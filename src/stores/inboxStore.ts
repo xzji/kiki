@@ -1,0 +1,28 @@
+"use client";
+
+import { create } from "zustand";
+
+import { initialInboxItems } from "@/mocks/inbox";
+import type { InboxItem } from "@/types/dora";
+
+type InboxStore = {
+  items: InboxItem[];
+  historyItems: InboxItem[];
+  markRead: (id: string) => void;
+  removeItem: (id: string) => void;
+  archiveItem: (id: string) => void;
+  addItem: (item: InboxItem) => void;
+};
+
+export const useInboxStore = create<InboxStore>((set) => ({
+  items: initialInboxItems,
+  historyItems: [],
+  markRead: (id) => set((state) => ({ items: state.items.map((item) => (item.id === id ? { ...item, unreadCount: 0 } : item)) })),
+  removeItem: (id) => set((state) => ({ items: state.items.filter((item) => item.id !== id) })),
+  archiveItem: (id) =>
+    set((state) => {
+      const target = state.items.find((item) => item.id === id);
+      return target ? { items: state.items.filter((item) => item.id !== id), historyItems: [{ ...target, unreadCount: 0 }, ...state.historyItems] } : state;
+    }),
+  addItem: (item) => set((state) => (state.items.some((current) => current.id === item.id) ? state : { items: [item, ...state.items] })),
+}));

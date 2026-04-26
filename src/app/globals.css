@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f5f6f8;
+  --foreground: #1f2328;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro", "PingFang SC", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.input {
+  @apply w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111];
+}
+
+.textarea {
+  @apply min-h-24 w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111];
+}

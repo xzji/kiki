@@ -1,0 +1,23 @@
+"use client";
+
+import Link from "next/link";
+
+import { useInboxStore } from "@/stores/inboxStore";
+
+export default function InboxItemPage({ params }: { params: { itemId: string } }) {
+  const item = useInboxStore((state) => state.items.find((entry) => entry.id === params.itemId));
+
+  if (!item) {
+    return <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 text-sm text-[#6B7280]">该收件箱卡片不存在或已被处理。</div>;
+  }
+
+  return (
+    <div className="rounded-2xl border border-[#D8DDE4] bg-white p-6">
+      <h1 className="text-2xl font-semibold text-[#111]">{item.title}</h1>
+      <p className="mt-4 text-sm leading-7 text-[#6B7280]">{item.snippet}</p>
+      <div className="mt-6">
+        <Link href={item.linkTo} className="rounded-lg bg-[#111] px-4 py-2 text-sm text-white hover:bg-[#333]">进入相关任务</Link>
+      </div>
+    </div>
+  );
+}
