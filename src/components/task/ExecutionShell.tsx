@@ -41,7 +41,7 @@ export function ExecutionShell({ goal, task, instance }: { goal: Goal; task: Tas
   };
 
   return (
-    <div className="rounded-[20px] border border-[#D8DDE4] bg-[#F5F6F8] px-8 py-7">
+    <div className="px-2 py-2">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="text-xs text-[#6B7280]"><Link href={`/goals/${goal.id}`} className="hover:text-[#111]">{goal.title}</Link> / <Link href={`/goals/${goal.id}/tasks/${task.id}`} className="hover:text-[#111]">{task.title.replace(/^任务\d+：/, "")}</Link></div>
         <button className="rounded-full border border-[#D0D7DE] p-2 text-[#6B7280] hover:bg-white"><MessageCircle className="h-4 w-4" /></button>

@@ -8,7 +8,7 @@ import type { Goal, Task } from "@/types/dora";
 
 export function InstanceList({ goal, task, showDetail = false, activeInstanceId }: { goal: Goal; task: Task; showDetail?: boolean; activeInstanceId?: string }) {
   return (
-    <div className="rounded-[20px] border border-[#D8DDE4] bg-[#F5F6F8] px-8 py-7">
+    <div className="px-2 py-2">
       <div className="mb-6 flex items-start justify-between gap-6">
         <div>
           <div className="mb-2 text-xs text-[#6B7280]"><Link href={`/goals/${goal.id}`} className="hover:text-[#111]">{goal.title}</Link> / {task.title.replace(/^任务\d+：/, "")}</div>
