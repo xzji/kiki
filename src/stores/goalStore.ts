@@ -38,6 +38,8 @@ type TaskEditInput = {
   payload?: ExecutionPayload;
 };
 
+type TaskCreateInput = Omit<TaskEditInput, "payload">;
+
 type GoalStore = {
   goals: Goal[];
   updateTask: (taskId: string, values: TaskEditInput) => void;
@@ -45,6 +47,8 @@ type GoalStore = {
   completeTaskInstance: (taskId: string, instanceId: string) => void;
   generateInstance: (taskId: string, createdAt: string) => TaskInstance | null;
   createGoalFromInput: (title: string) => Goal;
+  addSubGoal: (goalId: string, title: string) => void;
+  addTask: (goalId: string, subGoalId: string, input: TaskCreateInput) => void;
 };
 
 export const useGoalStore = create<GoalStore>((set, get) => ({
@@ -98,6 +102,49 @@ export const useGoalStore = create<GoalStore>((set, get) => ({
     const nextGoal = buildGoalFromDraft(draft);
     set((state) => ({ goals: [...state.goals, nextGoal] }));
     return nextGoal;
+  },
+  addSubGoal: (goalId, title) => {
+    set((state) => ({
+      goals: state.goals.map((goal) => {
+        if (goal.id !== goalId) return goal;
+        const nextIndex = goal.subGoals.length + 1;
+        const newSubGoal = {
+          id: `${goalId}-sg-custom-${Date.now()}`,
+          goalId,
+          title: title.startsWith("子目标") ? title : `子目标${nextIndex}：${title}`,
+          tasks: [],
+        };
+        return { ...goal, subGoals: [...goal.subGoals, newSubGoal] };
+      }),
+    }));
+  },
+  addTask: (goalId, subGoalId, input) => {
+    set((state) => ({
+      goals: state.goals.map((goal) => {
+        if (goal.id !== goalId) return goal;
+        return {
+          ...goal,
+          subGoals: goal.subGoals.map((subGoal) => {
+            if (subGoal.id !== subGoalId) return subGoal;
+            const nextIndex = subGoal.tasks.length + 1;
+            const newTask: Task = {
+              id: `${subGoalId}-task-custom-${Date.now()}`,
+              subGoalId,
+              title: input.title.startsWith("任务") ? input.title : `任务${nextIndex}：${input.title}`,
+              description: input.description,
+              expectedOutcome: input.expectedOutcome,
+              taskType: input.taskType,
+              triggerRule: input.triggerRule,
+              deadline: input.deadline,
+              progress: 0,
+              instances: [],
+              executionKind: input.executionKind,
+            };
+            return { ...subGoal, tasks: [...subGoal.tasks, newTask] };
+          }),
+        };
+      }),
+    }));
   },
 }));
 

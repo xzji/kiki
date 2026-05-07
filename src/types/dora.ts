@@ -83,6 +83,15 @@ export type SubGoal = {
   tasks: Task[];
 };
 
+export type GoalKind = "collab" | "digest" | "chat_history";
+
+export type ChatTurn = {
+  id: string;
+  role: "user" | "agent";
+  content: string;
+  timestamp: string;
+};
+
 export type Goal = {
   id: string;
   title: string;
@@ -90,6 +99,9 @@ export type Goal = {
   progress: number;
   subGoals: SubGoal[];
   createdAt: string;
+  kind?: GoalKind;
+  summary?: string;
+  chatTurns?: ChatTurn[];
 };
 
 export type InboxItem = {

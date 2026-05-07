@@ -6,10 +6,17 @@ import { usePathname } from "next/navigation";
 import { AssistantFab } from "@/components/layout/AssistantFab";
 import { AssistantSidebar } from "@/components/layout/AssistantSidebar";
 import { DevPanel } from "@/components/layout/DevPanel";
-import { Sidebar } from "@/components/layout/Sidebar";
+import {
+  NAV_SIDEBAR_COLLAPSED_WIDTH,
+  NAV_SIDEBAR_EXPANDED_WIDTH,
+  Sidebar,
+} from "@/components/layout/Sidebar";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { TaskDetailDrawer } from "@/components/goal/TaskDetailDrawer";
 import { useTriggerEngine } from "@/hooks/useTriggerEngine";
 import { useAssistantStore } from "@/stores/assistantStore";
+import { useNavSidebarStore } from "@/stores/navSidebarStore";
+import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
 export function AppShell({ children }: { children: ReactNode }) {
   useTriggerEngine();
@@ -23,20 +30,31 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [hydrate]);
 
   const assistantOpen = hydrated && isOpen;
+  const taskDrawerOpen = useTaskDrawerStore((state) => Boolean(state.activeTaskId));
+  const closeTaskDrawer = useTaskDrawerStore((state) => state.close);
+  useEffect(() => {
+    closeTaskDrawer();
+  }, [pathname, closeTaskDrawer]);
+
+  const navCollapsed = useNavSidebarStore((state) => state.collapsed);
+  const leftPadding = navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
+  // 任务侧栏改为覆盖式，不再挤压主内容；只有 AssistantSidebar 挤压
+  const rightPadding = assistantOpen ? 416 : 0;
 
   return (
-    <div className="min-h-screen bg-[#F5F6F8] text-[#1F2328]">
+    <div className="h-screen overflow-hidden bg-[#F5F6F8] text-[#1F2328]">
       <Sidebar />
-      <div
-        className="ml-[240px] min-h-screen bg-white px-8 pb-24 pt-8 transition-[padding] duration-200"
-        style={{ paddingRight: assistantOpen ? 416 : undefined }}
+      <main
+        className="h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8 transition-[padding,margin] duration-200"
+        style={{ marginLeft: leftPadding, paddingRight: rightPadding || undefined }}
       >
         <div className={`mx-auto w-full ${contentWidth}`}>{children}</div>
-      </div>
+      </main>
       <UserMenu />
       <DevPanel />
+      <TaskDetailDrawer />
       <AssistantSidebar />
-      <AssistantFab />
+      {!taskDrawerOpen ? <AssistantFab /> : null}
     </div>
   );
 }

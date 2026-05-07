@@ -3,9 +3,12 @@
 import { LogOut, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useNavSidebarStore } from "@/stores/navSidebarStore";
+
 export function UserMenu() {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const navCollapsed = useNavSidebarStore((state) => state.collapsed);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -18,8 +21,11 @@ export function UserMenu() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
+  // 收起态下，左侧栏宽 56px，头像 28px，居中偏移 = (56-28)/2 = 14px
+  const leftOffset = navCollapsed ? 14 : 28;
+
   return (
-    <div ref={menuRef} className="fixed bottom-6 left-7 z-20">
+    <div ref={menuRef} className="fixed bottom-6 z-20" style={{ left: leftOffset }}>
       {open ? (
         <div className="absolute bottom-14 left-0 w-40 rounded-xl border border-[#222]/40 bg-white p-3 shadow-sm">
           <div className="mb-3 flex items-center gap-3 border-b border-[#EEF1F4] pb-3">

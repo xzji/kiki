@@ -24,7 +24,7 @@ export function InboxCard({ item }: { item: InboxItem }) {
   const Icon = iconMap[item.iconType];
 
   return (
-    <Link href={item.linkTo} className="block rounded-xl border border-[#7D8590] bg-[#F5F6F8] p-4 transition hover:border-[#111] hover:shadow-sm">
+    <Link href={item.linkTo} className="block rounded-xl border border-[#E5E7EB] bg-white p-4 transition hover:border-[#111]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-center gap-2 text-[#111]">
