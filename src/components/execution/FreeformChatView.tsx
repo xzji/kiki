@@ -27,7 +27,7 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-5">
+      <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-5">
         <div className="space-y-4">
           {messages.map((message) => (
             <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -37,8 +37,8 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
           ))}
         </div>
       </div>
-      <div className="flex gap-2 rounded-xl border border-[#E5E7EB] bg-white p-3">
-        <input value={value} onChange={(event) => setValue(event.target.value)} placeholder="继续和 Dora 对话" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#9AA4B2]" onKeyDown={(event) => {
+      <div className="flex gap-2 rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-3">
+        <input value={value} onChange={(event) => setValue(event.target.value)} placeholder="继续和 Kiki 对话" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#9AA4B2]" onKeyDown={(event) => {
           if (event.key === "Enter" && value.trim()) {
             const content = value.trim();
             sendUserMessage(threadId, content);

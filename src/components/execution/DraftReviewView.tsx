@@ -16,7 +16,7 @@ export function DraftReviewView({ drafts, onComplete, onRewrite }: { drafts: Ema
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-5">
+      <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-5">
         <div className="mb-2 text-xs text-[#6B7280]">第 {index + 1} / {items.length} 封</div>
         <div className="text-sm font-medium text-[#111]">收件人：{current.recipient}</div>
         <div className="mt-1 text-sm text-[#374151]">主题：{current.subject}</div>
@@ -25,7 +25,7 @@ export function DraftReviewView({ drafts, onComplete, onRewrite }: { drafts: Ema
       <div className="flex justify-center gap-3">
         <button className="rounded-lg bg-[#111] px-5 py-2 text-sm text-white hover:bg-[#333]" onClick={next}>发送</button>
         <button className="rounded-lg border border-[#D0D7DE] px-5 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]" onClick={next}>跳过</button>
-        <button className="rounded-lg border border-[#D0D7DE] px-5 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]" onClick={onRewrite}>让 Dora 重写</button>
+        <button className="rounded-lg border border-[#D0D7DE] px-5 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]" onClick={onRewrite}>让 Kiki 重写</button>
       </div>
     </div>
   );

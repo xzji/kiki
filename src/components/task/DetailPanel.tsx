@@ -4,7 +4,7 @@ export function DetailPanel({ task }: { task: Task }) {
   const typeLabel = task.taskType === "daily_repeat" ? "每天重复任务" : task.taskType === "monitoring" ? "监控任务" : "一次性任务";
 
   return (
-    <div className="mb-6 grid gap-4 rounded-xl border border-[#E5E7EB] bg-white p-4 md:grid-cols-2">
+    <div className="mb-6 grid gap-4 rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-4 md:grid-cols-2">
       <Meta label="预期结果" value={task.expectedOutcome} />
       <Meta label="截止时间" value={task.deadline ? new Date(task.deadline).toISOString().slice(0, 10) : "未设置"} />
       <Meta label="完成进度" value={`${task.progress}%`} />

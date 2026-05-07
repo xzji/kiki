@@ -47,13 +47,13 @@ export function ExecutionShell({ goal, task, instance }: { goal: Goal; task: Tas
         <button className="rounded-full border border-[#D0D7DE] p-2 text-[#6B7280] hover:bg-white"><MessageCircle className="h-4 w-4" /></button>
       </div>
       {!started ? (
-        <div className="rounded-xl border border-[#7D8590] bg-white p-8 text-center">
+        <div className="rounded-xl border border-[#7D8590] bg-[#F5F6F8] p-8 text-center">
           <div className="mb-4 flex justify-center"><DoraAvatar size="sm" /></div>
           <p className="mx-auto max-w-2xl text-sm leading-7 text-[#374151]">{instance.intro}</p>
           <button className="mt-8 rounded-md border border-[#7D8590] px-6 py-1.5 text-xs text-[#111] hover:bg-[#F5F6F8]" onClick={() => { setStarted(true); markInstanceStatus(task.id, instance.id, "in_progress"); }}>开始</button>
         </div>
       ) : done ? (
-        <div className="rounded-xl border border-[#E5E7EB] bg-white p-10 text-center text-sm text-[#374151]">已完成，本次结果已经同步回实例列表。</div>
+        <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-10 text-center text-sm text-[#374151]">已完成，本次结果已经同步回实例列表。</div>
       ) : (
         <div className="space-y-6 rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6">
           <div className="flex items-start gap-3">

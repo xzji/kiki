@@ -11,7 +11,7 @@ export default function TaskDetailPage({ params, searchParams }: { params: { goa
   const view = searchParams?.view ?? "list";
 
   if (!goal || !task) {
-    return <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 text-sm text-[#6B7280]">未找到任务。</div>;
+    return <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">未找到任务。</div>;
   }
 
   const instance = task.instances.find((item) => item.id === searchParams?.instanceId) ?? task.instances[0];

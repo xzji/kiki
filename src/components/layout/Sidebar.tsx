@@ -35,8 +35,8 @@ export function Sidebar() {
           <NavLink href="/schedule" active={pathname.startsWith("/schedule")} icon={<CalendarDays className="h-4 w-4" />} label="日程" />
         </div>
         <div>
-          <button className="mb-2 flex w-full items-center justify-between text-xs font-medium text-[#6B7280]" onClick={() => setGoalsOpen((prev) => !prev)}>
-            <span className="flex items-center gap-2"><Target className="h-3.5 w-3.5" />目标</span>
+          <button className="mb-2 flex w-full items-center justify-between px-3 text-xs font-medium text-[#6B7280]" onClick={() => setGoalsOpen((prev) => !prev)}>
+            <span className="flex items-center gap-2"><Target className="h-3.5 w-3.5" />进行中</span>
             {goalsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
           {goalsOpen ? (
@@ -48,7 +48,7 @@ export function Sidebar() {
           ) : null}
         </div>
         <div>
-          <button className="mb-2 flex w-full items-center justify-between text-xs font-medium text-[#6B7280]" onClick={() => setHistoryOpen((prev) => !prev)}>
+          <button className="mb-2 flex w-full items-center justify-between px-3 text-xs font-medium text-[#6B7280]" onClick={() => setHistoryOpen((prev) => !prev)}>
             <span className="flex items-center gap-2"><History className="h-3.5 w-3.5" />历史</span>
             {historyOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>

@@ -19,7 +19,7 @@ export function ReadingDigestView({ articles, onComplete }: { articles: Article[
             </button>
           ))}
         </div>
-        <div className="rounded-xl border border-[#E5E7EB] bg-white p-5">
+        <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-5">
           <div className="text-xs text-[#6B7280]">{active.source}</div>
           <div className="mt-1 text-lg font-semibold text-[#111]">{active.title}</div>
           <p className="mt-4 text-sm leading-7 text-[#374151]">{active.body}</p>

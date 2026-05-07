@@ -19,7 +19,7 @@ export default function NewGoalPage({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-[#D8DDE4] bg-white p-6">
+      <div>
         <div className="mb-6 flex items-start gap-3">
           <DoraAvatar size="sm" />
           <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm leading-6 text-[#374151]">
@@ -28,7 +28,7 @@ export default function NewGoalPage({
         </div>
         <div className="space-y-6">
           {draft.subGoals.map((subGoal) => (
-            <section key={subGoal.id} className="rounded-xl border border-[#E5E7EB] p-4">
+            <section key={subGoal.id} className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-4">
               <div className="mb-3 text-sm font-semibold text-[#111]">{subGoal.title}</div>
               <div className="space-y-2">
                 {subGoal.tasks.map((task) => (

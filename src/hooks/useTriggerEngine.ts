@@ -15,7 +15,7 @@ function toInboxItem(task: Task, goalId: string, createdAt: string): InboxItem {
     id: `generated-${task.id}-${createdAt}`,
     iconType,
     title,
-    snippet: `Dora 已按 ${task.triggerRule} 为你生成新的待处理内容。`,
+    snippet: `Kiki 已按 ${task.triggerRule} 为你生成新的待处理内容。`,
     badge: task.executionKind === "confirm_action" ? "need_confirm" : null,
     unreadCount: 1,
     timeLabel,

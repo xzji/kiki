@@ -29,10 +29,10 @@ export function InstanceList({ goal, task, showDetail = false, activeInstanceId 
               <DoraAvatar size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center justify-between gap-2 text-xs text-[#6B7280]">
-                  <div className="font-medium text-[#111]">Dora</div>
+                  <div className="font-medium text-[#111]">Kiki</div>
                   <span>{instance.dateLabel} {new Date(instance.createdAt).toISOString().slice(11, 16)}</span>
                 </div>
-                <div className="rounded-xl border border-[#7D8590] bg-white p-4">
+                <div className="rounded-xl border border-[#7D8590] bg-[#F5F6F8] p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-medium text-[#111]">
                     <span>{instance.dateLabel} {task.title.replace(/^任务\d+：/, "")}</span>
                     {isToday && canStart ? <span className="inline-flex h-2 w-2 rounded-full bg-[#E5484D]" /> : null}

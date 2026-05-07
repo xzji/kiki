@@ -48,7 +48,7 @@ function payloadFor(kind: ExecutionKind): ExecutionPayload {
       return {
         kind,
         summary: "已为你选定 5 月 3 日 13:42 大阪→京都，JR 特急，¥2380，可免费改签一次。",
-        options: ["确认执行", "让 Dora 改方案"],
+        options: ["确认执行", "让 Kiki 改方案"],
       };
     case "draft_review":
       return { kind, drafts: emailDrafts };
@@ -212,7 +212,7 @@ export const initialGoals: Goal[] = [
     deadline: "2026-06-01T23:59:59+08:00",
     progress: 28,
     createdAt: "2026-04-06T08:00:00+08:00",
-    subGoals: [{ id: "sg-job-1", goalId: "goal-job", title: "子目标1：建立投递节奏", tasks: [task({ id: "task-job-rehearsal", subGoalId: "sg-job-1", title: "任务1：岗位表述 rehearse", description: "和 Dora 练习一句话介绍、项目亮点和 why now。", expectedOutcome: "形成一版简练的面试开场脚本。", taskType: "daily_repeat", triggerRule: "每天 20:30 触发", progress: 28, executionKind: "freeform_chat" })] }],
+    subGoals: [{ id: "sg-job-1", goalId: "goal-job", title: "子目标1：建立投递节奏", tasks: [task({ id: "task-job-rehearsal", subGoalId: "sg-job-1", title: "任务1：岗位表述 rehearse", description: "和 Kiki 练习一句话介绍、项目亮点和 why now。", expectedOutcome: "形成一版简练的面试开场脚本。", taskType: "daily_repeat", triggerRule: "每天 20:30 触发", progress: 28, executionKind: "freeform_chat" })] }],
   },
 ];
 

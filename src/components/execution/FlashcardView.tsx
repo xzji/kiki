@@ -12,7 +12,7 @@ export function FlashcardView({ cards, onComplete }: { cards: FlashCard[]; onCom
   return (
     <div className="space-y-6">
       <div className="text-sm font-medium text-[#111]">{progress}/{cards.length}</div>
-      <div className="mx-auto max-w-md rounded-xl border border-[#111] bg-white p-5">
+      <div className="mx-auto max-w-md rounded-xl border border-[#111] bg-[#F5F6F8] p-5">
         <div className="text-xl font-semibold text-[#111]">{card.word} <span className="text-sm font-normal text-[#6B7280]">{card.phonetic}</span></div>
         <div className="mt-1 text-sm text-[#6B7280]">{card.partOfSpeech} {card.meaning}</div>
         <div className="mt-4 space-y-3 text-sm leading-6 text-[#374151]">

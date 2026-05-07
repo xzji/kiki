@@ -24,11 +24,11 @@ export default function GoalDetailPage({ params }: { params: { goalId: string } 
   }, [inboxItems]);
 
   if (!goal) {
-    return <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 text-sm text-[#6B7280]">未找到该目标。</div>;
+    return <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">未找到该目标。</div>;
   }
 
   return (
-    <div className="rounded-[20px] border border-[#D8DDE4] bg-[#F5F6F8] px-8 py-7">
+    <div>
       <div className="mb-8 flex items-end justify-between gap-6 border-b border-[#D8DDE4] pb-6">
         <div>
           <h1 className="text-[28px] font-semibold text-[#111]">{goal.title}</h1>

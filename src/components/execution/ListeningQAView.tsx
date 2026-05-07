@@ -12,7 +12,7 @@ export function ListeningQAView({ questions, onComplete }: { questions: QA[]; on
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
+      <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-4">
         <div className="mb-3 h-10 rounded-lg bg-[#F5F6F8]" />
         <div className="text-sm font-semibold text-[#111]">{current.question}</div>
         <div className="mt-4 space-y-2">
