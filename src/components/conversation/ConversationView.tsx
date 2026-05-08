@@ -10,6 +10,7 @@ import { ConversationMessageItem } from "@/components/conversation/ConversationM
 import { GoalPlanDrawer } from "@/components/conversation/GoalPlanDrawer";
 import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
+import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
@@ -27,18 +28,15 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const markConversationRead = useConversationStore((state) => state.markConversationRead);
   const deleteMessage = useConversationStore((state) => state.deleteMessage);
   const goals = useGoalStore((state) => state.goals);
-  const navCollapsed = useNavSidebarStore((state) => state.collapsed);
-  const setNavCollapsed = useNavSidebarStore((state) => state.setCollapsed);
-
   const conversation = conversations.find((c) => c.id === conversationId);
   const [planOpen, setPlanOpen] = useState(false);
   const [planFocus, setPlanFocus] = useState<string | null>(null);
   const [quotedMessage, setQuotedMessage] = useState<ConversationMessage | null>(null);
+  const [resultMessage, setResultMessage] = useState<ConversationMessage | null>(null);
   const [taskInfoMessage, setTaskInfoMessage] = useState<ConversationMessage | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const firstUnreadMarkerRef = useRef<HTMLDivElement>(null);
   const initializedConversationRef = useRef<string | null>(null);
-  const prevNavRef = useRef<boolean | null>(null);
   const [entryUnreadIds, setEntryUnreadIds] = useState<string[]>([]);
   const [showUnreadJump, setShowUnreadJump] = useState(false);
 
@@ -90,20 +88,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
     return () => window.cancelAnimationFrame(frame);
   }, [firstUnreadId, sortedMessages.length]);
 
-  useEffect(() => {
-    const drawerVisible = Boolean(taskInfoMessage);
-    if (drawerVisible) {
-      if (prevNavRef.current === null) {
-        prevNavRef.current = navCollapsed;
-        if (!navCollapsed) setNavCollapsed(true);
-      }
-    } else if (prevNavRef.current !== null) {
-      if (!prevNavRef.current) setNavCollapsed(false);
-      prevNavRef.current = null;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskInfoMessage]);
-
   if (!conversation) return notFound();
 
   const taskInfo = (() => {
@@ -116,6 +100,20 @@ export function ConversationView({ conversationId }: { conversationId: string })
         .find((item) => item.id === taskInfoMessage.taskRef.taskId) ?? null;
     if (!task) return null;
     return { goal, task };
+  })();
+
+  const resultInfo = (() => {
+    if (!resultMessage || resultMessage.kind !== "task_card") return null;
+    const goal = goals.find((item) => item.id === resultMessage.taskRef.goalId);
+    if (!goal) return null;
+    const task =
+      goal.subGoals
+        .flatMap((subGoal) => subGoal.tasks)
+        .find((item) => item.id === resultMessage.taskRef.taskId) ?? null;
+    if (!task) return null;
+    const instance = task.instances.find((item) => item.id === resultMessage.taskRef.instanceId) ?? null;
+    if (!instance) return null;
+    return { goal, task, instance, message: resultMessage };
   })();
 
   const onSend = (text: string) => {
@@ -188,11 +186,22 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   <ConversationMessageItem
                     message={msg}
                     onQuote={(message) => setQuotedMessage(message)}
-                    onOpenTaskInfo={(message) => setTaskInfoMessage(message)}
+                    onOpenResult={(message) => {
+                      setTaskInfoMessage(null);
+                      setPlanOpen(false);
+                      setResultMessage(message);
+                    }}
+                    onOpenTaskInfo={(message) => {
+                      setResultMessage(null);
+                      setTaskInfoMessage(message);
+                    }}
                     onDelete={(messageId) => {
                       deleteMessage(conversation.id, messageId);
                       if (quotedMessage?.id === messageId) {
                         setQuotedMessage(null);
+                      }
+                      if (resultMessage?.id === messageId) {
+                        setResultMessage(null);
                       }
                       if (taskInfoMessage?.id === messageId) {
                         setTaskInfoMessage(null);
@@ -304,6 +313,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
           </aside>
         </>
       ) : null}
+
+      <TaskResultDrawer
+        open={Boolean(resultInfo)}
+        goal={resultInfo?.goal ?? null}
+        task={resultInfo?.task ?? null}
+        instance={resultInfo?.instance ?? null}
+        fullscreenHref={
+          resultInfo ? `/conversations/${conversation.id}/results/${resultInfo.message.id}` : "#"
+        }
+        onClose={() => setResultMessage(null)}
+      />
     </div>
   );
 }

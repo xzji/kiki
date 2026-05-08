@@ -69,9 +69,12 @@ export function Sidebar() {
           type="button"
           aria-label="展开侧边栏"
           onClick={() => setCollapsed(false)}
-          className="mb-6 flex h-8 w-8 items-center justify-center rounded-md text-[#6B7280] hover:bg-white"
+          className="group mb-6 flex h-8 w-8 items-center justify-center rounded-md text-[#111] hover:bg-white"
         >
-          <PanelLeftOpen className="h-4 w-4" />
+          <span className="group-hover:hidden">
+            <ProductLogo compact />
+          </span>
+          <PanelLeftOpen className="hidden h-4 w-4 text-[#6B7280] group-hover:block" />
         </button>
         <nav className="flex flex-col items-center gap-2 text-[#475467]">
           <IconLink
@@ -104,7 +107,8 @@ export function Sidebar() {
       className="fixed inset-y-0 left-0 z-10 flex flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5"
       style={{ width: NAV_SIDEBAR_EXPANDED_WIDTH }}
     >
-      <div className="mb-4 flex items-center justify-end">
+      <div className="mb-4 flex items-center justify-between px-3">
+        <ProductLogo />
         <button
           type="button"
           aria-label="收起侧边栏"
@@ -171,6 +175,32 @@ export function Sidebar() {
         )}
       </div>
     </aside>
+  );
+}
+
+function ProductLogo({ compact = false }: { compact?: boolean }) {
+  const size = compact ? 26 : 30;
+
+  return (
+    <div
+      aria-label="KiKi logo"
+      className="flex items-center justify-center text-[#111]"
+      style={{ width: size, height: size }}
+    >
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 96 96"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <rect x="6" y="6" width="84" height="84" rx="14" stroke="currentColor" strokeWidth="6" />
+        <path d="M32 25V74" stroke="currentColor" strokeWidth="10" strokeLinecap="square" />
+        <path d="M32 74L64 24" stroke="currentColor" strokeWidth="10" strokeLinecap="square" />
+        <path d="M50 50L70 74" stroke="currentColor" strokeWidth="10" strokeLinecap="square" />
+      </svg>
+    </div>
   );
 }
 

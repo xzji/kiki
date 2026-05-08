@@ -1,8 +1,14 @@
-import { BookOpen, Mail, Newspaper, Ticket } from "lucide-react";
-import Link from "next/link";
+import { BookOpen, ChevronDown, Mail, Newspaper, Ticket } from "lucide-react";
+import { useMemo, useState } from "react";
 
+import { DoraAvatar } from "@/components/layout/DoraAvatar";
+import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
+import { resolveInboxTaskContext } from "@/lib/inboxItem";
 import { cn } from "@/lib/utils";
+import { useGoalStore } from "@/stores/goalStore";
+import { useInboxStore } from "@/stores/inboxStore";
 import type { InboxItem } from "@/types/dora";
+import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 
 const iconMap = {
   task: BookOpen,
@@ -22,22 +28,80 @@ function renderSnippet(snippet: string) {
 
 export function InboxCard({ item }: { item: InboxItem }) {
   const Icon = iconMap[item.iconType];
+  const goals = useGoalStore((state) => state.goals);
+  const markRead = useInboxStore((state) => state.markRead);
+  const [expanded, setExpanded] = useState(false);
+  const [resultOpen, setResultOpen] = useState(false);
+  const taskContext = useMemo(() => resolveInboxTaskContext(item, goals), [goals, item]);
+  const unread = item.unreadCount > 0;
 
   return (
-    <Link href={item.linkTo} className="block rounded-xl border border-[#E5E7EB] bg-white p-4 transition hover:border-[#111]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex items-center gap-2 text-[#111]">
-            <Icon className="h-4 w-4" />
-            <h3 className="truncate text-sm font-semibold">{item.title}</h3>
+    <>
+      <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 transition hover:border-[#111]">
+        <button
+          type="button"
+          onClick={() => {
+            const nextExpanded = !expanded;
+            setExpanded(nextExpanded);
+            if (nextExpanded && unread) markRead(item.id);
+          }}
+          className="block w-full text-left"
+        >
+          <div className="flex items-center gap-2 text-[#111]">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Icon className="h-4 w-4" />
+              <h3 className="truncate text-sm font-semibold">{item.title}</h3>
+            </div>
+            <span className="shrink-0 text-[11px] text-[#6B7280]">{item.timeLabel}</span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-[#8C9198] transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
           </div>
-          <p className="line-clamp-1 text-xs text-[#6B7280]">{renderSnippet(item.snippet)}</p>
-        </div>
-        <div className="flex flex-col items-end gap-3">
-          <span className={cn("inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[10px] text-white", item.unreadCount === 0 && "bg-[#D0D7DE]")}>{item.unreadCount}</span>
-          <span className="text-[11px] text-[#6B7280]">{item.timeLabel}</span>
-        </div>
+
+          {!expanded ? (
+            <div className="mt-2 flex items-start gap-2">
+              {unread ? (
+                <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#E5484D]" />
+              ) : null}
+              <p className="line-clamp-1 text-xs text-[#6B7280]">{renderSnippet(item.snippet)}</p>
+            </div>
+          ) : null}
+        </button>
+
+        {expanded ? (
+          <div className="mt-4 border-t border-[#E5E7EB] pt-4">
+            <div className="flex items-start gap-3">
+              <DoraAvatar size="sm" />
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 text-[13px] font-medium text-[#1F2328]">KiKi</div>
+                <div className="whitespace-pre-wrap text-sm leading-6 text-[#374151]">
+                  {taskContext?.instance.intro ?? item.snippet}
+                </div>
+              </div>
+            </div>
+
+            {taskContext ? (
+              <TaskMessageCard
+                task={taskContext.task}
+                instance={taskContext.instance}
+                onOpen={() => setResultOpen(true)}
+              />
+            ) : null}
+          </div>
+        ) : null}
       </div>
-    </Link>
+
+      <TaskResultDrawer
+        open={resultOpen}
+        goal={taskContext?.goal ?? null}
+        task={taskContext?.task ?? null}
+        instance={taskContext?.instance ?? null}
+        fullscreenHref={`/inbox/${item.id}/result`}
+        onClose={() => setResultOpen(false)}
+      />
+    </>
   );
 }

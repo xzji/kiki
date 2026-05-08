@@ -19,11 +19,13 @@ import type { ConversationMessage } from "@/types/dora";
 export function ConversationMessageItem({
   message,
   onQuote,
+  onOpenResult,
   onOpenTaskInfo,
   onDelete,
 }: {
   message: ConversationMessage;
   onQuote: (message: ConversationMessage) => void;
+  onOpenResult?: (message: ConversationMessage) => void;
   onOpenTaskInfo?: (message: ConversationMessage) => void;
   onDelete: (messageId: string) => void;
 }) {
@@ -135,7 +137,11 @@ export function ConversationMessageItem({
         </div>
 
         {message.kind === "task_card" && taskInfo ? (
-          <TaskMessageCard task={taskInfo.task} instance={taskInfo.instance} />
+          <TaskMessageCard
+            task={taskInfo.task}
+            instance={taskInfo.instance}
+            onOpen={() => onOpenResult?.(message)}
+          />
         ) : null}
       </div>
     </div>
