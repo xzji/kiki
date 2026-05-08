@@ -139,6 +139,8 @@ export type ConversationMessage =
       content: string;
       createdAt: string;
       unread?: boolean;
+      status?: "streaming" | "done" | "error";
+      source?: "user" | "kiki" | "system";
     }
   | {
       id: string;
@@ -147,6 +149,8 @@ export type ConversationMessage =
       content: string;
       createdAt: string;
       unread?: boolean;
+      status?: "streaming" | "done" | "error";
+      source?: "user" | "kiki" | "system";
       taskRef: {
         goalId: string;
         subGoalId: string;
@@ -159,6 +163,9 @@ export type Conversation = {
   id: string;
   title: string;
   goalId?: string;
+  runtimeEnvId?: string;
+  claudeSessionId?: string;
+  status?: "idle" | "streaming" | "error";
   messages: ConversationMessage[];
   updatedAt: string;
   pinned?: boolean;

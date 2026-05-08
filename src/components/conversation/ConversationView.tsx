@@ -11,9 +11,11 @@ import { GoalPlanDrawer } from "@/components/conversation/GoalPlanDrawer";
 import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
+import { streamClaudeChat } from "@/lib/api/claude";
+import { openSettings } from "@/lib/settings";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
-import { useNavSidebarStore } from "@/stores/navSidebarStore";
+import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { ConversationMessage } from "@/types/dora";
 
 /**
@@ -25,15 +27,21 @@ import type { ConversationMessage } from "@/types/dora";
 export function ConversationView({ conversationId }: { conversationId: string }) {
   const conversations = useConversationStore((state) => state.conversations);
   const appendMessage = useConversationStore((state) => state.appendMessage);
+  const updateMessage = useConversationStore((state) => state.updateMessage);
   const markConversationRead = useConversationStore((state) => state.markConversationRead);
   const deleteMessage = useConversationStore((state) => state.deleteMessage);
+  const setConversationRuntimeEnv = useConversationStore((state) => state.setConversationRuntimeEnv);
+  const setClaudeSessionId = useConversationStore((state) => state.setClaudeSessionId);
+  const setConversationStatus = useConversationStore((state) => state.setConversationStatus);
   const goals = useGoalStore((state) => state.goals);
+  const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
   const [planOpen, setPlanOpen] = useState(false);
   const [planFocus, setPlanFocus] = useState<string | null>(null);
   const [quotedMessage, setQuotedMessage] = useState<ConversationMessage | null>(null);
   const [resultMessage, setResultMessage] = useState<ConversationMessage | null>(null);
   const [taskInfoMessage, setTaskInfoMessage] = useState<ConversationMessage | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const firstUnreadMarkerRef = useRef<HTMLDivElement>(null);
   const initializedConversationRef = useRef<string | null>(null);
@@ -116,25 +124,115 @@ export function ConversationView({ conversationId }: { conversationId: string })
     return { goal, task, instance, message: resultMessage };
   })();
 
-  const onSend = (text: string) => {
+  const onSend = async (
+    text: string,
+    quoted?: {
+      roleLabel: string;
+      content: string;
+    } | null,
+  ) => {
+    if (!activeRuntimeEnv || activeRuntimeEnv.type !== "local") {
+      setStreamError("当前没有连接本地 Claude CLI，请先到设置 -> 运行环境完成连接。");
+      return;
+    }
+
+    if ((activeRuntimeEnv.runtimeKind || "claude") !== "claude") {
+      setStreamError("当前会话对话链路暂只支持 Claude CLI。请在运行环境中切换到 Claude CLI，Codex/Gemini 后续可继续接入。");
+      return;
+    }
+
+    if (activeRuntimeEnv.health?.status !== "online") {
+      setStreamError("当前本地 Claude 环境离线，请先重新检测连接状态。");
+      return;
+    }
+
     const now = new Date().toISOString();
+    const userId = `msg-user-${Date.now()}`;
+    const assistantId = `msg-kiki-${Date.now() + 1}`;
     appendMessage(conversation.id, {
-      id: `msg-user-${Date.now()}`,
+      id: userId,
       kind: "text",
       role: "user",
       content: text,
       createdAt: now,
+      source: "user",
+      status: "done",
     });
-    // mock KiKi 回复
-    window.setTimeout(() => {
-      appendMessage(conversation.id, {
-        id: `msg-kiki-${Date.now()}`,
-        kind: "text",
-        role: "kiki",
-        content: "收到，我会在合适的时机推进。",
-        createdAt: new Date().toISOString(),
-      });
-    }, 400);
+    appendMessage(conversation.id, {
+      id: assistantId,
+      kind: "text",
+      role: "kiki",
+      content: "",
+      createdAt: new Date().toISOString(),
+      status: "streaming",
+      source: "kiki",
+    });
+    setConversationRuntimeEnv(conversation.id, activeRuntimeEnv.id);
+    setConversationStatus(conversation.id, "streaming");
+    setStreamError(null);
+
+    try {
+      await streamClaudeChat(
+        {
+          message: text,
+          conversationId: conversation.id,
+          runtimeEnv: activeRuntimeEnv,
+          claudeSessionId: conversation.claudeSessionId,
+          source: "conversation",
+          quotedMessage: quoted,
+        },
+        {
+          onEvent: (event) => {
+            if (event.type === "session") {
+              setClaudeSessionId(conversation.id, event.sessionId);
+              return;
+            }
+            if (event.type === "delta") {
+              updateMessage(conversation.id, assistantId, (message) => ({
+                ...message,
+                content: `${message.content}${event.text}`,
+              }));
+              return;
+            }
+            if (event.type === "message") {
+              updateMessage(conversation.id, assistantId, (message) => ({
+                ...message,
+                content: event.content,
+                status: "done",
+              }));
+              return;
+            }
+            if (event.type === "permission_request") {
+              setStreamError(event.reason);
+              return;
+            }
+            if (event.type === "error") {
+              setStreamError(event.message);
+              updateMessage(conversation.id, assistantId, (message) => ({
+                ...message,
+                status: "error",
+              }));
+              setConversationStatus(conversation.id, "error");
+              return;
+            }
+            if (event.type === "done") {
+              updateMessage(conversation.id, assistantId, (message) => ({
+                ...message,
+                status: message.status === "streaming" ? "done" : message.status,
+              }));
+              setConversationStatus(conversation.id, "idle");
+            }
+          },
+        },
+      );
+    } catch (error) {
+      setStreamError(error instanceof Error ? error.message : "Claude 对话失败");
+      updateMessage(conversation.id, assistantId, (message) => ({
+        ...message,
+        status: "error",
+      }));
+      setConversationStatus(conversation.id, "error");
+    }
     setQuotedMessage(null);
   };
 
@@ -164,12 +262,25 @@ export function ConversationView({ conversationId }: { conversationId: string })
           ref={scrollRef}
           className="flex h-full overflow-y-auto overscroll-contain px-2 pb-5 pt-3"
         >
-          {sortedMessages.length === 0 ? (
-            <div className="mx-auto mt-20 max-w-md text-center text-[13px] text-[#8C9198]">
-              和 KiKi 聊聊你的目标或想法，输入 <span className="font-mono text-[#1F2328]">/goal</span>{" "}
-              可以进入目标规划模式。
-            </div>
-          ) : (
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+            {streamError ? (
+              <div className="rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+                <div>{streamError}</div>
+                <button
+                  type="button"
+                  onClick={() => openSettings("runtime")}
+                  className="mt-2 font-medium underline"
+                >
+                  前往运行环境
+                </button>
+              </div>
+            ) : null}
+            {sortedMessages.length === 0 ? (
+              <div className="mt-20 max-w-md self-center text-center text-[13px] text-[#8C9198]">
+                和 KiKi 聊聊你的目标或想法，输入 <span className="font-mono text-[#1F2328]">/goal</span>{" "}
+                可以进入目标规划模式。
+              </div>
+            ) : (
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
               {sortedMessages.map((msg) => (
                 <div key={msg.id}>
@@ -211,7 +322,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 </div>
               ))}
             </div>
-          )}
+            )}
+          </div>
         </div>
 
         {showUnreadJump && unreadCount > 0 ? (
@@ -236,6 +348,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
         <div className="mx-auto max-w-3xl">
           <AssistantComposer
             onSubmit={onSend}
+            disabled={conversation.status === "streaming"}
+            localMode
             quotedMessage={
               quotedMessage
                 ? {

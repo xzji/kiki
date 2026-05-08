@@ -4,13 +4,21 @@ import { ArrowUp, ChevronDown, Link2, Plus, X } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type Props = {
-  onSubmit: (value: string) => void;
+  onSubmit: (
+    value: string,
+    quotedMessage?: {
+      roleLabel: string;
+      content: string;
+    } | null,
+  ) => void | Promise<void>;
   placeholder?: string;
   quotedMessage?: {
     roleLabel: string;
     content: string;
   } | null;
   onClearQuote?: () => void;
+  disabled?: boolean;
+  localMode?: boolean;
 };
 
 export function AssistantComposer({
@@ -18,9 +26,11 @@ export function AssistantComposer({
   placeholder = "输入任何想法，我会帮助你，没有什么大不了的事",
   quotedMessage,
   onClearQuote,
+  disabled = false,
+  localMode = false,
 }: Props) {
   const [value, setValue] = useState("");
-  const [selectedModel, setSelectedModel] = useState("GPT 5.4");
+  const [selectedModel, setSelectedModel] = useState(localMode ? "Claude Code Local" : "GPT 5.4");
   const [showConnectorMenu, setShowConnectorMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -30,15 +40,15 @@ export function AssistantComposer({
   const isEmpty = value.trim().length === 0;
 
   const connectorItems = ["Notion", "Google Drive", "Slack", "Linear"];
-  const modelItems = ["GPT 5.4", "Claude 4.1", "Gemini 2.5 Pro"];
+  const modelItems = localMode ? ["Claude Code Local"] : ["GPT 5.4", "Claude 4.1", "Gemini 2.5 Pro"];
 
   const submit = () => {
     const next = value.trim();
-    if (!next) return;
+    if (!next || disabled) return;
     setValue("");
     if (textareaRef.current) textareaRef.current.value = "";
     setAttachments([]);
-    onSubmit(next);
+    void onSubmit(next, quotedMessage);
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -88,8 +98,9 @@ export function AssistantComposer({
           ref={textareaRef}
           value={value}
           onChange={(event) => setValue(event.target.value)}
+          disabled={disabled}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Enter" && !event.shiftKey && !disabled) {
               event.preventDefault();
               submit();
             }
@@ -120,7 +131,8 @@ export function AssistantComposer({
             />
             <button
               type="button"
-              className="rounded-md p-1.5 hover:bg-[#F5F6F8]"
+              disabled={disabled}
+              className="rounded-md p-1.5 hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#C1C7D0]"
               aria-label="上传附件"
               onClick={() => fileInputRef.current?.click()}
             >
@@ -129,6 +141,7 @@ export function AssistantComposer({
             <div className="relative">
               <button
                 type="button"
+                disabled={disabled}
                 className="rounded-md p-1.5 hover:bg-[#F5F6F8]"
                 aria-label="连接器"
                 onClick={() => {
@@ -158,6 +171,7 @@ export function AssistantComposer({
             <div className="relative">
               <button
                 type="button"
+                disabled={disabled}
                 className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-[#F5F6F8]"
                 onClick={() => {
                   setShowModelMenu((prev) => !prev);
@@ -190,9 +204,9 @@ export function AssistantComposer({
             <button
               type="button"
               onClick={submit}
-              disabled={isEmpty}
+              disabled={isEmpty || disabled}
               className={`rounded-full border p-1.5 transition ${
-                isEmpty
+                isEmpty || disabled
                   ? "cursor-not-allowed border-[#E5E7EB] text-[#C1C7D0]"
                   : "border-[#D0D7DE] text-[#111] hover:border-[#111]"
               }`}

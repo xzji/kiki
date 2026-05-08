@@ -3,10 +3,14 @@
 import { LogOut, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { SettingsModal } from "@/components/settings/SettingsModal";
+import { OPEN_SETTINGS_EVENT, type SettingsTab } from "@/lib/settings";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 
 export function UserMenu() {
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("account");
   const menuRef = useRef<HTMLDivElement>(null);
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
 
@@ -19,6 +23,17 @@ export function UserMenu() {
 
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  useEffect(() => {
+    const onOpenSettings = (event: Event) => {
+      const customEvent = event as CustomEvent<{ tab?: SettingsTab }>;
+      setSettingsTab(customEvent.detail?.tab || "account");
+      setSettingsOpen(true);
+    };
+
+    window.addEventListener(OPEN_SETTINGS_EVENT, onOpenSettings as EventListener);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpenSettings as EventListener);
   }, []);
 
   // 收起态下，左侧栏宽 56px，头像 28px，居中偏移 = (56-28)/2 = 14px
@@ -41,7 +56,11 @@ export function UserMenu() {
             <button
               type="button"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-[#374151] hover:bg-[#F5F6F8]"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                setSettingsTab("account");
+                setSettingsOpen(true);
+              }}
             >
               <Settings className="h-4 w-4" />
               <span>设置</span>
@@ -65,6 +84,11 @@ export function UserMenu() {
       >
         J
       </button>
+      <SettingsModal
+        open={settingsOpen}
+        defaultTab={settingsTab}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { TaskDetailDrawer } from "@/components/goal/TaskDetailDrawer";
 import { useTriggerEngine } from "@/hooks/useTriggerEngine";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
+import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -33,6 +34,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+  const hydrateRuntimeEnvs = useRuntimeEnvStore((state) => state.hydrate);
+  useEffect(() => {
+    hydrateRuntimeEnvs();
+  }, [hydrateRuntimeEnvs]);
 
   const assistantOpen = hydrated && isOpen;
   const taskDrawerOpen = useTaskDrawerStore((state) => Boolean(state.activeTaskId));

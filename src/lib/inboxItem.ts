@@ -1,4 +1,4 @@
-import type { Goal, InboxItem, Task, TaskInstance } from "@/types/dora";
+import type { Goal, InboxItem, Task } from "@/types/dora";
 
 export function resolveInboxTaskContext(item: InboxItem, goals: Goal[]) {
   const goalId = item.goalId ?? extractGoalId(item.linkTo);

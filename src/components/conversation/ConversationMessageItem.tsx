@@ -61,49 +61,55 @@ export function ConversationMessageItem({
   if (message.role === "user") {
     return (
       <div className="group flex justify-end">
-        <div className="max-w-[60%]">
-          <div className="mb-1 flex items-center justify-end gap-2 text-[12px]">
-            <div className="font-medium text-[#1F2328]">你</div>
-            <div className="text-[#8C9198] opacity-0 transition-opacity group-hover:opacity-100">
-              {timeLabel}
+        <div className="flex max-w-[66%] items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex items-center justify-end gap-2 text-[12px]">
+              <div className="text-[#8C9198] opacity-0 transition-opacity group-hover:opacity-100">
+                {timeLabel}
+              </div>
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  aria-label="更多"
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                  className={cn(
+                    "inline-flex h-6 w-6 items-center justify-center rounded-md text-[#9AA0A6] transition-opacity hover:bg-[#F5F6F8] hover:text-[#1F2328]",
+                    "opacity-0 group-hover:opacity-100",
+                    menuOpen && "opacity-100",
+                  )}
+                >
+                  <Ellipsis className="h-4 w-4" />
+                </button>
+                {menuOpen ? (
+                  <MessageMenu
+                    canOpenTaskInfo={false}
+                    onQuote={() => onQuote(message)}
+                    onOpenTaskInfo={onOpenTaskInfo ? () => onOpenTaskInfo(message) : undefined}
+                    onDelete={() => onDelete(message.id)}
+                    onClose={() => setMenuOpen(false)}
+                  />
+                ) : null}
+              </div>
             </div>
-            <div ref={menuRef} className="relative">
-              <button
-                type="button"
-                aria-label="更多"
-                onClick={() => setMenuOpen((prev) => !prev)}
-                className={cn(
-                  "inline-flex h-6 w-6 items-center justify-center rounded-md text-[#9AA0A6] transition-opacity hover:bg-[#F5F6F8] hover:text-[#1F2328]",
-                  "opacity-0 group-hover:opacity-100",
-                  menuOpen && "opacity-100",
-                )}
-              >
-                <Ellipsis className="h-4 w-4" />
-              </button>
-              {menuOpen ? (
-                <MessageMenu
-                  canOpenTaskInfo={false}
-                  onQuote={() => onQuote(message)}
-                  onOpenTaskInfo={onOpenTaskInfo ? () => onOpenTaskInfo(message) : undefined}
-                  onDelete={() => onDelete(message.id)}
-                  onClose={() => setMenuOpen(false)}
-                />
-              ) : null}
+            <div className="rounded-2xl rounded-br-sm bg-[#111] px-4 py-2.5 text-sm leading-6 text-white">
+              {message.content}
             </div>
           </div>
-          <div className="rounded-2xl rounded-br-sm bg-[#111] px-4 py-2.5 text-sm leading-6 text-white">
-            {message.content}
+          <div className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-[11px] text-[#5F5AA2]">
+            J
           </div>
         </div>
       </div>
     );
   }
 
+  const isKikiLoading = message.status === "streaming" && message.content.trim().length === 0;
+
   return (
     <div className="group relative flex items-start gap-3">
       <DoraAvatar size="sm" />
       <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center justify-between">
+        <div className="mb-1 flex items-center gap-2">
           <div className="text-[13px] font-medium text-[#1F2328]">KiKi</div>
           <div ref={menuRef} className="relative flex items-center gap-1.5">
             <div className="text-[12px] text-[#8C9198] opacity-0 transition-opacity group-hover:opacity-100">
@@ -133,7 +139,7 @@ export function ConversationMessageItem({
           </div>
         </div>
         <div className="max-w-3xl whitespace-pre-wrap text-sm leading-6 text-[#374151]">
-          {message.content}
+          {isKikiLoading ? <LoadingDots /> : message.content}
         </div>
 
         {message.kind === "task_card" && taskInfo ? (
@@ -145,6 +151,20 @@ export function ConversationMessageItem({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function LoadingDots() {
+  return (
+    <span className="inline-flex h-6 items-center gap-1" aria-label="KiKi 正在输入">
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#9AA0A6]"
+          style={{ animationDelay: `${index * 120}ms` }}
+        />
+      ))}
+    </span>
   );
 }
 
