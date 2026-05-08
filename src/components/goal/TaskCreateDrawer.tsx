@@ -14,11 +14,11 @@ type Props = {
 };
 
 const EXECUTION_OPTIONS: { value: Task["executionKind"]; label: string }[] = [
-  { value: "freeform_chat", label: "自由对话 · 和 Kiki 一起推进" },
+  { value: "freeform_chat", label: "自由对话 · 和 KiKi 一起推进" },
   { value: "flashcard", label: "记忆闪卡 · 生词/概念记忆" },
   { value: "listening_qa", label: "听力问答 · 含音频练习" },
   { value: "reading_digest", label: "阅读摘要 · 素材快览" },
-  { value: "confirm_action", label: "确认执行 · Kiki 准备好让你拍板" },
+  { value: "confirm_action", label: "确认执行 · KiKi 准备好让你拍板" },
   { value: "draft_review", label: "草稿审阅 · 邮件/文档审核" },
 ];
 
@@ -107,7 +107,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
               placeholder="例：一份面试脚本 / 一张对比表"
               className="w-full rounded-lg border border-[#E5E7EB] bg-[#F5F6F8] px-3 py-2 text-sm text-[#1F2328] outline-none focus:border-[#1F2328]"
             />
-            <p className="mt-1.5 text-xs leading-5 text-[#8C9198]">交付物越具体，Kiki 越容易帮你对齐完成标准。</p>
+            <p className="mt-1.5 text-xs leading-5 text-[#8C9198]">交付物越具体，KiKi 越容易帮你对齐完成标准。</p>
           </Field>
           <Field label="任务类型">
             <select

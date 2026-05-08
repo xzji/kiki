@@ -41,7 +41,7 @@ function writePersistedOpen(open: boolean) {
   }
 }
 
-function mockKikiReply(input: string): string {
+function mockKiKiReply(input: string): string {
   if (input.length < 6) return "我听到了，继续说说看？";
   if (input.includes("?") || input.includes("？")) return "好问题，我在后台帮你拆解一下，稍后同步你结果。";
   return "收到，我会把它加入你的收件箱并在合适的时候推进。";
@@ -81,7 +81,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     const kikiMsg: AssistantMessage = {
       id: `k-${Date.now() + 1}`,
       role: "kiki",
-      content: mockKikiReply(trimmed),
+      content: mockKiKiReply(trimmed),
       createdAt: now
     };
     set({ messages: [...get().messages, userMsg, kikiMsg] });

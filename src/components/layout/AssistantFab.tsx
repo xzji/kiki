@@ -20,7 +20,7 @@ export function AssistantFab() {
   return (
     <button
       type="button"
-      aria-label="打开 Kiki 对话"
+      aria-label="打开 KiKi 对话"
       onClick={open}
       className="fixed bottom-6 right-6 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-[#222]/30 bg-white text-[#1F2328] transition hover:border-[#111] hover:bg-[#F5F6F8]"
     >

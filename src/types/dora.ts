@@ -2,7 +2,8 @@ export type TaskInstanceStatus =
   | "pending"
   | "in_progress"
   | "completed"
-  | "awaiting_user";
+  | "awaiting_user"
+  | "paused";
 
 export type ExecutionKind =
   | "flashcard"

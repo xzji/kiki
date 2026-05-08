@@ -62,7 +62,7 @@ export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
           {
             id: "draft-task-6",
             title: "投递节奏确认",
-            description: "和 Kiki 一起决定本周要投递的公司清单。",
+            description: "和 KiKi 一起决定本周要投递的公司清单。",
             expectedOutcome: "确认 5 家优先公司。",
             taskType: "one_shot",
             triggerRule: "明天 10:00 触发",

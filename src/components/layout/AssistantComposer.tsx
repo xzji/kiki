@@ -15,6 +15,7 @@ export function AssistantComposer({ onSubmit, placeholder = "输入任何想法�
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isEmpty = value.trim().length === 0;
 
@@ -24,9 +25,10 @@ export function AssistantComposer({ onSubmit, placeholder = "输入任何想法�
   const submit = () => {
     const next = value.trim();
     if (!next) return;
-    onSubmit(next);
     setValue("");
+    if (textareaRef.current) textareaRef.current.value = "";
     setAttachments([]);
+    onSubmit(next);
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -53,6 +55,7 @@ export function AssistantComposer({ onSubmit, placeholder = "输入任何想法�
     >
       <div className="flex min-h-[84px] flex-col">
         <textarea
+          ref={textareaRef}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

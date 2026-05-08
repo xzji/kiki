@@ -11,6 +11,7 @@ const STATUS_TEXT: Record<TaskInstance["status"], string> = {
   in_progress: "进行中",
   awaiting_user: "等待你确认",
   completed: "已完成",
+  paused: "已暂停",
 };
 
 export function DigestGoalView({ goal }: { goal: Goal }) {

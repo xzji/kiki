@@ -7,7 +7,6 @@ import { ChatHistoryView } from "@/components/goal/ChatHistoryView";
 import { DigestGoalView } from "@/components/goal/DigestGoalView";
 import { SubGoalBlock } from "@/components/goal/SubGoalBlock";
 import { SubGoalCreateDrawer } from "@/components/goal/SubGoalCreateDrawer";
-import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { BASE_DATE, formatDateInput } from "@/lib/date";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
@@ -17,7 +16,6 @@ import type { Task, TaskInstanceStatus } from "@/types/dora";
 export default function GoalDetailPage({ params }: { params: { goalId: string } }) {
   const goals = useGoalStore((state) => state.goals);
   const inboxItems = useInboxStore((state) => state.items);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [subGoalDrawerOpen, setSubGoalDrawerOpen] = useState(false);
   const openTaskDrawer = useTaskDrawerStore((state) => state.open);
 
@@ -106,7 +104,6 @@ export default function GoalDetailPage({ params }: { params: { goalId: string } 
             goal={goal}
             subGoal={subGoal}
             unreadByTask={unreadByTask}
-            onEditTask={setEditingTask}
             onOpenTask={(task) => openTaskDrawer(goal.id, task.id)}
           />
         ))}
@@ -120,7 +117,6 @@ export default function GoalDetailPage({ params }: { params: { goalId: string } 
         </button>
       </div>
 
-      <TaskEditDrawer task={editingTask} open={Boolean(editingTask)} onClose={() => setEditingTask(null)} />
       <SubGoalCreateDrawer open={subGoalDrawerOpen} goalId={goal.id} onClose={() => setSubGoalDrawerOpen(false)} />
     </div>
   );
@@ -167,7 +163,7 @@ function ProgressRing({ value }: { value: number }) {
 function getTaskSummaryStatus(task: Task): TaskInstanceStatus | "pending" {
   const latestStatus = task.instances[0]?.status;
   if (latestStatus === "completed" || task.progress >= 100) return "completed";
-  if (latestStatus === "awaiting_user" || latestStatus === "in_progress") return "in_progress";
+  if (latestStatus === "awaiting_user" || latestStatus === "in_progress" || latestStatus === "paused") return "in_progress";
   if (latestStatus === "pending") return task.progress > 0 ? "in_progress" : "pending";
   return task.progress > 0 ? "in_progress" : "pending";
 }

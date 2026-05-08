@@ -12,14 +12,12 @@ export function SubGoalBlock({
   goal,
   subGoal,
   unreadByTask,
-  onEditTask,
   onOpenTask,
 }: {
   index: number;
   goal: Goal;
   subGoal: Goal["subGoals"][number];
   unreadByTask: Record<string, number>;
-  onEditTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
 }) {
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
@@ -56,7 +54,6 @@ export function SubGoalBlock({
             task={task}
             unreadCount={unreadByTask[task.id] ?? 0}
             onOpen={() => onOpenTask(task)}
-            onEdit={() => onEditTask(task)}
           />
         ))}
         <button

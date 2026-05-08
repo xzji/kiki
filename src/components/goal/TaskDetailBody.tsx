@@ -1,10 +1,12 @@
 "use client";
 
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { cn } from "@/lib/utils";
+import { useGoalStore } from "@/stores/goalStore";
 import type { Goal, Task } from "@/types/dora";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
@@ -25,17 +27,22 @@ const EXECUTION_LABEL: Record<Task["executionKind"], string> = {
 /**
  * 任务详情主体，供侧栏 (TaskDetailDrawer) 与全屏页 (TaskDetailPage) 复用。
  * - 顶部摘要：标题 + 状态 + 进度
- * - 基本信息：默认折叠，点击展开
+ * - 详细信息：默认折叠，由顶部操作按钮展开
  * - 任务内容（描述）
  * - 未完成任务通知卡片列表：时间倒序，最新在上，未读红点
  */
 export function TaskDetailBody({ goal, task }: { goal: Goal; task: Task }) {
   const [metaOpen, setMetaOpen] = useState(false);
   const [completedOpen, setCompletedOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const controlTaskExecution = useGoalStore((state) => state.controlTaskExecution);
+  const deleteTask = useGoalStore((state) => state.deleteTask);
 
   const taskState = getTaskDisplayState(task);
   const statusLabel =
-    taskState === "completed" ? "已完成" : taskState === "in_progress" ? "进行中" : "待开始";
+    taskState === "completed" ? "已完成" : taskState === "in_progress" ? "进行中" : taskState === "paused" ? "已暂停" : "待开始";
+  const executionAction = getExecutionAction(task, taskState);
   const cleanTitle = task.title.replace(/^任务\d+：/, "");
 
   // 未完成通知：排除 completed，按 createdAt 倒序
@@ -51,42 +58,89 @@ export function TaskDetailBody({ goal, task }: { goal: Goal; task: Task }) {
   return (
     <div>
       <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-[#1F2328]">{cleanTitle}</h2>
-      <div className="mt-3 flex items-center gap-2">
-        <span
-          className={cn(
-            "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
-            taskState === "completed"
-              ? "bg-[#E5E7EB] text-[#6B7280]"
-              : taskState === "in_progress"
-                ? "bg-[#DDE1E7] text-[#1F2328]"
-                : "bg-[#F5F6F8] text-[#8C9198]",
-          )}
-        >
-          {statusLabel}
-        </span>
-        <span className="text-[12px] text-[#8C9198]">完成进度 {task.progress}%</span>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+              taskState === "completed"
+                ? "bg-[#E5E7EB] text-[#6B7280]"
+                : taskState === "in_progress"
+                  ? "bg-[#DDE1E7] text-[#1F2328]"
+                  : taskState === "paused"
+                    ? "bg-[#E5E7EB] text-[#6B7280]"
+                  : "bg-[#F5F6F8] text-[#8C9198]",
+            )}
+          >
+            {statusLabel}
+          </span>
+          <span className="text-[12px] text-[#8C9198]">完成进度 {task.progress}%</span>
+        </div>
+        <div className="relative ml-auto flex items-center justify-end gap-1">
+          {executionAction ? (
+            <button
+              type="button"
+              onClick={() => controlTaskExecution(task.id, executionAction.action)}
+              className="rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
+            >
+              {executionAction.label}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setMetaOpen((prev) => !prev)}
+            className="inline-flex items-center gap-1 rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
+          >
+            详细信息
+            {metaOpen ? (
+              <ChevronDown className="h-3.5 w-3.5 text-[#6B7280]" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-[#6B7280]" />
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label="更多任务操作"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#D0D7DE] bg-white text-[#6B7280] hover:border-[#111] hover:text-[#1F2328]"
+          >
+            <Ellipsis className="h-4 w-4" />
+          </button>
+          {menuOpen ? (
+            <div className="absolute right-0 top-8 z-20 w-28 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328]">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditOpen(true);
+                  setMenuOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+              >
+                编辑
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteTask(task.id);
+                  setMenuOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
+              >
+                删除
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-5 h-1 overflow-hidden rounded-full bg-[#E5E7EB]">
         <div className="h-full rounded-full bg-[#1F2328]" style={{ width: `${task.progress}%` }} />
       </div>
 
-      {/* 任务信息 - 默认折叠 */}
-      <section className="mt-6">
-        <button
-          type="button"
-          onClick={() => setMetaOpen((prev) => !prev)}
-          className="flex w-full items-center justify-between rounded-lg border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-2.5 text-[13px] text-[#1F2328] hover:border-[#1F2328]"
-        >
-          <span className="font-medium">任务信息</span>
-          {metaOpen ? (
-            <ChevronDown className="h-4 w-4 text-[#6B7280]" />
-          ) : (
-            <ChevronRight className="h-4 w-4 text-[#6B7280]" />
-          )}
-        </button>
+      {/* 详细信息 - 默认折叠 */}
+      <section>
         {metaOpen ? (
-          <div className="mt-3 rounded-lg border border-[#E5E7EB] bg-white px-4 py-4">
+          <div className="mt-5 border-t border-[#E5E7EB] pt-4">
             <div className="grid grid-cols-[88px_1fr] gap-x-4 gap-y-3 text-[13px]">
               <MetaLabel>任务类型</MetaLabel>
               <MetaValue>{TASK_TYPE_LABEL[task.taskType]}</MetaValue>
@@ -227,6 +281,7 @@ export function TaskDetailBody({ goal, task }: { goal: Goal; task: Task }) {
           )
         ) : null}
       </section>
+      <TaskEditDrawer task={task} open={editOpen} onClose={() => setEditOpen(false)} />
     </div>
   );
 }
@@ -241,15 +296,28 @@ function MetaValue({ children }: { children: React.ReactNode }) {
 function getTaskDisplayState(task: Task) {
   const latestStatus = task.instances[0]?.status;
   if (latestStatus === "completed" || task.progress >= 100) return "completed" as const;
+  if (latestStatus === "paused") return "paused" as const;
   if (latestStatus === "awaiting_user" || latestStatus === "in_progress")
     return "in_progress" as const;
   if (latestStatus === "pending") return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
   return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
 }
 
+function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisplayState>) {
+  if (taskState === "completed") return null;
+  if (taskState === "in_progress") return { label: "停止", action: "pause" as const };
+  if (taskState === "paused") return { label: "继续执行", action: "resume" as const };
+
+  const latest = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).find((instance) => instance.status !== "completed");
+  if (!latest) return { label: "执行", action: "start" as const };
+  if (latest.status === "pending") return { label: "执行", action: "start" as const };
+  return null;
+}
+
 function instanceStatusLabel(status: Task["instances"][number]["status"]) {
   if (status === "completed") return "已完成";
   if (status === "in_progress") return "进行中";
+  if (status === "paused") return "已暂停";
   if (status === "awaiting_user") return "待确认";
   return "待处理";
 }

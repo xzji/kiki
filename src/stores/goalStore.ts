@@ -43,7 +43,9 @@ type TaskCreateInput = Omit<TaskEditInput, "payload">;
 type GoalStore = {
   goals: Goal[];
   updateTask: (taskId: string, values: TaskEditInput) => void;
+  deleteTask: (taskId: string) => void;
   markInstanceStatus: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
+  controlTaskExecution: (taskId: string, action: "start" | "pause" | "resume") => void;
   completeTaskInstance: (taskId: string, instanceId: string) => void;
   generateInstance: (taskId: string, createdAt: string) => TaskInstance | null;
   createGoalFromInput: (title: string) => Goal;
@@ -68,12 +70,53 @@ export const useGoalStore = create<GoalStore>((set, get) => ({
       })),
     }));
   },
+  deleteTask: (taskId) => {
+    set((state) => ({
+      goals: state.goals.map((goal) => ({
+        ...goal,
+        subGoals: goal.subGoals.map((subGoal) => ({
+          ...subGoal,
+          tasks: subGoal.tasks.filter((task) => task.id !== taskId),
+        })),
+      })),
+    }));
+  },
   markInstanceStatus: (taskId, instanceId, status) => {
     set((state) => ({
       goals: updateTaskInGoals(state.goals, taskId, (task) => ({
         ...task,
         instances: task.instances.map((instance) => (instance.id === instanceId ? { ...instance, status } : instance)),
       })),
+    }));
+  },
+  controlTaskExecution: (taskId, action) => {
+    set((state) => ({
+      goals: updateTaskInGoals(state.goals, taskId, (task) => {
+        const sortedInstances = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+        const target = sortedInstances.find((instance) => instance.status !== "completed");
+
+        if (!target) {
+          const nextInstance = {
+            ...createGeneratedInstance(task, new Date().toISOString()),
+            status: action === "pause" ? ("paused" as const) : ("in_progress" as const),
+          };
+          return { ...task, instances: [nextInstance, ...task.instances] };
+        }
+
+        const nextStatus =
+          action === "start" || action === "resume"
+            ? "in_progress"
+            : action === "pause"
+              ? "paused"
+              : target.status;
+
+        return {
+          ...task,
+          instances: task.instances.map((instance) =>
+            instance.id === target.id ? { ...instance, status: nextStatus } : instance,
+          ),
+        };
+      }),
     }));
   },
   completeTaskInstance: (taskId, instanceId) => {

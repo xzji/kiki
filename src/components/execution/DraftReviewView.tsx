@@ -25,7 +25,7 @@ export function DraftReviewView({ drafts, onComplete, onRewrite }: { drafts: Ema
       <div className="flex justify-center gap-3">
         <button className="rounded-lg bg-[#111] px-5 py-2 text-sm text-white hover:bg-[#333]" onClick={next}>发送</button>
         <button className="rounded-lg border border-[#D0D7DE] px-5 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]" onClick={next}>跳过</button>
-        <button className="rounded-lg border border-[#D0D7DE] px-5 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]" onClick={onRewrite}>让 Kiki 重写</button>
+        <button className="rounded-lg border border-[#D0D7DE] px-5 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]" onClick={onRewrite}>让 KiKi 重写</button>
       </div>
     </div>
   );

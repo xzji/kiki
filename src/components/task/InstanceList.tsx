@@ -29,7 +29,7 @@ export function InstanceList({ goal, task, showDetail = false, activeInstanceId 
               <DoraAvatar size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center justify-between gap-2 text-xs text-[#6B7280]">
-                  <div className="font-medium text-[#111]">Kiki</div>
+                  <div className="font-medium text-[#111]">KiKi</div>
                   <span>{instance.dateLabel} {new Date(instance.createdAt).toISOString().slice(11, 16)}</span>
                 </div>
                 <div className="rounded-xl border border-[#7D8590] bg-[#F5F6F8] p-4">

@@ -48,7 +48,7 @@ function payloadFor(kind: ExecutionKind): ExecutionPayload {
       return {
         kind,
         summary: "已为你选定 5 月 3 日 13:42 大阪→京都，JR 特急，¥2380，可免费改签一次。",
-        options: ["确认执行", "让 Kiki 改方案"],
+        options: ["确认执行", "让 KiKi 改方案"],
       };
     case "draft_review":
       return { kind, drafts: emailDrafts };
@@ -407,7 +407,7 @@ export const initialGoals: Goal[] = [
     progress: 66,
     createdAt: "2026-04-05T10:00:00+08:00",
     kind: "digest",
-    summary: "每天在你固定的写邮件时段，Kiki 把待发邮件整理好草稿，等你 10 分钟内完成审阅与发送。",
+    summary: "每天在你固定的写邮件时段，KiKi 把待发邮件整理好草稿，等你 10 分钟内完成审阅与发送。",
     subGoals: [{ id: "sg-mail-1", goalId: "goal-mail", title: "子目标1：清理待发送邮件", tasks: [task({ id: "task-mail-review", subGoalId: "sg-mail-1", title: "任务1：邮件草稿审阅", description: "确认 3 封待发邮件的语气、结构和下一步动作。", expectedOutcome: "完成 3 封邮件发送。", taskType: "daily_repeat", triggerRule: "每天 16:00 触发", progress: 70, executionKind: "draft_review", instances: [instance("inst-mail-0401", "task-mail-review", "04-01", "2026-04-01T09:00:00+08:00", "我帮你草拟了 3 封待发送邮件，先从最关键的面试确认邮件开始。", "draft_review", "awaiting_user")] })] }],
   },
   {
@@ -417,7 +417,7 @@ export const initialGoals: Goal[] = [
     progress: 80,
     createdAt: "2026-04-01T08:00:00+08:00",
     kind: "digest",
-    summary: "每天早晨 9 点，Kiki 汇总昨晚到今早的 AI 行业重要动态，给你一份可速读的摘要。",
+    summary: "每天早晨 9 点，KiKi 汇总昨晚到今早的 AI 行业重要动态，给你一份可速读的摘要。",
     subGoals: [{ id: "sg-news-1", goalId: "goal-news", title: "子目标1：跟进 AI 方向的重要动态", tasks: [task({ id: "task-news-digest", subGoalId: "sg-news-1", title: "任务1：AI 行业新闻", description: "阅读并标记 3 篇和 Agent 相关的重要新闻。", expectedOutcome: "输出一份简短摘要供晚间复盘。", taskType: "daily_repeat", triggerRule: "每天 09:00 触发", progress: 86, executionKind: "reading_digest", instances: [instance("inst-news-0426", "task-news-digest", "04-26", "2026-04-26T09:00:00+08:00", "整理了 4 条 AI 行业的关键信息，OpenAI 发布多智能体协作框架位列第一。", "reading_digest", "awaiting_user")] })] }],
   },
   {
@@ -459,7 +459,7 @@ export const initialGoals: Goal[] = [
             id: "task-job-rehearsal",
             subGoalId: "sg-job-positioning",
             title: "任务3：岗位表述 rehearse",
-            description: "和 Kiki 练习一句话介绍、项目亮点和 why now。",
+            description: "和 KiKi 练习一句话介绍、项目亮点和 why now。",
             expectedOutcome: "一份精炼的面试开场脚本（30 秒自我介绍 + 3 个项目亮点）",
             taskType: "daily_repeat",
             triggerRule: "每天 20:30 触发",
@@ -477,7 +477,7 @@ export const initialGoals: Goal[] = [
             id: "task-job-list",
             subGoalId: "sg-job-deliver",
             title: "任务1：投递节奏确认",
-            description: "和 Kiki 一起决定本周要投递的公司清单、内推人与投递渠道。",
+            description: "和 KiKi 一起决定本周要投递的公司清单、内推人与投递渠道。",
             expectedOutcome: "每周一份投递计划表（5–10 家公司 × 渠道 × 截止日）",
             taskType: "monitoring",
             triggerRule: "每周日 20:00 触发",
@@ -546,7 +546,7 @@ export const initialGoals: Goal[] = [
     progress: 100,
     createdAt: "2026-04-08T18:20:00+08:00",
     kind: "chat_history",
-    summary: "一次和 Kiki 的简单对话，咨询了一道家常菜的做法。",
+    summary: "一次和 KiKi 的简单对话，咨询了一道家常菜的做法。",
     subGoals: [],
     chatTurns: [
       {

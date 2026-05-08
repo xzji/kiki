@@ -12,7 +12,7 @@ const geistSans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Kiki Prototype",
+  title: "KiKi Prototype",
   description: "目标驱动型自主 Agent 的高保真前端原型",
 };
 

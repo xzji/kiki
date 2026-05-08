@@ -56,7 +56,7 @@ export function ChatHistoryView({ goal }: { goal: Goal }) {
                 }`}
               >
                 <span className="font-medium text-[#1F2328]">
-                  {turn.role === "agent" ? "Kiki" : "我"}
+                  {turn.role === "agent" ? "KiKi" : "我"}
                 </span>
                 <span>{formatTime(turn.timestamp)}</span>
               </div>
@@ -75,7 +75,7 @@ export function ChatHistoryView({ goal }: { goal: Goal }) {
       </div>
 
       <div className="mt-10 rounded-[14px] border border-dashed border-[#D4D7DD] bg-transparent px-4 py-4 text-center text-[12px] text-[#8C9198]">
-        对话已结束 · 如需继续，可在右下角 Kiki 中重新发起
+        对话已结束 · 如需继续，可在右下角 KiKi 中重新发起
       </div>
     </div>
   );

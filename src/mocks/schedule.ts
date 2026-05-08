@@ -37,7 +37,7 @@ export const initialScheduleEvents: AgentEvent[] = [
   {
     id: "evt-focus-morning",
     title: "专注学习时段",
-    description: "Kiki 建议的核心学术词汇扫荡 90 分钟专注。",
+    description: "KiKi 建议的核心学术词汇扫荡 90 分钟专注。",
     startTime: "2026-04-26T13:00:00+08:00",
     endTime: "2026-04-26T15:00:00+08:00",
     isAllDay: false,
@@ -54,7 +54,7 @@ export const initialScheduleEvents: AgentEvent[] = [
   {
     id: "evt-listening",
     title: "听力练习反馈会",
-    description: "和 Kiki 一起回顾昨日听力错题，重点覆盖讲座题型。",
+    description: "和 KiKi 一起回顾昨日听力错题，重点覆盖讲座题型。",
     startTime: "2026-04-28T10:00:00+08:00",
     endTime: "2026-04-28T11:00:00+08:00",
     isAllDay: false,
@@ -112,7 +112,7 @@ export const initialScheduleEvents: AgentEvent[] = [
   },
   {
     id: "evt-agent-focus",
-    title: "Kiki 建议的深度思考时段",
+    title: "KiKi 建议的深度思考时段",
     description: "两小时无打扰的深度思考，适合梳理目标拆解。",
     startTime: "2026-04-30T09:00:00+08:00",
     endTime: "2026-04-30T11:00:00+08:00",

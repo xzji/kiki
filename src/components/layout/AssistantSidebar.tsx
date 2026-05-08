@@ -32,18 +32,18 @@ export function AssistantSidebar() {
   return (
     <aside
       className="fixed inset-y-0 right-0 z-20 flex w-[400px] flex-col border-l border-[#E5E7EB] bg-white"
-      aria-label="Kiki 助手"
+      aria-label="KiKi 助手"
     >
       <div className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#1F2328]">
           <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[#E5E7EB] bg-[#F5F6F8]">
             <Sparkles className="h-3.5 w-3.5 text-[#5B3DBE]" />
           </span>
-          <span>Kiki</span>
+          <span>KiKi</span>
         </div>
         <button
           type="button"
-          aria-label="收起 Kiki"
+          aria-label="收起 KiKi"
           onClick={close}
           className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
         >
@@ -57,9 +57,9 @@ export function AssistantSidebar() {
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-[#E5E7EB] bg-[#F5F6F8]">
               <Sparkles className="h-5 w-5 text-[#5B3DBE]" />
             </div>
-            <div className="text-sm font-semibold text-[#1F2328]">和 Kiki 聊聊</div>
+            <div className="text-sm font-semibold text-[#1F2328]">和 KiKi 聊聊</div>
             <div className="mt-2 max-w-[240px] text-[12px] leading-5 text-[#6B7280]">
-              说出你的想法、目标或问题，Kiki 会在后台推进，并把关键节点同步到你的收件箱。
+              说出你的想法、目标或问题，KiKi 会在后台推进，并把关键节点同步到你的收件箱。
             </div>
           </div>
         ) : (
