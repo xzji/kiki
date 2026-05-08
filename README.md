@@ -1,4 +1,4 @@
-# Dora Prototype
+# KiKi Agent Prototype
 
 目标驱动型自主 Agent 的高保真前端原型。当前版本为纯前端实现，包含：
 
