@@ -1,14 +1,24 @@
 "use client";
 
-import { ArrowUp, ChevronDown, Link2, Plus } from "lucide-react";
+import { ArrowUp, ChevronDown, Link2, Plus, X } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type Props = {
   onSubmit: (value: string) => void;
   placeholder?: string;
+  quotedMessage?: {
+    roleLabel: string;
+    content: string;
+  } | null;
+  onClearQuote?: () => void;
 };
 
-export function AssistantComposer({ onSubmit, placeholder = "输入任何想法，我会帮助你，没有什么大不了的事" }: Props) {
+export function AssistantComposer({
+  onSubmit,
+  placeholder = "输入任何想法，我会帮助你，没有什么大不了的事",
+  quotedMessage,
+  onClearQuote,
+}: Props) {
   const [value, setValue] = useState("");
   const [selectedModel, setSelectedModel] = useState("GPT 5.4");
   const [showConnectorMenu, setShowConnectorMenu] = useState(false);
@@ -54,6 +64,26 @@ export function AssistantComposer({ onSubmit, placeholder = "输入任何想法�
       className="rounded-2xl border border-[#E5E7EB] bg-white px-3 py-3"
     >
       <div className="flex min-h-[84px] flex-col">
+        {quotedMessage ? (
+          <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-[12px] font-medium text-[#1F2328]">
+                引用 {quotedMessage.roleLabel}
+              </div>
+              <div className="mt-0.5 line-clamp-2 text-[12px] leading-5 text-[#6B7280]">
+                {quotedMessage.content}
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label="取消引用"
+              onClick={onClearQuote}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#8C9198] hover:bg-white hover:text-[#1F2328]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : null}
         <textarea
           ref={textareaRef}
           value={value}

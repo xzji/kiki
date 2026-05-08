@@ -2,74 +2,61 @@
 
 import {
   CalendarDays,
-  ChevronDown,
-  ChevronRight,
-  History,
+  Ellipsis,
   Inbox,
+  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
-  Target,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { useGoalStore } from "@/stores/goalStore";
+import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
+import type { Conversation } from "@/types/dora";
 
-export const NAV_SIDEBAR_EXPANDED_WIDTH = 240;
+export const NAV_SIDEBAR_EXPANDED_WIDTH = 260;
 export const NAV_SIDEBAR_COLLAPSED_WIDTH = 56;
 
 export function Sidebar() {
   const pathname = usePathname();
-  const goals = useGoalStore((state) => state.goals);
+  const router = useRouter();
+  const conversations = useConversationStore((state) => state.conversations);
+  const createConversation = useConversationStore((state) => state.createConversation);
+  const markConversationUnread = useConversationStore((state) => state.markConversationUnread);
+  const deleteConversation = useConversationStore((state) => state.deleteConversation);
+  const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
   const setCollapsed = useNavSidebarStore((state) => state.setCollapsed);
 
-  const [goalsOpen, setGoalsOpen] = useState(true);
-  const [historyOpen, setHistoryOpen] = useState(true);
-
-  const activeGoals = useMemo(
-    () => goals.filter((goal) => (goal.kind ?? "collab") !== "chat_history"),
-    [goals],
-  );
-  const historyGoals = useMemo(
-    () => goals.filter((goal) => goal.kind === "chat_history"),
-    [goals],
+  const inboxUnread = useMemo(
+    () => inboxItems.reduce((sum, item) => sum + item.unreadCount, 0),
+    [inboxItems],
   );
 
-  const inboxUnread = useMemo(() => inboxItems.reduce((sum, item) => sum + item.unreadCount, 0), [inboxItems]);
-  const goalUnread = useMemo(() => {
-    return goals.reduce<Record<string, number>>((acc, goal) => {
-      acc[goal.id] = inboxItems.filter((item) => item.goalId === goal.id).reduce((sum, item) => sum + item.unreadCount, 0);
-      return acc;
-    }, {});
-  }, [goals, inboxItems]);
-
-  const totalGoalUnread = useMemo(
-    () => activeGoals.reduce((sum, goal) => sum + (goalUnread[goal.id] ?? 0), 0),
-    [activeGoals, goalUnread],
+  const sortedConversations = useMemo(
+    () =>
+      [...conversations].sort(
+        (a, b) =>
+          Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
+          +new Date(b.updatedAt) - +new Date(a.updatedAt),
+      ),
+    [conversations],
   );
 
-  const onGoalsGroupClick = () => {
-    if (collapsed) {
-      setCollapsed(false);
-      setGoalsOpen(true);
-    } else {
-      setGoalsOpen((prev) => !prev);
-    }
-  };
+  const totalUnread = useMemo(
+    () => sortedConversations.reduce((sum, c) => sum + getConversationUnreadCount(c), 0),
+    [sortedConversations],
+  );
 
-  const onHistoryGroupClick = () => {
-    if (collapsed) {
-      setCollapsed(false);
-      setHistoryOpen(true);
-    } else {
-      setHistoryOpen((prev) => !prev);
-    }
+  const onCreateConversation = () => {
+    const next = createConversation();
+    router.push(`/conversations/${next.id}`);
   };
 
   if (collapsed) {
@@ -101,17 +88,11 @@ export function Sidebar() {
             icon={<CalendarDays className="h-4 w-4" />}
           />
           <IconButton
-            label="进行中"
-            icon={<Target className="h-4 w-4" />}
-            badge={totalGoalUnread}
-            onClick={onGoalsGroupClick}
-            active={pathname.startsWith("/goals") && activeGoals.some((g) => pathname.startsWith(`/goals/${g.id}`))}
-          />
-          <IconButton
-            label="历史"
-            icon={<History className="h-4 w-4" />}
-            onClick={onHistoryGroupClick}
-            active={historyGoals.some((g) => pathname.startsWith(`/goals/${g.id}`))}
+            label="会话"
+            icon={<MessageCircle className="h-4 w-4" />}
+            badge={totalUnread}
+            onClick={() => setCollapsed(false)}
+            active={pathname.startsWith("/conversations")}
           />
         </nav>
       </aside>
@@ -120,10 +101,10 @@ export function Sidebar() {
 
   return (
     <aside
-      className="fixed inset-y-0 left-0 z-10 border-r border-[#D8DDE4] bg-[#F5F6F8] px-5 py-6"
+      className="fixed inset-y-0 left-0 z-10 flex flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5"
       style={{ width: NAV_SIDEBAR_EXPANDED_WIDTH }}
     >
-      <div className="mb-6 flex items-center justify-end">
+      <div className="mb-4 flex items-center justify-end">
         <button
           type="button"
           aria-label="收起侧边栏"
@@ -133,78 +114,177 @@ export function Sidebar() {
           <PanelLeftClose className="h-4 w-4" />
         </button>
       </div>
-      <nav className="space-y-6 text-sm text-[#475467]">
-        <div className="space-y-1">
-          <NavLink
-            href="/"
-            active={pathname === "/"}
-            icon={<Inbox className="h-4 w-4" />}
-            label="收件箱"
-            badge={inboxUnread}
-          />
-          <NavLink
-            href="/schedule"
-            active={pathname.startsWith("/schedule")}
-            icon={<CalendarDays className="h-4 w-4" />}
-            label="日程"
-          />
-        </div>
-        <div>
-          <button
-            className="mb-2 flex w-full items-center justify-between px-3 text-xs font-medium text-[#6B7280]"
-            onClick={() => setGoalsOpen((prev) => !prev)}
-          >
-            <span className="flex items-center gap-2">
-              <Target className="h-3.5 w-3.5" />
-              进行中
-            </span>
-            {goalsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </button>
-          {goalsOpen ? (
-            <div className="space-y-1">
-              {activeGoals.map((goal) => (
-                <NavLink
-                  key={goal.id}
-                  href={`/goals/${goal.id}`}
-                  active={pathname.startsWith(`/goals/${goal.id}`)}
-                  label={goal.title}
-                  badge={goalUnread[goal.id]}
-                  small
+      <nav className="space-y-1 text-sm text-[#475467]">
+        <NavLink
+          href="/"
+          active={pathname === "/"}
+          icon={<Inbox className="h-4 w-4" />}
+          label="收件箱"
+          badge={inboxUnread}
+        />
+        <NavLink
+          href="/schedule"
+          active={pathname.startsWith("/schedule")}
+          icon={<CalendarDays className="h-4 w-4" />}
+          label="日程"
+        />
+      </nav>
+
+      <div className="mt-6 flex items-center justify-between px-2 text-xs font-medium text-[#6B7280]">
+        <span className="flex items-center gap-2">
+          <MessageCircle className="h-3.5 w-3.5" />
+          会话
+        </span>
+        <button
+          type="button"
+          aria-label="新建会话"
+          onClick={onCreateConversation}
+          className="flex h-6 w-6 items-center justify-center rounded-md text-[#6B7280] hover:bg-white hover:text-[#1F2328]"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="mt-2 flex-1 overflow-y-auto overscroll-contain pr-1">
+        {sortedConversations.length === 0 ? (
+          <div className="mt-3 px-3 py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
+        ) : (
+          <ul className="space-y-1">
+            {sortedConversations.map((conv) => {
+              return (
+                <ConversationListItem
+                  key={conv.id}
+                  conversation={conv}
+                  active={pathname.startsWith(`/conversations/${conv.id}`)}
+                  onTogglePinned={() => toggleConversationPinned(conv.id)}
+                  onMarkUnread={() => markConversationUnread(conv.id)}
+                  onDelete={() => {
+                    deleteConversation(conv.id);
+                    if (pathname.startsWith(`/conversations/${conv.id}`)) {
+                      router.push("/conversations");
+                    }
+                  }}
                 />
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <div>
-          <button
-            className="mb-2 flex w-full items-center justify-between px-3 text-xs font-medium text-[#6B7280]"
-            onClick={() => setHistoryOpen((prev) => !prev)}
-          >
-            <span className="flex items-center gap-2">
-              <History className="h-3.5 w-3.5" />
-              历史
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function ConversationListItem({
+  conversation,
+  active,
+  onTogglePinned,
+  onMarkUnread,
+  onDelete,
+}: {
+  conversation: Conversation;
+  active: boolean;
+  onTogglePinned: () => void;
+  onMarkUnread: () => void;
+  onDelete: () => void;
+}) {
+  const unread = getConversationUnreadCount(conversation);
+  const latest = conversation.messages[conversation.messages.length - 1];
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, []);
+
+  return (
+    <li>
+      <div
+        className={cn(
+          "group flex items-start gap-2 rounded-lg px-3 py-2 transition hover:bg-white/80",
+          active && "bg-white shadow-sm",
+        )}
+      >
+        <Link href={`/conversations/${conversation.id}`} className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-[13px] text-[#1F2328]">
+              {conversation.title}
             </span>
-            {historyOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </button>
-          {historyOpen ? (
-            <div className="space-y-1">
-              {historyGoals.map((goal) => (
-                <NavLink
-                  key={goal.id}
-                  href={`/goals/${goal.id}`}
-                  active={pathname.startsWith(`/goals/${goal.id}`)}
-                  label={goal.title}
-                  small
-                />
-              ))}
-              {historyGoals.length === 0 ? (
-                <div className="px-3 py-2 text-[12px] text-[#9AA0A6]">暂无历史对话</div>
+            <div className="flex items-center gap-1">
+              {conversation.pinned ? (
+                <span className="text-[10px] text-[#8C9198]">置顶</span>
+              ) : null}
+              {unread > 0 ? (
+                <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[10px] text-white">
+                  {unread}
+                </span>
               ) : null}
             </div>
+          </div>
+          {latest ? (
+            <span className="block truncate text-[11px] text-[#8C9198]">
+              {latest.content}
+            </span>
+          ) : (
+            <span className="block truncate text-[11px] text-[#8C9198]">
+              暂无消息
+            </span>
+          )}
+        </Link>
+        <div ref={menuRef} className="relative pt-0.5">
+          <button
+            type="button"
+            aria-label="更多"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded-md text-[#8C9198] hover:bg-white hover:text-[#1F2328]",
+              menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+          >
+            <Ellipsis className="h-4 w-4" />
+          </button>
+          {menuOpen ? (
+            <div className="absolute right-0 top-7 z-20 w-32 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328] shadow-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  onTogglePinned();
+                  setMenuOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+              >
+                {conversation.pinned ? "取消置顶" : "置顶"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onMarkUnread();
+                  setMenuOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+              >
+                标记为未读
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDelete();
+                  setMenuOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
+              >
+                删除
+              </button>
+            </div>
           ) : null}
         </div>
-      </nav>
-    </aside>
+      </div>
+    </li>
   );
 }
 
@@ -214,14 +294,12 @@ function NavLink({
   label,
   badge,
   icon,
-  small = false,
 }: {
   href: string;
   active: boolean;
   label: string;
   badge?: number;
   icon?: React.ReactNode;
-  small?: boolean;
 }) {
   return (
     <Link
@@ -229,7 +307,6 @@ function NavLink({
       className={cn(
         "flex items-center justify-between rounded-lg px-3 py-2 transition hover:bg-white/80",
         active && "bg-white text-[#111] shadow-sm",
-        small && "text-[13px]",
       )}
     >
       <span className="flex min-w-0 items-center gap-2">

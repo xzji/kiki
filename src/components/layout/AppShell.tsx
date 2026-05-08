@@ -22,7 +22,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useTriggerEngine();
   const pathname = usePathname();
   const isWide = pathname.startsWith("/schedule");
-  const contentWidth = isWide ? "max-w-[1600px]" : "max-w-5xl";
+  const isConversation = pathname.startsWith("/conversations");
+  const contentWidth = isWide || isConversation ? "max-w-[1600px]" : "max-w-5xl";
 
   const { isOpen, hydrated, hydrate } = useAssistantStore();
   useEffect(() => {
@@ -40,15 +41,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const leftPadding = navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
   // 任务侧栏改为覆盖式，不再挤压主内容；只有 AssistantSidebar 挤压
   const rightPadding = assistantOpen ? 416 : 0;
+  const mainClassName = isConversation
+    ? "h-screen overflow-hidden bg-white px-0 pb-0 pt-0 transition-[padding,margin] duration-200"
+    : "h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8 transition-[padding,margin] duration-200";
+  const contentClassName = isConversation
+    ? `mx-auto h-full w-full ${contentWidth}`
+    : `mx-auto w-full ${contentWidth}`;
 
   return (
     <div className="h-screen overflow-hidden bg-[#F5F6F8] text-[#1F2328]">
       <Sidebar />
       <main
-        className="h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8 transition-[padding,margin] duration-200"
+        className={mainClassName}
         style={{ marginLeft: leftPadding, paddingRight: rightPadding || undefined }}
       >
-        <div className={`mx-auto w-full ${contentWidth}`}>{children}</div>
+        <div className={contentClassName}>{children}</div>
       </main>
       <UserMenu />
       <DevPanel />

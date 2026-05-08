@@ -12,12 +12,14 @@ export function SubGoalBlock({
   goal,
   subGoal,
   unreadByTask,
+  highlighted = false,
   onOpenTask,
 }: {
   index: number;
   goal: Goal;
   subGoal: Goal["subGoals"][number];
   unreadByTask: Record<string, number>;
+  highlighted?: boolean;
   onOpenTask: (task: Task) => void;
 }) {
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
@@ -29,7 +31,11 @@ export function SubGoalBlock({
   const progress = subGoal.tasks.length === 0 ? 0 : Math.round((completedCount / subGoal.tasks.length) * 100);
 
   return (
-    <section className="rounded-[18px] border border-[#E5E7EB] bg-white px-6 py-5">
+    <section
+      className={`rounded-[18px] border bg-white px-6 py-5 ${
+        highlighted ? "border-[#1F2328]" : "border-[#E5E7EB]"
+      }`}
+    >
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-3">

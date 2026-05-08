@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { ExecutionShell } from "@/components/task/ExecutionShell";
 import { useGoalStore } from "@/stores/goalStore";
@@ -35,13 +34,12 @@ export default function TaskDetailPage({
 
   return (
     <div className="mx-auto w-full max-w-3xl px-2 py-2">
-      <div className="mb-4 text-xs text-[#6B7280]">
-        <Link href={`/goals/${goal.id}`} className="hover:text-[#111]">
-          {goal.title}
-        </Link>
-        <span className="mx-1">/</span>
-        <span>{task.title.replace(/^任务\d+：/, "")}</span>
-      </div>
+      <GoalPlanBreadcrumb
+        goalId={goal.id}
+        goalTitle={goal.title}
+        taskTitle={task.title.replace(/^任务\d+：/, "")}
+        className="mb-4"
+      />
       <TaskDetailBody goal={goal} task={task} />
     </div>
   );

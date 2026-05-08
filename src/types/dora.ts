@@ -126,6 +126,44 @@ export type DoraMessage = {
   taskInstanceId?: string;
 };
 
+/**
+ * 会话中的单条消息。
+ * - text：纯文本（KiKi 或用户发言）
+ * - task_card：KiKi 推送的任务执行消息，带任务卡片
+ */
+export type ConversationMessage =
+  | {
+      id: string;
+      kind: "text";
+      role: "kiki" | "user";
+      content: string;
+      createdAt: string;
+      unread?: boolean;
+    }
+  | {
+      id: string;
+      kind: "task_card";
+      role: "kiki";
+      content: string;
+      createdAt: string;
+      unread?: boolean;
+      taskRef: {
+        goalId: string;
+        subGoalId: string;
+        taskId: string;
+        instanceId: string;
+      };
+    };
+
+export type Conversation = {
+  id: string;
+  title: string;
+  goalId?: string;
+  messages: ConversationMessage[];
+  updatedAt: string;
+  pinned?: boolean;
+};
+
 export type GoalBreakdownDraft = {
   goalTitle: string;
   subGoals: {
