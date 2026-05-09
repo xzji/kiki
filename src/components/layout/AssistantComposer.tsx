@@ -22,6 +22,7 @@ type Props = {
   disabled?: boolean;
   localMode?: boolean;
   onStop?: () => void;
+  autoFocus?: boolean;
 };
 
 export function AssistantComposer({
@@ -32,6 +33,7 @@ export function AssistantComposer({
   disabled = false,
   localMode = false,
   onStop,
+  autoFocus = false,
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedModel, setSelectedModel] = useState(localMode ? "Claude Code Local" : "GPT 5.4");
@@ -88,6 +90,14 @@ export function AssistantComposer({
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
+  useEffect(() => {
+    if (!autoFocus || disabled) return;
+    const frame = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, disabled]);
+
   return (
     <div
       ref={composerRef}
@@ -116,6 +126,7 @@ export function AssistantComposer({
         ) : null}
         <textarea
           ref={textareaRef}
+          autoFocus={autoFocus}
           value={value}
           onChange={(event) => {
             setValue(event.target.value);

@@ -573,6 +573,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           <AssistantComposer
             onSubmit={onSend}
             disabled={conversation.status === "streaming"}
+            autoFocus={conversation.messages.length === 0}
             localMode
             onStop={conversation.status === "streaming" ? stopGeneration : undefined}
             quotedMessage={

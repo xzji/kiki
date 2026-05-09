@@ -1,6 +1,7 @@
 "use client";
 
 import { advanceGoalInfoCollection, generateGoalPlan } from "@/lib/api/goals";
+import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -41,9 +42,6 @@ export type GoalInfoCollectionStepResult =
   | ({
       kind: "planned";
     } & GoalWorkflowResult);
-
-const INFO_COLLECTION_MIN_ROUNDS = 1;
-const INFO_COLLECTION_MAX_ROUNDS = 3;
 
 function assertClaudeRuntime() {
   const runtimeEnv = useRuntimeEnvStore.getState().getActiveEnvironment();
@@ -138,6 +136,7 @@ async function runGoalPlanning(input: {
   onProgress?: (progress: GoalWorkflowProgress) => void;
 }) {
   const runtimeEnv = assertClaudeRuntime();
+  const goalConfig = useEasterEggSettingsStore.getState().getSettings();
   const conversationStore = useConversationStore.getState();
   const goalStore = useGoalStore.getState();
   const conversation = conversationStore.conversations.find((item) => item.id === input.conversationId);
@@ -148,6 +147,7 @@ async function runGoalPlanning(input: {
   const draft = await generateGoalPlan({
     goalText: input.goalText,
     runtimeEnv,
+    config: goalConfig,
     conversationId: input.conversationId,
     conversationContext: buildConversationContext(input.conversationId),
     collectedInfo: collection ? buildCollectedInfoTranscript(collection.rounds) : undefined,
@@ -210,6 +210,7 @@ export async function startGoalInfoCollection(input: {
   }
 
   const runtimeEnv = assertClaudeRuntime();
+  const goalConfig = useEasterEggSettingsStore.getState().getSettings();
   const conversationStore = useConversationStore.getState();
 
   input.onProgress?.({ phase: "collecting_info", message: "正在准备几个关键澄清问题..." });
@@ -218,11 +219,12 @@ export async function startGoalInfoCollection(input: {
   const result = await advanceGoalInfoCollection({
     goalText,
     runtimeEnv,
+    config: goalConfig,
     conversationId: conversation.id,
     conversationContext: buildConversationContext(conversation.id),
     history: [],
-    minRounds: INFO_COLLECTION_MIN_ROUNDS,
-    maxRounds: INFO_COLLECTION_MAX_ROUNDS,
+    minRounds: goalConfig.minInfoCollectionRounds,
+    maxRounds: goalConfig.maxInfoCollectionRounds,
     signal: input.signal,
   });
 
@@ -236,8 +238,8 @@ export async function startGoalInfoCollection(input: {
     status: "awaiting_user",
     rounds: [createInfoCollectionRound(result.questions, now)],
     currentRound: 1,
-    minRounds: INFO_COLLECTION_MIN_ROUNDS,
-    maxRounds: INFO_COLLECTION_MAX_ROUNDS,
+    minRounds: goalConfig.minInfoCollectionRounds,
+    maxRounds: goalConfig.maxInfoCollectionRounds,
     startedAt: now,
     updatedAt: now,
     assistantMessage: result.assistantMessage,
@@ -264,6 +266,7 @@ export async function continueGoalWorkflowAfterInfo(input: {
   }
 
   const runtimeEnv = assertClaudeRuntime();
+  const goalConfig = useEasterEggSettingsStore.getState().getSettings();
   const conversationStore = useConversationStore.getState();
   const conversation = conversationStore.conversations.find((item) => item.id === input.conversationId);
   const collection = conversation?.goalInfoCollection;
@@ -292,6 +295,7 @@ export async function continueGoalWorkflowAfterInfo(input: {
   const decision = await advanceGoalInfoCollection({
     goalText: collection.goalText,
     runtimeEnv,
+    config: goalConfig,
     conversationId: input.conversationId,
     conversationContext: buildConversationContext(input.conversationId),
     history: serializeCollectionHistory(answeredRounds),

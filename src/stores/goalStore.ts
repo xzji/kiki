@@ -7,14 +7,41 @@ import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
 import type { ExecutionPayload, Goal, GoalBreakdownDraft, GoalWorkflow, Task, TaskInstance } from "@/types/kiki";
 
-function updateTaskInGoals(goals: Goal[], taskId: string, updater: (task: Task, goal: Goal) => Task): Goal[] {
-  return goals.map((goal) => ({
+function finalizeGoal(goal: Goal): Goal {
+  const tasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
+  const progress =
+    tasks.length === 0
+      ? goal.progress
+      : Math.round(tasks.reduce((total, task) => total + task.progress, 0) / tasks.length);
+
+  const onlyOneShotTasks = tasks.length > 0 && tasks.every((task) => task.taskType === "one_shot");
+  const allTasksCompleted = tasks.length > 0 && tasks.every((task) => task.progress >= 100);
+  const workflow =
+    goal.workflow && onlyOneShotTasks && allTasksCompleted && goal.workflow.phase !== "completed"
+      ? {
+          ...goal.workflow,
+          phase: "completed" as const,
+          updatedAt: nowIso(),
+        }
+      : goal.workflow;
+
+  return {
     ...goal,
-    subGoals: goal.subGoals.map((subGoal) => ({
-      ...subGoal,
-      tasks: subGoal.tasks.map((task) => (task.id === taskId ? updater(task, goal) : task)),
-    })),
-  }));
+    progress,
+    workflow,
+  };
+}
+
+function updateTaskInGoals(goals: Goal[], taskId: string, updater: (task: Task, goal: Goal) => Task): Goal[] {
+  return goals.map((goal) =>
+    finalizeGoal({
+      ...goal,
+      subGoals: goal.subGoals.map((subGoal) => ({
+        ...subGoal,
+        tasks: subGoal.tasks.map((task) => (task.id === taskId ? updater(task, goal) : task)),
+      })),
+    }),
+  );
 }
 
 function findTaskLocation(goals: Goal[], taskId: string) {
@@ -72,6 +99,21 @@ function buildGoalIdFromTitle(goalTitle: string) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function namespaceDependencyIds(
+  dependencies: string[] | undefined,
+  taskIdMap: Map<string, string>,
+  goalId: string,
+) {
+  if (!dependencies?.length) return dependencies;
+  return dependencies.map((dependencyId) => {
+    const trimmed = dependencyId.trim();
+    if (!trimmed) return trimmed;
+    if (taskIdMap.has(trimmed)) return taskIdMap.get(trimmed)!;
+    if (trimmed.startsWith(`${goalId}-`)) return trimmed;
+    return taskIdMap.get(trimmed.replace(/^.*?task-/, "task-")) ?? trimmed;
+  });
 }
 
 export const useGoalStore = create<GoalStore>()(
@@ -222,6 +264,17 @@ export const useGoalStore = create<GoalStore>()(
           })),
         };
 
+        const taskIdMap = new Map<string, string>();
+        draft.subGoals.forEach((draftSubGoal, sgIndex) => {
+          const nextSubGoal = nextGoal.subGoals[sgIndex];
+          draftSubGoal.tasks.forEach((draftTask, taskIndex) => {
+            const nextTask = nextSubGoal?.tasks[taskIndex];
+            if (nextTask) {
+              taskIdMap.set(draftTask.id, nextTask.id);
+            }
+          });
+        });
+
         // Fix subGoalId on tasks after we namespaced ids.
         nextGoal.subGoals = nextGoal.subGoals.map((sg) => ({
           ...sg,
@@ -243,7 +296,7 @@ export const useGoalStore = create<GoalStore>()(
                 ? {
                     ...t,
                     priority: draftTask.priority,
-                    dependencies: draftTask.dependencies,
+                    dependencies: namespaceDependencyIds(draftTask.dependencies, taskIdMap, goalId),
                     executionMode: draftTask.executionMode,
                     executionCycle: draftTask.executionCycle,
                     expectedResult: draftTask.expectedResult,
@@ -253,8 +306,9 @@ export const useGoalStore = create<GoalStore>()(
           };
         });
 
-        set((state) => ({ goals: [...state.goals, nextGoal] }));
-        return nextGoal;
+        const finalizedGoal = finalizeGoal(nextGoal);
+        set((state) => ({ goals: [...state.goals, finalizedGoal] }));
+        return finalizedGoal;
       },
       updateGoalWorkflow: (goalId, updates) => {
         set((state) => ({
@@ -281,7 +335,7 @@ export const useGoalStore = create<GoalStore>()(
             const prev = goal.workflow;
             const next: GoalWorkflow = {
               ...prev,
-              phase: "monitoring",
+              phase: "executing",
               planDecision: "confirmed",
               startedAt: prev?.startedAt ?? now,
               updatedAt: now,
@@ -367,7 +421,7 @@ export const useGoalStore = create<GoalStore>()(
         set((state) => ({
           goals: state.goals.map((goal) => {
             if (goal.id !== goalId) return goal;
-            return {
+            return finalizeGoal({
               ...goal,
               subGoals: goal.subGoals.map((subGoal) => {
                 if (subGoal.id !== subGoalId) return subGoal;
@@ -387,7 +441,7 @@ export const useGoalStore = create<GoalStore>()(
                 };
                 return { ...subGoal, tasks: [...subGoal.tasks, newTask] };
               }),
-            };
+            });
           }),
         }));
       },

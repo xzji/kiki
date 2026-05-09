@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { advanceGoalInfoCollectionWithClaude } from "@/lib/server/goalPlanning";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 type RequestBody = {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationId?: string;
   conversationContext?: string;
   history: Array<{
@@ -39,6 +41,7 @@ export async function POST(request: NextRequest) {
     const result = await advanceGoalInfoCollectionWithClaude({
       goalText,
       runtimeEnv: body.runtimeEnv,
+      config: body.config,
       conversationContext: body.conversationContext,
       history: body.history,
       minRounds: body.minRounds,

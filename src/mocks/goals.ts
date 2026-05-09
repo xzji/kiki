@@ -594,7 +594,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       goalId,
       title: subGoal.title,
       tasks: subGoal.tasks.map((taskItem, taskIndex) => ({
-        id: `${goalId}-task-${taskIndex + 1}`,
+        id: `${goalId}-sg-${subGoalIndex + 1}-task-${taskIndex + 1}`,
         subGoalId: `${goalId}-sg-${subGoalIndex + 1}`,
         title: taskItem.title,
         description: taskItem.description,

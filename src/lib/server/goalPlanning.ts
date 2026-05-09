@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
 
+import type { EasterEggSettings } from "@/lib/goalSystemConfig";
+import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -228,6 +230,7 @@ function buildDecomposePrompt(input: {
   goalTitle: string;
   goalDescription: string;
   userContext: Record<string, unknown>;
+  config: EasterEggSettings;
 }) {
   return `# Role
 你是一位资深目标规划与战略拆解专家，擅长运用 MECE 原则和逆向推演法，将复杂目标拆解为可执行、可度量的子目标。
@@ -261,7 +264,7 @@ MECE (Mutually Exclusive, Collectively Exhaustive) 要求：
 5. 风险可见：识别可能的风险点和应对策略
 
 ## 边界处理
-- 子目标数量建议 3-7 个，根据目标复杂度调整
+- 子目标数量建议 ${input.config.minSubGoals}-${input.config.maxSubGoals} 个，根据目标复杂度调整
 - 避免过度拆解导致管理成本过高
 - 避免拆解不足导致子目标过于庞大
 - 对于模糊目标，优先明确成功标准
@@ -309,6 +312,7 @@ function buildTaskGenerationPrompt(input: {
   subGoalName: string;
   subGoalDescription: string;
   successCriteria: string[];
+  config: EasterEggSettings;
 }) {
   return `请为以下子目标生成具体的执行任务。
 
@@ -329,6 +333,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 6. hierarchy_level 只能是 task | sub_task | action
 7. execution_kind 只能是 ${allowedExecutionKinds.join("、")}
 8. 覆盖所有关键完成标准，同时避免冗余任务
+9. 每个子目标尽量生成 ${input.config.minTasksPerSubGoal}-${input.config.maxTasksPerSubGoal} 个任务，过少会导致执行不可落地，过多会导致管理成本过高
 
 请按 JSON 格式返回：
 {
@@ -528,13 +533,126 @@ function extractTextFromPayload(raw: string) {
   return text;
 }
 
-function parseClaudeJson<T>(raw: string, validator: (value: unknown) => T, errorMessage: string) {
-  const content = stripJsonFences(extractTextFromPayload(raw));
-  try {
-    return validator(JSON.parse(content) as unknown);
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : errorMessage);
+function extractBalancedJsonSnippet(text: string) {
+  const startIndex = text.search(/[\{\[]/);
+  if (startIndex < 0) return text.trim();
+
+  const opener = text[startIndex];
+  const closer = opener === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === opener) {
+      depth += 1;
+      continue;
+    }
+    if (char === closer) {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, index + 1).trim();
+      }
+    }
   }
+
+  return text.slice(startIndex).trim();
+}
+
+function repairCommonJsonIssues(text: string) {
+  return text
+    .replace(/^\uFEFF/, "")
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*([}\]])/g, "$1")
+    .trim();
+}
+
+async function repairMalformedJsonWithClaude(input: {
+  runtimeEnv: RuntimeEnvironment;
+  malformedJson: string;
+  signal?: AbortSignal;
+}) {
+  const prompt = `你是 JSON 修复助手。请把下面这段不合法或不完整的 JSON 修复为严格合法的 JSON。
+
+要求：
+1. 只能输出修复后的严格 JSON。
+2. 不要输出 Markdown、解释、代码块或额外说明。
+3. 尽量保留原始字段和值语义，不要擅自改写业务含义。
+
+待修复内容：
+${input.malformedJson}`;
+
+  const stdout = await runClaudeJson({
+    runtimeEnv: input.runtimeEnv,
+    prompt,
+    signal: input.signal,
+    abortMessage: "JSON 修复已中断",
+    failureMessage: "Claude CLI JSON 修复失败",
+  });
+
+  return stripJsonFences(extractTextFromPayload(stdout));
+}
+
+async function parseClaudeJson<T>(input: {
+  raw: string;
+  validator: (value: unknown) => T;
+  errorMessage: string;
+  runtimeEnv: RuntimeEnvironment;
+  signal?: AbortSignal;
+}) {
+  const primary = stripJsonFences(extractTextFromPayload(input.raw));
+  const candidates = [
+    primary,
+    extractBalancedJsonSnippet(primary),
+    repairCommonJsonIssues(primary),
+    repairCommonJsonIssues(extractBalancedJsonSnippet(primary)),
+  ];
+
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      return input.validator(JSON.parse(candidate) as unknown);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  try {
+    const repaired = await repairMalformedJsonWithClaude({
+      runtimeEnv: input.runtimeEnv,
+      malformedJson: primary,
+      signal: input.signal,
+    });
+    return input.validator(JSON.parse(repairCommonJsonIssues(extractBalancedJsonSnippet(repaired))) as unknown);
+  } catch (error) {
+    lastError = error;
+  }
+
+  throw new Error(lastError instanceof Error ? lastError.message : input.errorMessage);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -929,13 +1047,20 @@ async function summarizeCollectedInfoWithClaude(input: {
     abortMessage: "目标信息整理已中断",
     failureMessage: "Claude CLI 信息摘要生成失败",
   });
-  return parseClaudeJson(stdout, validateCollectedInfoSummary, "Claude 信息摘要 JSON 解析失败");
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validateCollectedInfoSummary,
+    errorMessage: "Claude 信息摘要 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 }
 
 async function decomposeGoalWithClaude(input: {
   goalTitle: string;
   goalDescription: string;
   userContext: Record<string, unknown>;
+  config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
 }) {
@@ -946,7 +1071,13 @@ async function decomposeGoalWithClaude(input: {
     abortMessage: "子目标拆解已中断",
     failureMessage: "Claude CLI 子目标拆解失败",
   });
-  return parseClaudeJson(stdout, validateDecomposition, "Claude 子目标拆解 JSON 解析失败");
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validateDecomposition,
+    errorMessage: "Claude 子目标拆解 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 }
 
 async function generateTasksForSubGoalWithClaude(input: {
@@ -956,6 +1087,7 @@ async function generateTasksForSubGoalWithClaude(input: {
   subGoalName: string;
   subGoalDescription: string;
   successCriteria: string[];
+  config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
 }) {
@@ -966,7 +1098,13 @@ async function generateTasksForSubGoalWithClaude(input: {
     abortMessage: "任务生成已中断",
     failureMessage: "Claude CLI 任务生成失败",
   });
-  return parseClaudeJson(stdout, validateTaskGeneration, "Claude 任务生成 JSON 解析失败");
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validateTaskGeneration,
+    errorMessage: "Claude 任务生成 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 }
 
 async function reviewTasksWithClaude(input: {
@@ -984,7 +1122,13 @@ async function reviewTasksWithClaude(input: {
     abortMessage: "任务 review 已中断",
     failureMessage: "Claude CLI 任务 review 失败",
   });
-  return parseClaudeJson(stdout, validateTaskReview, "Claude 任务 review JSON 解析失败");
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validateTaskReview,
+    errorMessage: "Claude 任务 review JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 }
 
 async function buildPlanPresentationWithClaude(input: {
@@ -1006,7 +1150,13 @@ async function buildPlanPresentationWithClaude(input: {
     abortMessage: "计划摘要生成已中断",
     failureMessage: "Claude CLI 计划摘要生成失败",
   });
-  return parseClaudeJson(stdout, validatePlanPresentation, "Claude 计划摘要 JSON 解析失败");
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validatePlanPresentation,
+    errorMessage: "Claude 计划摘要 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 }
 
 function applyTaskReview(
@@ -1096,10 +1246,12 @@ function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
 export async function generateGoalPlanWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationContext?: string;
   collectedInfo?: string;
   signal?: AbortSignal;
 }): Promise<GoalBreakdownDraft> {
+  const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
   const collectedInfoSummary = input.collectedInfo?.trim()
     ? await summarizeCollectedInfoWithClaude({
         goalText: input.goalText,
@@ -1125,6 +1277,7 @@ export async function generateGoalPlanWithClaude(input: {
     goalTitle: input.goalText,
     goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
     userContext,
+    config,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
   });
@@ -1147,6 +1300,7 @@ export async function generateGoalPlanWithClaude(input: {
       subGoalName: subGoal.name,
       subGoalDescription: subGoal.description,
       successCriteria: subGoal.successCriteria.map((criterion) => criterion.description),
+      config,
       runtimeEnv: input.runtimeEnv,
       signal: input.signal,
     });
@@ -1217,6 +1371,7 @@ export async function generateGoalPlanWithClaude(input: {
 export async function generateGoalClarificationQuestionsWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationContext?: string;
   signal?: AbortSignal;
 }): Promise<GoalClarificationQuestions> {
@@ -1229,7 +1384,13 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
     failureMessage: "Claude CLI 澄清问题生成失败",
   });
 
-  return parseClaudeJson(stdout, validateClarificationQuestions, "Claude 澄清问题 JSON 解析失败");
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validateClarificationQuestions,
+    errorMessage: "Claude 澄清问题 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 }
 
 function buildCollectedInfoTranscript(history: GoalInfoCollectionHistoryItem[]) {
@@ -1244,6 +1405,7 @@ function buildCollectedInfoTranscript(history: GoalInfoCollectionHistoryItem[]) 
 export async function advanceGoalInfoCollectionWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationContext?: string;
   history: GoalInfoCollectionHistoryItem[];
   minRounds?: number;
@@ -1251,13 +1413,15 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
   signal?: AbortSignal;
 }): Promise<GoalInfoCollectionTurnDecision> {
   const answeredRounds = input.history.filter((item) => item.answer?.trim()).length;
-  const minRounds = input.minRounds ?? 1;
-  const maxRounds = input.maxRounds ?? 3;
+  const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
+  const minRounds = input.minRounds ?? config.minInfoCollectionRounds;
+  const maxRounds = input.maxRounds ?? config.maxInfoCollectionRounds;
 
   if (answeredRounds === 0) {
     const initial = await generateGoalClarificationQuestionsWithClaude({
       goalText: input.goalText,
       runtimeEnv: input.runtimeEnv,
+      config,
       conversationContext: input.conversationContext,
       signal: input.signal,
     });
@@ -1283,11 +1447,13 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
     failureMessage: "Claude CLI 信息收集判断失败",
   });
 
-  const decision = parseClaudeJson(
-    stdout,
-    validateGoalInfoCollectionDecision,
-    "Claude 信息收集判断 JSON 解析失败",
-  );
+  const decision = await parseClaudeJson({
+    raw: stdout,
+    validator: validateGoalInfoCollectionDecision,
+    errorMessage: "Claude 信息收集判断 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
+  });
 
   if (decision.status === "complete" && !decision.summary) {
     const transcript = buildCollectedInfoTranscript(input.history);

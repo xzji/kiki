@@ -1,6 +1,7 @@
 import { sleep } from "@/lib/utils";
 import { getGoalById, useGoalStore } from "@/stores/goalStore";
 import type { CollectedInfoSummary, GoalBreakdownDraft } from "@/types/kiki";
+import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 export async function getGoals() {
@@ -16,6 +17,7 @@ export async function getGoal(goalId: string) {
 export async function generateGoalPlan(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationId?: string;
   conversationContext?: string;
   collectedInfo?: string;
@@ -42,6 +44,7 @@ export async function generateGoalPlan(input: {
 export async function generateGoalClarificationQuestions(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationId?: string;
   conversationContext?: string;
   signal?: AbortSignal;
@@ -67,6 +70,7 @@ export async function generateGoalClarificationQuestions(input: {
 export type GoalInfoCollectionTurnInput = {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
   conversationId?: string;
   conversationContext?: string;
   history: Array<{
