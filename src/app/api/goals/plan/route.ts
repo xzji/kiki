@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
+import {
+  beginGoalTelemetry,
+  failGoalTelemetry,
+  finishGoalTelemetry,
+  updateGoalTelemetry,
+} from "@/lib/server/goalTelemetry";
 import { generateGoalPlanWithClaude } from "@/lib/server/goalPlanning";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -19,6 +25,9 @@ type RequestBody = {
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
   const goalText = body.goalText?.trim();
+  const requestId =
+    request.headers.get("x-goal-request-id")?.trim() ||
+    `goal-plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   if (!goalText) {
     return NextResponse.json({ reason: "goalText 不能为空" }, { status: 400 });
@@ -29,6 +38,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    beginGoalTelemetry({
+      requestId,
+      scope: "goal_plan",
+      phase: "collecting_info",
+      message: "已收到目标规划请求",
+    });
     const draft = await generateGoalPlanWithClaude({
       goalText,
       runtimeEnv: body.runtimeEnv,
@@ -36,9 +51,32 @@ export async function POST(request: NextRequest) {
       conversationContext: body.conversationContext,
       collectedInfo: body.collectedInfo,
       signal: request.signal,
+      requestId,
+      onProgress: ({ phase, message, details }) => {
+        updateGoalTelemetry({
+          requestId,
+          scope: "goal_plan",
+          phase,
+          message,
+          details,
+        });
+      },
+    });
+    finishGoalTelemetry({
+      requestId,
+      scope: "goal_plan",
+      phase: "presenting_plan",
+      message: "目标规划生成完成",
     });
     return NextResponse.json({ draft });
   } catch (error) {
+    failGoalTelemetry({
+      requestId,
+      scope: "goal_plan",
+      phase: "error",
+      message: "目标规划生成失败",
+      error: error instanceof Error ? error.message : "Claude 规划生成失败",
+    });
     return NextResponse.json(
       {
         reason: error instanceof Error ? error.message : "Claude 规划生成失败",

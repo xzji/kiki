@@ -77,8 +77,17 @@ export function GoalPlanDrawer({
         className="fixed inset-y-0 right-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-[#E5E7EB] bg-white"
         aria-label="目标规划"
       >
-        <div className="flex h-12 flex-none items-center border-b border-[#E5E7EB] px-4">
-          <div className="flex items-center gap-2">
+        <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
+          <GoalPlanBreadcrumb
+            goalId={goal.id}
+            goalTitle={goal.title}
+            taskTitle={activeTask?.title.replace(/^任务\d+：/, "")}
+            className="min-w-0 flex-1 justify-start text-left"
+            disableLinks
+            onGoalClick={activeTask ? () => setActiveTaskId(null) : undefined}
+            onGoalPlanClick={activeTask ? () => setActiveTaskId(null) : undefined}
+          />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <button
               type="button"
               aria-label="关闭"
@@ -95,15 +104,6 @@ export function GoalPlanDrawer({
               <Maximize2 className="h-4 w-4" />
             </Link>
           </div>
-          <GoalPlanBreadcrumb
-            goalId={goal.id}
-            goalTitle={goal.title}
-            taskTitle={activeTask?.title.replace(/^任务\d+：/, "")}
-            className="ml-auto"
-            disableLinks
-            onGoalClick={activeTask ? () => setActiveTaskId(null) : undefined}
-            onGoalPlanClick={activeTask ? () => setActiveTaskId(null) : undefined}
-          />
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">

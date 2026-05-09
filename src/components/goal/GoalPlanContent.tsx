@@ -139,8 +139,6 @@ export function GoalPlanContent({
 
   return (
     <div className="max-w-[920px] pb-12">
-      <GoalPlanBreadcrumb goalId={goal.id} goalTitle={goal.title} className="mb-4" />
-
       <section className="mb-8 rounded-[20px] border border-[#E5E7EB] bg-white p-6">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-1 items-center gap-5">

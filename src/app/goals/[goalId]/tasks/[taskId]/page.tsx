@@ -40,7 +40,7 @@ export default function TaskDetailPage({
         taskTitle={task.title.replace(/^任务\d+：/, "")}
         className="mb-4"
       />
-      <TaskDetailBody goal={goal} task={task} />
+      <TaskDetailBody goal={goal} task={task} showProgressBar={false} />
     </div>
   );
 }

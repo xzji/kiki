@@ -2,7 +2,10 @@ import { spawn } from "child_process";
 
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
+import { appendGoalLog } from "@/lib/server/goalTelemetry";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/types/kiki";
+import type { GoalTelemetryScope } from "@/types/goalTelemetry";
+import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 import { buildClaudeEnv } from "./claudeEnv";
@@ -125,6 +128,19 @@ const allowedExecutionKinds = [
   "draft_review",
   "freeform_chat",
 ] as const;
+
+type GoalStageProgressHandler = (progress: {
+  phase: GoalWorkflowPhase;
+  message: string;
+  details?: string;
+}) => void;
+
+type ClaudeRunContext = {
+  requestId?: string;
+  scope: GoalTelemetryScope;
+  phase: GoalWorkflowPhase;
+  stepLabel: string;
+};
 
 function buildGoalClarificationPrompt(goalText: string, conversationContext?: string) {
   return `你是 KiKi 的目标澄清助手。用户刚发起一个长期目标，请先判断为了生成可靠规划，最需要补充哪些背景信息。
@@ -459,10 +475,22 @@ async function runClaudeJson(input: {
   signal?: AbortSignal;
   abortMessage: string;
   failureMessage: string;
+  context?: ClaudeRunContext;
 }) {
   const cwd = normalizeWorkingDirectory(input.runtimeEnv.workingDirectory);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   return new Promise<string>((resolve, reject) => {
+    const startedAt = Date.now();
+    if (input.context) {
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: "info",
+        phase: input.context.phase,
+        message: `Claude 开始执行：${input.context.stepLabel}`,
+      });
+    }
+
     const child = spawn(cliPath, ["-p", "--output-format", "json", input.prompt], {
       cwd,
       env: buildClaudeEnv(),
@@ -476,6 +504,15 @@ async function runClaudeJson(input: {
     const abort = () => {
       aborted = true;
       child.kill("SIGTERM");
+      if (input.context) {
+        appendGoalLog({
+          requestId: input.context.requestId,
+          scope: input.context.scope,
+          level: "warn",
+          phase: input.context.phase,
+          message: `Claude 执行被中断：${input.context.stepLabel}`,
+        });
+      }
       reject(new DOMException(input.abortMessage, "AbortError"));
     };
 
@@ -496,6 +533,16 @@ async function runClaudeJson(input: {
 
     child.on("error", (error) => {
       input.signal?.removeEventListener("abort", abort);
+      if (input.context) {
+        appendGoalLog({
+          requestId: input.context.requestId,
+          scope: input.context.scope,
+          level: "error",
+          phase: input.context.phase,
+          message: `Claude 执行异常：${input.context.stepLabel}`,
+          details: error.message,
+        });
+      }
       reject(error);
     });
 
@@ -503,8 +550,28 @@ async function runClaudeJson(input: {
       input.signal?.removeEventListener("abort", abort);
       if (aborted) return;
       if (code !== 0) {
+        if (input.context) {
+          appendGoalLog({
+            requestId: input.context.requestId,
+            scope: input.context.scope,
+            level: "error",
+            phase: input.context.phase,
+            message: `Claude 执行失败：${input.context.stepLabel}`,
+            details: errorOutput.trim() || input.failureMessage,
+          });
+        }
         reject(new Error(errorOutput.trim() || input.failureMessage));
         return;
+      }
+      if (input.context) {
+        appendGoalLog({
+          requestId: input.context.requestId,
+          scope: input.context.scope,
+          level: "info",
+          phase: input.context.phase,
+          message: `Claude 执行完成：${input.context.stepLabel}`,
+          details: `耗时 ${Date.now() - startedAt}ms`,
+        });
       }
       resolve(output);
     });
@@ -1039,6 +1106,7 @@ async function summarizeCollectedInfoWithClaude(input: {
   runtimeEnv: RuntimeEnvironment;
   conversationContext?: string;
   signal?: AbortSignal;
+  requestId?: string;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
@@ -1046,6 +1114,12 @@ async function summarizeCollectedInfoWithClaude(input: {
     signal: input.signal,
     abortMessage: "目标信息整理已中断",
     failureMessage: "Claude CLI 信息摘要生成失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "collecting_info",
+      stepLabel: "整理背景信息",
+    },
   });
   return parseClaudeJson({
     raw: stdout,
@@ -1063,6 +1137,7 @@ async function decomposeGoalWithClaude(input: {
   config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
+  requestId?: string;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
@@ -1070,6 +1145,12 @@ async function decomposeGoalWithClaude(input: {
     signal: input.signal,
     abortMessage: "子目标拆解已中断",
     failureMessage: "Claude CLI 子目标拆解失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "decomposing",
+      stepLabel: "拆解子目标",
+    },
   });
   return parseClaudeJson({
     raw: stdout,
@@ -1090,6 +1171,9 @@ async function generateTasksForSubGoalWithClaude(input: {
   config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
+  requestId?: string;
+  subGoalIndex?: number;
+  totalSubGoals?: number;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
@@ -1097,6 +1181,12 @@ async function generateTasksForSubGoalWithClaude(input: {
     signal: input.signal,
     abortMessage: "任务生成已中断",
     failureMessage: "Claude CLI 任务生成失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "generating_tasks",
+      stepLabel: `为子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 生成任务：${input.subGoalName}`,
+    },
   });
   return parseClaudeJson({
     raw: stdout,
@@ -1114,6 +1204,9 @@ async function reviewTasksWithClaude(input: {
   tasksJson: string;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
+  requestId?: string;
+  subGoalIndex?: number;
+  totalSubGoals?: number;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
@@ -1121,6 +1214,12 @@ async function reviewTasksWithClaude(input: {
     signal: input.signal,
     abortMessage: "任务 review 已中断",
     failureMessage: "Claude CLI 任务 review 失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"}：${input.subGoalTitle}`,
+    },
   });
   return parseClaudeJson({
     raw: stdout,
@@ -1142,6 +1241,7 @@ async function buildPlanPresentationWithClaude(input: {
   }>;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
+  requestId?: string;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
@@ -1149,6 +1249,12 @@ async function buildPlanPresentationWithClaude(input: {
     signal: input.signal,
     abortMessage: "计划摘要生成已中断",
     failureMessage: "Claude CLI 计划摘要生成失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: "生成前端展示摘要",
+    },
   });
   return parseClaudeJson({
     raw: stdout,
@@ -1250,8 +1356,14 @@ export async function generateGoalPlanWithClaude(input: {
   conversationContext?: string;
   collectedInfo?: string;
   signal?: AbortSignal;
+  requestId?: string;
+  onProgress?: GoalStageProgressHandler;
 }): Promise<GoalBreakdownDraft> {
   const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
+  input.onProgress?.({
+    phase: "collecting_info",
+    message: "正在整理背景信息...",
+  });
   const collectedInfoSummary = input.collectedInfo?.trim()
     ? await summarizeCollectedInfoWithClaude({
         goalText: input.goalText,
@@ -1259,6 +1371,7 @@ export async function generateGoalPlanWithClaude(input: {
         runtimeEnv: input.runtimeEnv,
         conversationContext: input.conversationContext,
         signal: input.signal,
+        requestId: input.requestId,
       })
     : buildFallbackCollectedInfoSummary(input.goalText, input.collectedInfo);
 
@@ -1273,6 +1386,10 @@ export async function generateGoalPlanWithClaude(input: {
     summary: collectedInfoSummary.summary,
   };
 
+  input.onProgress?.({
+    phase: "decomposing",
+    message: "正在拆解子目标...",
+  });
   const decomposition = await decomposeGoalWithClaude({
     goalTitle: input.goalText,
     goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
@@ -1280,6 +1397,7 @@ export async function generateGoalPlanWithClaude(input: {
     config,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    requestId: input.requestId,
   });
 
   const taskPlanningSummary: Array<{
@@ -1291,20 +1409,35 @@ export async function generateGoalPlanWithClaude(input: {
   const subGoals: GoalBreakdownDraft["subGoals"] = [];
   const reviewSummary: string[] = [];
   const reviewRisks: string[] = [];
+  const totalSubGoals = decomposition.subGoals.length;
 
-  for (const subGoal of decomposition.subGoals) {
+  for (let subGoalIndex = 0; subGoalIndex < decomposition.subGoals.length; subGoalIndex += 1) {
+    const subGoal = decomposition.subGoals[subGoalIndex];
+    input.onProgress?.({
+      phase: "generating_tasks",
+      message: `正在为子目标 ${subGoalIndex + 1}/${totalSubGoals} 生成任务：${subGoal.name}`,
+    });
     const generatedTasks = await generateTasksForSubGoalWithClaude({
       goalTitle: input.goalText,
       goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
       userContext,
       subGoalName: subGoal.name,
       subGoalDescription: subGoal.description,
-      successCriteria: subGoal.successCriteria.map((criterion) => criterion.description),
+      successCriteria: subGoal.successCriteria.map(
+        (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+      ),
       config,
       runtimeEnv: input.runtimeEnv,
       signal: input.signal,
+      requestId: input.requestId,
+      subGoalIndex: subGoalIndex + 1,
+      totalSubGoals,
     });
 
+    input.onProgress?.({
+      phase: "reviewing_tasks",
+      message: `正在 review 子目标 ${subGoalIndex + 1}/${totalSubGoals}：${subGoal.name}`,
+    });
     const review = await reviewTasksWithClaude({
       goalTitle: input.goalText,
       subGoalTitle: subGoal.name,
@@ -1312,6 +1445,9 @@ export async function generateGoalPlanWithClaude(input: {
       tasksJson: JSON.stringify(generatedTasks.tasks, null, 2),
       runtimeEnv: input.runtimeEnv,
       signal: input.signal,
+      requestId: input.requestId,
+      subGoalIndex: subGoalIndex + 1,
+      totalSubGoals,
     });
 
     const tasks = applyTaskReview(generatedTasks.tasks, review);
@@ -1337,12 +1473,18 @@ export async function generateGoalPlanWithClaude(input: {
       title: subGoal.name,
       description: subGoal.description,
       priority: subGoal.priority,
-      dependencies: subGoal.dependencies.map((dependency) => `draft-subgoal-${dependency}`),
-      successCriteria: subGoal.successCriteria.map((criterion) => criterion.description),
+      dependencies: subGoal.dependencies.map((dependency: number) => `draft-subgoal-${dependency}`),
+      successCriteria: subGoal.successCriteria.map(
+        (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+      ),
       tasks,
     });
   }
 
+  input.onProgress?.({
+    phase: "reviewing_tasks",
+    message: "正在汇总规划结果...",
+  });
   const presentation = await buildPlanPresentationWithClaude({
     goalText: input.goalText,
     collectedInfoSummary,
@@ -1350,6 +1492,7 @@ export async function generateGoalPlanWithClaude(input: {
     taskPlanningSummary,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    requestId: input.requestId,
   });
 
   return validateGoalDraft({
@@ -1374,6 +1517,7 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
   config?: EasterEggSettings;
   conversationContext?: string;
   signal?: AbortSignal;
+  requestId?: string;
 }): Promise<GoalClarificationQuestions> {
   const prompt = buildGoalClarificationPrompt(input.goalText, input.conversationContext);
   const stdout = await runClaudeJson({
@@ -1382,6 +1526,12 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
     signal: input.signal,
     abortMessage: "目标信息收集已中断",
     failureMessage: "Claude CLI 澄清问题生成失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_collect",
+      phase: "collecting_info",
+      stepLabel: "生成澄清问题",
+    },
   });
 
   return parseClaudeJson({
@@ -1411,6 +1561,8 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
   minRounds?: number;
   maxRounds?: number;
   signal?: AbortSignal;
+  requestId?: string;
+  onProgress?: GoalStageProgressHandler;
 }): Promise<GoalInfoCollectionTurnDecision> {
   const answeredRounds = input.history.filter((item) => item.answer?.trim()).length;
   const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
@@ -1418,12 +1570,17 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
   const maxRounds = input.maxRounds ?? config.maxInfoCollectionRounds;
 
   if (answeredRounds === 0) {
+    input.onProgress?.({
+      phase: "collecting_info",
+      message: "正在生成首轮澄清问题...",
+    });
     const initial = await generateGoalClarificationQuestionsWithClaude({
       goalText: input.goalText,
       runtimeEnv: input.runtimeEnv,
       config,
       conversationContext: input.conversationContext,
       signal: input.signal,
+      requestId: input.requestId,
     });
     return {
       status: "continue",
@@ -1432,6 +1589,10 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
     };
   }
 
+  input.onProgress?.({
+    phase: "collecting_info",
+    message: `正在判断第 ${answeredRounds} 轮信息是否足够进入规划...`,
+  });
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildGoalInfoCollectionDecisionPrompt({
@@ -1445,6 +1606,12 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
     signal: input.signal,
     abortMessage: "目标信息收集已中断",
     failureMessage: "Claude CLI 信息收集判断失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_collect",
+      phase: "collecting_info",
+      stepLabel: `判断第 ${answeredRounds} 轮信息是否足够`,
+    },
   });
 
   const decision = await parseClaudeJson({
@@ -1457,12 +1624,17 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
 
   if (decision.status === "complete" && !decision.summary) {
     const transcript = buildCollectedInfoTranscript(input.history);
+    input.onProgress?.({
+      phase: "collecting_info",
+      message: "正在整理收集到的背景信息摘要...",
+    });
     const summary = await summarizeCollectedInfoWithClaude({
       goalText: input.goalText,
       collectedInfo: transcript,
       runtimeEnv: input.runtimeEnv,
       conversationContext: input.conversationContext,
       signal: input.signal,
+      requestId: input.requestId,
     });
     return {
       ...decision,

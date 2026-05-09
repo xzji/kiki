@@ -31,7 +31,15 @@ const EXECUTION_LABEL: Record<Task["executionKind"], string> = {
  * - 任务内容（描述）
  * - 未完成任务通知卡片列表：时间倒序，最新在上，未读红点
  */
-export function TaskDetailBody({ goal, task }: { goal: Goal; task: Task }) {
+export function TaskDetailBody({
+  goal,
+  task,
+  showProgressBar = true,
+}: {
+  goal: Goal;
+  task: Task;
+  showProgressBar?: boolean;
+}) {
   const [metaOpen, setMetaOpen] = useState(false);
   const [completedOpen, setCompletedOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -133,9 +141,11 @@ export function TaskDetailBody({ goal, task }: { goal: Goal; task: Task }) {
         </div>
       </div>
 
-      <div className="mt-5 h-1 overflow-hidden rounded-full bg-[#E5E7EB]">
-        <div className="h-full rounded-full bg-[#1F2328]" style={{ width: `${task.progress}%` }} />
-      </div>
+      {showProgressBar ? (
+        <div className="mt-5 h-1 overflow-hidden rounded-full bg-[#E5E7EB]">
+          <div className="h-full rounded-full bg-[#1F2328]" style={{ width: `${task.progress}%` }} />
+        </div>
+      ) : null}
 
       {/* 详细信息 - 默认折叠 */}
       <section>

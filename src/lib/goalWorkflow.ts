@@ -152,6 +152,12 @@ async function runGoalPlanning(input: {
     conversationContext: buildConversationContext(input.conversationId),
     collectedInfo: collection ? buildCollectedInfoTranscript(collection.rounds) : undefined,
     signal: input.signal,
+    onServerProgress: (progress) => {
+      input.onProgress?.({
+        phase: progress.phase,
+        message: progress.message,
+      });
+    },
   });
 
   if (input.summary) {
@@ -226,6 +232,12 @@ export async function startGoalInfoCollection(input: {
     minRounds: goalConfig.minInfoCollectionRounds,
     maxRounds: goalConfig.maxInfoCollectionRounds,
     signal: input.signal,
+    onServerProgress: (progress) => {
+      input.onProgress?.({
+        phase: progress.phase,
+        message: progress.message,
+      });
+    },
   });
 
   if (result.status !== "continue" || !result.questions?.length) {
@@ -302,6 +314,12 @@ export async function continueGoalWorkflowAfterInfo(input: {
     minRounds: collection.minRounds,
     maxRounds: collection.maxRounds,
     signal: input.signal,
+    onServerProgress: (progress) => {
+      input.onProgress?.({
+        phase: progress.phase,
+        message: progress.message,
+      });
+    },
   });
 
   const mergedSummary = mergeCollectedInfoSummary(collection.summary, decision.summary);
