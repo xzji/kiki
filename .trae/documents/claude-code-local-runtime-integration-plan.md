@@ -43,7 +43,7 @@
 ### 后端与基础设施现状
 
 - `src/app` 下当前没有任何 `route.ts`，项目仍是纯前端原型。
-- `src/lib/api/dora.ts` 仍是 mock 包装，未对接真实服务。
+- `src/lib/api/kiki.ts` 仍是 mock 包装，未对接真实服务。
 - `src/app/layout.tsx` + `src/components/layout/AppShell.tsx`
   - 已具备全局壳子，适合挂载全局运行环境状态与右侧 Assistant。
 - 本机已确认存在可用 `claude` CLI：`/opt/homebrew/bin/claude`
@@ -322,7 +322,7 @@ claude -p \
 修改文件：
 - `src/components/conversation/ConversationView.tsx`
 - `src/stores/conversationStore.ts`
-- `src/types/dora.ts`
+- `src/types/kiki.ts`
 
 新增/调整字段：
 - `Conversation` 增加：
@@ -362,7 +362,7 @@ claude -p \
   - `streamClaudeChat()`
 
 原因：
-- 当前 `src/lib/api/dora.ts` 仍是 mock 风格，不适合承载 SSE 解析
+- 当前 `src/lib/api/kiki.ts` 仍是 mock 风格，不适合承载 SSE 解析
 - 可以让 Assistant 与 Conversation 共用一套客户端封装
 
 ### 8. 错误态与边界处理

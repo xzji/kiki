@@ -12,11 +12,17 @@ import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
+import { continueGoalWorkflowAfterInfo, startGoalInfoCollection } from "@/lib/goalWorkflow";
 import { openSettings } from "@/lib/settings";
+import { parseSlashCommand } from "@/lib/slashCommands";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
-import type { ConversationMessage } from "@/types/dora";
+import type { ConversationMessage } from "@/types/kiki";
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
 
 /**
  * 会话视图：
@@ -33,16 +39,20 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const setConversationRuntimeEnv = useConversationStore((state) => state.setConversationRuntimeEnv);
   const setClaudeSessionId = useConversationStore((state) => state.setClaudeSessionId);
   const setConversationStatus = useConversationStore((state) => state.setConversationStatus);
+  const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
   const goals = useGoalStore((state) => state.goals);
   const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
   const [planOpen, setPlanOpen] = useState(false);
+  const [activePlanGoalId, setActivePlanGoalId] = useState<string | null>(null);
   const [planFocus, setPlanFocus] = useState<string | null>(null);
   const [quotedMessage, setQuotedMessage] = useState<ConversationMessage | null>(null);
   const [resultMessage, setResultMessage] = useState<ConversationMessage | null>(null);
   const [taskInfoMessage, setTaskInfoMessage] = useState<ConversationMessage | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const activeAssistantMessageIdRef = useRef<string | null>(null);
   const firstUnreadMarkerRef = useRef<HTMLDivElement>(null);
   const initializedConversationRef = useRef<string | null>(null);
   const [entryUnreadIds, setEntryUnreadIds] = useState<string[]>([]);
@@ -131,6 +141,183 @@ export function ConversationView({ conversationId }: { conversationId: string })
       content: string;
     } | null,
   ) => {
+    const parsedCommand = parseSlashCommand(text);
+    if (
+      conversation.goalInfoCollection &&
+      !(parsedCommand.kind === "command" && parsedCommand.command === "goal")
+    ) {
+      const now = new Date().toISOString();
+      const userId = `msg-user-${Date.now()}`;
+      const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+      activeAssistantMessageIdRef.current = assistantId;
+      appendMessage(conversation.id, {
+        id: userId,
+        kind: "text",
+        role: "user",
+        content: text,
+        createdAt: now,
+        source: "user",
+        status: "done",
+      });
+      appendMessage(conversation.id, {
+        id: assistantId,
+        kind: "text",
+        role: "kiki",
+        content: "已收到背景信息，正在拆解子目标...",
+        createdAt: now,
+        status: "streaming",
+        source: "kiki",
+      });
+      setConversationStatus(conversation.id, "streaming");
+      setStreamError(null);
+
+      try {
+        const result = await continueGoalWorkflowAfterInfo({
+          answer: text,
+          source: "conversation",
+          conversationId: conversation.id,
+          signal: controller.signal,
+          onProgress: (progress) => {
+            updateMessage(conversation.id, assistantId, (message) => ({
+              ...message,
+              content: progress.message,
+            }));
+          },
+        });
+        if (result.kind === "collecting_info") {
+          const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
+          const questionText = latestRound.questions
+            .map((question, index) => `${index + 1}. ${question}`)
+            .join("\n");
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: `${result.assistantMessage}\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`,
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          return;
+        }
+        setGoalInfoCollection(conversation.id, null);
+        updateMessage(conversation.id, assistantId, (message) => ({
+          id: message.id,
+          kind: "goal_plan_card",
+          role: "kiki",
+          content: "目标规划草案已生成。点击下方卡片或右上角「目标规划」查看详情并确认启动。",
+          createdAt: message.createdAt,
+          unread: message.unread,
+          status: "done",
+          source: "kiki",
+          goalRef: {
+            goalId: result.goalId,
+            title: result.goalTitle,
+            summary: result.summary,
+            subGoalCount: result.subGoalCount,
+            taskCount: result.taskCount,
+          },
+        }));
+        setConversationStatus(conversation.id, "idle");
+        setActivePlanGoalId(result.goalId);
+      } catch (error) {
+        if (isAbortError(error)) {
+          setConversationStatus(conversation.id, "idle");
+          return;
+        }
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: error instanceof Error ? error.message : "目标规划生成失败",
+          status: "error",
+        }));
+        setConversationStatus(conversation.id, "error");
+        setStreamError(error instanceof Error ? error.message : "目标规划生成失败");
+      } finally {
+        if (streamAbortRef.current === controller) {
+          streamAbortRef.current = null;
+          activeAssistantMessageIdRef.current = null;
+        }
+      }
+      setQuotedMessage(null);
+      return;
+    }
+
+    if (parsedCommand.kind === "unknown") {
+      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以先使用 /goal 创建长程目标。`);
+      return;
+    }
+
+    if (parsedCommand.kind === "command" && parsedCommand.command === "goal") {
+      const now = new Date().toISOString();
+      const userId = `msg-user-${Date.now()}`;
+      const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+      activeAssistantMessageIdRef.current = assistantId;
+      appendMessage(conversation.id, {
+        id: userId,
+        kind: "text",
+        role: "user",
+        content: text,
+        createdAt: now,
+        source: "user",
+        status: "done",
+      });
+      appendMessage(conversation.id, {
+        id: assistantId,
+        kind: "text",
+        role: "kiki",
+        content: "正在理解目标和关键约束...",
+        createdAt: now,
+        status: "streaming",
+        source: "kiki",
+      });
+      setConversationStatus(conversation.id, "streaming");
+      setStreamError(null);
+
+      try {
+        const result = await startGoalInfoCollection({
+          goalText: parsedCommand.payload,
+          source: "conversation",
+          conversationId: conversation.id,
+          signal: controller.signal,
+          onProgress: (progress) => {
+            updateMessage(conversation.id, assistantId, (message) => ({
+              ...message,
+              content: progress.message,
+            }));
+          },
+        });
+        const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
+        const questionText = latestRound.questions
+          .map((question, index) => `${index + 1}. ${question}`)
+          .join("\n");
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: `${result.assistantMessage}\n\n${questionText}\n\n你可以直接在下一条消息里一次性回答这些问题。`,
+          status: "done",
+        }));
+        setConversationStatus(conversation.id, "idle");
+      } catch (error) {
+        if (isAbortError(error)) {
+          setConversationStatus(conversation.id, "idle");
+          return;
+        }
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: error instanceof Error ? error.message : "目标规划生成失败",
+          status: "error",
+        }));
+        setConversationStatus(conversation.id, "error");
+        setStreamError(error instanceof Error ? error.message : "目标规划生成失败");
+      }
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = null;
+        activeAssistantMessageIdRef.current = null;
+      }
+      setQuotedMessage(null);
+      return;
+    }
+
     if (!activeRuntimeEnv || activeRuntimeEnv.type !== "local") {
       setStreamError("当前没有连接本地 Claude CLI，请先到设置 -> 运行环境完成连接。");
       return;
@@ -149,6 +336,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
     const now = new Date().toISOString();
     const userId = `msg-user-${Date.now()}`;
     const assistantId = `msg-kiki-${Date.now() + 1}`;
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+    activeAssistantMessageIdRef.current = assistantId;
     appendMessage(conversation.id, {
       id: userId,
       kind: "text",
@@ -224,16 +414,42 @@ export function ConversationView({ conversationId }: { conversationId: string })
             }
           },
         },
+        { signal: controller.signal },
       );
     } catch (error) {
+      if (isAbortError(error)) {
+        setConversationStatus(conversation.id, "idle");
+        return;
+      }
       setStreamError(error instanceof Error ? error.message : "Claude 对话失败");
       updateMessage(conversation.id, assistantId, (message) => ({
         ...message,
         status: "error",
       }));
       setConversationStatus(conversation.id, "error");
+    } finally {
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = null;
+        activeAssistantMessageIdRef.current = null;
+      }
     }
     setQuotedMessage(null);
+  };
+
+  const stopGeneration = () => {
+    streamAbortRef.current?.abort();
+    const assistantId = activeAssistantMessageIdRef.current;
+    if (assistantId) {
+      updateMessage(conversation.id, assistantId, (message) => ({
+        ...message,
+        status: "done",
+        content: message.content.trim() ? `${message.content}\n\n（已中断）` : "已中断",
+      }));
+    }
+    setConversationStatus(conversation.id, "idle");
+    setStreamError(null);
+    streamAbortRef.current = null;
+    activeAssistantMessageIdRef.current = null;
   };
 
   return (
@@ -245,6 +461,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           <button
             type="button"
             onClick={() => {
+              setActivePlanGoalId(conversation.goalId ?? null);
               setPlanFocus(null);
               setPlanOpen(true);
             }}
@@ -306,6 +523,13 @@ export function ConversationView({ conversationId }: { conversationId: string })
                       setResultMessage(null);
                       setTaskInfoMessage(message);
                     }}
+                    onOpenGoalPlan={(goalId) => {
+                      setResultMessage(null);
+                      setTaskInfoMessage(null);
+                      setActivePlanGoalId(goalId);
+                      setPlanFocus(null);
+                      setPlanOpen(true);
+                    }}
                     onDelete={(messageId) => {
                       deleteMessage(conversation.id, messageId);
                       if (quotedMessage?.id === messageId) {
@@ -350,6 +574,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             onSubmit={onSend}
             disabled={conversation.status === "streaming"}
             localMode
+            onStop={conversation.status === "streaming" ? stopGeneration : undefined}
             quotedMessage={
               quotedMessage
                 ? {
@@ -364,7 +589,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       </div>
 
       <GoalPlanDrawer
-        goalId={conversation.goalId}
+        goalId={activePlanGoalId ?? conversation.goalId}
         open={planOpen}
         focusSubGoalId={planFocus}
         onClose={() => setPlanOpen(false)}
@@ -405,6 +630,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 disableLinks
                 onGoalPlanClick={() => {
                   setTaskInfoMessage(null);
+                  setActivePlanGoalId(taskInfo.goal.id);
                   setPlanFocus(
                     taskInfoMessage?.kind === "task_card"
                       ? taskInfoMessage.taskRef.subGoalId
@@ -414,6 +640,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 }}
                 onGoalClick={() => {
                   setTaskInfoMessage(null);
+                  setActivePlanGoalId(taskInfo.goal.id);
                   setPlanFocus(null);
                   setPlanOpen(true);
                 }}

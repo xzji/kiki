@@ -1,4 +1,4 @@
-import type { Task } from "@/types/dora";
+import type { Task } from "@/types/kiki";
 
 export function DetailPanel({ task }: { task: Task }) {
   const typeLabel = task.taskType === "daily_repeat" ? "每天重复任务" : task.taskType === "monitoring" ? "监控任务" : "一次性任务";

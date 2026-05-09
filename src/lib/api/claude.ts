@@ -22,6 +22,7 @@ function parseEventType(raw: string): ClaudeStreamEvent["type"] | null {
 export async function streamClaudeChat(
   request: ClaudeChatRequest,
   handlers: StreamHandlers,
+  options?: { signal?: AbortSignal },
 ) {
   const response = await fetch("/api/claude/chat", {
     method: "POST",
@@ -29,6 +30,7 @@ export async function streamClaudeChat(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(request),
+    signal: options?.signal,
   });
 
   if (!response.ok || !response.body) {
@@ -86,4 +88,27 @@ export async function streamClaudeChat(
       break;
     }
   }
+}
+
+export async function deleteClaudeSession(input: {
+  sessionId: string;
+  workingDirectory?: string;
+}) {
+  const response = await fetch("/api/claude/session/delete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json()) as {
+    ok: boolean;
+    deleted?: boolean;
+    deletedCount?: number;
+    reason?: string;
+  };
+  if (!response.ok || !data.ok) {
+    throw new Error(data.reason || "删除 Claude session 失败");
+  }
+  return data;
 }

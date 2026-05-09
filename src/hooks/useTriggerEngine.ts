@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useTriggerStore } from "@/stores/triggerStore";
-import type { InboxItem, Task } from "@/types/dora";
+import type { InboxItem, Task } from "@/types/kiki";
 
 function toInboxItem(task: Task, goalId: string, createdAt: string): InboxItem {
   const title = task.title.replace(/^任务\d+：/, "");

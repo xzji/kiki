@@ -7,7 +7,7 @@ import { useState } from "react";
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
-import type { Goal, Task } from "@/types/dora";
+import type { Goal, Task } from "@/types/kiki";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
   daily_repeat: "每日重复",

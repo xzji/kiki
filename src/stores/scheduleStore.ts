@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { initialScheduleEvents } from "@/mocks/schedule";
 import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 
-const STORAGE_KEY = "dora.schedule.events";
+const STORAGE_KEY = "kiki.schedule.events";
 
 function loadEvents(): AgentEvent[] {
   if (typeof window === "undefined") return initialScheduleEvents;

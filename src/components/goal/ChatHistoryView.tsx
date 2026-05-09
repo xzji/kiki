@@ -2,8 +2,8 @@
 
 import { MessageCircle } from "lucide-react";
 
-import { DoraAvatar } from "@/components/layout/DoraAvatar";
-import type { Goal } from "@/types/dora";
+import { KikiAvatar } from "@/components/layout/KikiAvatar";
+import type { Goal } from "@/types/kiki";
 
 export function ChatHistoryView({ goal }: { goal: Goal }) {
   const turns = goal.chatTurns ?? [];
@@ -41,7 +41,7 @@ export function ChatHistoryView({ goal }: { goal: Goal }) {
             className={`flex items-start gap-3 ${turn.role === "user" ? "flex-row-reverse" : ""}`}
           >
             {turn.role === "agent" ? (
-              <DoraAvatar size="sm" />
+              <KikiAvatar size="sm" />
             ) : (
               <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E5E7EB] bg-white text-xs text-[#6B7280]">
                 J

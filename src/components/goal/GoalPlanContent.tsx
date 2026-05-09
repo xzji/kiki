@@ -11,8 +11,9 @@ import { SubGoalBlock } from "@/components/goal/SubGoalBlock";
 import { SubGoalCreateDrawer } from "@/components/goal/SubGoalCreateDrawer";
 import { cn } from "@/lib/utils";
 import { BASE_DATE, formatDateInput } from "@/lib/date";
+import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
-import type { Goal, Task, TaskInstanceStatus } from "@/types/dora";
+import type { Goal, GoalWorkflowPhase, Task, TaskInstanceStatus } from "@/types/kiki";
 
 export function GoalPlanBreadcrumb({
   goalId,
@@ -86,6 +87,8 @@ export function GoalPlanContent({
 }) {
   const router = useRouter();
   const inboxItems = useInboxStore((state) => state.items);
+  const confirmGoalPlan = useGoalStore((state) => state.confirmGoalPlan);
+  const requestGoalPlanRevision = useGoalStore((state) => state.requestGoalPlanRevision);
   const [subGoalDrawerOpen, setSubGoalDrawerOpen] = useState(false);
 
   const unreadByTask = useMemo(() => {
@@ -172,6 +175,43 @@ export function GoalPlanContent({
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
           </div>
         </div>
+        {goal.workflow ? (
+          <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-[12px] text-[#6B7280]">目标工作流</div>
+                <div className="mt-1 text-sm font-medium text-[#1F2328]">
+                  {phaseLabel(goal.workflow.phase)}
+                </div>
+                {goal.workflow.error ? (
+                  <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{goal.workflow.error}</div>
+                ) : null}
+              </div>
+              {goal.workflow.phase === "presenting_plan" && goal.workflow.planDecision === "pending" ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const feedback = window.prompt("告诉 KiKi 你希望如何调整这份计划：");
+                      if (!feedback?.trim()) return;
+                      requestGoalPlanRevision(goal.id, feedback.trim());
+                    }}
+                    className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+                  >
+                    继续调整
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => confirmGoalPlan(goal.id)}
+                    className="rounded-lg bg-[#111] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#333]"
+                  >
+                    确认并启动
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <div className="space-y-4">
@@ -203,6 +243,35 @@ export function GoalPlanContent({
       />
     </div>
   );
+}
+
+function phaseLabel(phase: GoalWorkflowPhase) {
+  switch (phase) {
+    case "collecting_info":
+      return "正在收集目标信息";
+    case "decomposing":
+      return "正在拆解子目标";
+    case "generating_tasks":
+      return "正在生成任务计划";
+    case "reviewing_tasks":
+      return "正在检查任务覆盖度";
+    case "presenting_plan":
+      return "待确认目标规划";
+    case "executing":
+      return "正在启动执行";
+    case "monitoring":
+      return "监控中，KiKi 会按任务触发规则推进";
+    case "reviewing":
+      return "正在复盘目标进展";
+    case "paused":
+      return "已暂停";
+    case "completed":
+      return "已完成";
+    case "error":
+      return "目标工作流出错";
+    default:
+      return "待启动";
+  }
 }
 
 function SummaryStat({

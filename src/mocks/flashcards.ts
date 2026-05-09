@@ -1,4 +1,4 @@
-import type { FlashCard } from "@/types/dora";
+import type { FlashCard } from "@/types/kiki";
 
 const words = [
   ["Celestial", "[səˈlestiəl]", "adj.", "天体的；天空的"],

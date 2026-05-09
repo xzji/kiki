@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { Article } from "@/types/dora";
+import type { Article } from "@/types/kiki";
 
 export function ReadingDigestView({ articles, onComplete }: { articles: Article[]; onComplete: () => void }) {
   const [activeId, setActiveId] = useState(articles[0]?.id);

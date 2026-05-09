@@ -5,7 +5,7 @@ import { persist } from "zustand/middleware";
 
 import { buildConversationsFromGoals } from "@/mocks/conversations";
 import { initialGoals } from "@/mocks/goals";
-import type { Conversation, ConversationMessage } from "@/types/dora";
+import type { Conversation, ConversationMessage, GoalInfoCollection } from "@/types/kiki";
 
 type ConversationStore = {
   conversations: Conversation[];
@@ -23,6 +23,7 @@ type ConversationStore = {
   deleteConversation: (conversationId: string) => void;
   toggleConversationPinned: (conversationId: string) => void;
   setGoalForConversation: (conversationId: string, goalId: string) => void;
+  setGoalInfoCollection: (conversationId: string, collection: GoalInfoCollection | null) => void;
   renameConversation: (conversationId: string, title: string) => void;
   setConversationRuntimeEnv: (conversationId: string, runtimeEnvId: string) => void;
   setClaudeSessionId: (conversationId: string, claudeSessionId: string) => void;
@@ -142,6 +143,15 @@ export const useConversationStore = create<ConversationStore>()(
         set({
           conversations: get().conversations.map((item) =>
             item.id === conversationId ? { ...item, goalId } : item,
+          ),
+        });
+      },
+      setGoalInfoCollection: (conversationId, collection) => {
+        set({
+          conversations: get().conversations.map((item) =>
+            item.id === conversationId
+              ? { ...item, goalInfoCollection: collection ?? undefined }
+              : item,
           ),
         });
       },

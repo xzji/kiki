@@ -6,7 +6,7 @@ export async function getGoalBreakdown(goalTitle: string) {
   return getGoalBreakdownDraft(goalTitle);
 }
 
-export async function getMockDoraReply(seed: string) {
+export async function getMockKikiReply(seed: string) {
   await sleep();
   return `我已收到：${seed}。如果你希望，我可以继续把它压缩成下一步可执行动作。`;
 }

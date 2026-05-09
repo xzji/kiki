@@ -1,13 +1,13 @@
 import { BookOpen, ChevronDown, Mail, Newspaper, Ticket } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { DoraAvatar } from "@/components/layout/DoraAvatar";
+import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { resolveInboxTaskContext } from "@/lib/inboxItem";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
-import type { InboxItem } from "@/types/dora";
+import type { InboxItem } from "@/types/kiki";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 
 const iconMap = {
@@ -74,7 +74,7 @@ export function InboxCard({ item }: { item: InboxItem }) {
         {expanded ? (
           <div className="mt-4 border-t border-[#E5E7EB] pt-4">
             <div className="flex items-start gap-3">
-              <DoraAvatar size="sm" />
+              <KikiAvatar size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="mb-1 text-[13px] font-medium text-[#1F2328]">KiKi</div>
                 <div className="whitespace-pre-wrap text-sm leading-6 text-[#374151]">

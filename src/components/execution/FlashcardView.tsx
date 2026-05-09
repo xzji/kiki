@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { FlashCard } from "@/types/dora";
+import type { FlashCard } from "@/types/kiki";
 
 export function FlashcardView({ cards, onComplete }: { cards: FlashCard[]; onComplete: () => void }) {
   const [index, setIndex] = useState(0);

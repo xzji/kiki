@@ -1,4 +1,4 @@
-import type { InboxItem } from "@/types/dora";
+import type { InboxItem } from "@/types/kiki";
 
 export const initialInboxItems: InboxItem[] = [
   {

@@ -1,4 +1,4 @@
-import type { Conversation, ConversationMessage, Goal } from "@/types/dora";
+import type { Conversation, ConversationMessage, Goal } from "@/types/kiki";
 
 /**
  * 将 goals 拍平为会话：

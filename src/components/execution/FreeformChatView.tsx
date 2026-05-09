@@ -3,7 +3,7 @@
 import { SendHorizonal } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { DoraAvatar } from "@/components/layout/DoraAvatar";
+import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { useChatStore } from "@/stores/chatStore";
 
 function replyFor(message: string) {
@@ -17,12 +17,12 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
   const threads = useChatStore((state) => state.threads);
   const seedThread = useChatStore((state) => state.seedThread);
   const sendUserMessage = useChatStore((state) => state.sendUserMessage);
-  const sendDoraMessage = useChatStore((state) => state.sendDoraMessage);
+  const sendKikiMessage = useChatStore((state) => state.sendKikiMessage);
   const [value, setValue] = useState("");
   const messages = threads[threadId] ?? [];
 
   useEffect(() => {
-    seedThread(threadId, [{ id: `${threadId}-seed`, role: "dora", content: seed, timestamp: "04-26 11:00" }]);
+    seedThread(threadId, [{ id: `${threadId}-seed`, role: "kiki", content: seed, timestamp: "04-26 11:00" }]);
   }, [seed, seedThread, threadId]);
 
   return (
@@ -31,8 +31,8 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
         <div className="space-y-4">
           {messages.map((message) => (
             <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-              {message.role === "dora" ? <DoraAvatar size="sm" /> : null}
-              <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === "dora" ? "border border-[#E5E7EB] bg-[#F8FAFC] text-[#374151]" : "bg-[#111] text-white"}`}>{message.content}</div>
+              {message.role === "kiki" ? <KikiAvatar size="sm" /> : null}
+              <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === "kiki" ? "border border-[#E5E7EB] bg-[#F8FAFC] text-[#374151]" : "bg-[#111] text-white"}`}>{message.content}</div>
             </div>
           ))}
         </div>
@@ -42,7 +42,7 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
           if (event.key === "Enter" && value.trim()) {
             const content = value.trim();
             sendUserMessage(threadId, content);
-            sendDoraMessage(threadId, replyFor(content));
+            sendKikiMessage(threadId, replyFor(content));
             setValue("");
           }
         }} />
@@ -50,7 +50,7 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
           const content = value.trim();
           if (!content) return;
           sendUserMessage(threadId, content);
-          sendDoraMessage(threadId, replyFor(content));
+          sendKikiMessage(threadId, replyFor(content));
           setValue("");
         }}><SendHorizonal className="h-4 w-4" /></button>
       </div>

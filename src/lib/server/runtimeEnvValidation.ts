@@ -10,6 +10,8 @@ import type {
   RuntimeDiscoveryItem,
 } from "@/types/runtime";
 
+import { buildClaudeEnv } from "./claudeEnv";
+
 const execFileAsync = promisify(execFile);
 
 const runtimeDefinitions: Record<LocalRuntimeKind, {
@@ -108,7 +110,7 @@ async function runHealthCheck(cliPath: string, workingDirectory: string) {
   const stdout = await new Promise<string>((resolve, reject) => {
     const child = spawn(cliPath, ["-p", "--output-format", "json", "请只回复 ok"], {
       cwd: workingDirectory,
-      env: process.env,
+      env: buildClaudeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 

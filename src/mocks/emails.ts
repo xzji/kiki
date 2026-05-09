@@ -1,4 +1,4 @@
-import type { EmailDraft } from "@/types/dora";
+import type { EmailDraft } from "@/types/kiki";
 
 export const emailDrafts: EmailDraft[] = [
   {

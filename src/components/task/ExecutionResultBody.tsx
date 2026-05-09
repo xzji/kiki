@@ -10,7 +10,7 @@ import { ListeningQAView } from "@/components/execution/ListeningQAView";
 import { ReadingDigestView } from "@/components/execution/ReadingDigestView";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
-import type { Goal, Task, TaskInstance } from "@/types/dora";
+import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
   flashcard: "记忆闪卡",

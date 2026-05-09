@@ -4,7 +4,7 @@ import { Calendar, Inbox, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 import { BASE_DATE, formatDateInput } from "@/lib/date";
-import type { Goal, TaskInstance } from "@/types/dora";
+import type { Goal, TaskInstance } from "@/types/kiki";
 
 const STATUS_TEXT: Record<TaskInstance["status"], string> = {
   pending: "待处理",

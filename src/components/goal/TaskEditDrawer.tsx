@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { formatDateInput } from "@/lib/date";
 import { useGoalStore } from "@/stores/goalStore";
-import type { Task } from "@/types/dora";
+import type { Task } from "@/types/kiki";
 
 export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; open: boolean; onClose: () => void }) {
   const updateTask = useGoalStore((state) => state.updateTask);

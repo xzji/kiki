@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { TaskCreateDrawer } from "@/components/goal/TaskCreateDrawer";
 import { TaskRow } from "@/components/goal/TaskRow";
-import type { Goal, Task } from "@/types/dora";
+import type { Goal, Task } from "@/types/kiki";
 
 export function SubGoalBlock({
   index,

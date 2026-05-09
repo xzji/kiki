@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 
 import { buildInstanceCardTitle, ExecutionResultBody } from "@/components/task/ExecutionResultBody";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
-import type { Goal, Task, TaskInstance } from "@/types/dora";
+import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
 export function TaskResultDrawer({
   open,

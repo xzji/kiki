@@ -3,7 +3,7 @@
 import { create } from "zustand";
 
 import { initialInboxItems } from "@/mocks/inbox";
-import type { InboxItem } from "@/types/dora";
+import type { InboxItem } from "@/types/kiki";
 
 type InboxStore = {
   items: InboxItem[];

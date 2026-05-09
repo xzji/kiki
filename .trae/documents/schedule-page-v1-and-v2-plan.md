@@ -113,7 +113,7 @@ export interface AgentEvent {
 
 * 持久化：
 
-  * 初始化时从 `localStorage.getItem("dora.schedule.events")` 读取
+  * 初始化时从 `localStorage.getItem("kiki.schedule.events")` 读取
 
   * `events` 任意变更后写回
 
@@ -358,7 +358,7 @@ export const EVENT_COLORS = {
 5. **头像**：Header 右区头像使用静态 `JJ` 显示，不与 UserMenu 联动
 6. **键盘交互**：仅在日程页根容器接收键盘事件，避免干扰全局输入框
 7. **拖拽精度**：15 分钟吸附；跨多小时允许，但同列创建时结束时间不得早于开始时间
-8. **localStorage key**：`dora.schedule.events`，值为 `AgentEvent[]` JSON
+8. **localStorage key**：`kiki.schedule.events`，值为 `AgentEvent[]` JSON
 
 ## 实现步骤（Todo 拆解）
 

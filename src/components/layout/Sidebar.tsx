@@ -13,11 +13,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { deleteClaudeSession } from "@/lib/api/claude";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
-import type { Conversation } from "@/types/dora";
+import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
+import type { Conversation } from "@/types/kiki";
 
 export const NAV_SIDEBAR_EXPANDED_WIDTH = 260;
 export const NAV_SIDEBAR_COLLAPSED_WIDTH = 56;
@@ -29,7 +31,9 @@ export function Sidebar() {
   const createConversation = useConversationStore((state) => state.createConversation);
   const markConversationUnread = useConversationStore((state) => state.markConversationUnread);
   const deleteConversation = useConversationStore((state) => state.deleteConversation);
+  const renameConversation = useConversationStore((state) => state.renameConversation);
   const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
+  const runtimeEnvironments = useRuntimeEnvStore((state) => state.environments);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
   const setCollapsed = useNavSidebarStore((state) => state.setCollapsed);
@@ -161,8 +165,22 @@ export function Sidebar() {
                   conversation={conv}
                   active={pathname.startsWith(`/conversations/${conv.id}`)}
                   onTogglePinned={() => toggleConversationPinned(conv.id)}
+                  onRename={(title) => renameConversation(conv.id, title)}
                   onMarkUnread={() => markConversationUnread(conv.id)}
-                  onDelete={() => {
+                  onDelete={async () => {
+                    if (conv.claudeSessionId) {
+                      const runtimeEnv = runtimeEnvironments.find((item) => item.id === conv.runtimeEnvId);
+                      try {
+                        await deleteClaudeSession({
+                          sessionId: conv.claudeSessionId,
+                          workingDirectory: runtimeEnv?.workingDirectory,
+                        });
+                      } catch (error) {
+                        console.warn("删除 Claude session 失败", error);
+                        window.alert(error instanceof Error ? error.message : "删除 Claude session 失败");
+                        return;
+                      }
+                    }
                     deleteConversation(conv.id);
                     if (pathname.startsWith(`/conversations/${conv.id}`)) {
                       router.push("/conversations");
@@ -208,19 +226,28 @@ function ConversationListItem({
   conversation,
   active,
   onTogglePinned,
+  onRename,
   onMarkUnread,
   onDelete,
 }: {
   conversation: Conversation;
   active: boolean;
   onTogglePinned: () => void;
+  onRename: (title: string) => void;
   onMarkUnread: () => void;
-  onDelete: () => void;
+  onDelete: () => void | Promise<void>;
 }) {
   const unread = getConversationUnreadCount(conversation);
   const latest = conversation.messages[conversation.messages.length - 1];
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(conversation.title);
   const menuRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDraftTitle(conversation.title);
+  }, [conversation.title]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -232,40 +259,89 @@ function ConversationListItem({
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
 
+  useEffect(() => {
+    if (!isRenaming) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [isRenaming]);
+
+  const finishRenaming = () => {
+    const nextTitle = draftTitle.trim();
+    setIsRenaming(false);
+    if (nextTitle && nextTitle !== conversation.title) {
+      onRename(nextTitle);
+      return;
+    }
+    setDraftTitle(conversation.title);
+  };
+
+  const cancelRenaming = () => {
+    setDraftTitle(conversation.title);
+    setIsRenaming(false);
+  };
+
   return (
     <li>
       <div
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (isRenaming) return;
+          setMenuOpen(true);
+        }}
         className={cn(
           "group flex items-start gap-2 rounded-lg px-3 py-2 transition hover:bg-white/80",
           active && "bg-white shadow-sm",
         )}
       >
-        <Link href={`/conversations/${conversation.id}`} className="min-w-0 flex-1">
+        {isRenaming ? (
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-[13px] text-[#1F2328]">
-              {conversation.title}
-            </span>
-            <div className="flex items-center gap-1">
-              {conversation.pinned ? (
-                <span className="text-[10px] text-[#8C9198]">置顶</span>
-              ) : null}
-              {unread > 0 ? (
-                <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[10px] text-white">
-                  {unread}
-                </span>
-              ) : null}
-            </div>
+            <input
+              ref={renameInputRef}
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onBlur={finishRenaming}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  finishRenaming();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelRenaming();
+                }
+              }}
+              className="w-full rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-[13px] text-[#1F2328] outline-none ring-0 placeholder:text-[#9AA0A6] focus:border-[#111]"
+              maxLength={80}
+            />
           </div>
-          {latest ? (
-            <span className="block truncate text-[11px] text-[#8C9198]">
-              {latest.content}
-            </span>
-          ) : (
-            <span className="block truncate text-[11px] text-[#8C9198]">
-              暂无消息
-            </span>
-          )}
-        </Link>
+        ) : (
+          <Link href={`/conversations/${conversation.id}`} className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[13px] text-[#1F2328]">
+                {conversation.title}
+              </span>
+              <div className="flex items-center gap-1">
+                {conversation.pinned ? (
+                  <span className="text-[10px] text-[#8C9198]">置顶</span>
+                ) : null}
+                {unread > 0 ? (
+                  <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[10px] text-white">
+                    {unread}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            {latest ? (
+              <span className="block truncate text-[11px] text-[#8C9198]">
+                {latest.content}
+              </span>
+            ) : (
+              <span className="block truncate text-[11px] text-[#8C9198]">
+                暂无消息
+              </span>
+            )}
+          </Link>
+        )}
         <div ref={menuRef} className="relative pt-0.5">
           <button
             type="button"
@@ -303,7 +379,18 @@ function ConversationListItem({
               <button
                 type="button"
                 onClick={() => {
-                  onDelete();
+                  setDraftTitle(conversation.title);
+                  setIsRenaming(true);
+                  setMenuOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+              >
+                重命名
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await onDelete();
                   setMenuOpen(false);
                 }}
                 className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"

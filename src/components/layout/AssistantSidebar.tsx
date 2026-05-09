@@ -1,11 +1,13 @@
 "use client";
 
 import { PanelRightClose, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import { openSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { useAssistantStore } from "@/stores/assistantStore";
+import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 
 import { AssistantComposer } from "./AssistantComposer";
 
@@ -16,13 +18,21 @@ export function AssistantSidebar() {
     hydrated,
     messages,
     send,
+    stop,
     isSending,
     error,
-    runtimeSnapshot,
     permissionRequest,
     clearError,
   } = useAssistantStore();
+  const runtimeHydrated = useRuntimeEnvStore((state) => state.hydrated);
+  const activeRuntimeEnvId = useRuntimeEnvStore((state) => state.activeRuntimeEnvId);
+  const runtimeEnvironments = useRuntimeEnvStore((state) => state.environments);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const activeRuntimeEnv =
+    runtimeEnvironments.find((item) => item.id === activeRuntimeEnvId) ??
+    runtimeEnvironments.find((item) => item.type === "local") ??
+    null;
 
   // Esc 关闭
   useEffect(() => {
@@ -118,6 +128,15 @@ export function AssistantSidebar() {
                     )}
                   >
                     {m.content}
+                    {m.action?.type === "open_goal_conversation" ? (
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/conversations/${m.action?.conversationId}`)}
+                        className="mt-2 block rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+                      >
+                        查看目标规划
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               )
@@ -127,29 +146,18 @@ export function AssistantSidebar() {
       </div>
 
       <div className="flex-none border-t border-[#E5E7EB] bg-[#F9FAFB] px-3 py-3">
-        {runtimeSnapshot ? (
-          <div className="mb-2 flex items-center justify-between rounded-xl border border-[#E5E7EB] bg-white px-3 py-2 text-[12px] text-[#6B7280]">
-            <span>
-              本地 Claude · {runtimeSnapshot.name}
-            </span>
-            <span>
-              {runtimeSnapshot.permissionMode === "readonly"
-                ? "只读聊天"
-                : runtimeSnapshot.permissionMode === "confirm"
-                  ? "手动确认"
-                  : "项目内可执行"}
-            </span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => openSettings("runtime")}
-            className="mb-2 w-full rounded-xl border border-dashed border-[#D0D7DE] bg-white px-3 py-2 text-left text-[12px] text-[#6B7280] hover:border-[#111] hover:text-[#111]"
-          >
-            还没有连接本地 Claude CLI，点击前往运行环境设置
-          </button>
-        )}
-        <AssistantComposer onSubmit={send} disabled={isSending} localMode />
+        {runtimeHydrated ? (
+          activeRuntimeEnv?.type === "local" ? null : (
+            <button
+              type="button"
+              onClick={() => openSettings("runtime")}
+              className="mb-2 w-full rounded-xl border border-dashed border-[#D0D7DE] bg-white px-3 py-2 text-left text-[12px] text-[#6B7280] hover:border-[#111] hover:text-[#111]"
+            >
+              还没有连接本地 Claude CLI，点击前往运行环境设置
+            </button>
+          )
+        ) : null}
+        <AssistantComposer onSubmit={send} disabled={isSending} localMode onStop={stop} />
       </div>
     </aside>
   );

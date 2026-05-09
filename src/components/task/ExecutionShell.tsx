@@ -4,7 +4,7 @@ import { MessageCircle } from "lucide-react";
 import Link from "next/link";
 
 import { ExecutionResultBody } from "@/components/task/ExecutionResultBody";
-import type { Goal, Task, TaskInstance } from "@/types/dora";
+import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
 export function ExecutionShell({ goal, task, instance }: { goal: Goal; task: Task; instance: TaskInstance }) {
   return (

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { QA } from "@/types/dora";
+import type { QA } from "@/types/kiki";
 
 export function ListeningQAView({ questions, onComplete }: { questions: QA[]; onComplete: () => void }) {
   const [index, setIndex] = useState(0);

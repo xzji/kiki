@@ -1,8 +1,8 @@
 import { spawn } from "child_process";
-import { randomUUID } from "crypto";
 
 import type { RuntimePermissionMode } from "@/types/runtime";
 
+import { buildClaudeEnv } from "./claudeEnv";
 import { normalizeWorkingDirectory, resolveCliPath } from "./runtimeEnvValidation";
 
 type ClaudeCliPayload = {
@@ -12,6 +12,7 @@ type ClaudeCliPayload = {
   session_id?: string;
   result?: string;
   api_error_status?: string;
+  errors?: string[];
   event?: {
     type?: string;
     delta?: {
@@ -35,6 +36,7 @@ type ClaudeStreamOptions = {
     roleLabel: string;
     content: string;
   } | null;
+  signal?: AbortSignal;
   onEvent: (event:
     | { type: "session"; sessionId: string }
     | { type: "status"; status: "checking" | "running" | "completed" }
@@ -54,15 +56,20 @@ function mapPermissionMode(permissionMode: RuntimePermissionMode) {
   }
 }
 
-function buildPrompt(message: string, quotedMessage?: ClaudeStreamOptions["quotedMessage"]) {
-  if (!quotedMessage) return message;
-  return [
-    `以下是当前用户引用的上下文，请优先参考：`,
-    `[${quotedMessage.roleLabel}] ${quotedMessage.content}`,
-    "",
-    `当前用户消息：`,
-    message,
-  ].join("\n");
+function buildPrompt(
+  message: string,
+  quotedMessage?: ClaudeStreamOptions["quotedMessage"],
+) {
+  const parts: string[] = [];
+  if (quotedMessage) {
+    parts.push(
+      `以下是当前用户引用的上下文，请优先参考：`,
+      `[${quotedMessage.roleLabel}] ${quotedMessage.content}`,
+      "",
+    );
+  }
+  parts.push(`当前用户消息：`, message);
+  return parts.join("\n");
 }
 
 function looksHighRisk(message: string) {
@@ -89,7 +96,8 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
     return;
   }
 
-  const sessionId = options.claudeSessionId || randomUUID();
+  options.onEvent({ type: "status", status: "checking" });
+
   const args = [
     "-p",
     "--verbose",
@@ -98,22 +106,20 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
     "--include-partial-messages",
     "--permission-mode",
     mapPermissionMode(options.permissionMode),
-    "--session-id",
-    sessionId,
   ];
+  if (options.claudeSessionId) {
+    args.push("--resume", options.claudeSessionId);
+  }
   const allowedTools = buildAllowedTools(options.permissionMode);
   if (allowedTools.length > 0) {
     args.push("--allowedTools", ...allowedTools);
   }
   args.push(buildPrompt(options.message, options.quotedMessage));
 
-  options.onEvent({ type: "session", sessionId });
-  options.onEvent({ type: "status", status: "checking" });
-
   await new Promise<void>((resolve) => {
     const child = spawn(cliPath, args, {
       cwd,
-      env: process.env,
+      env: buildClaudeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -121,6 +127,24 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
     let stderrBuffer = "";
     let finalMessage = "";
     let emittedFatalError = false;
+    let aborted = false;
+    let terminalResultReceived = false;
+
+    const abort = () => {
+      if (terminalResultReceived) return;
+      aborted = true;
+      emittedFatalError = true;
+      child.kill("SIGTERM");
+      options.onEvent({ type: "done" });
+      resolve();
+    };
+
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
+
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     const consumeLine = (line: string) => {
       if (!line.trim()) return;
@@ -159,6 +183,7 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
         }
 
         if (payload.type === "result") {
+          terminalResultReceived = true;
           if (payload.subtype === "success") {
             finalMessage = payload.result || finalMessage;
             options.onEvent({ type: "message", content: finalMessage });
@@ -167,7 +192,11 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
             emittedFatalError = true;
             options.onEvent({
               type: "error",
-              message: payload.result || payload.api_error_status || "Claude 返回了错误结果",
+              message:
+                payload.result ||
+                payload.errors?.join("\n") ||
+                payload.api_error_status ||
+                "Claude 返回了错误结果",
             });
           }
         }
@@ -202,6 +231,8 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
     });
 
     child.on("close", (code) => {
+      options.signal?.removeEventListener("abort", abort);
+      if (aborted) return;
       if (stdoutBuffer.trim()) {
         consumeLine(stdoutBuffer.trim());
       }

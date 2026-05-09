@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { EmailDraft } from "@/types/dora";
+import type { EmailDraft } from "@/types/kiki";
 
 export function DraftReviewView({ drafts, onComplete, onRewrite }: { drafts: EmailDraft[]; onComplete: () => void; onRewrite: () => void }) {
   const [items, setItems] = useState(drafts);

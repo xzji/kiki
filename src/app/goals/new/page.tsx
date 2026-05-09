@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { DoraAvatar } from "@/components/layout/DoraAvatar";
+import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { useGoalStore } from "@/stores/goalStore";
 
@@ -21,7 +21,7 @@ export default function NewGoalPage({
     <div className="space-y-6">
       <div>
         <div className="mb-6 flex items-start gap-3">
-          <DoraAvatar size="sm" />
+          <KikiAvatar size="sm" />
           <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm leading-6 text-[#374151]">
             我根据“{title}”先给出一版拆解草案：2 个子目标，每个子目标 3 个任务。你可以先看结构，之后再逐项微调。
           </div>

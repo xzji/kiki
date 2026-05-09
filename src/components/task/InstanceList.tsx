@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 
-import { DoraAvatar } from "@/components/layout/DoraAvatar";
+import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { DetailPanel } from "@/components/task/DetailPanel";
-import type { Goal, Task } from "@/types/dora";
+import type { Goal, Task } from "@/types/kiki";
 
 export function InstanceList({ goal, task, showDetail = false, activeInstanceId }: { goal: Goal; task: Task; showDetail?: boolean; activeInstanceId?: string }) {
   return (
@@ -26,7 +26,7 @@ export function InstanceList({ goal, task, showDetail = false, activeInstanceId 
           const canStart = instance.status !== "completed";
           return (
             <div key={instance.id} className="flex items-start gap-3">
-              <DoraAvatar size="sm" />
+              <KikiAvatar size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center justify-between gap-2 text-xs text-[#6B7280]">
                   <div className="font-medium text-[#111]">KiKi</div>

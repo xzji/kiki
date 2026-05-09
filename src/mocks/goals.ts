@@ -8,7 +8,7 @@ import type {
   GoalBreakdownDraft,
   Task,
   TaskInstance,
-} from "@/types/dora";
+} from "@/types/kiki";
 
 export const INITIAL_NOW = "2026-04-26T10:00:00+08:00";
 
@@ -584,10 +584,11 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
   return {
     id: goalId,
     title: draft.goalTitle,
-    deadline: "2026-06-30T23:59:59+08:00",
+    deadline: draft.deadline || "2026-06-30T23:59:59+08:00",
     progress: 0,
     createdAt: INITIAL_NOW,
     kind: "collab",
+    summary: draft.summary,
     subGoals: draft.subGoals.map((subGoal, subGoalIndex) => ({
       id: `${goalId}-sg-${subGoalIndex + 1}`,
       goalId,
@@ -600,10 +601,15 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
         expectedOutcome: taskItem.expectedOutcome,
         taskType: taskItem.taskType,
         triggerRule: taskItem.triggerRule,
-        deadline: "2026-06-30T23:59:59+08:00",
+        deadline: draft.deadline || "2026-06-30T23:59:59+08:00",
         progress: 0,
         instances: [],
         executionKind: taskItem.executionKind,
+        priority: taskItem.priority,
+        dependencies: taskItem.dependencies,
+        executionMode: taskItem.executionMode,
+        executionCycle: taskItem.executionCycle,
+        expectedResult: taskItem.expectedResult,
       })),
     })),
   };

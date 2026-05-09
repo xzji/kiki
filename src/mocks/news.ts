@@ -1,4 +1,4 @@
-import type { Article } from "@/types/dora";
+import type { Article } from "@/types/kiki";
 
 export const newsArticles: Article[] = [
   {

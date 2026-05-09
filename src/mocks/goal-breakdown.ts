@@ -1,4 +1,4 @@
-import type { GoalBreakdownDraft } from "@/types/dora";
+import type { GoalBreakdownDraft } from "@/types/kiki";
 
 export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
   return {

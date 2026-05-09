@@ -1,4 +1,4 @@
-import type { InboxItem } from "@/types/dora";
+import type { InboxItem } from "@/types/kiki";
 import { InboxCard } from "@/components/inbox/InboxCard";
 
 export function InboxList({ items }: { items: InboxItem[] }) {

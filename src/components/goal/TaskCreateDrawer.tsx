@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useGoalStore } from "@/stores/goalStore";
-import type { Task } from "@/types/dora";
+import type { Task } from "@/types/kiki";
 
 type Props = {
   open: boolean;

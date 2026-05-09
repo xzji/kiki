@@ -1,7 +1,9 @@
 "use client";
 
-import { ArrowUp, ChevronDown, Link2, Plus, X } from "lucide-react";
+import { ArrowUp, ChevronDown, Link2, Plus, Square, X } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
+
+import { getSlashCommandSuggestions } from "@/lib/slashCommands";
 
 type Props = {
   onSubmit: (
@@ -19,6 +21,7 @@ type Props = {
   onClearQuote?: () => void;
   disabled?: boolean;
   localMode?: boolean;
+  onStop?: () => void;
 };
 
 export function AssistantComposer({
@@ -28,19 +31,36 @@ export function AssistantComposer({
   onClearQuote,
   disabled = false,
   localMode = false,
+  onStop,
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedModel, setSelectedModel] = useState(localMode ? "Claude Code Local" : "GPT 5.4");
   const [showConnectorMenu, setShowConnectorMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0);
+  const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isEmpty = value.trim().length === 0;
+  const commandSuggestions = disabled ? [] : getSlashCommandSuggestions(value);
+  const showCommandMenu = commandSuggestions.length > 0 && !commandMenuDismissed;
 
   const connectorItems = ["Notion", "Google Drive", "Slack", "Linear"];
   const modelItems = localMode ? ["Claude Code Local"] : ["GPT 5.4", "Claude 4.1", "Gemini 2.5 Pro"];
+
+  const selectCommand = (index: number) => {
+    const command = commandSuggestions[index];
+    if (!command) return;
+    setValue(`/${command.name} `);
+    setActiveCommandIndex(0);
+    setCommandMenuDismissed(true);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(command.name.length + 2, command.name.length + 2);
+    });
+  };
 
   const submit = () => {
     const next = value.trim();
@@ -71,7 +91,7 @@ export function AssistantComposer({
   return (
     <div
       ref={composerRef}
-      className="rounded-2xl border border-[#E5E7EB] bg-white px-3 py-3"
+      className="relative rounded-2xl border border-[#E5E7EB] bg-white px-3 py-3"
     >
       <div className="flex min-h-[84px] flex-col">
         {quotedMessage ? (
@@ -97,9 +117,36 @@ export function AssistantComposer({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setActiveCommandIndex(0);
+            setCommandMenuDismissed(false);
+          }}
           disabled={disabled}
           onKeyDown={(event) => {
+            if (showCommandMenu) {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setActiveCommandIndex((prev) => (prev + 1) % commandSuggestions.length);
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setActiveCommandIndex((prev) => (prev - 1 + commandSuggestions.length) % commandSuggestions.length);
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setCommandMenuDismissed(true);
+                setActiveCommandIndex(0);
+                return;
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                selectCommand(activeCommandIndex);
+                return;
+              }
+            }
             if (event.key === "Enter" && !event.shiftKey && !disabled) {
               event.preventDefault();
               submit();
@@ -108,6 +155,31 @@ export function AssistantComposer({
           placeholder={placeholder}
           className="min-h-[48px] w-full resize-none bg-transparent text-sm leading-6 text-[#1F2328] outline-none placeholder:text-[#9197A3]"
         />
+        {showCommandMenu ? (
+          <div className="absolute bottom-[74px] left-3 z-20 w-[300px] rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
+            {commandSuggestions.map((command, index) => (
+              <button
+                key={command.name}
+                type="button"
+                className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left ${
+                  index === activeCommandIndex ? "bg-[#F5F6F8]" : "hover:bg-[#F5F6F8]"
+                }`}
+                onMouseEnter={() => setActiveCommandIndex(index)}
+                onClick={() => selectCommand(index)}
+              >
+                <span className="mt-0.5 rounded-md bg-[#111] px-1.5 py-0.5 font-mono text-[11px] text-white">
+                  /{command.name}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-[#1F2328]">{command.label}</span>
+                  <span className="mt-0.5 block text-[12px] leading-4 text-[#6B7280]">
+                    {command.description}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {attachments.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-2">
             {attachments.map((fileName) => (
@@ -201,19 +273,30 @@ export function AssistantComposer({
                 </div>
               ) : null}
             </div>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={isEmpty || disabled}
-              className={`rounded-full border p-1.5 transition ${
-                isEmpty || disabled
-                  ? "cursor-not-allowed border-[#E5E7EB] text-[#C1C7D0]"
-                  : "border-[#D0D7DE] text-[#111] hover:border-[#111]"
-              }`}
-              aria-label="发送"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
+            {disabled && onStop ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="rounded-full border border-[#D0D7DE] p-1.5 text-[#B42318] transition hover:border-[#B42318] hover:bg-[#FEF2F2]"
+                aria-label="停止生成"
+              >
+                <Square className="h-4 w-4 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submit}
+                disabled={isEmpty || disabled}
+                className={`rounded-full border p-1.5 transition ${
+                  isEmpty || disabled
+                    ? "cursor-not-allowed border-[#E5E7EB] text-[#C1C7D0]"
+                    : "border-[#D0D7DE] text-[#111] hover:border-[#111]"
+                }`}
+                aria-label="发送"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>

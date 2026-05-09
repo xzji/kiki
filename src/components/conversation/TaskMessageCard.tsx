@@ -1,7 +1,7 @@
 "use client";
 
 import { buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
-import type { Task, TaskInstance } from "@/types/dora";
+import type { Task, TaskInstance } from "@/types/kiki";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
   flashcard: "记忆闪卡",

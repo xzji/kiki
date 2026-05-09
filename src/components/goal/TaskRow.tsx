@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
-import type { Task } from "@/types/dora";
+import type { Task } from "@/types/kiki";
 
 export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount: number; onOpen: () => void }) {
   const [hovered, setHovered] = useState(false);

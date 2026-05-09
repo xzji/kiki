@@ -1,13 +1,13 @@
 "use client";
 
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, LayoutList } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { DoraAvatar } from "@/components/layout/DoraAvatar";
+import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
-import type { ConversationMessage } from "@/types/dora";
+import type { ConversationMessage } from "@/types/kiki";
 
 /**
  * 单条对话消息。
@@ -21,12 +21,14 @@ export function ConversationMessageItem({
   onQuote,
   onOpenResult,
   onOpenTaskInfo,
+  onOpenGoalPlan,
   onDelete,
 }: {
   message: ConversationMessage;
   onQuote: (message: ConversationMessage) => void;
   onOpenResult?: (message: ConversationMessage) => void;
   onOpenTaskInfo?: (message: ConversationMessage) => void;
+  onOpenGoalPlan?: (goalId: string) => void;
   onDelete: (messageId: string) => void;
 }) {
   const goals = useGoalStore((state) => state.goals);
@@ -107,7 +109,7 @@ export function ConversationMessageItem({
 
   return (
     <div className="group relative flex items-start gap-3">
-      <DoraAvatar size="sm" />
+      <KikiAvatar size="sm" />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
           <div className="text-[13px] font-medium text-[#1F2328]">KiKi</div>
@@ -149,8 +151,58 @@ export function ConversationMessageItem({
             onOpen={() => onOpenResult?.(message)}
           />
         ) : null}
+
+        {message.kind === "goal_plan_card" ? (
+          <GoalPlanMessageCard
+            title={message.goalRef.title}
+            summary={message.goalRef.summary}
+            subGoalCount={message.goalRef.subGoalCount}
+            taskCount={message.goalRef.taskCount}
+            onOpen={() => onOpenGoalPlan?.(message.goalRef.goalId)}
+          />
+        ) : null}
       </div>
     </div>
+  );
+}
+
+function GoalPlanMessageCard({
+  title,
+  summary,
+  subGoalCount,
+  taskCount,
+  onOpen,
+}: {
+  title: string;
+  summary?: string;
+  subGoalCount: number;
+  taskCount: number;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-3 block w-full max-w-xl rounded-2xl border border-[#D0D7DE] bg-white p-4 text-left shadow-sm transition hover:border-[#111] hover:shadow-md"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-[#F0EDFF] text-[#5B3DBE]">
+          <LayoutList className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[#6B7280]">目标规划草案</div>
+          <div className="mt-1 text-base font-semibold leading-6 text-[#1F2328]">{title}</div>
+          {summary ? (
+            <div className="mt-2 line-clamp-2 text-[13px] leading-5 text-[#6B7280]">{summary}</div>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-[#6B7280]">
+            <span className="rounded-md bg-[#F5F6F8] px-2 py-1">{subGoalCount} 个子目标</span>
+            <span className="rounded-md bg-[#F5F6F8] px-2 py-1">{taskCount} 个任务</span>
+            <span className="ml-auto font-medium text-[#1F2328]">打开规划</span>
+          </div>
+        </div>
+      </div>
+    </button>
   );
 }
 

@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
           permissionMode: body.runtimeEnv.permissionMode,
           claudeSessionId: body.claudeSessionId,
           quotedMessage: body.quotedMessage,
+          signal: request.signal,
           onEvent: (event) => {
             writeSseEvent(controller, event.type, event);
           },
