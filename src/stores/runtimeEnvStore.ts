@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { makeId } from "@/lib/utils";
 import type {
   RuntimeEnvironment,
@@ -22,21 +23,12 @@ type RuntimeEnvState = {
   setEnvironmentHealth: (id: string, health: RuntimeHealth) => void;
   setPermissionMode: (id: string, permissionMode: RuntimePermissionMode) => void;
   getActiveEnvironment: () => RuntimeEnvironment | null;
+  replaceEnvironments: (environments: RuntimeEnvironment[], activeRuntimeEnvId?: string | null) => void;
 };
 
 const STORAGE_KEY = "kiki.runtime.environments";
 
-const INITIAL_ENVIRONMENTS: RuntimeEnvironment[] = [
-  {
-    id: "env-cloud-kiki",
-    type: "cloud",
-    name: "KiKi Cloud Agent",
-    workingDirectory: "workspace-prod",
-    cliPath: "kiki-agent",
-    permissionMode: "readonly",
-    health: { status: "offline", reason: "云端环境暂未接入真实服务" },
-  },
-];
+export const INITIAL_ENVIRONMENTS: RuntimeEnvironment[] = INITIAL_RUNTIME_ENVIRONMENTS;
 
 function markDefault(environments: RuntimeEnvironment[], activeId: string | null) {
   return environments.map((item) => ({
@@ -116,6 +108,17 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
         const state = get();
         if (!state.activeRuntimeEnvId) return null;
         return state.environments.find((item) => item.id === state.activeRuntimeEnvId) ?? null;
+      },
+      replaceEnvironments: (environments, activeRuntimeEnvId) => {
+        const nextActiveId =
+          activeRuntimeEnvId ??
+          environments.find((item) => item.isDefault)?.id ??
+          environments.find((item) => item.type === "local")?.id ??
+          null;
+        set({
+          environments: markDefault(environments, nextActiveId),
+          activeRuntimeEnvId: nextActiveId,
+        });
       },
     }),
     {

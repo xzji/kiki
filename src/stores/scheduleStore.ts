@@ -6,10 +6,18 @@ import { initialScheduleEvents } from "@/mocks/schedule";
 import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 
 const STORAGE_KEY = "kiki.schedule.events";
+const RESET_VERSION_KEY = "kiki.schedule.events.reset-version";
+const MOCK_BASELINE_RESET_VERSION = "1";
 
 function loadEvents(): AgentEvent[] {
   if (typeof window === "undefined") return initialScheduleEvents;
   try {
+    const resetVersion = window.localStorage.getItem(RESET_VERSION_KEY);
+    if (resetVersion !== MOCK_BASELINE_RESET_VERSION) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(initialScheduleEvents));
+      window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
+      return initialScheduleEvents;
+    }
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return initialScheduleEvents;
     const parsed = JSON.parse(raw) as AgentEvent[];
@@ -24,6 +32,7 @@ function persistEvents(events: AgentEvent[]) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
   } catch {
     // ignore
   }
@@ -45,6 +54,7 @@ type ScheduleStore = {
   updateEvent: (event: AgentEvent) => void;
   deleteEvent: (id: string) => void;
   toggleAllDay: () => void;
+  replaceEvents: (events: AgentEvent[]) => void;
 };
 
 function stepDate(iso: string, direction: -1 | 1, mode: ScheduleViewMode): string {
@@ -99,5 +109,9 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
       persistEvents(events);
       return { events };
     }),
-  toggleAllDay: () => set((state) => ({ allDayCollapsed: !state.allDayCollapsed }))
+  toggleAllDay: () => set((state) => ({ allDayCollapsed: !state.allDayCollapsed })),
+  replaceEvents: (events) => {
+    persistEvents(events);
+    set({ events });
+  },
 }));

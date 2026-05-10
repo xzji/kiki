@@ -6,10 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "worker": "tsx scripts/start-worker.ts",
+    "daemon": "tsx src/bin/kiki-runtime-daemon.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.5",
+    "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.11.0",
     "next": "14.2.30",
@@ -19,6 +22,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
@@ -26,6 +30,7 @@
     "eslint-config-next": "14.2.30",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

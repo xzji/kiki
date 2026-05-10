@@ -30,6 +30,8 @@ type ConversationStore = {
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 
+const MOCK_BASELINE_RESET_VERSION = 1;
+
 export const useConversationStore = create<ConversationStore>()(
   persist(
     (set, get) => ({
@@ -186,6 +188,10 @@ export const useConversationStore = create<ConversationStore>()(
     }),
     {
       name: "kiki.conversations",
+      version: MOCK_BASELINE_RESET_VERSION,
+      migrate: () => ({
+        conversations: buildConversationsFromGoals(initialGoals),
+      }),
       partialize: (state) => ({
         conversations: state.conversations,
       }),

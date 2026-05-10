@@ -649,7 +649,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             </div>
             <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
               <div className="mx-auto w-full max-w-3xl">
-                <TaskDetailBody goal={taskInfo.goal} task={taskInfo.task} />
+                <TaskDetailBody task={taskInfo.task} />
               </div>
             </div>
           </aside>

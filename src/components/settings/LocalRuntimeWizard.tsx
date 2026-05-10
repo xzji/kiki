@@ -164,7 +164,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
           <div>
             <div className="text-[15px] font-medium text-[#111]">添加本地运行环境</div>
             <div className="mt-0.5 text-[12px] text-[#6B7280]">
-              检测本机 Runtime，选择后绑定为 KiKi 的本地执行环境。
+              检测本机 Runtime，选择后绑定为 KiKi 的本地执行环境。后续配合本机 daemon，可在关闭浏览器后继续运行任务。
             </div>
           </div>
           <button

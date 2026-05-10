@@ -3,15 +3,81 @@ export type TaskInstanceStatus =
   | "in_progress"
   | "completed"
   | "awaiting_user"
-  | "paused";
+  | "paused"
+  | "error";
 
-export type ExecutionKind =
+export type TaskResultViewKind =
   | "flashcard"
   | "listening_qa"
   | "reading_digest"
   | "confirm_action"
   | "draft_review"
-  | "freeform_chat";
+  | "freeform_chat"
+  | "generic_result";
+
+// Legacy alias kept to reduce churn while the UI migrates to resultViewKind.
+export type ExecutionKind = TaskResultViewKind;
+export type TaskExecutionStrategy = "agent_autonomous" | "user_interactive" | "hybrid";
+export type TaskCollaborationMode =
+  | "agent_autonomous"
+  | "agent_with_user_confirmation"
+  | "agent_user_collaborative"
+  | "user_primary_agent_assistive";
+export type UserInteractionType =
+  | "none"
+  | "confirm"
+  | "answer"
+  | "provide_context"
+  | "perform_offline_action";
+export type UserInteractionTiming =
+  | "not_required"
+  | "before_execution"
+  | "during_execution"
+  | "after_agent_output"
+  | "core_task_step";
+export type TaskCollaborationContract = {
+  mode: TaskCollaborationMode;
+  agentResponsibilities: string[];
+  userResponsibilities: string[];
+  userInteractionType: UserInteractionType;
+  userInteractionTiming: UserInteractionTiming;
+  userFacingActionLabel: string;
+  shouldNotifyUser: boolean;
+  completionOwner: "agent" | "user" | "shared";
+  completionDefinition: string;
+};
+export type InteractionRequirement = {
+  type:
+    | "none"
+    | "confirm"
+    | "answer"
+    | "provide_context"
+    | "perform_offline_action"
+    | "deliverable_gap"
+    | "agent_revision_required";
+  timing: UserInteractionTiming;
+  reason: string;
+  question?: string;
+  options?: string[];
+  suggestedActions?: string[];
+  shouldNotifyUser: boolean;
+};
+export type TaskExecutionPhase =
+  | "queued"
+  | "preparing"
+  | "running"
+  | "awaiting_user"
+  | "completed"
+  | "retrying"
+  | "failed"
+  | "cancelled";
+export type TaskRunErrorCategory =
+  | "transient_cli"
+  | "transient_network"
+  | "permission"
+  | "logic"
+  | "aborted"
+  | "unknown";
 
 export type GoalWorkflowPhase =
   | "idle"
@@ -99,6 +165,101 @@ export type TaskExpectedResult = {
   completionCriteria?: string;
 };
 
+export type TaskExecutionStep = {
+  id: string;
+  title: string;
+  type: "phase" | "tool" | "assistant" | "system" | "retry" | "result";
+  status: "pending" | "running" | "completed" | "failed" | "awaiting_user";
+  detail?: string;
+  toolName?: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
+export type TaskRunArtifact = {
+  id: string;
+  label: string;
+  kind: "markdown" | "text" | "json" | "code" | "link" | "other";
+  content?: string;
+  href?: string;
+};
+
+export type TaskInstanceRunnerState = {
+  requestId?: string;
+  runtimeEnvId?: string;
+  permissionMode?: "readonly" | "confirm" | "execute";
+  workingDirectory?: string;
+  attemptCount: number;
+  lastAttemptAt?: string;
+};
+
+export type TaskInstanceExecutionState = {
+  phase: TaskExecutionPhase;
+  status: TaskInstanceStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  lastUpdatedAt?: string;
+  errorCategory?: TaskRunErrorCategory;
+  errorMessage?: string;
+};
+
+export type TaskInstanceResult = {
+  summary?: string;
+  finalMessage?: string;
+  structuredOutput?: Record<string, unknown> | null;
+  artifacts?: TaskRunArtifact[];
+  interactionRequirement?: InteractionRequirement;
+};
+
+export type TaskInstanceAwaitingUser = {
+  reason: string;
+  suggestedActions?: string[];
+  interactionRequirement?: InteractionRequirement;
+};
+
+export type TaskResultNotificationChannel = "silent" | "inbox" | "conversation" | "both";
+
+export type TaskResultNotificationType =
+  | "action_required"
+  | "answer_required"
+  | "context_required"
+  | "result_ready"
+  | "digest_ready"
+  | "silent_archive";
+
+export type TaskResultNotificationPriority = "high" | "normal" | "low";
+
+export type TaskResultNotificationDecision = {
+  shouldNotify: boolean;
+  channel: TaskResultNotificationChannel;
+  notificationType: TaskResultNotificationType;
+  priority: TaskResultNotificationPriority;
+  reason: string;
+  title: string;
+  snippet: string;
+  userMessage: string;
+  badge?: "need_confirm" | "need_answer" | null;
+  resultSummary: {
+    headline: string;
+    keyPoints: string[];
+    nextActions: string[];
+    primaryArtifactLabel?: string;
+  };
+  detailPolicy: {
+    showTimelineByDefault: boolean;
+    showRawOutputBehindMore: boolean;
+    showArtifactsExpanded: boolean;
+  };
+  createdAt: string;
+};
+
+export type TaskInstanceNotificationState = TaskResultNotificationDecision & {
+  deliveryState: "pending" | "delivered" | "silent";
+  deliveredAt?: string;
+  inboxItemId?: string;
+  conversationMessageId?: string;
+};
+
 export type FlashCard = {
   id: string;
   word: string;
@@ -137,7 +298,8 @@ export type ExecutionPayload =
   | { kind: "reading_digest"; articles: Article[] }
   | { kind: "confirm_action"; summary: string; options: string[] }
   | { kind: "draft_review"; drafts: EmailDraft[] }
-  | { kind: "freeform_chat"; seed: string };
+  | { kind: "freeform_chat"; seed: string }
+  | { kind: "generic_result"; summary: string; details?: string; artifacts?: TaskRunArtifact[] };
 
 export type TaskInstance = {
   id: string;
@@ -147,6 +309,12 @@ export type TaskInstance = {
   intro: string;
   payload: ExecutionPayload;
   createdAt: string;
+  runner?: TaskInstanceRunnerState;
+  execution?: TaskInstanceExecutionState;
+  timeline?: TaskExecutionStep[];
+  result?: TaskInstanceResult;
+  awaitingUser?: TaskInstanceAwaitingUser;
+  notification?: TaskInstanceNotificationState;
 };
 
 export type Task = {
@@ -161,11 +329,18 @@ export type Task = {
   progress: number;
   instances: TaskInstance[];
   executionKind: ExecutionKind;
+  resultViewKind?: TaskResultViewKind;
+  executionStrategy?: TaskExecutionStrategy;
   priority?: TaskPriority;
   dependencies?: string[];
   executionMode?: TaskExecutionMode;
   executionCycle?: TaskExecutionCycle;
   expectedResult?: TaskExpectedResult;
+  executionObjective?: string;
+  recommendedWorkingDirectory?: string;
+  autoRunDisabled?: boolean;
+  requiresConfirmation?: boolean;
+  collaboration?: TaskCollaborationContract;
 };
 
 export type SubGoal = {
@@ -309,11 +484,18 @@ export type GoalBreakdownDraft = {
       taskType: Task["taskType"];
       triggerRule: string;
       executionKind: ExecutionKind;
+      resultViewKind?: TaskResultViewKind;
+      executionStrategy?: TaskExecutionStrategy;
       priority?: TaskPriority;
       dependencies?: string[];
       executionMode?: TaskExecutionMode;
       executionCycle?: TaskExecutionCycle;
       expectedResult?: TaskExpectedResult;
+      executionObjective?: string;
+      recommendedWorkingDirectory?: string;
+      autoRunDisabled?: boolean;
+      requiresConfirmation?: boolean;
+      collaboration?: TaskCollaborationContract;
     }[];
   }[];
 };

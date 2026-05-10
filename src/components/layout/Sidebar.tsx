@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteClaudeSession } from "@/lib/api/claude";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
+import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -33,10 +34,13 @@ export function Sidebar() {
   const deleteConversation = useConversationStore((state) => state.deleteConversation);
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
+  const deleteGoalsByConversationId = useGoalStore((state) => state.deleteGoalsByConversationId);
   const runtimeEnvironments = useRuntimeEnvStore((state) => state.environments);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
   const setCollapsed = useNavSidebarStore((state) => state.setCollapsed);
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
 
   const inboxUnread = useMemo(
     () => inboxItems.reduce((sum, item) => sum + item.unreadCount, 0),
@@ -61,6 +65,30 @@ export function Sidebar() {
   const onCreateConversation = () => {
     const next = createConversation();
     router.push(`/conversations/${next.id}`);
+  };
+
+  const confirmDeleteConversation = async () => {
+    if (!deleteTarget || deletePending) return;
+    setDeletePending(true);
+    try {
+      if (deleteTarget.claudeSessionId) {
+        const runtimeEnv = runtimeEnvironments.find((item) => item.id === deleteTarget.runtimeEnvId);
+        await deleteClaudeSession({
+          sessionId: deleteTarget.claudeSessionId,
+          workingDirectory: runtimeEnv?.workingDirectory,
+        });
+      }
+      deleteGoalsByConversationId(deleteTarget.id);
+      deleteConversation(deleteTarget.id);
+      if (pathname.startsWith(`/conversations/${deleteTarget.id}`)) {
+        router.push("/conversations");
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除会话失败");
+    } finally {
+      setDeletePending(false);
+    }
   };
 
   if (collapsed) {
@@ -167,32 +195,67 @@ export function Sidebar() {
                   onTogglePinned={() => toggleConversationPinned(conv.id)}
                   onRename={(title) => renameConversation(conv.id, title)}
                   onMarkUnread={() => markConversationUnread(conv.id)}
-                  onDelete={async () => {
-                    if (conv.claudeSessionId) {
-                      const runtimeEnv = runtimeEnvironments.find((item) => item.id === conv.runtimeEnvId);
-                      try {
-                        await deleteClaudeSession({
-                          sessionId: conv.claudeSessionId,
-                          workingDirectory: runtimeEnv?.workingDirectory,
-                        });
-                      } catch (error) {
-                        console.warn("删除 Claude session 失败", error);
-                        window.alert(error instanceof Error ? error.message : "删除 Claude session 失败");
-                        return;
-                      }
-                    }
-                    deleteConversation(conv.id);
-                    if (pathname.startsWith(`/conversations/${conv.id}`)) {
-                      router.push("/conversations");
-                    }
-                  }}
+                  onDelete={() => setDeleteTarget(conv)}
                 />
               );
             })}
           </ul>
         )}
       </div>
+      <DeleteConversationDialog
+        conversation={deleteTarget}
+        pending={deletePending}
+        onCancel={() => {
+          if (deletePending) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteConversation}
+      />
     </aside>
+  );
+}
+
+function DeleteConversationDialog({
+  conversation,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  conversation: Conversation | null;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!conversation) return null;
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 px-4">
+      <div className="w-[420px] max-w-full rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-2xl">
+        <div className="text-[16px] font-semibold text-[#111]">确认删除会话？</div>
+        <div className="mt-3 text-[13px] leading-6 text-[#4B5563]">
+          你将删除会话「<span className="font-medium text-[#111]">{conversation.title}</span>」。
+          删除后，该会话及其关联的目标规划数据会从持久化存储中移除，且无法恢复。
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onCancel}
+            className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#111] hover:bg-[#F8F9FB] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onConfirm}
+            className="inline-flex h-9 items-center rounded-lg bg-[#D1242F] px-3 text-[13px] text-white hover:bg-[#B42318] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {pending ? "删除中..." : "确认删除"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

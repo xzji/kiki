@@ -12,6 +12,7 @@ type InboxStore = {
   removeItem: (id: string) => void;
   archiveItem: (id: string) => void;
   addItem: (item: InboxItem) => void;
+  upsertItem: (item: InboxItem) => void;
 };
 
 export const useInboxStore = create<InboxStore>((set) => ({
@@ -25,4 +26,8 @@ export const useInboxStore = create<InboxStore>((set) => ({
       return target ? { items: state.items.filter((item) => item.id !== id), historyItems: [{ ...target, unreadCount: 0 }, ...state.historyItems] } : state;
     }),
   addItem: (item) => set((state) => (state.items.some((current) => current.id === item.id) ? state : { items: [item, ...state.items] })),
+  upsertItem: (item) =>
+    set((state) => ({
+      items: [item, ...state.items.filter((current) => current.id !== item.id)],
+    })),
 }));

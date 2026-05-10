@@ -52,7 +52,7 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
             <Field label="子目标"><div className="rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#6B7280]">{task.subGoalId}</div></Field>
           </Section>
           <Section title="执行方式">
-            <Field label="执行类型"><select value={form.executionKind} onChange={(e) => setForm((prev) => ({ ...prev, executionKind: e.target.value as Task["executionKind"] }))} className="input"><option value="flashcard">flashcard</option><option value="listening_qa">listening_qa</option><option value="reading_digest">reading_digest</option><option value="confirm_action">confirm_action</option><option value="draft_review">draft_review</option><option value="freeform_chat">freeform_chat</option></select></Field>
+            <Field label="执行类型"><select value={form.executionKind} onChange={(e) => setForm((prev) => ({ ...prev, executionKind: e.target.value as Task["executionKind"] }))} className="input"><option value="flashcard">flashcard</option><option value="listening_qa">listening_qa</option><option value="reading_digest">reading_digest</option><option value="confirm_action">confirm_action</option><option value="draft_review">draft_review</option><option value="freeform_chat">freeform_chat</option><option value="generic_result">generic_result</option></select></Field>
             <Field label="内容区配置"><textarea value={form.payload} onChange={(e) => setForm((prev) => ({ ...prev, payload: e.target.value }))} className="h-40 w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-[#111] outline-none" /></Field>
           </Section>
           <Section title="KiKi 的建议">

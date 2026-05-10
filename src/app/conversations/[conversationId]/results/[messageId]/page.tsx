@@ -32,8 +32,8 @@ export default function ConversationResultPage({
   if (!goal || !task || !instance) return notFound();
 
   return (
-    <div className="h-screen bg-white">
-      <header className="sticky top-0 z-10 flex h-12 items-center border-b border-[#E5E7EB] bg-white px-4">
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <header className="flex h-12 shrink-0 items-center border-b border-[#E5E7EB] bg-white px-4">
         <button
           type="button"
           aria-label="关闭"
@@ -47,8 +47,10 @@ export default function ConversationResultPage({
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl px-2 py-5">
-        <ExecutionResultBody goal={goal} task={task} instance={instance} mode="result" />
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto w-full max-w-3xl px-2 py-5">
+          <ExecutionResultBody goal={goal} task={task} instance={instance} mode="result" />
+        </div>
       </main>
     </div>
   );

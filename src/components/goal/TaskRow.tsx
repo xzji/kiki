@@ -4,6 +4,7 @@ import { Check, Circle, CircleDot, Dot, Ellipsis } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
+import { runTaskExecutionAction } from "@/lib/taskExecution";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
 import type { Task } from "@/types/kiki";
@@ -12,7 +13,6 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const controlTaskExecution = useGoalStore((state) => state.controlTaskExecution);
   const deleteTask = useGoalStore((state) => state.deleteTask);
   const taskState = useMemo(() => getTaskDisplayState(task), [task]);
   const Icon = taskState === "completed" ? CircleDot : taskState === "in_progress" ? Dot : Circle;
@@ -83,7 +83,9 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  controlTaskExecution(task.id, executionAction.action);
+                  void runTaskExecutionAction(task.id, executionAction.action).catch((error) => {
+                    window.alert(error instanceof Error ? error.message : "任务执行失败");
+                  });
                 }}
                 className={cn(
                   "inline-flex shrink-0 items-center rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-xs text-[#6B7280] transition hover:border-[#111]",

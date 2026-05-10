@@ -1,6 +1,14 @@
 import type { GoalWorkflowPhase } from "@/types/kiki";
 
-export type GoalTelemetryScope = "goal_plan" | "goal_collect";
+export type GoalTelemetryScope = "goal_plan" | "goal_collect" | "goal_task_execute";
+export type GoalTaskStepEventType =
+  | "phase_started"
+  | "tool_call_started"
+  | "tool_call_finished"
+  | "assistant_output"
+  | "retry_scheduled"
+  | "await_user"
+  | "result_ready";
 
 export type GoalProgressStatus = "running" | "completed" | "failed";
 
@@ -14,6 +22,12 @@ export type GoalServerProgress = {
   updatedAt: string;
   finishedAt?: string;
   error?: string;
+  goalId?: string;
+  taskId?: string;
+  taskInstanceId?: string;
+  attemptCount?: number;
+  summary?: string;
+  resultPayload?: Record<string, unknown> | null;
 };
 
 export type GoalServerLogLevel = "info" | "warn" | "error";
@@ -27,6 +41,12 @@ export type GoalServerLogEntry = {
   phase?: GoalWorkflowPhase;
   message: string;
   details?: string;
+  eventType?: GoalTaskStepEventType;
+  goalId?: string;
+  taskId?: string;
+  taskInstanceId?: string;
+  toolName?: string;
+  status?: "pending" | "running" | "completed" | "failed" | "awaiting_user";
 };
 
 export type GoalServerLogsResponse = {

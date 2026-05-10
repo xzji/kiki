@@ -17,10 +17,17 @@ const iconMap = {
   booking: Ticket,
 };
 
-function renderSnippet(snippet: string) {
+function renderSnippet(snippet: string, unread: boolean) {
   return snippet.split(/(\[需要作答\]|\[需要确认\])/g).map((part, index) => {
     if (part === "[需要作答]" || part === "[需要确认]") {
-      return <span key={`${part}-${index}`} className="text-[#E5484D]">{part}</span>;
+      return (
+        <span
+          key={`${part}-${index}`}
+          className={unread ? "text-[#E5484D]" : "text-[#6B7280]"}
+        >
+          {part}
+        </span>
+      );
     }
     return <span key={`${part}-${index}`}>{part}</span>;
   });
@@ -66,7 +73,7 @@ export function InboxCard({ item }: { item: InboxItem }) {
               {unread ? (
                 <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#E5484D]" />
               ) : null}
-              <p className="line-clamp-1 text-xs text-[#6B7280]">{renderSnippet(item.snippet)}</p>
+              <p className="line-clamp-1 text-xs text-[#6B7280]">{renderSnippet(item.snippet, unread)}</p>
             </div>
           ) : null}
         </button>
@@ -78,7 +85,7 @@ export function InboxCard({ item }: { item: InboxItem }) {
               <div className="min-w-0 flex-1">
                 <div className="mb-1 text-[13px] font-medium text-[#1F2328]">KiKi</div>
                 <div className="whitespace-pre-wrap text-sm leading-6 text-[#374151]">
-                  {taskContext?.instance.intro ?? item.snippet}
+                  {taskContext?.instance.notification?.userMessage ?? taskContext?.instance.intro ?? item.snippet}
                 </div>
               </div>
             </div>

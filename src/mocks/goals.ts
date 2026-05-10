@@ -6,7 +6,10 @@ import type {
   ExecutionPayload,
   Goal,
   GoalBreakdownDraft,
+  InteractionRequirement,
   Task,
+  TaskCollaborationContract,
+  TaskExecutionStep,
   TaskInstance,
 } from "@/types/kiki";
 
@@ -54,7 +57,109 @@ function payloadFor(kind: ExecutionKind): ExecutionPayload {
       return { kind, drafts: emailDrafts };
     case "freeform_chat":
       return { kind, seed: "我会继续基于你的长期目标，把下一步拆成更具体的行动。" };
+    case "generic_result":
+      return { kind, summary: "已生成本轮任务结果。", details: "查看执行链路获取更多上下文。" };
   }
+}
+
+function statusToPhase(status: TaskInstance["status"]) {
+  if (status === "completed") return "completed" as const;
+  if (status === "awaiting_user") return "awaiting_user" as const;
+  if (status === "paused") return "failed" as const;
+  if (status === "error") return "failed" as const;
+  if (status === "in_progress") return "running" as const;
+  return "queued" as const;
+}
+
+function collaborationFor(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationContract {
+  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
+    return {
+      mode: "agent_user_collaborative",
+      agentResponsibilities: [description, "准备练习内容并给出反馈"],
+      userResponsibilities: ["完成作答或互动"],
+      userInteractionType: "answer",
+      userInteractionTiming: "core_task_step",
+      userFacingActionLabel: "开始作答",
+      shouldNotifyUser: true,
+      completionOwner: "shared",
+      completionDefinition: expectedOutcome,
+    };
+  }
+  if (kind === "confirm_action" || kind === "draft_review") {
+    return {
+      mode: "agent_with_user_confirmation",
+      agentResponsibilities: [description, "生成可供用户确认或修改的方案"],
+      userResponsibilities: ["确认结果或提出修改建议"],
+      userInteractionType: "confirm",
+      userInteractionTiming: "after_agent_output",
+      userFacingActionLabel: "确认或提出修改建议",
+      shouldNotifyUser: true,
+      completionOwner: "agent",
+      completionDefinition: expectedOutcome,
+    };
+  }
+  return {
+    mode: "agent_autonomous",
+    agentResponsibilities: [description, "自主完成并沉淀结果"],
+    userResponsibilities: [],
+    userInteractionType: "none",
+    userInteractionTiming: "not_required",
+    userFacingActionLabel: "查看结果",
+    shouldNotifyUser: kind === "reading_digest",
+    completionOwner: "agent",
+    completionDefinition: expectedOutcome,
+  };
+}
+
+function interactionFor(kind: ExecutionKind, reason: string): InteractionRequirement {
+  const collaboration = collaborationFor(kind, reason, reason);
+  const type =
+    collaboration.userInteractionType === "perform_offline_action"
+      ? "perform_offline_action"
+      : collaboration.userInteractionType;
+  return {
+    type,
+    timing: collaboration.userInteractionTiming,
+    reason,
+    suggestedActions:
+      type === "answer"
+        ? ["开始作答", "查看练习内容"]
+        : type === "confirm"
+          ? ["确认结果", "提出修改建议"]
+          : type === "provide_context"
+            ? ["补充信息"]
+            : undefined,
+    shouldNotifyUser: collaboration.shouldNotifyUser,
+  };
+}
+
+function buildInitialTimeline(
+  taskId: string,
+  createdAt: string,
+  status: TaskInstance["status"],
+  intro: string,
+): TaskExecutionStep[] {
+  const phaseStatus = status === "pending" ? "pending" : status === "awaiting_user" ? "awaiting_user" : status === "completed" ? "completed" : status === "in_progress" ? "running" : "failed";
+  return [
+    {
+      id: `${taskId}-phase-queued`,
+      title: "任务进入队列",
+      type: "phase",
+      status: status === "pending" ? "running" : "completed",
+      detail: "调度器已生成任务实例，等待 Agent 接手。",
+      startedAt: createdAt,
+      finishedAt: status === "pending" ? undefined : createdAt,
+    },
+    {
+      id: `${taskId}-phase-main`,
+      title: status === "completed" ? "Agent 已完成执行" : status === "awaiting_user" ? "Agent 等待用户参与" : status === "in_progress" ? "Agent 正在执行" : "Agent 执行暂停",
+      type: "phase",
+      status: phaseStatus,
+      detail: intro,
+      startedAt: createdAt,
+      finishedAt: status === "completed" ? createdAt : undefined,
+    },
+  ];
 }
 
 function instance(
@@ -66,11 +171,57 @@ function instance(
   kind: ExecutionKind,
   status: TaskInstance["status"] = "pending",
 ): TaskInstance {
-  return { id, taskId, dateLabel, status, intro, payload: payloadFor(kind), createdAt };
+  const interactionRequirement = status === "awaiting_user" ? interactionFor(kind, intro) : undefined;
+  return {
+    id,
+    taskId,
+    dateLabel,
+    status,
+    intro,
+    payload: payloadFor(kind),
+    createdAt,
+    runner: {
+      attemptCount: status === "pending" ? 0 : 1,
+      lastAttemptAt: status === "pending" ? undefined : createdAt,
+    },
+    execution: {
+      phase: statusToPhase(status),
+      status,
+      startedAt: status === "pending" ? undefined : createdAt,
+      finishedAt: status === "completed" ? createdAt : undefined,
+      lastUpdatedAt: createdAt,
+      errorCategory: status === "paused" || status === "error" ? "unknown" : undefined,
+    },
+    timeline: buildInitialTimeline(taskId, createdAt, status, intro),
+    result:
+      status === "completed"
+        ? {
+            summary: intro,
+            finalMessage: intro,
+          }
+        : undefined,
+    awaitingUser: interactionRequirement
+      ? {
+          reason: interactionRequirement.reason,
+          suggestedActions: interactionRequirement.suggestedActions,
+          interactionRequirement,
+        }
+      : undefined,
+  };
 }
 
 function task(data: Omit<Task, "instances"> & { instances?: TaskInstance[] }): Task {
-  return { ...data, instances: data.instances ?? [] };
+  return {
+    ...data,
+    collaboration: data.collaboration ?? collaborationFor(data.resultViewKind ?? data.executionKind, data.description, data.expectedOutcome),
+    executionStrategy:
+      data.executionStrategy ??
+      (data.executionKind === "flashcard" || data.executionKind === "listening_qa" || data.executionKind === "freeform_chat"
+        ? "hybrid"
+        : "agent_autonomous"),
+    requiresConfirmation: data.requiresConfirmation ?? (data.executionKind === "confirm_action" || data.executionKind === "draft_review"),
+    instances: data.instances ?? [],
+  };
 }
 
 export const initialGoals: Goal[] = [
@@ -113,7 +264,7 @@ export const initialGoals: Goal[] = [
             taskType: "daily_repeat",
             triggerRule: "每天 15:00 触发",
             progress: 32,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-toefl-listening",
@@ -147,7 +298,7 @@ export const initialGoals: Goal[] = [
             taskType: "daily_repeat",
             triggerRule: "每天 08:30 触发",
             progress: 64,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-toefl-summary",
@@ -158,7 +309,7 @@ export const initialGoals: Goal[] = [
             taskType: "daily_repeat",
             triggerRule: "每天 20:00 触发",
             progress: 40,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-toefl-digest",
@@ -197,9 +348,9 @@ export const initialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "今天 21:00 触发",
             progress: 100,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
             instances: [
-              instance("inst-suv-budget-0410", "task-suv-budget", "04-10", "2026-04-10T21:00:00+08:00", "我整理了你最近 3 个月的现金流和家庭用车场景，初步定在 25–35 万区间，以城市为主、偶尔长途。", "freeform_chat", "completed"),
+              instance("inst-suv-budget-0410", "task-suv-budget", "04-10", "2026-04-10T21:00:00+08:00", "我整理了你最近 3 个月的现金流和家庭用车场景，初步定在 25–35 万区间，以城市为主、偶尔长途。", "generic_result", "completed"),
             ],
           }),
           task({
@@ -269,7 +420,7 @@ export const initialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "5 月第二周周日 20:00 触发",
             progress: 0,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-suv-insurance",
@@ -394,7 +545,7 @@ export const initialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "5 月 4 日 20:00 触发",
             progress: 0,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -418,7 +569,7 @@ export const initialGoals: Goal[] = [
     createdAt: "2026-04-01T08:00:00+08:00",
     kind: "digest",
     summary: "每天早晨 9 点，KiKi 汇总昨晚到今早的 AI 行业重要动态，给你一份可速读的摘要。",
-    subGoals: [{ id: "sg-news-1", goalId: "goal-news", title: "子目标1：跟进 AI 方向的重要动态", tasks: [task({ id: "task-news-digest", subGoalId: "sg-news-1", title: "任务1：AI 行业新闻", description: "阅读并标记 3 篇和 Agent 相关的重要新闻。", expectedOutcome: "输出一份简短摘要供晚间复盘。", taskType: "daily_repeat", triggerRule: "每天 09:00 触发", progress: 86, executionKind: "reading_digest", instances: [instance("inst-news-0426", "task-news-digest", "04-26", "2026-04-26T09:00:00+08:00", "整理了 4 条 AI 行业的关键信息，OpenAI 发布多智能体协作框架位列第一。", "reading_digest", "awaiting_user")] })] }],
+    subGoals: [{ id: "sg-news-1", goalId: "goal-news", title: "子目标1：跟进 AI 方向的重要动态", tasks: [task({ id: "task-news-digest", subGoalId: "sg-news-1", title: "任务1：AI 行业新闻", description: "阅读并标记 3 篇和 Agent 相关的重要新闻。", expectedOutcome: "输出一份简短摘要供晚间复盘。", taskType: "daily_repeat", triggerRule: "每天 09:00 触发", progress: 86, executionKind: "reading_digest", instances: [instance("inst-news-0426", "task-news-digest", "04-26", "2026-04-26T09:00:00+08:00", "整理了 4 条 AI 行业的关键信息，OpenAI 发布多智能体协作框架位列第一。", "reading_digest", "completed")] })] }],
   },
   {
     id: "goal-job",
@@ -464,7 +615,7 @@ export const initialGoals: Goal[] = [
             taskType: "daily_repeat",
             triggerRule: "每天 20:30 触发",
             progress: 28,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -493,7 +644,7 @@ export const initialGoals: Goal[] = [
             taskType: "daily_repeat",
             triggerRule: "每天 11:00 触发",
             progress: 15,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-job-mail",
@@ -522,7 +673,7 @@ export const initialGoals: Goal[] = [
             taskType: "daily_repeat",
             triggerRule: "每天 22:30 触发",
             progress: 10,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-job-offer",
@@ -533,7 +684,7 @@ export const initialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "拿到首个 offer 当晚 21:00 触发",
             progress: 0,
-            executionKind: "freeform_chat",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -605,11 +756,20 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
         progress: 0,
         instances: [],
         executionKind: taskItem.executionKind,
+        resultViewKind: taskItem.resultViewKind ?? taskItem.executionKind,
+        executionStrategy: taskItem.executionStrategy ?? "agent_autonomous",
         priority: taskItem.priority,
         dependencies: taskItem.dependencies,
         executionMode: taskItem.executionMode,
         executionCycle: taskItem.executionCycle,
         expectedResult: taskItem.expectedResult,
+        executionObjective: taskItem.executionObjective ?? taskItem.description,
+        recommendedWorkingDirectory: taskItem.recommendedWorkingDirectory,
+        autoRunDisabled: taskItem.autoRunDisabled,
+        requiresConfirmation: taskItem.requiresConfirmation,
+        collaboration:
+          taskItem.collaboration ??
+          collaborationFor(taskItem.resultViewKind ?? taskItem.executionKind, taskItem.description, taskItem.expectedOutcome),
       })),
     })),
   };
@@ -623,8 +783,17 @@ export function createGeneratedInstance(task: Task, createdAt: string): TaskInst
     taskId: task.id,
     dateLabel,
     status: "pending",
-    intro: `到了 ${task.triggerRule} 的触发时间，我已经为你准备好“${task.title.replace(/^任务\d+：/, "") }”的今日内容。`,
-    payload: payloadFor(task.executionKind),
+    intro: `到了 ${task.triggerRule} 的触发时间，KiKi 已自动排队执行“${task.title.replace(/^任务\d+：/, "")}”。`,
+    payload: payloadFor(task.resultViewKind ?? task.executionKind),
     createdAt,
+    runner: {
+      attemptCount: 0,
+    },
+    execution: {
+      phase: "queued",
+      status: "pending",
+      lastUpdatedAt: createdAt,
+    },
+    timeline: buildInitialTimeline(task.id, createdAt, "pending", "等待 Agent 开始执行。"),
   };
 }

@@ -87,7 +87,7 @@ export function TaskDetailDrawer() {
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
-        <TaskDetailBody goal={goal} task={task} />
+        <TaskDetailBody task={task} />
       </div>
 
       {!assistantOpen ? (

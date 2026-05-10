@@ -2,10 +2,12 @@
 
 import { useEffect } from "react";
 
+import { startTaskRun, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
+import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
 import type { Goal, InboxItem, Task, TaskInstanceStatus } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
@@ -24,11 +26,6 @@ const OPEN_INSTANCE_STATUSES = new Set<TaskInstanceStatus>([
   "paused",
 ]);
 const SLOT_OCCUPYING_STATUSES = new Set<TaskInstanceStatus>(["pending", "in_progress", "awaiting_user"]);
-const PREPARED_RESULT_KINDS = new Set<Task["executionKind"]>([
-  "reading_digest",
-  "confirm_action",
-  "draft_review",
-]);
 
 type ReadyTask = {
   goal: Goal;
@@ -54,58 +51,8 @@ function getTaskIconType(task: Task): InboxItem["iconType"] {
   }
 }
 
-function getTaskBadge(task: Task): InboxItem["badge"] {
-  switch (task.executionKind) {
-    case "confirm_action":
-    case "draft_review":
-      return "need_confirm";
-    case "flashcard":
-    case "listening_qa":
-    case "freeform_chat":
-      return "need_answer";
-    default:
-      return null;
-  }
-}
-
-function taskDisplayTitle(goal: Goal, task: Task) {
-  return `${task.title.replace(/^任务\d+：/, "")} - ${goal.title}`;
-}
-
 function buildTaskLink(goalId: string, taskId: string, instanceId: string) {
   return `/goals/${goalId}/tasks/${taskId}?view=exec&instanceId=${instanceId}`;
-}
-
-function buildInboxSnippet(task: Task) {
-  switch (task.executionKind) {
-    case "confirm_action":
-      return "[需要确认] KiKi 已准备好建议方案，等待你确认是否执行。";
-    case "draft_review":
-      return "[需要确认] KiKi 已准备好草稿，等你审阅后发送。";
-    case "reading_digest":
-      return "KiKi 已整理好本轮阅读摘要，可以直接查看结果。";
-    case "flashcard":
-      return "KiKi 已生成本轮记忆卡片，开始后即可进入练习。";
-    case "listening_qa":
-      return "KiKi 已准备好本轮听力问答，开始后即可作答。";
-    case "freeform_chat":
-      return "KiKi 已准备好对话引导，等待你进入本轮执行。";
-    default:
-      return "KiKi 已启动一个新的目标任务。";
-  }
-}
-
-function buildConversationContent(task: Task) {
-  switch (task.executionKind) {
-    case "confirm_action":
-      return `我已推进任务「${task.title.replace(/^任务\d+：/, "")}」，现在需要你确认下一步。`;
-    case "draft_review":
-      return `我已生成任务「${task.title.replace(/^任务\d+：/, "")}」的草稿，等你审阅。`;
-    case "reading_digest":
-      return `我已整理好任务「${task.title.replace(/^任务\d+：/, "")}」的结果摘要。`;
-    default:
-      return `我已启动任务「${task.title.replace(/^任务\d+：/, "")}」，点击卡片查看并继续执行。`;
-  }
 }
 
 function buildScheduleEvent(goal: Goal, task: Task, instanceId: string, startedAt: Date): AgentEvent {
@@ -220,19 +167,116 @@ function getReadyTasks(goals: Goal[]) {
   return ready.sort((left, right) => right.priorityScore - left.priorityScore);
 }
 
-function buildInboxItem(goal: Goal, task: Task, instanceId: string, createdAt: string): InboxItem {
+function buildResultInboxItem(input: {
+  goal: Goal;
+  task: Task;
+  instanceId: string;
+  createdAt: string;
+}): InboxItem | null {
+  const instance = input.task.instances.find((entry) => entry.id === input.instanceId);
+  const notification = instance?.notification;
+  if (!notification?.shouldNotify) return null;
   return {
-    id: `inbox-${instanceId}`,
-    iconType: getTaskIconType(task),
-    title: taskDisplayTitle(goal, task),
-    snippet: buildInboxSnippet(task),
-    badge: getTaskBadge(task),
+    id: `inbox-${input.instanceId}`,
+    iconType: getTaskIconType(input.task),
+    title: notification.title,
+    snippet: notification.snippet,
+    badge: notification.badge ?? null,
     unreadCount: 1,
-    timeLabel: formatLocalTime(new Date(createdAt)),
-    linkTo: buildTaskLink(goal.id, task.id, instanceId),
-    goalId: goal.id,
-    createdAt,
+    timeLabel: formatLocalTime(new Date(notification.createdAt || input.createdAt)),
+    linkTo: buildTaskLink(input.goal.id, input.task.id, input.instanceId),
+    goalId: input.goal.id,
+    createdAt: notification.createdAt || input.createdAt,
   };
+}
+
+function shouldDeliverToInbox(channel: NonNullable<Task["instances"][number]["notification"]>["channel"]) {
+  return channel === "inbox" || channel === "both";
+}
+
+function shouldDeliverToConversation(channel: NonNullable<Task["instances"][number]["notification"]>["channel"]) {
+  return channel === "conversation" || channel === "both";
+}
+
+function canDeliverNotification(instance: Task["instances"][number]) {
+  const notification = instance.notification;
+  if (!notification?.shouldNotify || notification.deliveryState !== "pending") return false;
+  if (notification.notificationType === "silent_archive") return false;
+  if (notification.notificationType === "result_ready" || notification.notificationType === "digest_ready") {
+    return instance.status === "completed";
+  }
+  if (notification.notificationType === "answer_required" || notification.notificationType === "context_required") {
+    return instance.status === "awaiting_user" || instance.status === "completed";
+  }
+  if (notification.notificationType === "action_required") {
+    return instance.awaitingUser?.interactionRequirement?.type === "confirm" || instance.status === "completed";
+  }
+  return false;
+}
+
+function deliverPendingTaskNotifications(goals: Goal[]) {
+  const inboxStore = useInboxStore.getState();
+  const conversationStore = useConversationStore.getState();
+  const goalStore = useGoalStore.getState();
+
+  for (const goal of goals) {
+    for (const subGoal of goal.subGoals) {
+      for (const task of subGoal.tasks) {
+        for (const instance of task.instances) {
+          const notification = instance.notification;
+          if (!notification || !canDeliverNotification(instance)) continue;
+
+          const inboxItem = shouldDeliverToInbox(notification.channel)
+            ? buildResultInboxItem({
+                goal,
+                task,
+                instanceId: instance.id,
+                createdAt: notification.createdAt,
+              })
+            : null;
+          if (inboxItem) {
+            inboxStore.upsertItem(inboxItem);
+          }
+
+          const messageId = notification.conversationMessageId || `msg-task-${instance.id}`;
+          if (goal.conversationId && shouldDeliverToConversation(notification.channel)) {
+            const conversation = conversationStore.conversations.find((entry) => entry.id === goal.conversationId);
+            const nextMessage = {
+              id: messageId,
+              kind: "task_card" as const,
+              role: "kiki" as const,
+              content: notification.userMessage,
+              createdAt: notification.createdAt,
+              unread: true,
+              status: "done" as const,
+              source: "system" as const,
+              taskRef: {
+                goalId: goal.id,
+                subGoalId: subGoal.id,
+                taskId: task.id,
+                instanceId: instance.id,
+              },
+            };
+            if (conversation?.messages.some((message) => message.id === messageId)) {
+              conversationStore.updateMessage(goal.conversationId, messageId, (message) =>
+                message.kind === "task_card" ? { ...message, ...nextMessage } : message,
+              );
+            } else {
+              conversationStore.appendMessage(goal.conversationId, nextMessage);
+            }
+          }
+
+          goalStore.markTaskNotificationDelivered({
+            taskId: task.id,
+            instanceId: instance.id,
+            inboxItemId: inboxItem?.id,
+            conversationMessageId:
+              goal.conversationId && shouldDeliverToConversation(notification.channel) ? messageId : undefined,
+          });
+        }
+      }
+    }
+  }
 }
 
 function buildReminderItem(input: {
@@ -303,12 +347,14 @@ function runExecutionWatchdogs(goals: Goal[]) {
 
 function runGoalSchedulerCycle() {
   const goalStore = useGoalStore.getState();
+  const runtimeEnv = useRuntimeEnvStore.getState().getActiveEnvironment();
   const activeGoals = goalStore.goals.filter(
     (goal) =>
       goal.workflow?.planDecision === "confirmed" &&
       (goal.workflow.phase === "executing" || goal.workflow.phase === "monitoring"),
   );
   if (activeGoals.length === 0) return;
+  if (!runtimeEnv || runtimeEnv.type !== "local") return;
 
   runExecutionWatchdogs(activeGoals);
 
@@ -333,57 +379,66 @@ function runGoalSchedulerCycle() {
     return;
   }
 
-  const inboxStore = useInboxStore.getState();
   const scheduleStore = useScheduleStore.getState();
-  const conversationStore = useConversationStore.getState();
 
   for (const item of tasksToLaunch) {
     const instance = goalStore.generateInstance(item.task.id, nowIso);
     if (!instance) continue;
-
-    const nextStatus: TaskInstanceStatus = PREPARED_RESULT_KINDS.has(item.task.executionKind)
-      ? "awaiting_user"
-      : "pending";
-    goalStore.markInstanceStatus(item.task.id, instance.id, nextStatus);
 
     const latestTask = useGoalStore
       .getState()
       .goals.flatMap((goal) => goal.subGoals.flatMap((subGoal) => subGoal.tasks))
       .find((task) => task.id === item.task.id);
     const latestInstance = latestTask?.instances.find((entry) => entry.id === instance.id) ?? instance;
-
-    const inboxItem = buildInboxItem(item.goal, item.task, latestInstance.id, latestInstance.createdAt);
-    if (!inboxStore.items.some((entry) => entry.id === inboxItem.id)) {
-      inboxStore.addItem(inboxItem);
-    }
+    const latestGoal = useGoalStore.getState().goals.find((goal) => goal.id === item.goal.id) ?? item.goal;
+    const latestSubGoal = latestGoal.subGoals.find((subGoal) => subGoal.id === item.subGoalId);
+    const effectiveTask = latestSubGoal?.tasks.find((task) => task.id === item.task.id) ?? latestTask ?? item.task;
+    if (!latestSubGoal) continue;
 
     const scheduleEvent = buildScheduleEvent(item.goal, item.task, latestInstance.id, now);
     if (!scheduleStore.events.some((event) => event.id === scheduleEvent.id)) {
       scheduleStore.addEvent(scheduleEvent);
     }
 
-    if (item.goal.conversationId) {
-      const conversation = conversationStore.conversations.find((entry) => entry.id === item.goal.conversationId);
-      const messageId = `msg-task-${latestInstance.id}`;
-      if (conversation && !conversation.messages.some((message) => message.id === messageId)) {
-        conversationStore.appendMessage(item.goal.conversationId, {
-          id: messageId,
-          kind: "task_card",
-          role: "kiki",
-          content: buildConversationContent(item.task),
-          createdAt: latestInstance.createdAt,
-          unread: true,
-          status: "done",
-          source: "system",
-          taskRef: {
-            goalId: item.goal.id,
-            subGoalId: item.subGoalId,
-            taskId: item.task.id,
-            instanceId: latestInstance.id,
+    void (async () => {
+      try {
+        const run = await startTaskRun({
+          goal: latestGoal,
+          subGoal: latestSubGoal,
+          task: effectiveTask,
+          instance: latestInstance,
+          runtimeEnv,
+        });
+        useGoalStore.getState().startTaskInstanceRun({
+          taskId: effectiveTask.id,
+          instanceId: latestInstance.id,
+          requestId: run.requestId,
+          runtimeEnvId: runtimeEnv.id,
+          permissionMode: runtimeEnv.permissionMode,
+          workingDirectory: effectiveTask.recommendedWorkingDirectory || runtimeEnv.workingDirectory,
+        });
+        const result = await waitForTaskRunCompletion({
+          requestId: run.requestId,
+          taskInstanceId: latestInstance.id,
+          onProgress: (payload) => {
+            useGoalStore.getState().syncTaskInstanceRun({
+              taskId: effectiveTask.id,
+              instanceId: latestInstance.id,
+              progress: payload.progress,
+              logs: payload.logs,
+            });
           },
         });
+        useGoalStore.getState().syncTaskInstanceRun({
+          taskId: effectiveTask.id,
+          instanceId: latestInstance.id,
+          progress: result.progress,
+          logs: result.logs,
+        });
+      } catch {
+        useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");
       }
-    }
+    })();
   }
 
   activeGoals.forEach((goal) => {
@@ -398,23 +453,31 @@ export function GoalSchedulerRuntime() {
   const hydrated = useEasterEggSettingsStore((state) => state.hydrated);
   const settings = useEasterEggSettingsStore((state) => state.settings);
   const hydrateSettings = useEasterEggSettingsStore((state) => state.hydrate);
+  const browserSchedulerEnabled = process.env.NEXT_PUBLIC_KIKI_ENABLE_BROWSER_SCHEDULER === "1";
 
   useEffect(() => {
     hydrateSettings();
   }, [hydrateSettings]);
 
   useEffect(() => {
+    if (!browserSchedulerEnabled) return;
     if (!hydrated) return;
     runGoalSchedulerCycle();
-  }, [goals, hydrated, settings.maxConcurrentTasks]);
+  }, [browserSchedulerEnabled, goals, hydrated, settings.maxConcurrentTasks]);
 
   useEffect(() => {
+    if (!hydrated) return;
+    deliverPendingTaskNotifications(goals);
+  }, [goals, hydrated]);
+
+  useEffect(() => {
+    if (!browserSchedulerEnabled) return;
     if (!hydrated) return;
     const timer = window.setInterval(() => {
       runGoalSchedulerCycle();
     }, settings.schedulerCycleIntervalMs);
     return () => window.clearInterval(timer);
-  }, [hydrated, settings.schedulerCycleIntervalMs]);
+  }, [browserSchedulerEnabled, hydrated, settings.schedulerCycleIntervalMs]);
 
   return null;
 }

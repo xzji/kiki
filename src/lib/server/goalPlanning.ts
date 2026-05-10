@@ -84,6 +84,26 @@ type TaskGenerationPayload = {
       format: "json" | "markdown" | "table" | "text" | "code" | "other";
       completion_criteria?: string;
     };
+    collaboration?: {
+      mode?:
+        | "agent_autonomous"
+        | "agent_with_user_confirmation"
+        | "agent_user_collaborative"
+        | "user_primary_agent_assistive";
+      agent_responsibilities?: string[];
+      user_responsibilities?: string[];
+      user_interaction_type?: "none" | "confirm" | "answer" | "provide_context" | "perform_offline_action";
+      user_interaction_timing?:
+        | "not_required"
+        | "before_execution"
+        | "during_execution"
+        | "after_agent_output"
+        | "core_task_step";
+      user_facing_action_label?: string;
+      should_notify_user?: boolean;
+      completion_owner?: "agent" | "user" | "shared";
+      completion_definition?: string;
+    };
     estimated_duration_minutes?: number;
   }>;
   execution_plan?: {
@@ -127,6 +147,7 @@ const allowedExecutionKinds = [
   "confirm_action",
   "draft_review",
   "freeform_chat",
+  "generic_result",
 ] as const;
 
 type GoalStageProgressHandler = (progress: {
@@ -141,6 +162,13 @@ type ClaudeRunContext = {
   phase: GoalWorkflowPhase;
   stepLabel: string;
 };
+
+function formatTimingDetails(input: Record<string, string | number | boolean | undefined>) {
+  return Object.entries(input)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+}
 
 function buildGoalClarificationPrompt(goalText: string, conversationContext?: string) {
   return `你是 KiKi 的目标澄清助手。用户刚发起一个长期目标，请先判断为了生成可靠规划，最需要补充哪些背景信息。
@@ -350,6 +378,13 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 7. execution_kind 只能是 ${allowedExecutionKinds.join("、")}
 8. 覆盖所有关键完成标准，同时避免冗余任务
 9. 每个子目标尽量生成 ${input.config.minTasksPerSubGoal}-${input.config.maxTasksPerSubGoal} 个任务，过少会导致执行不可落地，过多会导致管理成本过高
+10. 必须明确每个任务的 Agent / 用户职责分工，写入 collaboration
+
+协作模式规则:
+- agent_autonomous: Agent 可自主完成，用户只需知悉结果
+- agent_with_user_confirmation: Agent 自主产出，但需要用户确认、采纳或提出修改建议
+- agent_user_collaborative: Agent 与用户共同完成，用户作答、选择或补充是任务完成的一部分
+- user_primary_agent_assistive: 用户主要完成，Agent 负责建议、提醒、检查和记录
 
 请按 JSON 格式返回：
 {
@@ -365,7 +400,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
       "description": "详细描述",
       "execution_cycle": "once|recurring",
       "execution_mode": "standard|interactive|monitoring|event_triggered",
-      "execution_kind": "freeform_chat",
+      "execution_kind": "generic_result",
       "recurrence": "周期频率描述(仅 recurring 需要)",
       "trigger_condition": "触发条件描述(仅 event_triggered 需要)",
       "hierarchy_level": "task|sub_task|action",
@@ -377,6 +412,17 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
         "description": "预期产出描述",
         "format": "json|markdown|table|text|code|other",
         "completion_criteria": "完成判定标准"
+      },
+      "collaboration": {
+        "mode": "agent_autonomous|agent_with_user_confirmation|agent_user_collaborative|user_primary_agent_assistive",
+        "agent_responsibilities": ["Agent 负责准备、分析、生成或提醒的事项"],
+        "user_responsibilities": ["用户需要确认、作答、补充或线下完成的事项；如不需要则为空数组"],
+        "user_interaction_type": "none|confirm|answer|provide_context|perform_offline_action",
+        "user_interaction_timing": "not_required|before_execution|during_execution|after_agent_output|core_task_step",
+        "user_facing_action_label": "给用户看的动作文案，例如 查看结果 / 确认结果 / 开始作答 / 补充信息",
+        "should_notify_user": true,
+        "completion_owner": "agent|user|shared",
+        "completion_definition": "这个任务如何才算完成"
       },
       "estimated_duration_minutes": 60
     }
@@ -481,14 +527,21 @@ async function runClaudeJson(input: {
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   return new Promise<string>((resolve, reject) => {
     const startedAt = Date.now();
+    const promptChars = input.prompt.length;
     if (input.context) {
+      // #region debug-point goal-planning-latency-claude-start
       appendGoalLog({
         requestId: input.context.requestId,
         scope: input.context.scope,
         level: "info",
         phase: input.context.phase,
         message: `Claude 开始执行：${input.context.stepLabel}`,
+        details: formatTimingDetails({
+          promptChars,
+          cwd,
+        }),
       });
+      // #endregion
     }
 
     const child = spawn(cliPath, ["-p", "--output-format", "json", input.prompt], {
@@ -505,6 +558,7 @@ async function runClaudeJson(input: {
       aborted = true;
       child.kill("SIGTERM");
       if (input.context) {
+        // #region debug-point goal-planning-latency-claude-abort
         appendGoalLog({
           requestId: input.context.requestId,
           scope: input.context.scope,
@@ -512,6 +566,7 @@ async function runClaudeJson(input: {
           phase: input.context.phase,
           message: `Claude 执行被中断：${input.context.stepLabel}`,
         });
+        // #endregion
       }
       reject(new DOMException(input.abortMessage, "AbortError"));
     };
@@ -534,6 +589,7 @@ async function runClaudeJson(input: {
     child.on("error", (error) => {
       input.signal?.removeEventListener("abort", abort);
       if (input.context) {
+        // #region debug-point goal-planning-latency-claude-error
         appendGoalLog({
           requestId: input.context.requestId,
           scope: input.context.scope,
@@ -542,6 +598,7 @@ async function runClaudeJson(input: {
           message: `Claude 执行异常：${input.context.stepLabel}`,
           details: error.message,
         });
+        // #endregion
       }
       reject(error);
     });
@@ -551,6 +608,7 @@ async function runClaudeJson(input: {
       if (aborted) return;
       if (code !== 0) {
         if (input.context) {
+          // #region debug-point goal-planning-latency-claude-failed
           appendGoalLog({
             requestId: input.context.requestId,
             scope: input.context.scope,
@@ -559,19 +617,26 @@ async function runClaudeJson(input: {
             message: `Claude 执行失败：${input.context.stepLabel}`,
             details: errorOutput.trim() || input.failureMessage,
           });
+          // #endregion
         }
         reject(new Error(errorOutput.trim() || input.failureMessage));
         return;
       }
       if (input.context) {
+        // #region debug-point goal-planning-latency-claude-finished
         appendGoalLog({
           requestId: input.context.requestId,
           scope: input.context.scope,
           level: "info",
           phase: input.context.phase,
           message: `Claude 执行完成：${input.context.stepLabel}`,
-          details: `耗时 ${Date.now() - startedAt}ms`,
+          details: formatTimingDetails({
+            elapsedMs: Date.now() - startedAt,
+            promptChars,
+            outputChars: output.length,
+          }),
         });
+        // #endregion
       }
       resolve(output);
     });
@@ -688,33 +753,85 @@ async function parseClaudeJson<T>(input: {
   errorMessage: string;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
+  context?: ClaudeRunContext;
 }) {
+  const parseStartedAt = Date.now();
   const primary = stripJsonFences(extractTextFromPayload(input.raw));
   const candidates = [
-    primary,
-    extractBalancedJsonSnippet(primary),
-    repairCommonJsonIssues(primary),
-    repairCommonJsonIssues(extractBalancedJsonSnippet(primary)),
+    { label: "primary", value: primary },
+    { label: "balanced", value: extractBalancedJsonSnippet(primary) },
+    { label: "common_repair", value: repairCommonJsonIssues(primary) },
+    { label: "balanced_common_repair", value: repairCommonJsonIssues(extractBalancedJsonSnippet(primary)) },
   ];
 
   let lastError: unknown = null;
 
   for (const candidate of candidates) {
-    if (!candidate) continue;
+    if (!candidate.value) continue;
     try {
-      return input.validator(JSON.parse(candidate) as unknown);
+      const parsed = input.validator(JSON.parse(candidate.value) as unknown);
+      if (input.context) {
+        // #region debug-point goal-planning-latency-parse-hit
+        appendGoalLog({
+          requestId: input.context.requestId,
+          scope: input.context.scope,
+          level: "info",
+          phase: input.context.phase,
+          message: `JSON 解析命中：${input.context.stepLabel}`,
+          details: formatTimingDetails({
+            strategy: candidate.label,
+            elapsedMs: Date.now() - parseStartedAt,
+            rawChars: primary.length,
+          }),
+        });
+        // #endregion
+      }
+      return parsed;
     } catch (error) {
       lastError = error;
     }
   }
 
   try {
+    if (input.context) {
+      // #region debug-point goal-planning-latency-parse-repair-start
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: "warn",
+        phase: input.context.phase,
+        message: `JSON 解析进入 Claude 修复：${input.context.stepLabel}`,
+        details: formatTimingDetails({
+          elapsedMs: Date.now() - parseStartedAt,
+          rawChars: primary.length,
+        }),
+      });
+      // #endregion
+    }
     const repaired = await repairMalformedJsonWithClaude({
       runtimeEnv: input.runtimeEnv,
       malformedJson: primary,
       signal: input.signal,
     });
-    return input.validator(JSON.parse(repairCommonJsonIssues(extractBalancedJsonSnippet(repaired))) as unknown);
+    const parsed = input.validator(JSON.parse(repairCommonJsonIssues(extractBalancedJsonSnippet(repaired))) as unknown);
+    if (input.context) {
+      // #region debug-point goal-planning-latency-parse-repair-finished
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: "info",
+        phase: input.context.phase,
+        message: `JSON 修复完成：${input.context.stepLabel}`,
+        details: formatTimingDetails({
+          strategy: "claude_repair",
+          elapsedMs: Date.now() - parseStartedAt,
+          rawChars: primary.length,
+          repairedChars: repaired.length,
+        }),
+      });
+      // #endregion
+    }
+    return parsed;
   } catch (error) {
     lastError = error;
   }
@@ -936,6 +1053,7 @@ function validateTaskGeneration(value: unknown): TaskGenerationPayload {
             ? expectedOutput.completion_criteria.trim()
             : undefined,
       },
+      collaboration: normalizeTaskCollaborationPayload(task),
       estimated_duration_minutes:
         typeof task.estimated_duration_minutes === "number"
           ? task.estimated_duration_minutes
@@ -1050,19 +1168,188 @@ function extractStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function inferUserInteractionType(task: Pick<TaskGenerationPayload["tasks"][number], "execution_mode" | "expected_output" | "execution_kind">) {
+  const kind = task.execution_kind;
+  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") return "answer";
+  if (kind === "confirm_action" || kind === "draft_review") return "confirm";
+  if (task.expected_output.type === "decision" || task.expected_output.type === "confirmation") return "confirm";
+  if (task.expected_output.type === "action" && task.execution_mode === "interactive") return "perform_offline_action";
+  if (task.execution_mode === "interactive") return "confirm";
+  return "none";
+}
+
+function inferCollaborationMode(
+  interactionType: NonNullable<TaskGenerationPayload["tasks"][number]["collaboration"]>["user_interaction_type"],
+) {
+  if (interactionType === "answer" || interactionType === "provide_context") return "agent_user_collaborative";
+  if (interactionType === "perform_offline_action") return "user_primary_agent_assistive";
+  if (interactionType === "confirm") return "agent_with_user_confirmation";
+  return "agent_autonomous";
+}
+
+function normalizeTaskCollaborationPayload(
+  task: Record<string, unknown> & {
+    execution_mode?: unknown;
+    execution_kind?: unknown;
+    expected_output?: unknown;
+  },
+): TaskGenerationPayload["tasks"][number]["collaboration"] {
+  const expectedOutput = isObject(task.expected_output) ? task.expected_output : {};
+  const normalizedExpectedOutputType: TaskGenerationPayload["tasks"][number]["expected_output"]["type"] =
+    expectedOutput.type === "deliverable" ||
+    expectedOutput.type === "decision" ||
+    expectedOutput.type === "action" ||
+    expectedOutput.type === "confirmation"
+      ? expectedOutput.type
+      : "information";
+  const normalizedExecutionMode: TaskGenerationPayload["tasks"][number]["execution_mode"] =
+    task.execution_mode === "interactive" ||
+    task.execution_mode === "monitoring" ||
+    task.execution_mode === "event_triggered"
+      ? task.execution_mode
+      : "standard";
+  const normalizedTask = {
+    execution_mode: normalizedExecutionMode,
+    execution_kind: typeof task.execution_kind === "string" ? task.execution_kind.trim() : undefined,
+    expected_output: {
+      type: normalizedExpectedOutputType,
+      description: typeof expectedOutput.description === "string" ? expectedOutput.description.trim() : "任务交付物",
+      format: "text" as const,
+    },
+  };
+  const raw = isObject(task.collaboration) ? task.collaboration : {};
+  const inferredInteractionType = inferUserInteractionType(normalizedTask);
+  const userInteractionType =
+    raw.user_interaction_type === "confirm" ||
+    raw.user_interaction_type === "answer" ||
+    raw.user_interaction_type === "provide_context" ||
+    raw.user_interaction_type === "perform_offline_action"
+      ? raw.user_interaction_type
+      : inferredInteractionType;
+  const mode =
+    raw.mode === "agent_with_user_confirmation" ||
+    raw.mode === "agent_user_collaborative" ||
+    raw.mode === "user_primary_agent_assistive" ||
+    raw.mode === "agent_autonomous"
+      ? raw.mode
+      : inferCollaborationMode(userInteractionType);
+  const userInteractionTiming =
+    raw.user_interaction_timing === "before_execution" ||
+    raw.user_interaction_timing === "during_execution" ||
+    raw.user_interaction_timing === "after_agent_output" ||
+    raw.user_interaction_timing === "core_task_step"
+      ? raw.user_interaction_timing
+      : userInteractionType === "none"
+        ? "not_required"
+        : userInteractionType === "answer" || userInteractionType === "perform_offline_action"
+          ? "core_task_step"
+          : "after_agent_output";
+  const completionOwner =
+    raw.completion_owner === "user" || raw.completion_owner === "shared" || raw.completion_owner === "agent"
+      ? raw.completion_owner
+      : mode === "agent_user_collaborative"
+        ? "shared"
+        : mode === "user_primary_agent_assistive"
+          ? "user"
+          : "agent";
+  const defaultActionLabel =
+    userInteractionType === "answer"
+      ? "开始作答"
+      : userInteractionType === "confirm"
+        ? "确认或提出修改建议"
+        : userInteractionType === "provide_context"
+          ? "补充信息"
+          : userInteractionType === "perform_offline_action"
+            ? "记录完成情况"
+            : "查看结果";
+
+  return {
+    mode,
+    agent_responsibilities: extractStringArray(raw.agent_responsibilities),
+    user_responsibilities: extractStringArray(raw.user_responsibilities),
+    user_interaction_type: userInteractionType,
+    user_interaction_timing: userInteractionTiming,
+    user_facing_action_label:
+      typeof raw.user_facing_action_label === "string" && raw.user_facing_action_label.trim()
+        ? raw.user_facing_action_label.trim()
+        : defaultActionLabel,
+    should_notify_user:
+      typeof raw.should_notify_user === "boolean" ? raw.should_notify_user : userInteractionType !== "none",
+    completion_owner: completionOwner,
+    completion_definition:
+      typeof raw.completion_definition === "string" && raw.completion_definition.trim()
+        ? raw.completion_definition.trim()
+        : `完成「${normalizedTask.expected_output.description}」`,
+  };
+}
+
 function inferExecutionKind(task: TaskGenerationPayload["tasks"][number]): DraftTask["executionKind"] {
   if (task.execution_kind && allowedExecutionKinds.includes(task.execution_kind as DraftTask["executionKind"])) {
     return task.execution_kind as DraftTask["executionKind"];
   }
   if (task.execution_mode === "monitoring") return "reading_digest";
-  if (task.execution_mode === "interactive") return "confirm_action";
+  if (task.execution_mode === "interactive") {
+    return task.expected_output.type === "deliverable" ? "draft_review" : "confirm_action";
+  }
   if (task.expected_output.type === "deliverable" && task.expected_output.format === "markdown") {
     return "draft_review";
   }
   if (task.expected_output.type === "decision" || task.expected_output.type === "confirmation") {
     return "confirm_action";
   }
-  return "freeform_chat";
+  return "generic_result";
+}
+
+function toDraftCollaboration(task: TaskGenerationPayload["tasks"][number]): NonNullable<DraftTask["collaboration"]> {
+  const collaboration = (task.collaboration ??
+    normalizeTaskCollaborationPayload(task)) as NonNullable<TaskGenerationPayload["tasks"][number]["collaboration"]>;
+  return {
+    mode: collaboration.mode ?? "agent_autonomous",
+    agentResponsibilities: collaboration.agent_responsibilities ?? [],
+    userResponsibilities: collaboration.user_responsibilities ?? [],
+    userInteractionType: collaboration.user_interaction_type ?? "none",
+    userInteractionTiming: collaboration.user_interaction_timing ?? "not_required",
+    userFacingActionLabel: collaboration.user_facing_action_label ?? "查看结果",
+    shouldNotifyUser: collaboration.should_notify_user ?? false,
+    completionOwner: collaboration.completion_owner ?? "agent",
+    completionDefinition: collaboration.completion_definition ?? `完成「${task.expected_output.description}」`,
+  };
+}
+
+function inferDraftCollaboration(task: DraftTask): NonNullable<DraftTask["collaboration"]> {
+  const userInteractionType =
+    task.resultViewKind === "flashcard" || task.resultViewKind === "listening_qa" || task.resultViewKind === "freeform_chat"
+      ? "answer"
+      : task.resultViewKind === "confirm_action" ||
+          task.resultViewKind === "draft_review" ||
+          task.expectedResult?.type === "decision" ||
+          task.expectedResult?.type === "confirmation"
+        ? "confirm"
+        : "none";
+  const mode =
+    userInteractionType === "answer"
+      ? "agent_user_collaborative"
+      : userInteractionType === "confirm"
+        ? "agent_with_user_confirmation"
+        : "agent_autonomous";
+  return {
+    mode,
+    agentResponsibilities: [task.description],
+    userResponsibilities:
+      userInteractionType === "answer"
+        ? ["完成作答或互动"]
+        : userInteractionType === "confirm"
+          ? ["确认结果或提出修改建议"]
+          : [],
+    userInteractionType,
+    userInteractionTiming:
+      userInteractionType === "answer" ? "core_task_step" : userInteractionType === "confirm" ? "after_agent_output" : "not_required",
+    userFacingActionLabel:
+      userInteractionType === "answer" ? "开始作答" : userInteractionType === "confirm" ? "确认或提出修改建议" : "查看结果",
+    shouldNotifyUser: userInteractionType !== "none",
+    completionOwner: userInteractionType === "answer" ? "shared" : "agent",
+    completionDefinition: task.expectedResult?.completionCriteria || task.expectedOutcome,
+  };
 }
 
 function inferTaskType(task: TaskGenerationPayload["tasks"][number]): DraftTask["taskType"] {
@@ -1127,6 +1414,12 @@ async function summarizeCollectedInfoWithClaude(input: {
     errorMessage: "Claude 信息摘要 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "collecting_info",
+      stepLabel: "整理背景信息",
+    },
   });
 }
 
@@ -1158,6 +1451,12 @@ async function decomposeGoalWithClaude(input: {
     errorMessage: "Claude 子目标拆解 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "decomposing",
+      stepLabel: "拆解子目标",
+    },
   });
 }
 
@@ -1194,6 +1493,12 @@ async function generateTasksForSubGoalWithClaude(input: {
     errorMessage: "Claude 任务生成 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "generating_tasks",
+      stepLabel: `为子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 生成任务：${input.subGoalName}`,
+    },
   });
 }
 
@@ -1227,6 +1532,12 @@ async function reviewTasksWithClaude(input: {
     errorMessage: "Claude 任务 review JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"}：${input.subGoalTitle}`,
+    },
   });
 }
 
@@ -1262,6 +1573,12 @@ async function buildPlanPresentationWithClaude(input: {
     errorMessage: "Claude 计划摘要 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: "生成前端展示摘要",
+    },
   });
 }
 
@@ -1277,6 +1594,7 @@ function applyTaskReview(
         return null;
       }
       const effectivePriority = reviewItem?.subGoalContribution ?? task.priority;
+      const collaboration = toDraftCollaboration(task);
       const normalizedTask: DraftTask = {
         id: `draft-task-${index + 1}`,
         title: task.title,
@@ -1285,6 +1603,13 @@ function applyTaskReview(
         taskType: inferTaskType(task),
         triggerRule: inferTriggerRule(task),
         executionKind: inferExecutionKind(task),
+        resultViewKind: inferExecutionKind(task),
+        executionStrategy:
+          collaboration.mode === "agent_user_collaborative"
+            ? "hybrid"
+            : collaboration.mode === "user_primary_agent_assistive"
+              ? "user_interactive"
+              : "agent_autonomous",
         priority: effectivePriority,
         dependencies: task.dependencies,
         executionMode: task.execution_mode,
@@ -1295,6 +1620,14 @@ function applyTaskReview(
           format: task.expected_output.format,
           completionCriteria: task.expected_output.completion_criteria,
         },
+        executionObjective: task.description,
+        recommendedWorkingDirectory: undefined,
+        autoRunDisabled: false,
+        requiresConfirmation:
+          collaboration.userInteractionType === "confirm" ||
+          task.expected_output.type === "decision" ||
+          task.expected_output.type === "confirmation",
+        collaboration,
       };
       return normalizedTask;
     })
@@ -1303,6 +1636,7 @@ function applyTaskReview(
   if (normalized.length > 0) return normalized;
 
   const firstTask = tasks[0];
+  const firstCollaboration = toDraftCollaboration(firstTask);
   return [
     {
       id: "draft-task-1",
@@ -1312,6 +1646,13 @@ function applyTaskReview(
       taskType: inferTaskType(firstTask),
       triggerRule: inferTriggerRule(firstTask),
       executionKind: inferExecutionKind(firstTask),
+      resultViewKind: inferExecutionKind(firstTask),
+      executionStrategy:
+        firstCollaboration.mode === "agent_user_collaborative"
+          ? "hybrid"
+          : firstCollaboration.mode === "user_primary_agent_assistive"
+            ? "user_interactive"
+            : "agent_autonomous",
       priority: firstTask.priority,
       dependencies: firstTask.dependencies,
       executionMode: firstTask.execution_mode,
@@ -1322,6 +1663,14 @@ function applyTaskReview(
         format: firstTask.expected_output.format,
         completionCriteria: firstTask.expected_output.completion_criteria,
       },
+      executionObjective: firstTask.description,
+      recommendedWorkingDirectory: undefined,
+      autoRunDisabled: false,
+      requiresConfirmation:
+        firstCollaboration.userInteractionType === "confirm" ||
+        firstTask.expected_output.type === "decision" ||
+        firstTask.expected_output.type === "confirmation",
+      collaboration: firstCollaboration,
     },
   ];
 }
@@ -1342,8 +1691,14 @@ function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
         throw new Error("规划中的任务字段不完整");
       }
       if (!allowedExecutionKinds.includes(task.executionKind as (typeof allowedExecutionKinds)[number])) {
-        task.executionKind = "freeform_chat";
+        task.executionKind = "generic_result";
       }
+      task.resultViewKind = task.resultViewKind ?? task.executionKind;
+      task.executionStrategy = task.executionStrategy ?? "agent_autonomous";
+      task.executionObjective = task.executionObjective ?? task.description;
+      task.autoRunDisabled = task.autoRunDisabled ?? false;
+      task.requiresConfirmation = task.requiresConfirmation ?? task.executionKind === "confirm_action";
+      task.collaboration = task.collaboration ?? inferDraftCollaboration(task);
     }
   }
   return value;
@@ -1359,11 +1714,13 @@ export async function generateGoalPlanWithClaude(input: {
   requestId?: string;
   onProgress?: GoalStageProgressHandler;
 }): Promise<GoalBreakdownDraft> {
+  const planStartedAt = Date.now();
   const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
   input.onProgress?.({
     phase: "collecting_info",
     message: "正在整理背景信息...",
   });
+  const collectedInfoStartedAt = Date.now();
   const collectedInfoSummary = input.collectedInfo?.trim()
     ? await summarizeCollectedInfoWithClaude({
         goalText: input.goalText,
@@ -1374,6 +1731,19 @@ export async function generateGoalPlanWithClaude(input: {
         requestId: input.requestId,
       })
     : buildFallbackCollectedInfoSummary(input.goalText, input.collectedInfo);
+  // #region debug-point goal-planning-latency-stage-collected-info
+  appendGoalLog({
+    requestId: input.requestId,
+    scope: "goal_plan",
+    level: "info",
+    phase: "collecting_info",
+    message: "阶段耗时：整理背景信息",
+    details: formatTimingDetails({
+      elapsedMs: Date.now() - collectedInfoStartedAt,
+      usedClaude: Boolean(input.collectedInfo?.trim()),
+    }),
+  });
+  // #endregion
 
   const userContext = {
     goalText: input.goalText,
@@ -1390,6 +1760,7 @@ export async function generateGoalPlanWithClaude(input: {
     phase: "decomposing",
     message: "正在拆解子目标...",
   });
+  const decompositionStartedAt = Date.now();
   const decomposition = await decomposeGoalWithClaude({
     goalTitle: input.goalText,
     goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
@@ -1399,6 +1770,19 @@ export async function generateGoalPlanWithClaude(input: {
     signal: input.signal,
     requestId: input.requestId,
   });
+  // #region debug-point goal-planning-latency-stage-decompose
+  appendGoalLog({
+    requestId: input.requestId,
+    scope: "goal_plan",
+    level: "info",
+    phase: "decomposing",
+    message: "阶段耗时：拆解子目标",
+    details: formatTimingDetails({
+      elapsedMs: Date.now() - decompositionStartedAt,
+      subGoalCount: decomposition.subGoals.length,
+    }),
+  });
+  // #endregion
 
   const taskPlanningSummary: Array<{
     subGoalName: string;
@@ -1413,6 +1797,7 @@ export async function generateGoalPlanWithClaude(input: {
 
   for (let subGoalIndex = 0; subGoalIndex < decomposition.subGoals.length; subGoalIndex += 1) {
     const subGoal = decomposition.subGoals[subGoalIndex];
+    const subGoalStartedAt = Date.now();
     input.onProgress?.({
       phase: "generating_tasks",
       message: `正在为子目标 ${subGoalIndex + 1}/${totalSubGoals} 生成任务：${subGoal.name}`,
@@ -1479,12 +1864,30 @@ export async function generateGoalPlanWithClaude(input: {
       ),
       tasks,
     });
+
+    // #region debug-point goal-planning-latency-stage-subgoal
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_plan",
+      level: "info",
+      phase: "reviewing_tasks",
+      message: `阶段耗时：子目标 ${subGoalIndex + 1}/${totalSubGoals}`,
+      details: formatTimingDetails({
+        subGoalName: subGoal.name,
+        elapsedMs: Date.now() - subGoalStartedAt,
+        generatedTaskCount: generatedTasks.tasks.length,
+        finalTaskCount: tasks.length,
+        uncoveredRiskCount: uncoveredRisks.length,
+      }),
+    });
+    // #endregion
   }
 
   input.onProgress?.({
     phase: "reviewing_tasks",
     message: "正在汇总规划结果...",
   });
+  const presentationStartedAt = Date.now();
   const presentation = await buildPlanPresentationWithClaude({
     goalText: input.goalText,
     collectedInfoSummary,
@@ -1494,6 +1897,32 @@ export async function generateGoalPlanWithClaude(input: {
     signal: input.signal,
     requestId: input.requestId,
   });
+  // #region debug-point goal-planning-latency-stage-presentation
+  appendGoalLog({
+    requestId: input.requestId,
+    scope: "goal_plan",
+    level: "info",
+    phase: "reviewing_tasks",
+    message: "阶段耗时：生成前端展示摘要",
+    details: formatTimingDetails({
+      elapsedMs: Date.now() - presentationStartedAt,
+    }),
+  });
+  // #endregion
+
+  // #region debug-point goal-planning-latency-stage-total
+  appendGoalLog({
+    requestId: input.requestId,
+    scope: "goal_plan",
+    level: "info",
+    phase: "presenting_plan",
+    message: "阶段耗时：目标规划总计",
+    details: formatTimingDetails({
+      elapsedMs: Date.now() - planStartedAt,
+      subGoalCount: totalSubGoals,
+    }),
+  });
+  // #endregion
 
   return validateGoalDraft({
     goalTitle: presentation.goalTitle,

@@ -14,7 +14,8 @@ type Props = {
 };
 
 const EXECUTION_OPTIONS: { value: Task["executionKind"]; label: string }[] = [
-  { value: "freeform_chat", label: "自由对话 · 和 KiKi 一起推进" },
+  { value: "generic_result", label: "Agent 执行 · KiKi 自动推进" },
+  { value: "freeform_chat", label: "补充对话 · 人工介入时使用" },
   { value: "flashcard", label: "记忆闪卡 · 生词/概念记忆" },
   { value: "listening_qa", label: "听力问答 · 含音频练习" },
   { value: "reading_digest", label: "阅读摘要 · 素材快览" },
@@ -30,7 +31,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
     expectedOutcome: "",
     taskType: "daily_repeat" as Task["taskType"],
     triggerRule: "",
-    executionKind: "freeform_chat" as Task["executionKind"],
+    executionKind: "generic_result" as Task["executionKind"],
   });
 
   useEffect(() => {
@@ -41,7 +42,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
         expectedOutcome: "",
         taskType: "daily_repeat",
         triggerRule: "",
-        executionKind: "freeform_chat",
+        executionKind: "generic_result",
       });
     }
   }, [open]);
