@@ -51,7 +51,7 @@ type ClaudeStreamOptions = {
     | { type: "status"; status: "checking" | "running" | "completed" }
     | { type: "delta"; text: string }
     | { type: "message"; content: string }
-    | { type: "tool_call"; toolName: string; summary: string }
+    | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
     | { type: "permission_request"; reason: string }
     | { type: "error"; message: string }
     | { type: "done" }) => void;
@@ -280,6 +280,8 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
                 type: "tool_call",
                 toolName: currentTool.name,
                 summary: summarizeToolCall(currentTool.name, parsedInput),
+                input: parsedInput,
+                index: eventIndex,
               });
               toolUseBlocks.delete(eventIndex);
             }

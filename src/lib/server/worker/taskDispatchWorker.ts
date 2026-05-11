@@ -65,27 +65,44 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         task: job.payload.task,
         instance: job.payload.instance,
         runtimeEnv: job.payload.runtimeEnv,
+        resumeContext: job.payload.resumeContext,
       });
 
       const latestProgress = getGoalTelemetryProgress(job.requestId ?? "");
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
+      const latestTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
+        ? job.trajectory.concat(latestProgress.resultPayload.trajectory as typeof job.trajectory).filter((step, index, all) =>
+            all.findIndex((item) => item.id === step.id) === index,
+          )
+        : job.trajectory;
+      const latestBlocker = latestProgress?.resultPayload?.blocker ?? null;
+      const nextStatus =
+        latestProgress?.status === "failed"
+          ? "failed"
+          : latestProgress?.resultPayload?.awaitingUser || latestBlocker
+            ? "awaiting_user"
+            : "completed";
       const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
         taskId: job.payload.task.id,
         instanceId: job.payload.instance.id,
         progress: latestProgress,
         logs: latestLogs,
+        trajectory: latestTrajectory,
       });
       upsertGoalsSnapshot(nextGoals);
 
       updateRuntimeJobExecution(job.id, {
-        status: "completed",
+        status: nextStatus,
         progress: latestProgress,
         logs: latestLogs,
+        trajectory: latestTrajectory,
+        blocker: latestBlocker as typeof job.blocker,
         result:
           latestProgress?.resultPayload && typeof latestProgress.resultPayload === "object"
             ? latestProgress.resultPayload
             : null,
-        finishedAt: new Date().toISOString(),
+        lastError: nextStatus === "failed" ? latestProgress?.error || "任务未达到完成标准" : undefined,
+        finishedAt: latestBlocker ? undefined : new Date().toISOString(),
         leaseOwner: undefined,
         leaseExpiresAt: undefined,
       });
@@ -97,23 +114,36 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         lastJobFinishedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      appendRuntimeDaemonLog(`任务 ${job.id} 执行完成`);
+      appendRuntimeDaemonLog(
+        nextStatus === "failed"
+          ? `任务 ${job.id} 执行失败: ${latestProgress?.error || "任务未达到完成标准"}`
+          : latestBlocker
+            ? `任务 ${job.id} 等待用户确认`
+            : `任务 ${job.id} 执行完成`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "后台任务执行失败";
       const failedJob = job.requestId ? getRuntimeJobByRequestId(job.requestId) : null;
       const latestProgress = job.requestId ? getGoalTelemetryProgress(job.requestId) : failedJob?.progress ?? null;
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
+      const latestTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
+        ? job.trajectory.concat(latestProgress.resultPayload.trajectory as typeof job.trajectory).filter((step, index, all) =>
+            all.findIndex((item) => item.id === step.id) === index,
+          )
+        : job.trajectory;
       const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
         taskId: job.payload.task.id,
         instanceId: job.payload.instance.id,
         progress: latestProgress,
         logs: latestLogs,
+        trajectory: latestTrajectory,
       });
       upsertGoalsSnapshot(nextGoals);
       updateRuntimeJobExecution(job.id, {
         status: "failed",
         progress: latestProgress,
         logs: latestLogs,
+        trajectory: latestTrajectory,
         lastError: message,
         finishedAt: new Date().toISOString(),
         leaseOwner: undefined,

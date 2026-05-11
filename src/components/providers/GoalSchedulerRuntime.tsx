@@ -201,17 +201,7 @@ function shouldDeliverToConversation(channel: NonNullable<Task["instances"][numb
 function canDeliverNotification(instance: Task["instances"][number]) {
   const notification = instance.notification;
   if (!notification?.shouldNotify || notification.deliveryState !== "pending") return false;
-  if (notification.notificationType === "silent_archive") return false;
-  if (notification.notificationType === "result_ready" || notification.notificationType === "digest_ready") {
-    return instance.status === "completed";
-  }
-  if (notification.notificationType === "answer_required" || notification.notificationType === "context_required") {
-    return instance.status === "awaiting_user" || instance.status === "completed";
-  }
-  if (notification.notificationType === "action_required") {
-    return instance.awaitingUser?.interactionRequirement?.type === "confirm" || instance.status === "completed";
-  }
-  return false;
+  return notification.channel !== "silent" && notification.notificationType !== "silent_archive";
 }
 
 function deliverPendingTaskNotifications(goals: Goal[]) {

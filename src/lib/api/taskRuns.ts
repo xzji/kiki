@@ -1,6 +1,7 @@
 import { sleep } from "@/lib/utils";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 function createTaskRequestId() {
@@ -17,11 +18,12 @@ async function getTaskRunProgress(input: { requestId?: string; taskInstanceId?: 
     cache: "no-store",
   });
   if (!response.ok) {
-    return { progress: null, logs: [] as GoalServerLogEntry[] };
+    return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[] };
   }
   return (await response.json()) as {
     progress: GoalServerProgress | null;
     logs: GoalServerLogEntry[];
+    trajectory: ExecutionTrajectoryStep[];
   };
 }
 
@@ -62,7 +64,7 @@ export async function waitForTaskRunCompletion(input: {
   requestId: string;
   taskInstanceId: string;
   signal?: AbortSignal;
-  onProgress?: (payload: { progress: GoalServerProgress | null; logs: GoalServerLogEntry[] }) => void;
+  onProgress?: (payload: { progress: GoalServerProgress | null; logs: GoalServerLogEntry[]; trajectory: ExecutionTrajectoryStep[] }) => void;
 }) {
   while (!input.signal?.aborted) {
     const state = await getTaskRunProgress({
@@ -76,7 +78,7 @@ export async function waitForTaskRunCompletion(input: {
     }
     await sleep(1000);
   }
-  return { progress: null, logs: [] as GoalServerLogEntry[] };
+  return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[] };
 }
 
 export async function fetchTaskRunProgress(input: {
@@ -85,4 +87,35 @@ export async function fetchTaskRunProgress(input: {
   signal?: AbortSignal;
 }) {
   return getTaskRunProgress(input);
+}
+
+export async function resumeTaskRun(input: {
+  taskInstanceId: string;
+  resumeToken: string;
+  approved: boolean;
+  feedback?: string;
+  action?: string;
+  fields?: Record<string, string>;
+}) {
+  const response = await fetch("/api/goals/tasks/resume", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json()) as {
+    reason?: string;
+    progress?: GoalServerProgress | null;
+    logs?: GoalServerLogEntry[];
+    trajectory?: ExecutionTrajectoryStep[];
+  };
+  if (!response.ok) {
+    throw new Error(data.reason || "任务恢复失败");
+  }
+  return {
+    progress: data.progress ?? null,
+    logs: data.logs ?? [],
+    trajectory: data.trajectory ?? [],
+  };
 }

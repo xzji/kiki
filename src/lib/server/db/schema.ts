@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 1;
+export const KIKI_DB_SCHEMA_VERSION = 3;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS runtime_jobs (
   payload_json TEXT NOT NULL,
   progress_json TEXT,
   logs_json TEXT,
+  trajectory_json TEXT,
+  blocker_json TEXT,
   result_json TEXT,
   lease_owner TEXT,
   lease_expires_at TEXT,
@@ -44,3 +46,21 @@ CREATE TABLE IF NOT EXISTS runtime_state_snapshots (
   updated_at TEXT NOT NULL
 );
 `;
+
+export const KIKI_DB_MIGRATIONS: Array<{
+  version: number;
+  sql: string;
+}> = [
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE runtime_jobs ADD COLUMN trajectory_json TEXT;
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      ALTER TABLE runtime_jobs ADD COLUMN blocker_json TEXT;
+    `,
+  },
+];

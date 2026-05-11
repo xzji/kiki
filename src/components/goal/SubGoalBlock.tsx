@@ -25,7 +25,9 @@ export function SubGoalBlock({
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
 
   const completedCount = subGoal.tasks.filter((task) => {
-    const latestStatus = task.instances[0]?.status;
+    const latest = task.instances[0];
+    const latestStatus = latest?.status;
+    if (latestStatus === "awaiting_user" || latest?.awaitingUser) return false;
     return latestStatus === "completed" || task.progress >= 100;
   }).length;
   const progress = subGoal.tasks.length === 0 ? 0 : Math.round((completedCount / subGoal.tasks.length) * 100);

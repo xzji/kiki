@@ -1,3 +1,7 @@
+import type { TaskResult } from "@/types/taskResult";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
+
 export type TaskInstanceStatus =
   | "pending"
   | "in_progress"
@@ -61,6 +65,16 @@ export type InteractionRequirement = {
   options?: string[];
   suggestedActions?: string[];
   shouldNotifyUser: boolean;
+};
+
+export type InteractionSubmission = {
+  type: InteractionRequirement["type"];
+  status: "submitted" | "confirmed" | "rejected" | "completed";
+  action: string;
+  approved?: boolean;
+  feedback?: string;
+  fields?: Record<string, string>;
+  submittedAt: string;
 };
 export type TaskExecutionPhase =
   | "queued"
@@ -162,6 +176,10 @@ export type TaskExpectedResult = {
   type: "information" | "deliverable" | "decision" | "action" | "confirmation";
   description: string;
   format: "json" | "markdown" | "table" | "text" | "code" | "other";
+  presentation?: "summary_card" | "visual_report" | "comparison_table" | "checklist" | "timeline" | "document" | "dashboard" | "handoff_package";
+  primaryFormat?: "structured_blocks" | "json" | "markdown" | "html" | "text" | "code";
+  exportableFormats?: Array<"html" | "markdown" | "json" | "text">;
+  requiredBlocks?: Array<"heading" | "paragraph" | "markdown" | "list" | "key_value" | "comparison_table" | "decision" | "callout">;
   completionCriteria?: string;
 };
 
@@ -206,15 +224,18 @@ export type TaskInstanceExecutionState = {
 export type TaskInstanceResult = {
   summary?: string;
   finalMessage?: string;
+  taskResult?: TaskResult;
   structuredOutput?: Record<string, unknown> | null;
   artifacts?: TaskRunArtifact[];
   interactionRequirement?: InteractionRequirement;
+  interactionSubmission?: InteractionSubmission;
 };
 
 export type TaskInstanceAwaitingUser = {
   reason: string;
   suggestedActions?: string[];
   interactionRequirement?: InteractionRequirement;
+  blocker?: ExecutionBlocker;
 };
 
 export type TaskResultNotificationChannel = "silent" | "inbox" | "conversation" | "both";
@@ -312,8 +333,10 @@ export type TaskInstance = {
   runner?: TaskInstanceRunnerState;
   execution?: TaskInstanceExecutionState;
   timeline?: TaskExecutionStep[];
+  trajectory?: ExecutionTrajectoryStep[];
   result?: TaskInstanceResult;
   awaitingUser?: TaskInstanceAwaitingUser;
+  blocker?: ExecutionBlocker;
   notification?: TaskInstanceNotificationState;
 };
 

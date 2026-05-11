@@ -18,8 +18,32 @@ const STATUS_LABEL: Record<TaskExecutionStep["status"], string> = {
   awaiting_user: "待确认",
 };
 
+function formatStepDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function isVisibleExecutionStep(step: TaskExecutionStep) {
+  return (
+    step.toolName !== "debug.stream_event" &&
+    !step.title.trim().startsWith("[debug]") &&
+    !step.detail?.trim().startsWith("[debug]")
+  );
+}
+
 export function TaskExecutionTimeline({ steps }: { steps: TaskExecutionStep[] }) {
-  if (steps.length === 0) {
+  const visibleSteps = steps.filter(isVisibleExecutionStep);
+
+  if (visibleSteps.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-[#F8F9FB] px-4 py-6 text-sm text-[#8C9198]">
         暂无执行链路。
@@ -29,7 +53,7 @@ export function TaskExecutionTimeline({ steps }: { steps: TaskExecutionStep[] })
 
   return (
     <div className="space-y-3">
-      {steps.map((step) => (
+      {visibleSteps.map((step) => (
         <div key={step.id} className="rounded-xl border border-[#E5E7EB] bg-white px-4 py-3.5">
           <div className="flex items-center justify-between gap-3">
             <div className="text-[13px] font-medium text-[#1F2328]">{step.title}</div>
@@ -39,8 +63,8 @@ export function TaskExecutionTimeline({ steps }: { steps: TaskExecutionStep[] })
           </div>
           {step.detail ? <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[#6B7280]">{step.detail}</p> : null}
           <div className="mt-2 text-[11px] text-[#8C9198]">
-            开始 {new Date(step.startedAt).toLocaleString("zh-CN")}
-            {step.finishedAt ? ` · 结束 ${new Date(step.finishedAt).toLocaleString("zh-CN")}` : ""}
+            开始 {formatStepDateTime(step.startedAt)}
+            {step.finishedAt ? ` · 结束 ${formatStepDateTime(step.finishedAt)}` : ""}
           </div>
         </div>
       ))}

@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
     status: "queued",
     progress: null,
     logs: [],
+    blocker: null,
     result: null,
     lastError: undefined,
     finishedAt: undefined,

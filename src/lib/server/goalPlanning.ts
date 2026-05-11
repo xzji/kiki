@@ -3,7 +3,7 @@ import { spawn } from "child_process";
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
 import { appendGoalLog } from "@/lib/server/goalTelemetry";
-import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/types/kiki";
+import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, TaskExpectedResult } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -82,6 +82,10 @@ type TaskGenerationPayload = {
       type: "information" | "deliverable" | "decision" | "action" | "confirmation";
       description: string;
       format: "json" | "markdown" | "table" | "text" | "code" | "other";
+      presentation?: NonNullable<TaskExpectedResult["presentation"]>;
+      primary_format?: NonNullable<TaskExpectedResult["primaryFormat"]>;
+      exportable_formats?: NonNullable<TaskExpectedResult["exportableFormats"]>;
+      required_blocks?: NonNullable<TaskExpectedResult["requiredBlocks"]>;
       completion_criteria?: string;
     };
     collaboration?: {
@@ -149,6 +153,35 @@ const allowedExecutionKinds = [
   "freeform_chat",
   "generic_result",
 ] as const;
+const allowedPresentations: NonNullable<TaskExpectedResult["presentation"]>[] = [
+  "summary_card",
+  "visual_report",
+  "comparison_table",
+  "checklist",
+  "timeline",
+  "document",
+  "dashboard",
+  "handoff_package",
+];
+const allowedPrimaryFormats: NonNullable<TaskExpectedResult["primaryFormat"]>[] = [
+  "structured_blocks",
+  "json",
+  "markdown",
+  "html",
+  "text",
+  "code",
+];
+const allowedExportFormats: NonNullable<TaskExpectedResult["exportableFormats"]> = ["html", "markdown", "json", "text"];
+const allowedRequiredBlocks: NonNullable<TaskExpectedResult["requiredBlocks"]> = [
+  "heading",
+  "paragraph",
+  "markdown",
+  "list",
+  "key_value",
+  "comparison_table",
+  "decision",
+  "callout",
+];
 
 type GoalStageProgressHandler = (progress: {
   phase: GoalWorkflowPhase;
@@ -192,7 +225,7 @@ JSON schema：
 }`;
 }
 
-function buildGoalInfoCollectionDecisionPrompt(input: {
+function buildGoalFollowUpQuestionsPrompt(input: {
   goalText: string;
   conversationContext?: string;
   history: GoalInfoCollectionHistoryItem[];
@@ -200,42 +233,31 @@ function buildGoalInfoCollectionDecisionPrompt(input: {
   minRounds: number;
   maxRounds: number;
 }) {
-  return `你是 KiKi 长程目标系统中的信息收集 orchestrator。你的职责是判断：现有信息是否已经足够进入目标规划；如果还不够，就继续追问 1-3 个高价值问题。
+  return `你是 KiKi 的目标信息收集助手。系统已通过代码规则决定：当前还需要继续收集一轮信息。你的唯一任务是结合目标和已收集信息，提出下一轮最有价值的补充问题。
 
 目标：
 ${input.goalText}
 
-已进行轮数：${input.answeredRounds}
-至少收集轮数：${input.minRounds}
-最多收集轮数：${input.maxRounds}
+已完成回答轮数：${input.answeredRounds}
+最小信息收集轮数：${input.minRounds}
+最大信息收集轮数：${input.maxRounds}
 
 历史问答：
 ${JSON.stringify(input.history, null, 2)}
 
 ${input.conversationContext ? `会话上下文：\n${input.conversationContext}\n` : ""}
-判断原则：
-1. 优先补齐成功标准、时间线、资源/投入、关键约束、主要风险、用户偏好。
-2. 如果信息已经足够支撑可靠规划，返回 complete。
-3. 如果还缺少关键背景，且未达到最大轮数，返回 continue，并只追问最关键的 1-3 个问题。
-4. 如果已经达到最大轮数，即使信息仍有不确定，也应总结当前已知信息并返回 complete。
-5. 问题必须自然、具体、方便用户一次性回答，避免重复追问。
-
-只能输出严格 JSON，不要包含 Markdown、代码块或额外解释。
+要求：
+1. 只能输出严格 JSON，不要包含 Markdown、代码块或额外解释。
+2. 只生成下一轮 1-3 个补充问题，不要判断是否可以进入规划。
+3. 问题必须基于“目标 + 历史问答”中仍缺失或不清楚的信息，避免重复询问已经回答过的内容。
+4. 优先补齐：成功标准、时间线、资源/投入、关键约束、主要风险、用户偏好。
+5. 问题必须具体、自然、便于用户一次性回答。
 
 JSON schema：
 {
-  "status": "continue | complete",
-  "assistantMessage": "给用户看的自然中文说明。continue 时说明为什么还需要补充；complete 时说明信息已经足够、将进入规划。",
-  "questions": ["仅在 continue 时返回 1-3 个问题"],
-  "summary": {
-    "goalDetails": "更具体的目标描述",
-    "timeline": "时间限制、截止时间、频率要求",
-    "resources": "可投入时间、预算、工具、人力、基础条件",
-    "constraints": "约束、限制、不能接受的条件",
-    "challenges": "当前障碍、风险、薄弱点",
-    "preferences": "用户偏好、优先级、风格要求",
-    "summary": "2-3 句中文摘要"
-  }
+  "questions": [
+    "结合已有回答后，下一轮最需要补充的问题"
+  ]
 }`;
 }
 
@@ -379,6 +401,9 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 8. 覆盖所有关键完成标准，同时避免冗余任务
 9. 每个子目标尽量生成 ${input.config.minTasksPerSubGoal}-${input.config.maxTasksPerSubGoal} 个任务，过少会导致执行不可落地，过多会导致管理成本过高
 10. 必须明确每个任务的 Agent / 用户职责分工，写入 collaboration
+11. 必须明确交付形式：expected_output.presentation、primary_format、exportable_formats、required_blocks 都必须填写
+12. 信息类任务（type=information）默认使用 presentation=visual_report、primary_format=structured_blocks、exportable_formats 至少包含 html，避免只交付 markdown 长文
+13. 对比/研究/攻略/方案类任务必须优先要求 comparison_table、callout、key_value 等 blocks，形成可视化报告
 
 协作模式规则:
 - agent_autonomous: Agent 可自主完成，用户只需知悉结果
@@ -411,6 +436,10 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
         "type": "information|deliverable|decision|action|confirmation",
         "description": "预期产出描述",
         "format": "json|markdown|table|text|code|other",
+        "presentation": "summary_card|visual_report|comparison_table|checklist|timeline|document|dashboard|handoff_package",
+        "primary_format": "structured_blocks|json|markdown|html|text|code",
+        "exportable_formats": ["html", "markdown"],
+        "required_blocks": ["heading", "callout", "comparison_table", "key_value"],
         "completion_criteria": "完成判定标准"
       },
       "collaboration": {
@@ -718,6 +747,8 @@ function repairCommonJsonIssues(text: string) {
     .replace(/[“”]/g, "\"")
     .replace(/[‘’]/g, "'")
     .replace(/,\s*([}\]])/g, "$1")
+    .replace(/(["\]\}\d])\s*\n\s*("[-_$a-zA-Z0-9\u4e00-\u9fa5]+":)/g, "$1,\n$2")
+    .replace(/(["\]\}\d])\s+("[-_$a-zA-Z0-9\u4e00-\u9fa5]+":)/g, "$1, $2")
     .trim();
 }
 
@@ -813,7 +844,8 @@ async function parseClaudeJson<T>(input: {
       malformedJson: primary,
       signal: input.signal,
     });
-    const parsed = input.validator(JSON.parse(repairCommonJsonIssues(extractBalancedJsonSnippet(repaired))) as unknown);
+    const repairedCandidate = repairCommonJsonIssues(extractBalancedJsonSnippet(repaired));
+    const parsed = input.validator(JSON.parse(repairedCandidate) as unknown);
     if (input.context) {
       // #region debug-point goal-planning-latency-parse-repair-finished
       appendGoalLog({
@@ -836,7 +868,17 @@ async function parseClaudeJson<T>(input: {
     lastError = error;
   }
 
-  throw new Error(lastError instanceof Error ? lastError.message : input.errorMessage);
+  if (input.context) {
+    appendGoalLog({
+      requestId: input.context.requestId,
+      scope: input.context.scope,
+      level: "error",
+      phase: input.context.phase,
+      message: `JSON 解析失败：${input.context.stepLabel}`,
+      details: lastError instanceof Error ? lastError.message : input.errorMessage,
+    });
+  }
+  throw new Error(input.errorMessage);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -860,38 +902,6 @@ function validateClarificationQuestions(value: unknown): GoalClarificationQuesti
     throw new Error("澄清问题为空");
   }
   return { questions: validQuestions };
-}
-
-function validateGoalInfoCollectionDecision(value: unknown): GoalInfoCollectionTurnDecision {
-  if (!isObject(value)) {
-    throw new Error("Claude 返回的信息收集结果不是 JSON 对象");
-  }
-  const status = value.status === "complete" ? "complete" : "continue";
-  const assistantMessage =
-    typeof value.assistantMessage === "string" && value.assistantMessage.trim()
-      ? value.assistantMessage.trim()
-      : status === "complete"
-        ? "收到，信息已经足够，我现在开始生成目标规划。"
-        : "我还需要再确认几个关键点，才能把目标规划得更准。";
-  const summary = isObject(value.summary) ? validateCollectedInfoSummary(value.summary) : undefined;
-  const questions = Array.isArray(value.questions)
-    ? value.questions
-        .filter((question): question is string => typeof question === "string")
-        .map((question) => question.trim())
-        .filter(Boolean)
-        .slice(0, 3)
-    : [];
-
-  if (status === "continue" && questions.length === 0) {
-    throw new Error("信息收集结果要求继续追问，但缺少 questions");
-  }
-
-  return {
-    status,
-    assistantMessage,
-    questions: status === "continue" ? questions : undefined,
-    summary,
-  };
 }
 
 function validateCollectedInfoSummary(value: unknown): CollectedInfoSummaryPayload {
@@ -1005,6 +1015,26 @@ function validateTaskGeneration(value: unknown): TaskGenerationPayload {
     const expectedDescription =
       typeof expectedOutput.description === "string" ? expectedOutput.description.trim() : "";
     if (!title || !description || !expectedDescription) continue;
+    const expectedType =
+      expectedOutput.type === "deliverable" ||
+      expectedOutput.type === "decision" ||
+      expectedOutput.type === "action" ||
+      expectedOutput.type === "confirmation"
+        ? expectedOutput.type
+        : "information";
+    const expectedFormat =
+      expectedOutput.format === "json" ||
+      expectedOutput.format === "markdown" ||
+      expectedOutput.format === "table" ||
+      expectedOutput.format === "code" ||
+      expectedOutput.format === "other"
+        ? expectedOutput.format
+        : "text";
+    const presentation = normalizeEnumValue(
+      expectedOutput.presentation,
+      allowedPresentations,
+      inferPresentation({ ...expectedOutput, type: expectedType, format: expectedFormat }),
+    );
     tasks.push({
       id:
         typeof task.id === "string" && task.id.trim()
@@ -1032,22 +1062,25 @@ function validateTaskGeneration(value: unknown): TaskGenerationPayload {
       priority: normalizePriority(task.priority),
       dependencies: extractStringArray(task.dependencies),
       expected_output: {
-        type:
-          expectedOutput.type === "deliverable" ||
-          expectedOutput.type === "decision" ||
-          expectedOutput.type === "action" ||
-          expectedOutput.type === "confirmation"
-            ? expectedOutput.type
-            : "information",
+        type: expectedType,
         description: expectedDescription,
-        format:
-          expectedOutput.format === "json" ||
-          expectedOutput.format === "markdown" ||
-          expectedOutput.format === "table" ||
-          expectedOutput.format === "code" ||
-          expectedOutput.format === "other"
-            ? expectedOutput.format
-            : "text",
+        format: expectedFormat,
+        presentation,
+        primary_format: normalizeEnumValue(
+          expectedOutput.primary_format,
+          allowedPrimaryFormats,
+          inferPrimaryFormat({ ...expectedOutput, format: expectedFormat }),
+        ),
+        exportable_formats: normalizeEnumArrayValue(
+          expectedOutput.exportable_formats,
+          allowedExportFormats,
+          expectedType === "information" ? ["html", "markdown"] : ["markdown"],
+        ),
+        required_blocks: normalizeEnumArrayValue(
+          expectedOutput.required_blocks,
+          allowedRequiredBlocks,
+          inferRequiredBlocks(presentation),
+        ),
         completion_criteria:
           typeof expectedOutput.completion_criteria === "string"
             ? expectedOutput.completion_criteria.trim()
@@ -1166,6 +1199,40 @@ function extractStringArray(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeEnumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+function normalizeEnumArrayValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] {
+  if (!Array.isArray(value)) return fallback;
+  const items = value
+    .filter((item): item is T => typeof item === "string" && allowed.includes(item as T));
+  return items.length ? Array.from(new Set(items)) : fallback;
+}
+
+function inferPresentation(expectedOutput: Record<string, unknown>): NonNullable<TaskExpectedResult["presentation"]> {
+  if (expectedOutput.format === "table") return "comparison_table";
+  if (expectedOutput.type === "information") return "visual_report";
+  if (expectedOutput.type === "decision" || expectedOutput.type === "confirmation") return "summary_card";
+  if (expectedOutput.type === "action") return "checklist";
+  return "document";
+}
+
+function inferPrimaryFormat(expectedOutput: Record<string, unknown>): NonNullable<TaskExpectedResult["primaryFormat"]> {
+  if (expectedOutput.format === "json") return "json";
+  if (expectedOutput.format === "code") return "code";
+  return "structured_blocks";
+}
+
+function inferRequiredBlocks(presentation: NonNullable<TaskExpectedResult["presentation"]>): NonNullable<TaskExpectedResult["requiredBlocks"]> {
+  if (presentation === "visual_report") return ["heading", "callout", "comparison_table", "key_value"];
+  if (presentation === "comparison_table") return ["heading", "comparison_table", "callout"];
+  if (presentation === "checklist") return ["heading", "list", "callout"];
+  if (presentation === "timeline") return ["heading", "list", "key_value"];
+  if (presentation === "summary_card") return ["callout", "key_value"];
+  return ["heading", "paragraph"];
 }
 
 function inferUserInteractionType(task: Pick<TaskGenerationPayload["tasks"][number], "execution_mode" | "expected_output" | "execution_kind">) {
@@ -1408,19 +1475,31 @@ async function summarizeCollectedInfoWithClaude(input: {
       stepLabel: "整理背景信息",
     },
   });
-  return parseClaudeJson({
-    raw: stdout,
-    validator: validateCollectedInfoSummary,
-    errorMessage: "Claude 信息摘要 JSON 解析失败",
-    runtimeEnv: input.runtimeEnv,
-    signal: input.signal,
-    context: {
+  try {
+    return await parseClaudeJson({
+      raw: stdout,
+      validator: validateCollectedInfoSummary,
+      errorMessage: "Claude 信息摘要 JSON 解析失败",
+      runtimeEnv: input.runtimeEnv,
+      signal: input.signal,
+      context: {
+        requestId: input.requestId,
+        scope: "goal_plan",
+        phase: "collecting_info",
+        stepLabel: "整理背景信息",
+      },
+    });
+  } catch (error) {
+    appendGoalLog({
       requestId: input.requestId,
       scope: "goal_plan",
+      level: "warn",
       phase: "collecting_info",
-      stepLabel: "整理背景信息",
-    },
-  });
+      message: "信息摘要解析失败，已使用原始回答兜底",
+      details: error instanceof Error ? error.message : "未知解析错误",
+    });
+    return buildFallbackCollectedInfoSummary(input.goalText, input.collectedInfo);
+  }
 }
 
 async function decomposeGoalWithClaude(input: {
@@ -1618,6 +1697,10 @@ function applyTaskReview(
           type: task.expected_output.type,
           description: task.expected_output.description,
           format: task.expected_output.format,
+          presentation: task.expected_output.presentation,
+          primaryFormat: task.expected_output.primary_format,
+          exportableFormats: task.expected_output.exportable_formats,
+          requiredBlocks: task.expected_output.required_blocks,
           completionCriteria: task.expected_output.completion_criteria,
         },
         executionObjective: task.description,
@@ -1661,6 +1744,10 @@ function applyTaskReview(
         type: firstTask.expected_output.type,
         description: firstTask.expected_output.description,
         format: firstTask.expected_output.format,
+        presentation: firstTask.expected_output.presentation,
+        primaryFormat: firstTask.expected_output.primary_format,
+        exportableFormats: firstTask.expected_output.exportable_formats,
+        requiredBlocks: firstTask.expected_output.required_blocks,
         completionCriteria: firstTask.expected_output.completion_criteria,
       },
       executionObjective: firstTask.description,
@@ -1963,22 +2050,110 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
     },
   });
 
-  return parseClaudeJson({
-    raw: stdout,
-    validator: validateClarificationQuestions,
-    errorMessage: "Claude 澄清问题 JSON 解析失败",
-    runtimeEnv: input.runtimeEnv,
-    signal: input.signal,
-  });
+  try {
+    return await parseClaudeJson({
+      raw: stdout,
+      validator: validateClarificationQuestions,
+      errorMessage: "Claude 澄清问题 JSON 解析失败",
+      runtimeEnv: input.runtimeEnv,
+      signal: input.signal,
+      context: {
+        requestId: input.requestId,
+        scope: "goal_collect",
+        phase: "collecting_info",
+        stepLabel: "解析澄清问题",
+      },
+    });
+  } catch (error) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_collect",
+      level: "warn",
+      phase: "collecting_info",
+      message: "澄清问题解析失败，已使用兜底问题继续",
+      details: error instanceof Error ? error.message : "未知解析错误",
+    });
+    return {
+      questions: [
+        "这个目标最重要的成功标准是什么？",
+        "你目前有哪些时间、预算、资源或偏好约束？",
+        "有没有必须避开的风险或特别想优先体验的内容？",
+      ],
+    };
+  }
 }
 
-function buildCollectedInfoTranscript(history: GoalInfoCollectionHistoryItem[]) {
-  return history
-    .map((round, index) => {
-      const questionLines = round.questions.map((question, questionIndex) => `${questionIndex + 1}. ${question}`);
-      return [`第 ${index + 1} 轮澄清问题：`, ...questionLines, "", "用户回答：", round.answer?.trim() || ""] .join("\n");
-    })
-    .join("\n\n");
+function decideGoalInfoCollectionByRounds(input: {
+  answeredRounds: number;
+  minRounds: number;
+  maxRounds: number;
+}): "continue" | "complete" {
+  if (input.answeredRounds >= input.maxRounds) {
+    return "complete";
+  }
+
+  if (input.answeredRounds >= input.minRounds) {
+    return "complete";
+  }
+
+  return "continue";
+}
+
+async function generateGoalFollowUpQuestionsWithClaude(input: {
+  goalText: string;
+  runtimeEnv: RuntimeEnvironment;
+  conversationContext?: string;
+  history: GoalInfoCollectionHistoryItem[];
+  answeredRounds: number;
+  minRounds: number;
+  maxRounds: number;
+  signal?: AbortSignal;
+  requestId?: string;
+}) {
+  const stdout = await runClaudeJson({
+    runtimeEnv: input.runtimeEnv,
+    prompt: buildGoalFollowUpQuestionsPrompt(input),
+    signal: input.signal,
+    abortMessage: "目标补充问题生成已中断",
+    failureMessage: "Claude CLI 补充问题生成失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_collect",
+      phase: "collecting_info",
+      stepLabel: `生成第 ${input.answeredRounds + 1} 轮补充问题`,
+    },
+  });
+
+  try {
+    return await parseClaudeJson({
+      raw: stdout,
+      validator: validateClarificationQuestions,
+      errorMessage: "Claude 补充问题 JSON 解析失败",
+      runtimeEnv: input.runtimeEnv,
+      signal: input.signal,
+      context: {
+        requestId: input.requestId,
+        scope: "goal_collect",
+        phase: "collecting_info",
+        stepLabel: `解析第 ${input.answeredRounds + 1} 轮补充问题`,
+      },
+    });
+  } catch (error) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_collect",
+      level: "warn",
+      phase: "collecting_info",
+      message: "补充问题解析失败，已使用兜底问题继续",
+      details: error instanceof Error ? error.message : "未知解析错误",
+    });
+    return {
+      questions: [
+        "基于你已经补充的信息，还有哪些关键约束、偏好或资源会影响目标规划？",
+        "这个目标接下来最需要 KiKi 优先保障的结果是什么？",
+      ],
+    };
+  }
 }
 
 export async function advanceGoalInfoCollectionWithClaude(input: {
@@ -1995,8 +2170,10 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
 }): Promise<GoalInfoCollectionTurnDecision> {
   const answeredRounds = input.history.filter((item) => item.answer?.trim()).length;
   const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
-  const minRounds = input.minRounds ?? config.minInfoCollectionRounds;
-  const maxRounds = input.maxRounds ?? config.maxInfoCollectionRounds;
+  const configuredMaxRounds = input.maxRounds ?? config.maxInfoCollectionRounds;
+  const maxRounds = Math.max(1, configuredMaxRounds);
+  const configuredMinRounds = input.minRounds ?? config.minInfoCollectionRounds;
+  const minRounds = Math.min(Math.max(1, configuredMinRounds), maxRounds);
 
   if (answeredRounds === 0) {
     input.onProgress?.({
@@ -2020,56 +2197,55 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
 
   input.onProgress?.({
     phase: "collecting_info",
-    message: `正在判断第 ${answeredRounds} 轮信息是否足够进入规划...`,
+    message: `正在按本地轮数规则判断第 ${answeredRounds} 轮信息收集状态...`,
   });
-  const stdout = await runClaudeJson({
-    runtimeEnv: input.runtimeEnv,
-    prompt: buildGoalInfoCollectionDecisionPrompt({
-      goalText: input.goalText,
-      conversationContext: input.conversationContext,
-      history: input.history,
+  const collectionDecision = decideGoalInfoCollectionByRounds({
+    answeredRounds,
+    minRounds,
+    maxRounds,
+  });
+  appendGoalLog({
+    requestId: input.requestId,
+    scope: "goal_collect",
+    level: "info",
+    phase: "collecting_info",
+    message: "信息收集轮数判断已使用本地规则完成",
+    details: formatTimingDetails({
       answeredRounds,
       minRounds,
       maxRounds,
+      status: collectionDecision,
     }),
-    signal: input.signal,
-    abortMessage: "目标信息收集已中断",
-    failureMessage: "Claude CLI 信息收集判断失败",
-    context: {
-      requestId: input.requestId,
-      scope: "goal_collect",
-      phase: "collecting_info",
-      stepLabel: `判断第 ${answeredRounds} 轮信息是否足够`,
-    },
   });
 
-  const decision = await parseClaudeJson({
-    raw: stdout,
-    validator: validateGoalInfoCollectionDecision,
-    errorMessage: "Claude 信息收集判断 JSON 解析失败",
-    runtimeEnv: input.runtimeEnv,
-    signal: input.signal,
-  });
-
-  if (decision.status === "complete" && !decision.summary) {
-    const transcript = buildCollectedInfoTranscript(input.history);
-    input.onProgress?.({
-      phase: "collecting_info",
-      message: "正在整理收集到的背景信息摘要...",
-    });
-    const summary = await summarizeCollectedInfoWithClaude({
-      goalText: input.goalText,
-      collectedInfo: transcript,
-      runtimeEnv: input.runtimeEnv,
-      conversationContext: input.conversationContext,
-      signal: input.signal,
-      requestId: input.requestId,
-    });
+  if (collectionDecision === "complete") {
+    const reachedMaxRounds = answeredRounds >= maxRounds;
     return {
-      ...decision,
-      summary,
+      status: "complete",
+      assistantMessage: reachedMaxRounds
+        ? `已完成 ${answeredRounds} 轮信息收集，达到当前设置的最大轮数，我会基于现有信息开始生成目标规划。`
+        : `已完成 ${answeredRounds} 轮信息收集，达到当前设置的最小轮数，我会基于现有信息开始生成目标规划。`,
     };
   }
 
-  return decision;
+  input.onProgress?.({
+    phase: "collecting_info",
+    message: `正在生成第 ${answeredRounds + 1} 轮补充问题...`,
+  });
+  const followUp = await generateGoalFollowUpQuestionsWithClaude({
+    goalText: input.goalText,
+    runtimeEnv: input.runtimeEnv,
+    conversationContext: input.conversationContext,
+    history: input.history,
+    answeredRounds,
+    minRounds,
+    maxRounds,
+    signal: input.signal,
+    requestId: input.requestId,
+  });
+  return {
+    status: "continue",
+    assistantMessage: `还需要再补充一轮关键信息，完成至少 ${minRounds} 轮收集后再进入规划。`,
+    questions: followUp.questions,
+  };
 }

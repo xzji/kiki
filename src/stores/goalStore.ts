@@ -5,12 +5,16 @@ import { persist } from "zustand/middleware";
 
 import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type {
   ExecutionPayload,
   Goal,
   GoalBreakdownDraft,
   GoalWorkflow,
+  InteractionRequirement,
+  InteractionSubmission,
   Task,
   TaskExecutionStep,
   TaskInstance,
@@ -20,6 +24,7 @@ import type {
   TaskRunErrorCategory,
   TaskResultViewKind,
 } from "@/types/kiki";
+import type { TaskResult } from "@/types/taskResult";
 
 const MOCK_BASELINE_RESET_VERSION = 1;
 
@@ -116,6 +121,27 @@ function mergeTimelineSteps(
     });
   }
   return Array.from(byId.values()).sort((left, right) => +new Date(left.startedAt) - +new Date(right.startedAt));
+}
+
+function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] | undefined): TaskExecutionStep[] | undefined {
+  if (!trajectory?.length) return undefined;
+  return trajectory.map((step) => ({
+    id: step.id,
+    title: step.title,
+    type:
+      step.type === "tool_call" || step.type === "tool_result"
+        ? "tool"
+        : step.type === "assistant"
+          ? "assistant"
+          : step.type === "result"
+            ? "result"
+            : "phase",
+    status: step.status,
+    detail: step.thought,
+    toolName: step.toolCall?.name,
+    startedAt: step.startedAt,
+    finishedAt: step.endedAt,
+  }));
 }
 
 function isNotificationDecision(value: unknown): value is TaskResultNotificationDecision {
@@ -240,8 +266,9 @@ type GoalStore = {
   deleteTask: (taskId: string) => void;
   markInstanceStatus: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
   controlTaskExecution: (taskId: string, action: "start" | "pause" | "resume") => void;
-  completeTaskInstance: (taskId: string, instanceId: string) => void;
+  completeTaskInstance: (taskId: string, instanceId: string, submission?: InteractionSubmission) => void;
   generateInstance: (taskId: string, createdAt: string) => TaskInstance | null;
+  generateRerunInstance: (taskId: string, createdAt: string) => TaskInstance | null;
   createGoalFromInput: (title: string) => Goal;
   createGoalFromDraft: (draft: GoalBreakdownDraft, options?: { conversationId?: string }) => Goal;
   deleteGoalsByConversationId: (conversationId: string) => void;
@@ -263,6 +290,7 @@ type GoalStore = {
     instanceId: string;
     progress: GoalServerProgress | null;
     logs?: GoalServerLogEntry[];
+    trajectory?: ExecutionTrajectoryStep[];
   }) => void;
   retryTaskInstanceRun: (taskId: string, instanceId: string) => void;
   stopTaskInstanceRun: (taskId: string, instanceId: string) => void;
@@ -427,7 +455,7 @@ export const useGoalStore = create<GoalStore>()(
           }),
         }));
       },
-      completeTaskInstance: (taskId, instanceId) => {
+      completeTaskInstance: (taskId, instanceId, submission) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
             ...task,
@@ -438,6 +466,17 @@ export const useGoalStore = create<GoalStore>()(
                     {
                       ...instance,
                       status: "completed",
+                      result: submission
+                        ? {
+                            ...instance.result,
+                            summary: `${submission.action}已提交`,
+                            interactionSubmission: submission,
+                            structuredOutput: {
+                              ...(instance.result?.structuredOutput ?? {}),
+                              interactionSubmission: submission,
+                            },
+                          }
+                        : instance.result,
                       execution: {
                         phase: "completed",
                         status: "completed",
@@ -466,6 +505,29 @@ export const useGoalStore = create<GoalStore>()(
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
             ...task,
             instances: [normalizeInstance(nextInstance, task), ...task.instances],
+          })),
+        }));
+        return nextInstance;
+      },
+      generateRerunInstance: (taskId, createdAt) => {
+        const found = findTaskLocation(get().goals, taskId);
+        if (!found) return null;
+        const baseInstance = createGeneratedInstance(found.task, createdAt);
+        const date = new Date(createdAt);
+        const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+        const nextInstance = normalizeInstance(
+          {
+            ...baseInstance,
+            id: `${baseInstance.id}-rerun-${date.getTime()}`,
+            dateLabel: `${baseInstance.dateLabel} 重跑 ${timeLabel}`,
+            intro: `重新执行“${found.task.title.replace(/^任务\d+：/, "")}”，KiKi 将基于当前任务要求重新产出结果。`,
+          },
+          found.task,
+        );
+        set((state) => ({
+          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
+            ...task,
+            instances: [nextInstance, ...task.instances],
           })),
         }));
         return nextInstance;
@@ -698,14 +760,18 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
-      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs }) => {
+      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs, trajectory }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => {
-            const timeline = normalizeTimelineFromLogs(logs);
+            const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
+              ? (progress.resultPayload.trajectory as ExecutionTrajectoryStep[])
+              : undefined;
+            const nextTrajectory = trajectory?.length ? trajectory : progressTrajectory;
+            const timeline = normalizeTimelineFromTrajectory(nextTrajectory) ?? normalizeTimelineFromLogs(logs);
             return {
               ...task,
               progress:
-                progress?.status === "completed"
+                progress?.status === "completed" && !progress.resultPayload?.awaitingUser
                   ? Math.min(100, Math.max(task.progress, task.progress + (defaultResultViewKind(task) === "flashcard" ? 8 : 5)))
                   : task.progress,
               instances: task.instances.map((instance) => {
@@ -722,6 +788,11 @@ export const useGoalStore = create<GoalStore>()(
                 const artifacts = Array.isArray(progress?.resultPayload?.artifacts)
                   ? (progress.resultPayload.artifacts as TaskRunArtifact[])
                   : undefined;
+                if (!progress) return instance;
+                const taskResult = progress.resultPayload?.taskResult as TaskResult | undefined;
+                const interactionRequirement = progress.resultPayload?.interactionRequirement as InteractionRequirement | undefined;
+                const interactionSubmission = progress.resultPayload?.interactionSubmission as InteractionSubmission | undefined;
+                const blocker = progress.resultPayload?.blocker as ExecutionBlocker | undefined;
                 return normalizeInstance(
                   {
                     ...instance,
@@ -756,20 +827,21 @@ export const useGoalStore = create<GoalStore>()(
                           : undefined,
                       errorMessage: nextStatus === "error" ? progress?.error : undefined,
                     },
-                    result: progress
-                      ? {
-                          summary: progress.summary || instance.result?.summary,
-                          finalMessage:
-                            typeof progress.resultPayload?.finalMessage === "string"
-                              ? progress.resultPayload.finalMessage
-                              : instance.result?.finalMessage,
-                          structuredOutput:
-                            (progress.resultPayload?.structuredOutput as Record<string, unknown> | null | undefined) ??
-                            instance.result?.structuredOutput ??
-                            null,
-                          artifacts: artifacts ?? instance.result?.artifacts,
-                        }
-                      : instance.result,
+                    result: {
+                      summary: progress.summary || instance.result?.summary,
+                      finalMessage:
+                        typeof progress.resultPayload?.finalMessage === "string"
+                          ? progress.resultPayload.finalMessage
+                          : instance.result?.finalMessage,
+                      taskResult: taskResult ?? instance.result?.taskResult,
+                      structuredOutput:
+                        (progress.resultPayload?.structuredOutput as Record<string, unknown> | null | undefined) ??
+                        instance.result?.structuredOutput ??
+                        null,
+                      artifacts: artifacts ?? instance.result?.artifacts,
+                      interactionRequirement: interactionRequirement ?? instance.result?.interactionRequirement,
+                      interactionSubmission: interactionSubmission ?? instance.result?.interactionSubmission,
+                    },
                     awaitingUser:
                       progress?.resultPayload?.awaitingUser
                         ? {
@@ -777,11 +849,15 @@ export const useGoalStore = create<GoalStore>()(
                               (progress.resultPayload?.awaitingReason as string | undefined) || "任务需要你确认下一步。",
                             suggestedActions: Array.isArray(progress.resultPayload?.suggestedActions)
                               ? (progress.resultPayload.suggestedActions as string[])
-                              : undefined,
+                              : interactionRequirement?.suggestedActions,
+                            interactionRequirement,
+                            blocker,
                           }
                         : undefined,
+                    blocker,
                     notification: normalizeNotificationFromProgress(progress, instance),
                     timeline: mergeTimelineSteps(instance.timeline, timeline),
+                    trajectory: nextTrajectory ?? instance.trajectory,
                   },
                   { ...task, resultViewKind: nextKind },
                 );

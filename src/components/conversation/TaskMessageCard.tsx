@@ -1,6 +1,7 @@
 "use client";
 
 import { buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
+import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
 import type { Task, TaskInstance } from "@/types/kiki";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
@@ -15,7 +16,7 @@ const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
 
 function stripNotificationPrefix(snippet?: string | null) {
   if (!snippet) return snippet;
-  return snippet.replace(/^\[(需要作答|需要确认|待补充)\]\s*/, "");
+  return snippet.replace(/^\[(需要作答|需要确认|待补充|待完成)\]\s*/, "");
 }
 
 function awaitingStatusLabel(instance: TaskInstance) {
@@ -43,7 +44,9 @@ export function TaskMessageCard({
   onOpen: () => void;
 }) {
   const statusLabel =
-    instance.status === "completed"
+    instance.awaitingUser
+      ? awaitingStatusLabel(instance)
+      : instance.status === "completed"
       ? "已完成"
       : instance.status === "in_progress"
         ? "进行中"
@@ -64,30 +67,33 @@ export function TaskMessageCard({
     instance.awaitingUser?.reason ||
     instance.intro;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="mt-3 block w-full rounded-xl border border-[#E5E7EB] bg-white p-5 text-left hover:border-[#111]"
-    >
-      <div className="min-w-0">
-        <div className="text-[15px] font-semibold text-[#1F2328]">
-          {buildInstanceCardTitle(task, instance)}
+    <div className="mt-3 w-full rounded-xl border border-[#E5E7EB] bg-white p-5 text-left">
+      <button type="button" onClick={onOpen} className="block w-full text-left hover:opacity-90">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-[#1F2328]">
+            {buildInstanceCardTitle(task, instance)}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+            <span>{EXECUTION_KIND_LABEL[task.resultViewKind ?? task.executionKind]}</span>
+            <span className="text-[#D0D7DE]">/</span>
+            <span>{statusLabel}</span>
+            {badgeLabel ? (
+              <>
+                <span className="text-[#D0D7DE]">/</span>
+                <span className="rounded-full bg-[#FFF3CD] px-2 py-0.5 text-[#8A6D3B]">{badgeLabel}</span>
+              </>
+            ) : null}
+          </div>
+          <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">
+            {summaryText}
+          </div>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
-          <span>{EXECUTION_KIND_LABEL[task.resultViewKind ?? task.executionKind]}</span>
-          <span className="text-[#D0D7DE]">/</span>
-          <span>{statusLabel}</span>
-          {badgeLabel ? (
-            <>
-              <span className="text-[#D0D7DE]">/</span>
-              <span className="rounded-full bg-[#FFF3CD] px-2 py-0.5 text-[#8A6D3B]">{badgeLabel}</span>
-            </>
-          ) : null}
+      </button>
+      {instance.awaitingUser ? (
+        <div className="mt-4">
+          <AwaitingUserResumePanel task={task} instance={instance} />
         </div>
-        <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">
-          {summaryText}
-        </div>
-      </div>
-    </button>
+      ) : null}
+    </div>
   );
 }

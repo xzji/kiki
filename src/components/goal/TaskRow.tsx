@@ -15,9 +15,17 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
   const [editOpen, setEditOpen] = useState(false);
   const deleteTask = useGoalStore((state) => state.deleteTask);
   const taskState = useMemo(() => getTaskDisplayState(task), [task]);
-  const Icon = taskState === "completed" ? CircleDot : taskState === "in_progress" ? Dot : Circle;
+  const Icon = taskState === "completed" ? CircleDot : taskState === "in_progress" || taskState === "awaiting_user" ? Dot : Circle;
   const statusLabel =
-    taskState === "completed" ? "已完成" : taskState === "in_progress" ? "进行中" : taskState === "paused" ? "已暂停" : "待开始";
+    taskState === "completed"
+      ? "已完成"
+      : taskState === "awaiting_user"
+        ? awaitingStatusLabel(task)
+        : taskState === "in_progress"
+          ? "进行中"
+          : taskState === "paused"
+            ? "已暂停"
+            : "待开始";
   const executionAction = getExecutionAction(task, taskState);
 
   return (
@@ -44,6 +52,8 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
           "mt-0.5 inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border",
           taskState === "completed"
             ? "border-[#1F2328] bg-[#1F2328] text-white"
+            : taskState === "awaiting_user"
+              ? "border-[#D9A441] text-[#8A6D3B]"
             : taskState === "in_progress"
               ? "border-[#1F2328] text-[#1F2328]"
               : "border-[#D0D7DE] text-transparent"
@@ -52,7 +62,16 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
         {taskState === "completed" ? (
           <Check className="h-3 w-3" />
         ) : (
-          <Icon className={cn("h-3.5 w-3.5", taskState === "in_progress" ? "fill-[#1F2328] text-[#1F2328]" : "text-[#D0D7DE]")} />
+          <Icon
+            className={cn(
+              "h-3.5 w-3.5",
+              taskState === "awaiting_user"
+                ? "fill-[#D9A441] text-[#D9A441]"
+                : taskState === "in_progress"
+                  ? "fill-[#1F2328] text-[#1F2328]"
+                  : "text-[#D0D7DE]",
+            )}
+          />
         )}
       </span>
       <div className="min-w-0 flex-1">
@@ -67,6 +86,8 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
                   "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
                   taskState === "completed"
                     ? "bg-[#E5E7EB] text-[#6B7280]"
+                    : taskState === "awaiting_user"
+                      ? "bg-[#FFF3CD] text-[#8A6D3B]"
                     : taskState === "in_progress"
                       ? "bg-[#DDE1E7] text-[#1F2328]"
                       : "bg-[#F5F6F8] text-[#8C9198]"
@@ -149,16 +170,19 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
 }
 
 function getTaskDisplayState(task: Task) {
-  const latestStatus = task.instances[0]?.status;
+  const latest = task.instances[0];
+  const latestStatus = latest?.status;
+  if (latestStatus === "awaiting_user" || latest?.awaitingUser) return "awaiting_user" as const;
   if (latestStatus === "completed" || task.progress >= 100) return "completed" as const;
   if (latestStatus === "paused") return "paused" as const;
-  if (latestStatus === "awaiting_user" || latestStatus === "in_progress") return "in_progress" as const;
+  if (latestStatus === "in_progress") return "in_progress" as const;
   if (latestStatus === "pending") return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
   return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
 }
 
 function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisplayState>) {
-  if (taskState === "completed") return null;
+  if (taskState === "completed") return { label: "重新执行", action: "rerun" as const };
+  if (taskState === "awaiting_user") return null;
   if (taskState === "in_progress") return { label: "停止", action: "pause" as const };
   if (taskState === "paused") return { label: "继续执行", action: "resume" as const };
 
@@ -170,4 +194,13 @@ function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisp
 
 function stripPrefix(value: string) {
   return value.replace(/^任务\d+：/, "");
+}
+
+function awaitingStatusLabel(task: Task) {
+  const latest = task.instances[0];
+  const type = latest?.awaitingUser?.interactionRequirement?.type ?? latest?.result?.interactionRequirement?.type;
+  if (type === "answer") return "待作答";
+  if (type === "provide_context") return "待补充";
+  if (type === "perform_offline_action") return "待线下完成";
+  return "待确认";
 }

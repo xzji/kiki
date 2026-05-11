@@ -5,7 +5,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
-type TaskExecutionAction = "start" | "pause" | "resume";
+type TaskExecutionAction = "start" | "pause" | "resume" | "rerun";
 
 export async function runTaskExecutionAction(taskId: string, action: TaskExecutionAction) {
   if (action === "pause") {
@@ -27,10 +27,13 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
   }
 
   let current = location;
-  let targetInstance = getLatestRunnableInstance(current.task);
+  let targetInstance = action === "rerun" ? null : getLatestRunnableInstance(current.task);
 
   if (!targetInstance) {
-    const created = useGoalStore.getState().generateInstance(taskId, new Date().toISOString());
+    const created =
+      action === "rerun"
+        ? useGoalStore.getState().generateRerunInstance(taskId, new Date().toISOString())
+        : useGoalStore.getState().generateInstance(taskId, new Date().toISOString());
     if (!created) {
       throw new Error("任务实例创建失败，请稍后重试。");
     }
@@ -69,6 +72,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
           instanceId: targetInstance!.id,
           progress: payload.progress,
           logs: payload.logs,
+          trajectory: payload.trajectory,
         });
       },
     })
@@ -78,6 +82,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
           instanceId: targetInstance!.id,
           progress: result.progress,
           logs: result.logs,
+          trajectory: result.trajectory,
         });
       })
       .catch((error) => {

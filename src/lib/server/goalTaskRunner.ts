@@ -1,6 +1,11 @@
 import { appendGoalLog, beginGoalTelemetry, failGoalTelemetry, finishGoalTelemetry, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
+import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
+import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
+import { validateTaskResultLocally } from "@/lib/taskResult/localValidation";
+import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type {
   Goal,
   InteractionRequirement,
@@ -11,9 +16,13 @@ import type {
   TaskRunArtifact,
   TaskRunErrorCategory,
 } from "@/types/kiki";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import type { AcceptanceReport, LocalValidationReport, TaskAcceptanceRuntimeState } from "@/types/taskAcceptance";
+import type { TaskResult } from "@/types/taskResult";
 
 import { streamClaudeCli } from "./claudeCli";
+import { getRuntimeJobByRequestId, updateRuntimeJobExecution } from "./repositories/runtimeJobsRepository";
 
 type RunGoalTaskInput = {
   requestId: string;
@@ -22,6 +31,8 @@ type RunGoalTaskInput = {
   task: Task;
   instance: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
+  resumeContext?: string;
+  initialTrajectory?: ExecutionTrajectoryStep[];
 };
 
 type DeliverableCheckStatus = "passed" | "failed" | "unknown";
@@ -47,9 +58,42 @@ type ParsedTaskRunnerResult = {
   awaitingReason?: string;
   suggestedActions?: string[];
   artifacts: TaskRunArtifact[];
+  taskResult: TaskResult | null;
   deliverableCheck: DeliverableCheck | null;
   interactionRequirement: InteractionRequirement;
+  blocker: ExecutionBlocker | null;
   structuredOutput: Record<string, unknown> | null;
+};
+
+type TaskRunAttemptResult = ParsedTaskRunnerResult & {
+  trajectory: ExecutionTrajectoryStep[];
+  rawOutput: string;
+  localValidationReport?: LocalValidationReport;
+  acceptanceReport?: AcceptanceReport;
+  acceptanceRuntime?: TaskAcceptanceRuntimeState;
+};
+
+type TaskReadinessInfoStatus = "available" | "missing_user" | "agent_retrievable" | "not_required";
+
+type TaskReadinessInfoItem = {
+  id: string;
+  label: string;
+  description: string;
+  source: "user" | "agent" | "system";
+  status: TaskReadinessInfoStatus;
+  reason: string;
+  value?: string;
+  options?: string[];
+};
+
+type TaskReadinessCheck = {
+  status: "ready" | "blocked";
+  generatedAt: string;
+  summary: string;
+  items: TaskReadinessInfoItem[];
+  missingUserInfo: TaskReadinessInfoItem[];
+  agentRetrievableInfo: TaskReadinessInfoItem[];
+  availableInfo: TaskReadinessInfoItem[];
 };
 
 function extractJsonObject(raw: string) {
@@ -77,6 +121,185 @@ function normalizeStringList(value: unknown) {
     : [];
 }
 
+function uniqueStrings(items: Array<string | undefined>) {
+  return Array.from(new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))));
+}
+
+function taskExecutionText(input: RunGoalTaskInput) {
+  return [
+    input.goal.title,
+    input.goal.summary,
+    input.subGoal.title,
+    input.task.title,
+    input.task.description,
+    input.task.executionObjective,
+    input.task.expectedOutcome,
+    input.task.expectedResult?.description,
+    input.task.expectedResult?.completionCriteria,
+    input.task.triggerRule,
+    input.instance.intro,
+    input.resumeContext,
+  ].filter(Boolean).join("\n");
+}
+
+function extractUserFeedback(input: RunGoalTaskInput) {
+  const match = input.resumeContext?.match(/用户反馈：([\s\S]+)/);
+  const feedback = match?.[1]?.trim();
+  if (!feedback) return "";
+  if (/^(补充缺失信息|补充具体信息|补充约束或偏好|说明暂时无法提供|确认继续)$/.test(feedback)) return "";
+  return feedback;
+}
+
+function hasExplicitDepartureCity(input: RunGoalTaskInput, text: string) {
+  if (extractUserFeedback(input)) return true;
+  return /出发城市[:：]\s*[\u4e00-\u9fa5A-Za-z]{2,20}|出发地[:：]\s*[\u4e00-\u9fa5A-Za-z]{2,20}|从[\u4e00-\u9fa5A-Za-z]{2,20}(?:出发|飞)|[\u4e00-\u9fa5A-Za-z]{2,20}出发/.test(text);
+}
+
+function hasDateValue(text: string) {
+  return /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}|(?:明天|后天|下周|本周|周[一二三四五六日天])/.test(text);
+}
+
+function buildTaskReadinessCheck(input: RunGoalTaskInput): TaskReadinessCheck {
+  const text = taskExecutionText(input);
+  const items: TaskReadinessInfoItem[] = [];
+  const addItem = (item: TaskReadinessInfoItem) => {
+    if (!items.some((entry) => entry.id === item.id)) items.push(item);
+  };
+
+  if (/航班|机票|飞往|往返|出发城市|出发地|从哪个城市|哪里出发/.test(text)) {
+    const userFeedback = extractUserFeedback(input);
+    const available = hasExplicitDepartureCity(input, text);
+    addItem({
+      id: "departure_city",
+      label: "出发城市",
+      description: "查询航班和价格必须先知道用户从哪个城市出发。",
+      source: "user",
+      status: available ? "available" : "missing_user",
+      reason: available ? "已在任务上下文或用户反馈中找到出发城市。" : "这是用户个人行程信息，Agent 不能自行猜测或默认选择。",
+      value: userFeedback || undefined,
+      options: ["上海", "广州", "北京", "深圳", "其他城市"],
+    });
+    addItem({
+      id: "flight_inventory",
+      label: "航班时刻与价格",
+      description: "可在具备出发城市、目的地和日期后由 Agent 查询。",
+      source: "agent",
+      status: "agent_retrievable",
+      reason: "属于公开或可检索信息，不需要用户手动提供。",
+    });
+  }
+
+  if (/出发日期|返回日期|往返日期|旅行日期|行程时间/.test(text)) {
+    addItem({
+      id: "travel_dates",
+      label: "出行日期",
+      description: "查询交通、住宿或行程安排需要明确日期范围。",
+      source: "user",
+      status: hasDateValue(text) ? "available" : "missing_user",
+      reason: hasDateValue(text) ? "已在任务上下文中找到日期。" : "日期属于用户行程约束，缺失时不能默认假设。",
+      options: ["补充出发日期", "补充返回日期", "补充完整日期范围"],
+    });
+  }
+
+  if (/预算|价格上限|费用上限|人均|总价/.test(text)) {
+    addItem({
+      id: "budget_constraint",
+      label: "预算约束",
+      description: "涉及筛选或推荐时需要知道预算边界。",
+      source: "user",
+      status: /\d+\s*(元|块|人民币|rmb|¥)/i.test(text) ? "available" : "missing_user",
+      reason: /\d+\s*(元|块|人民币|rmb|¥)/i.test(text) ? "已在任务上下文中找到预算数字。" : "预算是用户偏好，Agent 不能自行假设。",
+      options: ["补充预算上限", "暂不限制预算", "按性价比优先"],
+    });
+  }
+
+  const missingUserInfo = items.filter((item) => item.status === "missing_user" && item.source === "user");
+  const agentRetrievableInfo = items.filter((item) => item.status === "agent_retrievable");
+  const availableInfo = items.filter((item) => item.status === "available");
+  return {
+    status: missingUserInfo.length ? "blocked" : "ready",
+    generatedAt: new Date().toISOString(),
+    summary: missingUserInfo.length
+      ? `缺少 ${missingUserInfo.map((item) => item.label).join("、")}，需要用户补充后才能执行。`
+      : "执行当前任务所需的用户侧关键信息已具备。",
+    items,
+    missingUserInfo,
+    agentRetrievableInfo,
+    availableInfo,
+  };
+}
+
+function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): TaskResult {
+  const missingLabels = readiness.missingUserInfo.map((item) => item.label);
+  return {
+    schemaVersion: 1,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    title: "需要补充信息后继续",
+    status: "pending_user",
+    blocks: [
+      { kind: "callout", tone: "warn", text: "当前任务缺少用户才能提供的必要信息，KiKi 已暂停执行，没有生成基于猜测的方案。" },
+      { kind: "heading", level: 2, text: "缺失的必要信息" },
+      { kind: "list", ordered: false, items: missingLabels },
+      {
+        kind: "key_value",
+        entries: readiness.items.map((item) => ({
+          label: item.label,
+          value: `${item.status === "missing_user" ? "缺失，需用户提供" : item.status === "agent_retrievable" ? "Agent 可自行获取" : "已具备"}：${item.reason}`,
+          emphasis: item.status === "missing_user",
+        })),
+      },
+    ],
+    meta: {
+      producedAt: readiness.generatedAt,
+    },
+  };
+}
+
+function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): ParsedTaskRunnerResult {
+  const firstMissing = readiness.missingUserInfo[0];
+  const question =
+    readiness.missingUserInfo.length === 1
+      ? `请补充${firstMissing.label}，KiKi 才能继续执行「${input.task.title.replace(/^任务\d+：/, "")}」。`
+      : `请补充以下必要信息：${readiness.missingUserInfo.map((item) => item.label).join("、")}。`;
+  const options = uniqueStrings(readiness.missingUserInfo.flatMap((item) => item.options ?? [])).slice(0, 5);
+  const suggestedActions = uniqueStrings([...options, "填写其他信息"]).slice(0, 6);
+  const taskResult = buildReadinessBlockedTaskResult(input, readiness);
+  const interactionRequirement: InteractionRequirement = {
+    type: "provide_context",
+    timing: "before_execution",
+    reason: readiness.summary,
+    question,
+    options: options.length ? options : ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
+    suggestedActions,
+    shouldNotifyUser: true,
+  };
+  const deliverableCheck = buildFallbackDeliverableCheck(input, readiness.summary);
+  return {
+    summary: "需要你补充关键信息后才能继续执行。",
+    finalMessage: readiness.summary,
+    resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    awaitingUser: true,
+    awaitingReason: readiness.summary,
+    suggestedActions,
+    artifacts: [],
+    taskResult,
+    deliverableCheck: {
+      ...deliverableCheck,
+      confidence: "high",
+      missingDeliverables: readiness.missingUserInfo.map((item) => item.label),
+      gapReason: readiness.summary,
+    },
+    interactionRequirement,
+    blocker: null,
+    structuredOutput: {
+      taskReadiness: readiness,
+      taskResult,
+      interactionRequirement,
+    },
+  };
+}
+
 function normalizeDeliverableCheck(value: unknown): DeliverableCheck | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as {
@@ -100,7 +323,7 @@ function normalizeDeliverableCheck(value: unknown): DeliverableCheck | null {
   const criteriaResults = rawCriteria
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
     .map((item) => {
-      const status =
+      const status: DeliverableCheckStatus =
         item.status === "passed" || item.status === "failed" || item.status === "unknown" ? item.status : "unknown";
       return {
         criterion: typeof item.criterion === "string" && item.criterion.trim() ? item.criterion.trim() : "未命名验收标准",
@@ -171,7 +394,152 @@ function normalizeInteractionRequirement(
   };
 }
 
-function parseTaskRunnerResult(raw: string, fallbackKind: TaskResultViewKind): ParsedTaskRunnerResult {
+function textForUserInputDetection(result: ParsedTaskRunnerResult) {
+  return [
+    result.summary,
+    result.finalMessage,
+    result.awaitingReason,
+    result.interactionRequirement.reason,
+    result.interactionRequirement.question,
+    ...(result.suggestedActions ?? []),
+    ...(result.deliverableCheck?.missingDeliverables ?? []),
+    result.deliverableCheck?.gapReason,
+  ].filter(Boolean).join("\n");
+}
+
+function looksLikeMissingUserContext(result: ParsedTaskRunnerResult) {
+  if (!result.awaitingUser) return false;
+  if (result.interactionRequirement.type === "provide_context" || result.interactionRequirement.type === "answer") return true;
+  const text = textForUserInputDetection(result);
+  return /需要用户|请用户|用户确认|用户补充|补充.*信息|提供.*信息|缺少.*信息|确认.*城市|出发城市|出发地|目的地|预算|偏好|账号|登录|授权|选择|作答/.test(text);
+}
+
+function extractExampleOptions(text: string) {
+  const matches = Array.from(text.matchAll(/(?:如|例如|比如|包含|包括)[:：]?\s*([^\n。；;，,]+(?:[\/、，,][^\n。；;，,]+){1,6})/g));
+  const options = matches.flatMap((match) => match[1].split(/[\/、，,]/).map((item) => item.trim()));
+  return uniqueStrings(options)
+    .filter((item) => item.length >= 2 && item.length <= 16)
+    .slice(0, 5);
+}
+
+function defaultContextOptions(result: ParsedTaskRunnerResult) {
+  const text = textForUserInputDetection(result);
+  const exampleOptions = extractExampleOptions(text);
+  if (exampleOptions.length >= 2) return exampleOptions;
+  return ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"];
+}
+
+function normalizeBlockerLabel(value: string, index: number) {
+  return value
+    .replace(/^请(补充|确认|选择|提供)/, "")
+    .replace(/[。；;：:，,].*$/, "")
+    .trim()
+    .slice(0, 24) || `待补充信息 ${index + 1}`;
+}
+
+function buildReadinessFromUserBlockers(blockers: string[], summary: string): TaskReadinessCheck | null {
+  const uniqueBlockers = uniqueStrings(blockers);
+  if (!uniqueBlockers.length) return null;
+  const items = uniqueBlockers.map((blocker, index) => ({
+    id: `user_blocker_${index + 1}`,
+    label: normalizeBlockerLabel(blocker, index),
+    description: blocker,
+    source: "user" as const,
+    status: "missing_user" as const,
+    reason: blocker,
+    options: ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
+  }));
+  return {
+    status: "blocked",
+    generatedAt: new Date().toISOString(),
+    summary: summary || `缺少 ${items.map((item) => item.label).join("、")}，需要用户一次性补充后才能执行。`,
+    items,
+    missingUserInfo: items,
+    agentRetrievableInfo: [],
+    availableInfo: [],
+  };
+}
+
+function buildPendingUserTaskResult(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): TaskResult {
+  const question = result.interactionRequirement.question || result.awaitingReason || "请补充完成任务所需的关键信息。";
+  const missing = result.deliverableCheck?.missingDeliverables?.length
+    ? result.deliverableCheck.missingDeliverables
+    : [question];
+  return {
+    schemaVersion: 1,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    title: "需要补充信息后继续",
+    status: "pending_user",
+    blocks: [
+      { kind: "callout", tone: "warn", text: "当前缺少用户才能提供的关键信息，KiKi 已暂停执行，未生成基于猜测的方案。" },
+      { kind: "heading", level: 2, text: "需要你补充" },
+      { kind: "paragraph", text: question },
+      { kind: "list", ordered: false, items: missing },
+    ],
+    meta: {
+      producedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): ParsedTaskRunnerResult {
+  if (!looksLikeMissingUserContext(result)) return result;
+  const question = result.interactionRequirement.question || result.awaitingReason || "请补充完成任务所需的关键信息。";
+  const reason = result.awaitingReason || result.interactionRequirement.reason || question;
+  const readiness =
+    result.structuredOutput?.taskReadiness ??
+    buildReadinessFromUserBlockers(result.deliverableCheck?.missingDeliverables?.length ? result.deliverableCheck.missingDeliverables : [question], reason);
+  const options = result.interactionRequirement.options?.length
+    ? result.interactionRequirement.options
+    : defaultContextOptions(result);
+  const suggestedActions = uniqueStrings([
+    ...(options ?? []),
+    ...(result.suggestedActions ?? []),
+    "填写其他信息",
+  ]).slice(0, 5);
+  const deliverableCheck = result.deliverableCheck ?? buildFallbackDeliverableCheck(input, reason);
+  const normalizedDeliverableCheck: DeliverableCheck = {
+    ...deliverableCheck,
+    matched: false,
+    confidence: "high",
+    missingDeliverables: deliverableCheck.missingDeliverables.length ? deliverableCheck.missingDeliverables : [question],
+    gapReason: deliverableCheck.gapReason || reason,
+  };
+  const interactionRequirement: InteractionRequirement = {
+    ...result.interactionRequirement,
+    type: "provide_context",
+    timing: result.interactionRequirement.timing === "not_required" ? "before_execution" : result.interactionRequirement.timing,
+    reason,
+    question,
+    options,
+    suggestedActions,
+    shouldNotifyUser: true,
+  };
+  const taskResult = buildPendingUserTaskResult(input, { ...result, interactionRequirement, deliverableCheck: normalizedDeliverableCheck });
+  return {
+    ...result,
+    summary: "需要你补充关键信息后才能继续执行。",
+    finalMessage: reason,
+    awaitingUser: true,
+    awaitingReason: reason,
+    suggestedActions,
+    artifacts: [],
+    taskResult,
+    deliverableCheck: normalizedDeliverableCheck,
+    interactionRequirement,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      ...(readiness ? { taskReadiness: readiness } : {}),
+      taskResult,
+      deliverableCheck: normalizedDeliverableCheck,
+      interactionRequirement,
+      blockedByMissingUserContext: true,
+    },
+  };
+}
+
+function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKind: TaskResultViewKind): ParsedTaskRunnerResult {
   const parsed = JSON.parse(extractJsonObject(raw)) as {
     summary?: string;
     final_message?: string;
@@ -181,9 +549,17 @@ function parseTaskRunnerResult(raw: string, fallbackKind: TaskResultViewKind): P
     suggested_actions?: string[];
     interaction_requirement?: unknown;
     artifacts?: Array<{ label?: string; kind?: TaskRunArtifact["kind"]; content?: string; href?: string }>;
+    task_result?: unknown;
+    taskResult?: unknown;
     deliverable_check?: unknown;
     structured_output?: Record<string, unknown> | null;
   };
+  const taskResult = normalizeTaskResult(parsed.task_result ?? parsed.taskResult, {
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    title: input.task.expectedOutcome || input.task.title,
+  });
+  const legacyFromBlocks = taskResult ? deriveLegacyTaskResult(taskResult) : null;
   const suggestedActions = Array.isArray(parsed.suggested_actions)
     ? parsed.suggested_actions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : undefined;
@@ -200,27 +576,115 @@ function parseTaskRunnerResult(raw: string, fallbackKind: TaskResultViewKind): P
       interactionRequirement.type !== "deliverable_gap" &&
       interactionRequirement.type !== "agent_revision_required");
   return {
-    summary: parsed.summary?.trim() || "任务执行完成。",
-    finalMessage: parsed.final_message?.trim() || parsed.summary?.trim() || "任务执行完成。",
+    summary: parsed.summary?.trim() || legacyFromBlocks?.summary || "任务执行完成。",
+    finalMessage: parsed.final_message?.trim() || legacyFromBlocks?.finalMessage || parsed.summary?.trim() || "任务执行完成。",
     resultViewKind: parsed.result_view_kind || fallbackKind || "generic_result",
     awaitingUser,
     awaitingReason: parsed.awaiting_reason?.trim() || interactionRequirement.reason,
     suggestedActions,
-    artifacts: Array.isArray(parsed.artifacts)
-      ? parsed.artifacts
-          .filter((item) => item?.label)
-          .map((item, index) => ({
-            id: `artifact-${index + 1}`,
-            label: item.label!.trim(),
-            kind: item.kind || "other",
-            content: item.content,
-            href: item.href,
-          }))
-      : [],
+    artifacts:
+      Array.isArray(parsed.artifacts) && parsed.artifacts.length > 0
+        ? parsed.artifacts
+            .filter((item) => item?.label)
+            .map((item, index) => ({
+              id: `artifact-${index + 1}`,
+              label: item.label!.trim(),
+              kind: item.kind || "other",
+              content: item.content,
+              href: item.href,
+            }))
+        : legacyFromBlocks?.artifacts ?? [],
+    taskResult,
     deliverableCheck: normalizeDeliverableCheck(parsed.deliverable_check),
     interactionRequirement,
-    structuredOutput: parsed.structured_output ?? null,
+    blocker: null,
+    structuredOutput: {
+      ...(parsed.structured_output ?? {}),
+      ...(taskResult ? { taskResult } : {}),
+    },
   };
+}
+
+function tryParseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKind: TaskResultViewKind) {
+  try {
+    return {
+      result: parseTaskRunnerResult(input, raw, fallbackKind),
+      error: undefined,
+    };
+  } catch (error) {
+    return {
+      result: null,
+      error: error instanceof Error ? error.message : "任务结果解析失败",
+    };
+  }
+}
+
+function normalizeAcceptanceReport(value: unknown): AcceptanceReport {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const verdict =
+    raw.verdict === "pass" || raw.verdict === "needs_repair" || raw.verdict === "needs_user" || raw.verdict === "fail"
+      ? raw.verdict
+      : "needs_repair";
+  const confidence = raw.confidence === "high" || raw.confidence === "medium" || raw.confidence === "low" ? raw.confidence : "low";
+  const stringItems = (items: unknown) => Array.isArray(items) ? items.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+  const criteria = (items: unknown) =>
+    Array.isArray(items)
+      ? items
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+          .map((item) => ({
+            criterion: typeof item.criterion === "string" && item.criterion.trim() ? item.criterion.trim() : "未命名标准",
+            evidence: typeof item.evidence === "string" ? item.evidence.trim() : "",
+          }))
+      : [];
+  const failedCriteria = Array.isArray(raw.failedCriteria)
+    ? raw.failedCriteria
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .map((item) => {
+          const severity: AcceptanceReport["failedCriteria"][number]["severity"] =
+            item.severity === "critical" || item.severity === "major" || item.severity === "minor" ? item.severity : "major";
+          return {
+            criterion: typeof item.criterion === "string" && item.criterion.trim() ? item.criterion.trim() : "未命名标准",
+            evidence: typeof item.evidence === "string" ? item.evidence.trim() : "",
+            severity,
+            repairableByAgent: item.repairableByAgent !== false,
+            requiresUserInput: item.requiresUserInput === true,
+          };
+        })
+    : [];
+  const blockAssessment = raw.blockAssessment && typeof raw.blockAssessment === "object" ? raw.blockAssessment as Record<string, unknown> : {};
+  const repairStrategy = raw.repairStrategy && typeof raw.repairStrategy === "object" ? raw.repairStrategy as Record<string, unknown> : {};
+  const mode =
+    repairStrategy.mode === "presentation_only" ||
+    repairStrategy.mode === "content_gap" ||
+    repairStrategy.mode === "restructure" ||
+    repairStrategy.mode === "rerun_with_tools"
+      ? repairStrategy.mode
+      : "content_gap";
+
+  return {
+    verdict,
+    confidence,
+    summary: typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim() : "验收结果需要补齐。",
+    hardFailures: stringItems(raw.hardFailures),
+    passedCriteria: criteria(raw.passedCriteria),
+    failedCriteria,
+    blockAssessment: {
+      keepBlocks: stringItems(blockAssessment.keepBlocks),
+      rewriteBlocks: stringItems(blockAssessment.rewriteBlocks),
+      missingBlocks: stringItems(blockAssessment.missingBlocks) as AcceptanceReport["blockAssessment"]["missingBlocks"],
+    },
+    repairStrategy: {
+      mode,
+      reuseExistingContent: repairStrategy.reuseExistingContent !== false,
+      allowNewToolCalls: repairStrategy.allowNewToolCalls === true,
+    },
+    repairInstructions: stringItems(raw.repairInstructions),
+    userBlockers: stringItems(raw.userBlockers),
+  };
+}
+
+function parseAcceptanceReport(raw: string) {
+  return normalizeAcceptanceReport(JSON.parse(extractJsonObject(raw)));
 }
 
 function buildFallbackDeliverableCheck(input: RunGoalTaskInput, reason: string): DeliverableCheck {
@@ -244,95 +708,425 @@ function buildFallbackDeliverableCheck(input: RunGoalTaskInput, reason: string):
   };
 }
 
-function hasUsablePrimaryArtifact(result: ParsedTaskRunnerResult) {
-  const primaryArtifact = result.artifacts[0];
-  if (!primaryArtifact) return false;
-  return Boolean(primaryArtifact.href || primaryArtifact.content?.trim());
-}
-
-function enforceDeliverableContract(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): ParsedTaskRunnerResult {
-  const issues: string[] = [];
-  const deliverableCheck =
-    result.deliverableCheck ??
-    buildFallbackDeliverableCheck(input, "Agent 未返回 deliverable_check，无法确认产物是否满足任务契约。");
-
-  if (!result.deliverableCheck) {
-    issues.push("Agent 未返回交付物验收结果。");
-  }
-  if (!deliverableCheck.matched) {
-    issues.push(deliverableCheck.gapReason || "主交付物未通过任务契约验收。");
-  }
-  if (deliverableCheck.missingDeliverables.length > 0) {
-    issues.push(`缺少交付物：${deliverableCheck.missingDeliverables.join("、")}`);
-  }
-  const failedCriteria = deliverableCheck.criteriaResults.filter((item) => item.status === "failed");
-  if (failedCriteria.length > 0) {
-    issues.push(`未通过验收标准：${failedCriteria.map((item) => item.criterion).join("、")}`);
-  }
-  if (!result.awaitingUser && !hasUsablePrimaryArtifact(result)) {
-    issues.push("缺少 artifacts[0] 主交付物，不能只用摘要或最终说明替代产物。");
-  }
-
-  if (issues.length === 0 || result.awaitingUser) {
-    return {
-      ...result,
-      deliverableCheck,
-      structuredOutput: {
-        ...(result.structuredOutput ?? {}),
-        deliverableCheck,
-        interactionRequirement: result.interactionRequirement,
-      },
-    };
-  }
-
-  const awaitingReason = [
-    "任务产物尚未满足预期交付物，已暂停标记完成。",
-    ...Array.from(new Set(issues)),
-  ].join("\n");
-
-  return {
-    ...result,
-    summary: "任务产物未通过交付物验收。",
-    finalMessage: [result.finalMessage, awaitingReason].filter(Boolean).join("\n\n"),
-    awaitingUser: true,
-    awaitingReason,
-    suggestedActions: [
-      "让 Agent 根据缺口继续补齐主交付物",
-      "补充任务上下文或调整预期交付物",
-      ...(result.suggestedActions ?? []),
-    ],
-    deliverableCheck,
-    interactionRequirement,
-    structuredOutput: {
-      ...(result.structuredOutput ?? {}),
-      deliverableCheck,
-      interactionRequirement,
-      taskContract: {
-        expectedOutcome: input.task.expectedOutcome,
-        expectedResult: input.task.expectedResult ?? null,
-        executionObjective: input.task.executionObjective ?? input.task.description,
-      },
-    },
-  };
-}
-
 function shouldRetry(category: TaskRunErrorCategory, attemptCount: number) {
   if (attemptCount >= 2) return false;
   return category === "transient_cli" || category === "transient_network";
 }
 
+function shouldCreateUserBlocker(interactionRequirement: InteractionRequirement) {
+  return (
+    interactionRequirement.type === "confirm" ||
+    interactionRequirement.type === "answer" ||
+    interactionRequirement.type === "provide_context" ||
+    interactionRequirement.type === "perform_offline_action"
+  );
+}
+
+function shouldAutoReflect(result: ParsedTaskRunnerResult) {
+  return (
+    result.awaitingUser &&
+    (result.interactionRequirement.type === "agent_revision_required" ||
+      result.interactionRequirement.type === "deliverable_gap")
+  );
+}
+
+function createExecutionBlocker(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, trajectory: ExecutionTrajectoryStep[]): ExecutionBlocker | null {
+  if (!result.awaitingUser || !shouldCreateUserBlocker(result.interactionRequirement)) return null;
+  const now = new Date().toISOString();
+  return {
+    executionId: input.requestId,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    blockedStepIndex: Math.max(trajectory.length - 1, 0),
+    resumeToken: `resume-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    interactionRequirement: result.interactionRequirement,
+    resumeStrategy:
+      result.interactionRequirement.type === "confirm" && result.interactionRequirement.timing === "after_agent_output"
+        ? "complete_on_approve"
+        : "rerun_with_feedback",
+    status: "waiting",
+    createdAt: now,
+  };
+}
+
+function createTrajectoryStep(input: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & {
+  index: number;
+  startedAt?: string;
+}): ExecutionTrajectoryStep {
+  return {
+    id: `trajectory-${Date.now()}-${input.index}-${Math.random().toString(36).slice(2, 8)}`,
+    startedAt: input.startedAt ?? new Date().toISOString(),
+    ...input,
+  };
+}
+
+function persistTrajectorySnapshot(requestId: string, trajectory: ExecutionTrajectoryStep[]) {
+  const job = getRuntimeJobByRequestId(requestId);
+  if (!job) return;
+  updateRuntimeJobExecution(job.id, { trajectory });
+}
+
+function progressPayloadWithTrajectory(trajectory: ExecutionTrajectoryStep[], resultPayload?: Record<string, unknown> | null) {
+  return {
+    ...(resultPayload ?? {}),
+    trajectory,
+  };
+}
+
+async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
+  let finalMessage = "";
+  await streamClaudeCli({
+    message,
+    workingDirectory: input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
+    cliPath: input.runtimeEnv.cliPath,
+    permissionMode,
+    claudeSessionId: undefined,
+    onEvent: (event) => {
+      if (event.type === "delta" && event.text.trim()) finalMessage += event.text;
+      if (event.type === "message") finalMessage = event.content;
+      if (event.type === "error") throw new Error(event.message);
+    },
+  });
+  return finalMessage;
+}
+
+function buildUnfinishedResult(input: RunGoalTaskInput, options: {
+  currentResult: ParsedTaskRunnerResult | null;
+  reason: string;
+  localValidationReport?: LocalValidationReport;
+  acceptanceReport?: AcceptanceReport;
+  acceptanceRuntime: TaskAcceptanceRuntimeState;
+}): ParsedTaskRunnerResult {
+  const deliverableCheck = options.currentResult?.deliverableCheck ?? buildFallbackDeliverableCheck(input, options.reason);
+  const interactionRequirement: InteractionRequirement = {
+    type: "agent_revision_required",
+    timing: "after_agent_output",
+    reason: options.reason,
+    suggestedActions: ["重新执行任务", "调整任务完成标准"],
+    shouldNotifyUser: false,
+  };
+  return {
+    summary: "任务未达到完成标准。",
+    finalMessage: [options.currentResult?.finalMessage, options.reason].filter(Boolean).join("\n\n"),
+    resultViewKind: options.currentResult?.resultViewKind ?? input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    awaitingUser: true,
+    awaitingReason: options.reason,
+    suggestedActions: interactionRequirement.suggestedActions,
+    artifacts: options.currentResult?.artifacts ?? [],
+    taskResult: options.currentResult?.taskResult ?? null,
+    deliverableCheck: {
+      ...deliverableCheck,
+      matched: false,
+      gapReason: options.reason,
+    },
+    interactionRequirement,
+    blocker: null,
+    structuredOutput: {
+      ...(options.currentResult?.structuredOutput ?? {}),
+      localValidationReport: options.localValidationReport,
+      acceptanceReport: options.acceptanceReport,
+      acceptanceRuntime: options.acceptanceRuntime,
+    },
+  };
+}
+
+function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport, runtime: TaskAcceptanceRuntimeState) {
+  const userBlockers = uniqueStrings(report.userBlockers.length ? report.userBlockers : [report.summary]);
+  const reason = userBlockers.length ? userBlockers.join("；") : report.summary;
+  const readiness = buildReadinessFromUserBlockers(userBlockers, reason);
+  const interactionRequirement: InteractionRequirement = {
+    type: "provide_context",
+    timing: "after_agent_output",
+    reason,
+    question: userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason,
+    options: ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
+    suggestedActions: ["补充具体信息", "补充约束或偏好"],
+    shouldNotifyUser: true,
+  };
+  return coerceMissingUserContextBlocker(input, {
+    ...result,
+    summary: "需要你补充信息后才能继续。",
+    finalMessage: reason,
+    awaitingUser: true,
+    awaitingReason: reason,
+    suggestedActions: interactionRequirement.suggestedActions,
+    interactionRequirement,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      ...(readiness ? { taskReadiness: readiness } : {}),
+      acceptanceReport: report,
+      acceptanceRuntime: runtime,
+    },
+  });
+}
+
+function applyAcceptedDeliverableCheck(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport): ParsedTaskRunnerResult {
+  const criteriaResults = report.passedCriteria.length
+    ? report.passedCriteria.map((item) => ({
+        criterion: item.criterion,
+        status: "passed" as const,
+        evidence: item.evidence,
+      }))
+    : [
+        {
+          criterion: input.task.expectedResult?.completionCriteria || input.task.expectedOutcome,
+          status: "passed" as const,
+          evidence: report.summary,
+        },
+      ];
+  return {
+    ...result,
+    deliverableCheck: {
+      matched: true,
+      confidence: report.confidence,
+      deliveredArtifacts: result.deliverableCheck?.deliveredArtifacts?.length ? result.deliverableCheck.deliveredArtifacts : ["task_result.blocks"],
+      missingDeliverables: [],
+      criteriaResults,
+      gapReason: "",
+    },
+  };
+}
+
+async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
+  rawOutput: string;
+  parsedResult: ParsedTaskRunnerResult | null;
+  parseError?: string;
+  runtime: TaskAcceptanceRuntimeState;
+  appendTrajectory: (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => ExecutionTrajectoryStep[];
+}) {
+  let rawOutput = state.rawOutput;
+  let parsedResult = state.parsedResult;
+  let parseError = state.parseError;
+  let lastReport = validateTaskResultLocally({
+    task: input.task,
+    rawOutput,
+    parsedResult,
+    parseError,
+  });
+
+  for (let attempt = 1; attempt <= 2 && !lastReport.passed; attempt += 1) {
+    state.runtime.localValidationReports.push(lastReport);
+    state.runtime.repairAttempts.push({
+      type: "local_validation",
+      attempt,
+      promptKind: "local_validation_repair",
+      startedAt: new Date().toISOString(),
+      status: "running",
+      issueCodes: lastReport.issues.map((item) => item.code),
+    });
+    state.appendTrajectory({
+      type: "system",
+      status: "running",
+      title: `本地校验未通过，开始第 ${attempt} 次结构修复`,
+      thought: lastReport.issues.map((item) => `${item.code}: ${item.message}`).join("\n"),
+    });
+    const repairPrompt = buildLocalValidationRepairPrompt({
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      rawAgentOutput: rawOutput,
+      parsedResult,
+      report: lastReport,
+    });
+    rawOutput = await runClaudePrompt(input, repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
+    const parsed = tryParseTaskRunnerResult(input, rawOutput, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+    parsedResult = parsed.result;
+    parseError = parsed.error;
+    lastReport = validateTaskResultLocally({
+      task: input.task,
+      rawOutput,
+      parsedResult,
+      parseError,
+    });
+    const runtimeAttempt = state.runtime.repairAttempts[state.runtime.repairAttempts.length - 1];
+    if (runtimeAttempt) {
+      runtimeAttempt.finishedAt = new Date().toISOString();
+      runtimeAttempt.status = lastReport.passed ? "passed" : "failed";
+    }
+  }
+
+  state.runtime.localValidationReports.push(lastReport);
+  return { rawOutput, parsedResult, parseError, localValidationReport: lastReport };
+}
+
+async function completeWithAcceptance(input: RunGoalTaskInput, state: {
+  rawOutput: string;
+  parsedResult: ParsedTaskRunnerResult | null;
+  parseError?: string;
+  trajectory: ExecutionTrajectoryStep[];
+  appendTrajectory: (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => ExecutionTrajectoryStep[];
+}): Promise<TaskRunAttemptResult> {
+  const runtime: TaskAcceptanceRuntimeState = {
+    localValidationReports: [],
+    acceptanceReports: [],
+    repairAttempts: [],
+  };
+
+  let local = await runLocalRepairCycle(input, { ...state, runtime });
+  if (!local.localValidationReport.passed || !local.parsedResult) {
+    const failed = buildUnfinishedResult(input, {
+      currentResult: local.parsedResult,
+      reason: "本地校验失败，任务没有产出可展示、可验收的结果。",
+      localValidationReport: local.localValidationReport,
+      acceptanceRuntime: runtime,
+    });
+    return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceRuntime: runtime };
+  }
+
+  let currentResult = coerceMissingUserContextBlocker(input, local.parsedResult);
+  if (currentResult.awaitingUser) {
+    return {
+      ...currentResult,
+      rawOutput: local.rawOutput,
+      trajectory: state.trajectory,
+      localValidationReport: local.localValidationReport,
+      acceptanceRuntime: runtime,
+      structuredOutput: {
+        ...(currentResult.structuredOutput ?? {}),
+        localValidationReport: local.localValidationReport,
+        acceptanceRuntime: runtime,
+      },
+    };
+  }
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    state.appendTrajectory({
+      type: "system",
+      status: "running",
+      title: `验收员正在检查结果（第 ${attempt} 次）`,
+      thought: "检查任务结果是否满足完成标准。",
+    });
+    const judgePrompt = buildAcceptanceJudgePrompt({
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      localValidationReport: local.localValidationReport,
+      currentResult,
+    });
+    const judgeRaw = await runClaudePrompt(input, judgePrompt, "readonly");
+    const acceptanceReport = parseAcceptanceReport(judgeRaw);
+    runtime.acceptanceReports.push(acceptanceReport);
+
+    if (acceptanceReport.verdict === "pass") {
+      const acceptedResult = applyAcceptedDeliverableCheck(input, currentResult, acceptanceReport);
+      return {
+        ...acceptedResult,
+        rawOutput: local.rawOutput,
+        trajectory: state.trajectory,
+        localValidationReport: local.localValidationReport,
+        acceptanceReport,
+        acceptanceRuntime: runtime,
+        structuredOutput: {
+          ...(acceptedResult.structuredOutput ?? {}),
+          deliverableCheck: acceptedResult.deliverableCheck,
+          localValidationReport: local.localValidationReport,
+          acceptanceReport,
+          acceptanceRuntime: runtime,
+        },
+      };
+    }
+
+    if (acceptanceReport.verdict === "needs_user") {
+      const userResult = buildNeedsUserFromAcceptance(input, currentResult, acceptanceReport, runtime);
+      return { ...userResult, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
+    }
+
+    if (acceptanceReport.verdict === "fail" || attempt >= 3) {
+      const failed = buildUnfinishedResult(input, {
+        currentResult,
+        reason: acceptanceReport.summary,
+        localValidationReport: local.localValidationReport,
+        acceptanceReport,
+        acceptanceRuntime: runtime,
+      });
+      return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
+    }
+
+    runtime.repairAttempts.push({
+      type: "semantic_repair",
+      attempt,
+      promptKind: "semantic_repair",
+      startedAt: new Date().toISOString(),
+      status: "running",
+      verdict: acceptanceReport.verdict,
+    });
+    state.appendTrajectory({
+      type: "system",
+      status: "running",
+      title: `验收未通过，开始第 ${attempt} 次内容补齐`,
+      thought: acceptanceReport.repairInstructions.join("\n") || acceptanceReport.summary,
+    });
+    const repairPrompt = buildSemanticRepairPrompt({
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      currentResult,
+      acceptanceReport,
+    });
+    const repairedRaw = await runClaudePrompt(input, repairPrompt, acceptanceReport.repairStrategy.allowNewToolCalls ? input.runtimeEnv.permissionMode : "readonly");
+    const repaired = tryParseTaskRunnerResult(input, repairedRaw, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+    local = await runLocalRepairCycle(input, {
+      rawOutput: repairedRaw,
+      parsedResult: repaired.result,
+      parseError: repaired.error,
+      runtime,
+      appendTrajectory: state.appendTrajectory,
+    });
+    const runtimeAttempt = runtime.repairAttempts.findLast((item) => item.type === "semantic_repair" && item.attempt === attempt);
+    if (runtimeAttempt) {
+      runtimeAttempt.finishedAt = new Date().toISOString();
+      runtimeAttempt.status = local.localValidationReport.passed ? "passed" : "failed";
+    }
+    if (!local.localValidationReport.passed || !local.parsedResult) {
+      const failed = buildUnfinishedResult(input, {
+        currentResult: local.parsedResult ?? currentResult,
+        reason: "内容补齐后仍未通过本地校验。",
+        localValidationReport: local.localValidationReport,
+        acceptanceReport,
+        acceptanceRuntime: runtime,
+      });
+      return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
+    }
+    currentResult = coerceMissingUserContextBlocker(input, local.parsedResult);
+  }
+
+  const failed = buildUnfinishedResult(input, {
+    currentResult,
+    reason: "多轮补齐后仍未达到完成标准。",
+    localValidationReport: local.localValidationReport,
+    acceptanceRuntime: runtime,
+  });
+  return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceRuntime: runtime };
+}
+
 async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   let finalMessage = "";
   let lastStatus: "checking" | "running" | "completed" | null = null;
+  const trajectory: ExecutionTrajectoryStep[] = [...(input.initialTrajectory ?? [])];
+  const appendTrajectory = (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => {
+    trajectory.push(createTrajectoryStep({ ...step, index: trajectory.length }));
+    persistTrajectorySnapshot(input.requestId, trajectory);
+    return trajectory;
+  };
+  appendTrajectory({
+    type: "system",
+    status: "running",
+    title: input.resumeContext ? `开始第 ${input.attemptCount} 轮反思补齐` : `开始第 ${input.attemptCount} 次执行`,
+    thought: [input.resumeContext ? "带入上一轮反思上下文继续执行。" : undefined, `任务：${input.task.title}`].filter(Boolean).join("\n"),
+  });
   updateGoalTelemetry({
     requestId: input.requestId,
     scope: "goal_task_execute",
     phase: "executing",
-    message: `开始第 ${input.attemptCount} 次执行`,
+    message: input.resumeContext ? `开始第 ${input.attemptCount} 轮反思补齐` : `开始第 ${input.attemptCount} 次执行`,
     goalId: input.goal.id,
     taskId: input.task.id,
     taskInstanceId: input.instance.id,
     attemptCount: input.attemptCount,
+    resultPayload: progressPayloadWithTrajectory(trajectory),
   });
   appendGoalLog({
     requestId: input.requestId,
@@ -378,9 +1172,20 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
           taskId: input.task.id,
           taskInstanceId: input.instance.id,
           attemptCount: input.attemptCount,
+          resultPayload: progressPayloadWithTrajectory(trajectory),
         });
       }
       if (event.type === "tool_call") {
+        appendTrajectory({
+          type: "tool_call",
+          status: "running",
+          title: event.summary,
+          toolCall: {
+            name: event.toolName,
+            input: event.input,
+            summary: event.summary,
+          },
+        });
         appendGoalLog({
           requestId: input.requestId,
           scope: "goal_task_execute",
@@ -396,9 +1201,27 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
         });
       }
       if (event.type === "error") {
+        appendTrajectory({
+          type: "error",
+          status: "failed",
+          title: event.message,
+          toolResult: {
+            ok: false,
+            error: event.message,
+          },
+          endedAt: new Date().toISOString(),
+        });
         throw new Error(event.message);
       }
     },
+  });
+
+  appendTrajectory({
+    type: "assistant",
+    status: "completed",
+    title: "Agent 已返回最终消息",
+    thought: finalMessage.slice(0, 2000),
+    endedAt: new Date().toISOString(),
   });
 
   appendGoalLog({
@@ -415,8 +1238,34 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
-  const parsedResult = parseTaskRunnerResult(finalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
-  return enforceDeliverableContract(input, parsedResult);
+  const parsed = tryParseTaskRunnerResult(input, finalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+  const result = await completeWithAcceptance(input, {
+    rawOutput: finalMessage,
+    parsedResult: parsed.result,
+    parseError: parsed.error,
+    trajectory,
+    appendTrajectory,
+  });
+  appendTrajectory({
+    type: result.awaitingUser ? "approval" : "result",
+    status: result.awaitingUser ? "awaiting_user" : "completed",
+    title: result.summary,
+    thought: result.finalMessage.slice(0, 2000),
+    endedAt: new Date().toISOString(),
+  });
+  const blocker = createExecutionBlocker(input, result, trajectory);
+  if (blocker) {
+    updateRuntimeJobExecution(`job-${input.instance.id}`, { blocker, status: "awaiting_user" });
+  }
+  return {
+    ...result,
+    blocker,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      ...(blocker ? { blocker } : {}),
+    },
+    trajectory,
+  };
 }
 
 export async function runGoalTask(input: RunGoalTaskInput) {
@@ -431,8 +1280,108 @@ export async function runGoalTask(input: RunGoalTaskInput) {
     attemptCount: 1,
   });
 
+  const readiness = buildTaskReadinessCheck(input);
+  if (readiness.status === "blocked") {
+    const trajectory = [
+      createTrajectoryStep({
+        index: 0,
+        type: "system",
+        status: "completed",
+        title: "执行前信息充分性检查",
+        thought: readiness.summary,
+        endedAt: new Date().toISOString(),
+      }),
+      createTrajectoryStep({
+        index: 1,
+        type: "approval",
+        status: "awaiting_user",
+        title: "缺少用户提供的信息",
+        thought: readiness.missingUserInfo.map((item) => `${item.label}：${item.reason}`).join("\n"),
+        endedAt: new Date().toISOString(),
+      }),
+    ];
+    const blockedResult = buildReadinessBlockedResult(input, readiness);
+    const blocker = createExecutionBlocker(input, blockedResult, trajectory);
+    const result = {
+      ...blockedResult,
+      blocker,
+      structuredOutput: {
+        ...(blockedResult.structuredOutput ?? {}),
+        ...(blocker ? { blocker } : {}),
+      },
+      trajectory,
+    };
+    const notificationDecision = judgeTaskResult({
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      result,
+    });
+    const resultPayload = {
+      resultViewKind: result.resultViewKind,
+      awaitingUser: true,
+      awaitingReason: result.awaitingReason,
+      suggestedActions: result.suggestedActions,
+      artifacts: result.artifacts,
+      taskResult: result.taskResult,
+      trajectory,
+      deliverableCheck: result.deliverableCheck,
+      interactionRequirement: result.interactionRequirement,
+      blocker,
+      structuredOutput: result.structuredOutput,
+      finalMessage: result.finalMessage,
+      notificationDecision,
+    } satisfies Record<string, unknown>;
+    updateGoalTelemetry({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      phase: "reviewing",
+      message: readiness.summary,
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+      attemptCount: 1,
+      summary: result.summary,
+      resultPayload,
+    });
+    finishGoalTelemetry({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      phase: "reviewing",
+      message: "任务执行已暂停，等待用户补充必要信息",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+      summary: result.summary,
+      resultPayload,
+    });
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "info",
+      phase: "reviewing",
+      message: readiness.summary,
+      eventType: "await_user",
+      status: "awaiting_user",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+    if (blocker) {
+      updateRuntimeJobExecution(`job-${input.instance.id}`, {
+        blocker,
+        status: "awaiting_user",
+        trajectory,
+        result: resultPayload,
+      });
+    }
+    return;
+  }
+
   let attemptCount = 1;
-  while (attemptCount <= 2) {
+  const maxAttempts = 2;
+  while (attemptCount <= maxAttempts) {
     try {
       const result = await executeOnce({ ...input, attemptCount });
       const notificationDecision = judgeTaskResult({
@@ -442,18 +1391,57 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         instance: input.instance,
         result,
       });
+      const unresolvedAgentRevision = shouldAutoReflect(result);
       const resultPayload = {
         resultViewKind: result.resultViewKind,
-        awaitingUser: result.awaitingUser,
+        awaitingUser: unresolvedAgentRevision ? false : result.awaitingUser,
         awaitingReason: result.awaitingReason,
         suggestedActions: result.suggestedActions,
         artifacts: result.artifacts,
+        taskResult: result.taskResult,
+        trajectory: result.trajectory,
         deliverableCheck: result.deliverableCheck,
         interactionRequirement: result.interactionRequirement,
+        blocker: result.blocker,
         structuredOutput: result.structuredOutput,
         finalMessage: result.finalMessage,
         notificationDecision,
       } satisfies Record<string, unknown>;
+      if (unresolvedAgentRevision) {
+        const errorMessage = result.awaitingReason || "任务缺少组件化产出，Agent 自动补齐后仍未满足交付物契约。";
+        failGoalTelemetry({
+          requestId: input.requestId,
+          scope: "goal_task_execute",
+          phase: "reviewing",
+          message: "任务缺少组件化产出，未完成",
+          error: errorMessage,
+          goalId: input.goal.id,
+          taskId: input.task.id,
+          taskInstanceId: input.instance.id,
+          summary: result.summary,
+          resultPayload,
+        });
+        appendGoalLog({
+          requestId: input.requestId,
+          scope: "goal_task_execute",
+          level: "error",
+          phase: "reviewing",
+          message: "任务未产出可视化组件结果，已标记为未完成",
+          details: errorMessage,
+          status: "failed",
+          goalId: input.goal.id,
+          taskId: input.task.id,
+          taskInstanceId: input.instance.id,
+        });
+        updateRuntimeJobExecution(`job-${input.instance.id}`, {
+          status: "failed",
+          result: resultPayload,
+          trajectory: result.trajectory,
+          lastError: errorMessage,
+          finishedAt: new Date().toISOString(),
+        });
+        return;
+      }
       if (result.awaitingUser) {
         updateGoalTelemetry({
           requestId: input.requestId,

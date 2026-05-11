@@ -1,7 +1,10 @@
 import { createGeneratedInstance } from "@/mocks/goals";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type {
   Goal,
   InteractionRequirement,
+  InteractionSubmission,
   SubGoal,
   Task,
   TaskExecutionPhase,
@@ -15,6 +18,7 @@ import type {
   TaskRunErrorCategory,
 } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
+import type { TaskResult } from "@/types/taskResult";
 
 function defaultResultViewKind(task: Task) {
   return task.resultViewKind ?? task.executionKind ?? "generic_result";
@@ -66,6 +70,27 @@ function mergeTimelineSteps(
     });
   }
   return Array.from(byId.values()).sort((left, right) => +new Date(left.startedAt) - +new Date(right.startedAt));
+}
+
+function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] | undefined): TaskExecutionStep[] | undefined {
+  if (!trajectory?.length) return undefined;
+  return trajectory.map((step) => ({
+    id: step.id,
+    title: step.title,
+    type:
+      step.type === "tool_call" || step.type === "tool_result"
+        ? "tool"
+        : step.type === "assistant"
+          ? "assistant"
+          : step.type === "result"
+            ? "result"
+            : "phase",
+    status: step.status,
+    detail: step.thought,
+    toolName: step.toolCall?.name,
+    startedAt: step.startedAt,
+    finishedAt: step.endedAt,
+  }));
 }
 
 function isNotificationDecision(value: unknown): value is TaskResultNotificationDecision {
@@ -284,6 +309,7 @@ export function syncGoalInstanceFromProgress(
     instanceId: string;
     progress: GoalServerProgress | null;
     logs?: GoalServerLogEntry[];
+    trajectory?: ExecutionTrajectoryStep[];
   },
 ) {
   return goals.map((goal) => ({
@@ -292,11 +318,15 @@ export function syncGoalInstanceFromProgress(
       ...subGoal,
       tasks: subGoal.tasks.map((task) => {
         if (task.id !== input.taskId) return task;
-        const timeline = normalizeTimelineFromLogs(input.logs);
+        const progressTrajectory = Array.isArray(input.progress?.resultPayload?.trajectory)
+          ? (input.progress.resultPayload.trajectory as ExecutionTrajectoryStep[])
+          : undefined;
+        const nextTrajectory = input.trajectory?.length ? input.trajectory : progressTrajectory;
+        const timeline = normalizeTimelineFromTrajectory(nextTrajectory) ?? normalizeTimelineFromLogs(input.logs);
         return {
           ...task,
           progress:
-            input.progress?.status === "completed"
+            input.progress?.status === "completed" && !input.progress.resultPayload?.awaitingUser
               ? Math.min(
                   100,
                   Math.max(task.progress, task.progress + (defaultResultViewKind(task) === "flashcard" ? 8 : 5)),
@@ -326,9 +356,15 @@ export function syncGoalInstanceFromProgress(
             const artifacts = Array.isArray(input.progress?.resultPayload?.artifacts)
               ? (input.progress.resultPayload.artifacts as TaskRunArtifact[])
               : undefined;
+            if (!input.progress) return instance;
             const interactionRequirement = input.progress?.resultPayload?.interactionRequirement as
               | InteractionRequirement
               | undefined;
+            const interactionSubmission = input.progress?.resultPayload?.interactionSubmission as
+              | InteractionSubmission
+              | undefined;
+            const taskResult = input.progress?.resultPayload?.taskResult as TaskResult | undefined;
+            const blocker = input.progress?.resultPayload?.blocker as ExecutionBlocker | undefined;
             return {
               ...instance,
               status: nextStatus,
@@ -357,21 +393,21 @@ export function syncGoalInstanceFromProgress(
                     : undefined,
                 errorMessage: nextStatus === "error" ? input.progress?.error : undefined,
               },
-              result: input.progress
-                ? {
-                    summary: input.progress.summary || instance.result?.summary,
-                    finalMessage:
-                      typeof input.progress.resultPayload?.finalMessage === "string"
-                        ? input.progress.resultPayload.finalMessage
-                        : instance.result?.finalMessage,
-                    structuredOutput:
-                      (input.progress.resultPayload?.structuredOutput as Record<string, unknown> | null | undefined) ??
-                      instance.result?.structuredOutput ??
-                      null,
-                    artifacts: artifacts ?? instance.result?.artifacts,
-                    interactionRequirement: interactionRequirement ?? instance.result?.interactionRequirement,
-                  }
-                : instance.result,
+              result: {
+                summary: input.progress.summary || instance.result?.summary,
+                finalMessage:
+                  typeof input.progress.resultPayload?.finalMessage === "string"
+                    ? input.progress.resultPayload.finalMessage
+                    : instance.result?.finalMessage,
+                taskResult: taskResult ?? instance.result?.taskResult,
+                structuredOutput:
+                  (input.progress.resultPayload?.structuredOutput as Record<string, unknown> | null | undefined) ??
+                  instance.result?.structuredOutput ??
+                  null,
+                artifacts: artifacts ?? instance.result?.artifacts,
+                interactionRequirement: interactionRequirement ?? instance.result?.interactionRequirement,
+                interactionSubmission: interactionSubmission ?? instance.result?.interactionSubmission,
+              },
               awaitingUser: input.progress?.resultPayload?.awaitingUser
                 ? {
                     reason:
@@ -382,10 +418,13 @@ export function syncGoalInstanceFromProgress(
                       ? (input.progress.resultPayload.suggestedActions as string[])
                       : interactionRequirement?.suggestedActions,
                     interactionRequirement,
+                    blocker,
                   }
                 : undefined,
+              blocker,
               notification: normalizeNotificationFromProgress(input.progress, instance),
               timeline: mergeTimelineSteps(instance.timeline, timeline),
+              trajectory: nextTrajectory ?? instance.trajectory,
             };
           }),
         };

@@ -33,13 +33,13 @@ export function GoalPlanBreadcrumb({
   disableLinks?: boolean;
 }) {
   const goalNode = onGoalClick ? (
-    <button type="button" onClick={onGoalClick} className="font-medium text-[#1F2328] hover:text-[#111]">
+    <button type="button" onClick={onGoalClick} className="font-medium hover:text-[#111]">
       {goalTitle}
     </button>
   ) : disableLinks ? (
-    <span className="font-medium text-[#1F2328]">{goalTitle}</span>
+    <span className="font-medium">{goalTitle}</span>
   ) : (
-    <Link href={`/goals/${goalId}`} className="font-medium text-[#1F2328] hover:text-[#111]">
+    <Link href={`/goals/${goalId}`} className="font-medium hover:text-[#111]">
       {goalTitle}
     </Link>
   );
@@ -59,7 +59,7 @@ export function GoalPlanBreadcrumb({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-end gap-1 text-right text-xs text-[#8C9198]",
+        "flex flex-wrap items-center justify-end gap-1 text-right text-xs text-[#1F2328]",
         className,
       )}
     >
@@ -69,7 +69,7 @@ export function GoalPlanBreadcrumb({
       {taskTitle ? (
         <>
           <span>/</span>
-          <span className="font-medium text-[#1F2328]">{taskTitle}</span>
+          <span className="font-medium">{taskTitle}</span>
         </>
       ) : null}
     </div>
@@ -103,6 +103,7 @@ export function GoalPlanContent({
     const allTasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
     const statusList = allTasks.map(getTaskSummaryStatus);
     const completedCount = statusList.filter((status) => status === "completed").length;
+    const awaitingCount = statusList.filter((status) => status === "awaiting_user").length;
     const inProgressCount = statusList.filter((status) => status === "in_progress").length;
     const pendingCount = statusList.filter((status) => status === "pending").length;
     const daysLeft = Math.max(
@@ -115,6 +116,7 @@ export function GoalPlanContent({
     return {
       allTasks,
       completedCount,
+      awaitingCount,
       inProgressCount,
       pendingCount,
       daysLeft,
@@ -167,8 +169,9 @@ export function GoalPlanContent({
             </div>
           </div>
 
-          <div className="grid min-w-[260px] grid-cols-3 gap-3 border-t border-[#E5E7EB] pt-5 lg:min-w-[300px] lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+          <div className="grid min-w-[260px] grid-cols-4 gap-3 border-t border-[#E5E7EB] pt-5 lg:min-w-[360px] lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
             <SummaryStat label="已完成" value={summary.completedCount} />
+            <SummaryStat label="待确认" value={summary.awaitingCount} />
             <SummaryStat label="进行中" value={summary.inProgressCount} />
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
           </div>
@@ -325,10 +328,11 @@ function ProgressRing({ value }: { value: number }) {
 }
 
 function getTaskSummaryStatus(task: Task): TaskInstanceStatus | "pending" {
-  const latestStatus = task.instances[0]?.status;
+  const latest = task.instances[0];
+  const latestStatus = latest?.status;
+  if (latestStatus === "awaiting_user" || latest?.awaitingUser) return "awaiting_user";
   if (latestStatus === "completed" || task.progress >= 100) return "completed";
   if (
-    latestStatus === "awaiting_user" ||
     latestStatus === "in_progress" ||
     latestStatus === "paused"
   ) {

@@ -9,9 +9,11 @@ import type {
   InteractionRequirement,
   Task,
   TaskCollaborationContract,
+  TaskExpectedResult,
   TaskExecutionStep,
   TaskInstance,
 } from "@/types/kiki";
+import type { TaskResult } from "@/types/taskResult";
 
 export const INITIAL_NOW = "2026-04-26T10:00:00+08:00";
 
@@ -133,6 +135,174 @@ function interactionFor(kind: ExecutionKind, reason: string): InteractionRequire
   };
 }
 
+function inferRequiredBlocks(kind: ExecutionKind, expectedOutcome: string, description: string): NonNullable<TaskExpectedResult["requiredBlocks"]> {
+  const text = `${expectedOutcome}\n${description}`;
+  const blocks: NonNullable<TaskExpectedResult["requiredBlocks"]> = ["heading"];
+
+  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
+    return ["heading", "list", "callout"];
+  }
+  if (kind === "confirm_action") {
+    return ["heading", "decision", "callout"];
+  }
+  if (kind === "draft_review") {
+    return ["heading", "list", "callout"];
+  }
+  if (kind === "reading_digest") {
+    return ["heading", "list", "callout"];
+  }
+
+  if (/对比|比较|表|矩阵|维度/.test(text)) {
+    blocks.push("comparison_table");
+  }
+  if (/清单|步骤|计划|训练|复盘|词汇|摘要|精读|复述|结构图/.test(text)) {
+    blocks.push("list");
+  }
+  if (!blocks.includes("comparison_table")) {
+    blocks.push("paragraph");
+  }
+  blocks.push("callout");
+  return Array.from(new Set(blocks));
+}
+
+function expectedResultFor(kind: ExecutionKind, expectedOutcome: string, description: string): TaskExpectedResult {
+  if (kind === "flashcard") {
+    return {
+      type: "deliverable",
+      description: expectedOutcome,
+      format: "json",
+      presentation: "checklist",
+      primaryFormat: "structured_blocks",
+      exportableFormats: ["json", "markdown"],
+      requiredBlocks: ["heading", "list", "callout"],
+      completionCriteria: `准备好可直接开始的练习内容，并让用户能继续完成「${expectedOutcome}」。`,
+    };
+  }
+  if (kind === "listening_qa" || kind === "freeform_chat") {
+    return {
+      type: "deliverable",
+      description: expectedOutcome,
+      format: "json",
+      presentation: "document",
+      primaryFormat: "structured_blocks",
+      exportableFormats: ["json", "markdown"],
+      requiredBlocks: ["heading", "list", "callout"],
+      completionCriteria: `准备好可交互练习内容，并围绕「${expectedOutcome}」给出明确目标。`,
+    };
+  }
+  if (kind === "confirm_action") {
+    return {
+      type: "decision",
+      description: expectedOutcome,
+      format: "text",
+      presentation: "summary_card",
+      primaryFormat: "structured_blocks",
+      exportableFormats: ["markdown"],
+      requiredBlocks: ["heading", "decision", "callout"],
+      completionCriteria: `给出可确认的方案，并明确用户需要确认的下一步。`,
+    };
+  }
+  if (kind === "draft_review") {
+    return {
+      type: "deliverable",
+      description: expectedOutcome,
+      format: "markdown",
+      presentation: "document",
+      primaryFormat: "structured_blocks",
+      exportableFormats: ["markdown"],
+      requiredBlocks: ["heading", "list", "callout"],
+      completionCriteria: `生成可审阅的草稿内容，并说明需要用户重点关注什么。`,
+    };
+  }
+  if (kind === "reading_digest") {
+    return {
+      type: "information",
+      description: expectedOutcome,
+      format: "markdown",
+      presentation: "visual_report",
+      primaryFormat: "structured_blocks",
+      exportableFormats: ["html", "markdown"],
+      requiredBlocks: ["heading", "list", "callout"],
+      completionCriteria: `输出可快速阅读的摘要结果，并突出重点结论与风险。`,
+    };
+  }
+
+  return {
+    type: "deliverable",
+    description: expectedOutcome,
+    format: /表|对比|矩阵/.test(expectedOutcome) ? "table" : "markdown",
+    presentation: /表|对比|矩阵/.test(expectedOutcome) ? "visual_report" : "document",
+    primaryFormat: "structured_blocks",
+    exportableFormats: /表|对比|矩阵/.test(expectedOutcome) ? ["html", "markdown"] : ["markdown"],
+    requiredBlocks: inferRequiredBlocks(kind, expectedOutcome, description),
+    completionCriteria: `围绕任务目标「${expectedOutcome}」输出完整、可展示、可复用的结果。`,
+  };
+}
+
+function buildCompletedGenericTaskResult(task: Task, intro: string, createdAt: string): TaskResult {
+  const requiredBlocks = task.expectedResult?.requiredBlocks ?? ["heading", "paragraph", "callout"];
+  const blocks: TaskResult["blocks"] = [{ kind: "heading", level: 2, text: task.expectedResult?.description || task.expectedOutcome }];
+
+  if (requiredBlocks.includes("comparison_table")) {
+    blocks.push({
+      kind: "comparison_table",
+      columns: ["维度", "内容"],
+      rows: [
+        { 维度: "任务目标", 内容: task.expectedOutcome },
+        { 维度: "当前结果", 内容: intro },
+      ],
+    });
+  } else if (requiredBlocks.includes("list")) {
+    blocks.push({
+      kind: "list",
+      ordered: false,
+      items: [intro, `预期结果：${task.expectedOutcome}`],
+    });
+  } else {
+    blocks.push({ kind: "paragraph", text: intro });
+  }
+
+  blocks.push({
+    kind: "callout",
+    tone: "success",
+    text: `已完成：${task.expectedOutcome}`,
+  });
+
+  return {
+    schemaVersion: 1,
+    taskId: task.id,
+    instanceId: `mock-result-${task.id}`,
+    title: task.expectedResult?.description || task.expectedOutcome,
+    status: "done",
+    blocks,
+    meta: {
+      producedAt: createdAt,
+      presentation: task.expectedResult?.presentation,
+      primaryFormat: task.expectedResult?.primaryFormat,
+      exportableFormats: task.expectedResult?.exportableFormats,
+    },
+  };
+}
+
+function normalizeMockInstances(task: Task, instances: TaskInstance[]) {
+  return instances.map((item) => {
+    if (item.status !== "completed") return item;
+    if ((task.resultViewKind ?? task.executionKind) !== "generic_result") return item;
+    const existingResult = item.result ?? {
+      summary: item.intro,
+      finalMessage: item.intro,
+    };
+    if (existingResult.taskResult) return item;
+    return {
+      ...item,
+      result: {
+        ...existingResult,
+        taskResult: buildCompletedGenericTaskResult(task, item.intro, item.createdAt),
+      },
+    };
+  });
+}
+
 function buildInitialTimeline(
   taskId: string,
   createdAt: string,
@@ -211,8 +381,9 @@ function instance(
 }
 
 function task(data: Omit<Task, "instances"> & { instances?: TaskInstance[] }): Task {
-  return {
+  const nextTask: Task = {
     ...data,
+    expectedResult: data.expectedResult ?? expectedResultFor(data.resultViewKind ?? data.executionKind, data.expectedOutcome, data.description),
     collaboration: data.collaboration ?? collaborationFor(data.resultViewKind ?? data.executionKind, data.description, data.expectedOutcome),
     executionStrategy:
       data.executionStrategy ??
@@ -221,6 +392,10 @@ function task(data: Omit<Task, "instances"> & { instances?: TaskInstance[] }): T
         : "agent_autonomous"),
     requiresConfirmation: data.requiresConfirmation ?? (data.executionKind === "confirm_action" || data.executionKind === "draft_review"),
     instances: data.instances ?? [],
+  };
+  return {
+    ...nextTask,
+    instances: normalizeMockInstances(nextTask, nextTask.instances),
   };
 }
 

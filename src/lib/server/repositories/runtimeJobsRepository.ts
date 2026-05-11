@@ -1,6 +1,8 @@
 import { getDatabase } from "@/lib/server/db/client";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 export type RuntimeJobStatus =
@@ -19,6 +21,7 @@ export type RuntimeJobPayload = {
   task: Task;
   instance: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
+  resumeContext?: string;
 };
 
 export type RuntimeJobRecord = {
@@ -36,6 +39,8 @@ export type RuntimeJobRecord = {
   payload: RuntimeJobPayload;
   progress: GoalServerProgress | null;
   logs: GoalServerLogEntry[];
+  trajectory: ExecutionTrajectoryStep[];
+  blocker: ExecutionBlocker | null;
   result: Record<string, unknown> | null;
   leaseOwner?: string;
   leaseExpiresAt?: string;
@@ -62,6 +67,8 @@ type RuntimeJobRow = {
   payload_json: string;
   progress_json: string | null;
   logs_json: string | null;
+  trajectory_json: string | null;
+  blocker_json: string | null;
   result_json: string | null;
   lease_owner: string | null;
   lease_expires_at: string | null;
@@ -94,6 +101,8 @@ function mapRow(row: RuntimeJobRow): RuntimeJobRecord {
     payload: JSON.parse(row.payload_json) as RuntimeJobPayload,
     progress: parseNullableJson<GoalServerProgress>(row.progress_json),
     logs: parseNullableJson<GoalServerLogEntry[]>(row.logs_json) ?? [],
+    trajectory: parseNullableJson<ExecutionTrajectoryStep[]>(row.trajectory_json) ?? [],
+    blocker: parseNullableJson<ExecutionBlocker>(row.blocker_json),
     result: parseNullableJson<Record<string, unknown>>(row.result_json),
     leaseOwner: row.lease_owner ?? undefined,
     leaseExpiresAt: row.lease_expires_at ?? undefined,
@@ -117,12 +126,12 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
       INSERT INTO runtime_jobs (
         id, task_instance_id, task_id, goal_id, conversation_id, user_id, kind, status,
         request_id, runtime_env_id, runtime_transport, payload_json, progress_json, logs_json,
-        result_json, lease_owner, lease_expires_at, available_at, created_at, updated_at,
+        trajectory_json, blocker_json, result_json, lease_owner, lease_expires_at, available_at, created_at, updated_at,
         started_at, finished_at, last_error
       ) VALUES (
         @id, @task_instance_id, @task_id, @goal_id, @conversation_id, @user_id, @kind, @status,
         @request_id, @runtime_env_id, @runtime_transport, @payload_json, @progress_json, @logs_json,
-        @result_json, @lease_owner, @lease_expires_at, @available_at, @created_at, @updated_at,
+        @trajectory_json, @blocker_json, @result_json, @lease_owner, @lease_expires_at, @available_at, @created_at, @updated_at,
         @started_at, @finished_at, @last_error
       )
       ON CONFLICT(id) DO UPDATE SET
@@ -133,6 +142,8 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
         payload_json = excluded.payload_json,
         progress_json = excluded.progress_json,
         logs_json = excluded.logs_json,
+        trajectory_json = excluded.trajectory_json,
+        blocker_json = excluded.blocker_json,
         result_json = excluded.result_json,
         lease_owner = excluded.lease_owner,
         lease_expires_at = excluded.lease_expires_at,
@@ -157,6 +168,8 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
     payload_json: JSON.stringify(record.payload),
     progress_json: record.progress ? JSON.stringify(record.progress) : null,
     logs_json: JSON.stringify(record.logs),
+    trajectory_json: JSON.stringify(record.trajectory),
+    blocker_json: record.blocker ? JSON.stringify(record.blocker) : null,
     result_json: record.result ? JSON.stringify(record.result) : null,
     lease_owner: record.leaseOwner ?? null,
     lease_expires_at: record.leaseExpiresAt ?? null,
@@ -187,6 +200,8 @@ export function createQueuedRuntimeJob(payload: RuntimeJobPayload, input?: { req
     payload,
     progress: null,
     logs: [],
+    trajectory: [],
+    blocker: null,
     result: null,
     availableAt: now,
     createdAt: now,
@@ -263,7 +278,18 @@ export function updateRuntimeJobExecution(
   updates: Partial<
     Pick<
       RuntimeJobRecord,
-      "status" | "requestId" | "progress" | "logs" | "result" | "lastError" | "finishedAt" | "leaseOwner" | "leaseExpiresAt"
+      | "status"
+      | "payload"
+      | "requestId"
+      | "progress"
+      | "logs"
+      | "trajectory"
+      | "blocker"
+      | "result"
+      | "lastError"
+      | "finishedAt"
+      | "leaseOwner"
+      | "leaseExpiresAt"
     >
   >,
 ) {

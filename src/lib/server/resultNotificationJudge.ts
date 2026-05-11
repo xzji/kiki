@@ -107,6 +107,11 @@ function baseDecision(
 function actionRequiredDecision(
   input: JudgeTaskResultInput,
   reason: string,
+  options?: {
+    snippetPrefix?: string;
+    userMessage?: string;
+    fallbackNextActions?: string[];
+  },
 ): TaskResultNotificationDecision {
   const taskTitle = cleanTaskTitle(input.task);
   const summary = buildSummary(input, reason);
@@ -116,12 +121,12 @@ function actionRequiredDecision(
     notificationType: "action_required",
     priority: "high",
     reason,
-    snippet: `[需要确认] ${reason}`,
-    userMessage: `任务「${taskTitle}」需要你确认或提出修改建议。${reason}`,
+    snippet: `[${options?.snippetPrefix ?? "需要确认"}] ${reason}`,
+    userMessage: options?.userMessage ?? `任务「${taskTitle}」需要你确认或提出修改建议。${reason}`,
     badge: "need_confirm",
     resultSummary: {
       ...summary,
-      nextActions: summary.nextActions.length ? summary.nextActions : ["查看结果", "确认下一步"],
+      nextActions: summary.nextActions.length ? summary.nextActions : (options?.fallbackNextActions ?? ["查看结果", "确认下一步"]),
     },
     detailPolicy: {
       showTimelineByDefault: false,
@@ -176,6 +181,15 @@ function contextRequiredDecision(input: JudgeTaskResultInput, reason: string): T
       showRawOutputBehindMore: true,
       showArtifactsExpanded: true,
     },
+  });
+}
+
+function offlineActionRequiredDecision(input: JudgeTaskResultInput, reason: string): TaskResultNotificationDecision {
+  const taskTitle = cleanTaskTitle(input.task);
+  return actionRequiredDecision(input, reason, {
+    snippetPrefix: "待完成",
+    userMessage: `任务「${taskTitle}」需要你完成线下动作并记录结果。${reason}`,
+    fallbackNextActions: ["记录完成情况", "查看任务详情"],
   });
 }
 
@@ -286,7 +300,7 @@ export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotifica
   }
 
   if (interaction?.type === "perform_offline_action" && interaction.shouldNotifyUser) {
-    return actionRequiredDecision(input, interaction.reason || "任务需要你完成线下动作并记录结果。");
+    return offlineActionRequiredDecision(input, interaction.reason || "任务需要你完成线下动作并记录结果。");
   }
 
   if (input.result.awaitingUser) {

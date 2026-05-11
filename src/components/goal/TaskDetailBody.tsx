@@ -4,11 +4,13 @@ import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
+import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
@@ -26,6 +28,17 @@ const EXECUTION_LABEL: Record<Task["executionKind"], string> = {
   freeform_chat: "补充对话",
   generic_result: "Agent 任务",
 };
+
+const PRESENTATION_LABEL = {
+  summary_card: "摘要卡片",
+  visual_report: "可视化报告",
+  comparison_table: "对比表",
+  checklist: "检查清单",
+  timeline: "时间线",
+  document: "结构化文档",
+  dashboard: "数据看板",
+  handoff_package: "交付包",
+} as const;
 
 const SECTION_COPY = {
   pending: {
@@ -52,7 +65,42 @@ function isAbortError(error: unknown) {
 }
 
 function isVisibleExecutionStep(step: TaskExecutionStep) {
-  return step.toolName !== "debug.stream_event";
+  return (
+    step.toolName !== "debug.stream_event" &&
+    !step.title.trim().startsWith("[debug]") &&
+    !step.detail?.trim().startsWith("[debug]")
+  );
+}
+
+function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined): TaskExecutionStep[] | undefined {
+  if (!trajectory?.length) return undefined;
+  return trajectory.map((step) => ({
+    id: step.id,
+    title: step.title,
+    type:
+      step.type === "tool_call" || step.type === "tool_result"
+        ? "tool"
+        : step.type === "assistant"
+          ? "assistant"
+          : step.type === "result"
+            ? "result"
+            : "phase",
+    status: step.status,
+    detail: step.thought ?? summarizeToolInput(step.toolCall?.input),
+    toolName: step.toolCall?.name,
+    startedAt: step.startedAt,
+    finishedAt: step.endedAt,
+  }));
+}
+
+function summarizeToolInput(input: unknown) {
+  if (!input || typeof input !== "object") return undefined;
+  try {
+    const text = JSON.stringify(input, null, 2);
+    return text.length > 600 ? `${text.slice(0, 600)}...` : text;
+  } catch {
+    return undefined;
+  }
 }
 
 export function TaskDetailBody({
@@ -75,7 +123,15 @@ export function TaskDetailBody({
 
   const taskState = getTaskDisplayState(task);
   const statusLabel =
-    taskState === "completed" ? "已完成" : taskState === "in_progress" ? "进行中" : taskState === "paused" ? "已暂停" : "待开始";
+    taskState === "completed"
+      ? "已完成"
+      : taskState === "awaiting_user"
+        ? awaitingTaskStatusLabel(task)
+        : taskState === "in_progress"
+          ? "进行中"
+          : taskState === "paused"
+            ? "已暂停"
+            : "待开始";
   const executionAction = getExecutionAction(task, taskState);
   const cleanTitle = task.title.replace(/^任务\d+：/, "");
 
@@ -88,11 +144,11 @@ export function TaskDetailBody({
     [sortedInstances],
   );
   const runningInstances = useMemo(
-    () => sortedInstances.filter((item) => item.status === "in_progress" || item.status === "awaiting_user"),
+    () => sortedInstances.filter((item) => item.status === "in_progress" || item.status === "awaiting_user" || item.awaitingUser),
     [sortedInstances],
   );
   const completedInstances = useMemo(
-    () => sortedInstances.filter((item) => item.status === "completed"),
+    () => sortedInstances.filter((item) => item.status === "completed" && !item.awaitingUser),
     [sortedInstances],
   );
 
@@ -137,6 +193,7 @@ export function TaskDetailBody({
               instanceId: instance.id,
               progress: state.progress,
               logs: state.logs,
+              trajectory: state.trajectory,
             });
           }),
         );
@@ -250,6 +307,9 @@ export function TaskDetailBody({
 
               <MetaLabel>交付物</MetaLabel>
               <MetaValue>{task.expectedOutcome || "—"}</MetaValue>
+
+              <MetaLabel>交付形式</MetaLabel>
+              <MetaValue>{formatDeliverablePresentation(task)}</MetaValue>
 
               <MetaLabel>执行方式</MetaLabel>
               <MetaValue>{EXECUTION_LABEL[task.resultViewKind ?? task.executionKind]}</MetaValue>
@@ -384,11 +444,22 @@ function pendingLength(task: Task) {
 }
 
 function runningLength(task: Task) {
-  return task.instances.filter((item) => item.status === "in_progress" || item.status === "awaiting_user").length;
+  return task.instances.filter((item) => item.status === "in_progress" || item.status === "awaiting_user" || item.awaitingUser).length;
 }
 
 function completedLength(task: Task) {
-  return task.instances.filter((item) => item.status === "completed").length;
+  return task.instances.filter((item) => item.status === "completed" && !item.awaitingUser).length;
+}
+
+function formatDeliverablePresentation(task: Task) {
+  const expectedResult = task.expectedResult;
+  const presentation = expectedResult?.presentation;
+  const presentationLabel = presentation ? PRESENTATION_LABEL[presentation] : "结构化产物";
+  const primaryFormat = expectedResult?.primaryFormat ?? "structured_blocks";
+  const exportFormats = expectedResult?.exportableFormats?.length
+    ? `，可导出 ${expectedResult.exportableFormats.join(" / ")}`
+    : "";
+  return `${presentationLabel}（${primaryFormat}${exportFormats}）`;
 }
 
 function InstanceCard({
@@ -448,7 +519,7 @@ function InstanceCard({
           <div className="space-y-4">
             <div className="min-w-0">
               <div className="mb-2 text-[12px] font-medium text-[#6B7280]">执行过程</div>
-              <ExecutionMessageStream steps={instance.timeline ?? []} />
+              <ExecutionMessageStream steps={trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? []} />
             </div>
             {instance.status === "completed" || instance.status === "awaiting_user" ? (
               <div className="min-w-0">
@@ -476,6 +547,7 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
     instance.result?.artifacts ??
     (instance.payload.kind === "generic_result" ? instance.payload.artifacts : undefined);
   const structuredOutput = instance.result?.structuredOutput;
+  const taskResult = instance.result?.taskResult;
   const resultSummary = genericSummary && genericSummary !== resultLine ? genericSummary : "";
   const extraPayloadLines = getPayloadSummaryLines(instance).slice(resultLine ? 1 : 0);
 
@@ -495,10 +567,11 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
           </div>
         ) : null}
       </div>
-      {(genericMessage && genericMessage !== resultLine) || genericArtifacts?.length ? (
+      {(genericMessage && genericMessage !== resultLine) || genericArtifacts?.length || taskResult ? (
         <GenericAgentResultView
           summary={genericSummary}
           finalMessage={genericMessage}
+          taskResult={taskResult}
           artifacts={genericArtifacts}
           structuredOutput={structuredOutput}
           notification={instance.notification}
@@ -517,13 +590,7 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
         <PayloadSummaryCard lines={extraPayloadLines} />
       ) : null}
       {instance.awaitingUser ? (
-        <div className="rounded-xl border border-[#F5D58B] bg-[#FFF9E8] p-4 text-[13px] leading-6 text-[#6E5A16]">
-          <div className="font-medium text-[#8A6D3B]">{awaitingUserTitle(instance)}</div>
-          <div className="mt-2">{instance.awaitingUser.reason}</div>
-          {instance.awaitingUser.suggestedActions?.length ? (
-            <div className="mt-2">建议操作：{instance.awaitingUser.suggestedActions.join(" / ")}</div>
-          ) : null}
-        </div>
+        <AwaitingUserResumePanel task={task} instance={instance} />
       ) : null}
     </div>
   );
@@ -563,6 +630,8 @@ function ExecutionFeedItem({ step }: { step: TaskExecutionStep }) {
   const timestamp = new Date(step.startedAt).toLocaleTimeString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
   });
   const message = step.detail?.trim() || step.title;
 
@@ -680,16 +749,19 @@ function MetaValue({ children }: { children: React.ReactNode }) {
 }
 
 function getTaskDisplayState(task: Task) {
-  const latestStatus = task.instances[0]?.status;
+  const latest = task.instances[0];
+  const latestStatus = latest?.status;
+  if (latestStatus === "awaiting_user" || latest?.awaitingUser) return "awaiting_user" as const;
   if (latestStatus === "completed" || task.progress >= 100) return "completed" as const;
   if (latestStatus === "paused") return "paused" as const;
-  if (latestStatus === "awaiting_user" || latestStatus === "in_progress") return "in_progress" as const;
+  if (latestStatus === "in_progress") return "in_progress" as const;
   if (latestStatus === "pending") return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
   return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
 }
 
 function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisplayState>) {
-  if (taskState === "completed") return null;
+  if (taskState === "completed") return { label: "重新执行", action: "rerun" as const };
+  if (taskState === "awaiting_user") return null;
   const latest = [...task.instances]
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     .find((instance) => instance.status !== "completed");
@@ -703,6 +775,7 @@ function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisp
 
 function taskStatusClassName(state: ReturnType<typeof getTaskDisplayState>) {
   if (state === "completed") return "bg-[#E5E7EB] text-[#6B7280]";
+  if (state === "awaiting_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
   if (state === "in_progress") return "bg-[#DDE1E7] text-[#1F2328]";
   if (state === "paused") return "bg-[#E5E7EB] text-[#6B7280]";
   return "bg-[#F5F6F8] text-[#8C9198]";
@@ -715,16 +788,6 @@ function instanceStatusClassName(status: Task["instances"][number]["status"]) {
   if (status === "error") return "bg-[#FDECEC] text-[#B42318]";
   if (status === "paused") return "bg-[#E5E7EB] text-[#6B7280]";
   return "bg-[#F5F6F8] text-[#8C9198]";
-}
-
-function awaitingUserTitle(instance: TaskInstance) {
-  const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
-  if (type === "answer") return "等待你作答";
-  if (type === "provide_context") return "等待你补充信息";
-  if (type === "perform_offline_action") return "等待你完成线下动作";
-  if (type === "agent_revision_required") return "等待 Agent 补齐";
-  if (type === "deliverable_gap") return "未通过验收";
-  return "等待你确认";
 }
 
 function instanceStatusLabel(instance: Task["instances"][number]) {
@@ -743,4 +806,10 @@ function instanceStatusLabel(instance: Task["instances"][number]) {
     return "待确认";
   }
   return "待处理";
+}
+
+function awaitingTaskStatusLabel(task: Task) {
+  const latest = task.instances[0];
+  if (!latest) return "待确认";
+  return instanceStatusLabel(latest);
 }
