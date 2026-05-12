@@ -73,6 +73,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
           progress: payload.progress,
           logs: payload.logs,
           trajectory: payload.trajectory,
+          waitingReason: payload.waitingReason,
         });
       },
     })
@@ -83,6 +84,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
           progress: result.progress,
           logs: result.logs,
           trajectory: result.trajectory,
+          waitingReason: result.waitingReason,
         });
       })
       .catch((error) => {

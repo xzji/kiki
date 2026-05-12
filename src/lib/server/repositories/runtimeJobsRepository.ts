@@ -310,6 +310,26 @@ export function getRuntimeJob(jobId: string) {
   return row ? mapRow(row) : null;
 }
 
+export function renewRuntimeJobLease(jobId: string, input: { leaseOwner: string; leaseMs?: number }) {
+  const db = getDatabase();
+  const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + (input.leaseMs ?? 2 * 60 * 1000)).toISOString();
+  const result = db
+    .prepare(
+      `
+        UPDATE runtime_jobs
+        SET lease_owner = ?,
+            lease_expires_at = ?,
+            updated_at = ?
+        WHERE id = ?
+          AND status = 'running'
+          AND (lease_owner IS NULL OR lease_owner = ?)
+      `,
+    )
+    .run(input.leaseOwner, leaseExpiresAt, now, jobId, input.leaseOwner);
+  return { renewed: result.changes > 0, leaseExpiresAt };
+}
+
 export function releaseExpiredRuntimeJobLeases() {
   const db = getDatabase();
   const now = nowIso();

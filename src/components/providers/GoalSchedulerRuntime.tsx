@@ -416,6 +416,8 @@ function runGoalSchedulerCycle() {
               instanceId: latestInstance.id,
               progress: payload.progress,
               logs: payload.logs,
+              trajectory: payload.trajectory,
+              waitingReason: payload.waitingReason,
             });
           },
         });
@@ -424,6 +426,8 @@ function runGoalSchedulerCycle() {
           instanceId: latestInstance.id,
           progress: result.progress,
           logs: result.logs,
+          trajectory: result.trajectory,
+          waitingReason: result.waitingReason,
         });
       } catch {
         useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");

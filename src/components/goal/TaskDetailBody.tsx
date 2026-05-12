@@ -3,15 +3,17 @@
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { TaskAgentPromptDrawer } from "@/components/goal/TaskAgentPromptDrawer";
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
+import { formatToolOperationText, summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
+import type { Goal, Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
   daily_repeat: "每日重复",
@@ -86,26 +88,42 @@ function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined)
             ? "result"
             : "phase",
     status: step.status,
-    detail: step.thought ?? summarizeToolInput(step.toolCall?.input),
+    detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
   }));
 }
 
-function summarizeToolInput(input: unknown) {
-  if (!input || typeof input !== "object") return undefined;
-  try {
-    const text = JSON.stringify(input, null, 2);
-    return text.length > 600 ? `${text.slice(0, 600)}...` : text;
-  } catch {
-    return undefined;
+function applyWaitingReasonToSteps(steps: TaskExecutionStep[], waitingReason: string | undefined) {
+  if (!waitingReason?.trim()) return steps;
+  const nextSteps = [...steps];
+  for (let index = nextSteps.length - 1; index >= 0; index -= 1) {
+    const step = nextSteps[index];
+    if (step.toolName) continue;
+    if (step.status !== "pending" && step.status !== "running") continue;
+    if (!/等待 Agent 开始执行|调度器已生成任务实例|任务已创建/.test(step.title)) continue;
+    nextSteps[index] = {
+      ...step,
+      detail: waitingReason.trim(),
+    };
+    return nextSteps;
   }
+  return nextSteps.concat({
+    id: `waiting-reason-${nextSteps.at(-1)?.id ?? "step"}`,
+    title: "等待 Agent 开始执行",
+    type: "phase",
+    status: "pending",
+    detail: waitingReason.trim(),
+    startedAt: nextSteps.at(-1)?.startedAt ?? new Date().toISOString(),
+  });
 }
 
 export function TaskDetailBody({
+  goal,
   task,
 }: {
+  goal: Goal;
   task: Task;
 }) {
   const [metaOpen, setMetaOpen] = useState(false);
@@ -120,6 +138,15 @@ export function TaskDetailBody({
   });
   const deleteTask = useGoalStore((state) => state.deleteTask);
   const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
+  const promptContext = useMemo(() => {
+    for (const subGoal of goal.subGoals) {
+      if (subGoal.tasks.some((item) => item.id === task.id)) {
+        return { goal, subGoal };
+      }
+    }
+    return null;
+  }, [goal, task.id]);
+  const [promptDrawerOpen, setPromptDrawerOpen] = useState(false);
 
   const taskState = getTaskDisplayState(task);
   const statusLabel =
@@ -194,6 +221,7 @@ export function TaskDetailBody({
               progress: state.progress,
               logs: state.logs,
               trajectory: state.trajectory,
+              waitingReason: state.waitingReason,
             });
           }),
         );
@@ -324,7 +352,18 @@ export function TaskDetailBody({
 
             {task.description ? (
               <div className="mt-4 border-t border-[#E5E7EB] pt-4">
-                <div className="mb-2 text-[12px] text-[#8C9198]">任务内容</div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-[12px] text-[#8C9198]">任务内容</div>
+                  {promptContext ? (
+                    <button
+                      type="button"
+                      onClick={() => setPromptDrawerOpen(true)}
+                      className="text-[12px] text-[#3B82F6] hover:underline"
+                    >
+                      📄 Agent 完整任务内容（md）
+                    </button>
+                  ) : null}
+                </div>
                 <p className="whitespace-pre-wrap text-[13px] leading-6 text-[#1F2328]">{task.description}</p>
               </div>
             ) : null}
@@ -375,6 +414,13 @@ export function TaskDetailBody({
       </div>
 
       <TaskEditDrawer task={task} open={editOpen} onClose={() => setEditOpen(false)} />
+      <TaskAgentPromptDrawer
+        open={promptDrawerOpen}
+        onClose={() => setPromptDrawerOpen(false)}
+        goal={promptContext?.goal ?? null}
+        subGoal={promptContext?.subGoal ?? null}
+        task={task}
+      />
     </div>
   );
 }
@@ -462,6 +508,49 @@ function formatDeliverablePresentation(task: Task) {
   return `${presentationLabel}（${primaryFormat}${exportFormats}）`;
 }
 
+function formatDuration(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0秒";
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}小时${minutes}分${seconds}秒`;
+  if (minutes > 0) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
+function calculateCumulativeExecutionMs(steps: TaskExecutionStep[]) {
+  const now = Date.now();
+  const ranges = steps
+    .map((step) => {
+      const start = new Date(step.startedAt).getTime();
+      const end = new Date(step.finishedAt ?? now).getTime();
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+      return { start, end };
+    })
+    .filter((item): item is { start: number; end: number } => Boolean(item))
+    .sort((left, right) => left.start - right.start);
+
+  if (ranges.length === 0) return 0;
+
+  let total = 0;
+  let currentStart = ranges[0].start;
+  let currentEnd = ranges[0].end;
+
+  for (let index = 1; index < ranges.length; index += 1) {
+    const next = ranges[index];
+    if (next.start <= currentEnd) {
+      currentEnd = Math.max(currentEnd, next.end);
+      continue;
+    }
+    total += currentEnd - currentStart;
+    currentStart = next.start;
+    currentEnd = next.end;
+  }
+
+  return total + (currentEnd - currentStart);
+}
+
 function InstanceCard({
   task,
   instance,
@@ -475,6 +564,11 @@ function InstanceCard({
 }) {
   const canExpand = instance.status === "in_progress" || instance.status === "awaiting_user" || instance.status === "completed";
   const resultLine = instance.status === "completed" ? getInstanceResultLine(task, instance) : "";
+  const executionSteps = applyWaitingReasonToSteps(
+    trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
+    instance.execution?.waitingReason,
+  );
+  const executionDuration = formatDuration(calculateCumulativeExecutionMs(executionSteps));
 
   return (
     <div className="overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white">
@@ -518,8 +612,11 @@ function InstanceCard({
         <div className="border-t border-[#E5E7EB] bg-[#FAFAFB] px-4 py-4">
           <div className="space-y-4">
             <div className="min-w-0">
-              <div className="mb-2 text-[12px] font-medium text-[#6B7280]">执行过程</div>
-              <ExecutionMessageStream steps={trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? []} />
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] font-medium text-[#6B7280]">
+                <span>执行过程</span>
+                <span className="text-[#8C9198]">累计执行时长 {executionDuration}</span>
+              </div>
+              <ExecutionMessageStream steps={executionSteps} />
             </div>
             {instance.status === "completed" || instance.status === "awaiting_user" ? (
               <div className="min-w-0">
@@ -633,8 +730,10 @@ function ExecutionFeedItem({ step }: { step: TaskExecutionStep }) {
     second: "2-digit",
     hour12: false,
   });
-  const message = step.detail?.trim() || step.title;
-
+  const message =
+    step.type === "tool" || step.toolName
+      ? formatToolOperationText(step.title, step.detail?.trim())
+      : step.detail?.trim() || step.title;
   if (step.type === "tool" || step.toolName) {
     return (
       <div className="rounded-full bg-[#EAEAEA] px-3 py-2 text-[12px] leading-5 text-[#5B6168]">
@@ -642,7 +741,7 @@ function ExecutionFeedItem({ step }: { step: TaskExecutionStep }) {
           <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white text-[10px] text-[#8C9198]">
             {toolGlyph(step)}
           </span>
-          <span className="truncate">{message}</span>
+          <span className="min-w-0 flex-1 truncate">{message}</span>
           <span className="shrink-0 text-[11px] text-[#9AA0A6]">{timestamp}</span>
         </div>
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatToolOperationText } from "@/lib/execution/summarizeToolOperation";
 import type { TaskExecutionStep } from "@/types/kiki";
 
 const STATUS_STYLE: Record<TaskExecutionStep["status"], string> = {
@@ -56,12 +57,16 @@ export function TaskExecutionTimeline({ steps }: { steps: TaskExecutionStep[] })
       {visibleSteps.map((step) => (
         <div key={step.id} className="rounded-xl border border-[#E5E7EB] bg-white px-4 py-3.5">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[13px] font-medium text-[#1F2328]">{step.title}</div>
+            <div className="text-[13px] font-medium text-[#1F2328]">
+              {step.toolName ? formatToolOperationText(step.title, step.detail?.trim()) : step.title}
+            </div>
             <span className={`rounded-md px-2 py-0.5 text-[11px] ${STATUS_STYLE[step.status]}`}>
               {STATUS_LABEL[step.status]}
             </span>
           </div>
-          {step.detail ? <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[#6B7280]">{step.detail}</p> : null}
+          {step.detail && !step.toolName ? (
+            <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[#6B7280]">{step.detail}</p>
+          ) : null}
           <div className="mt-2 text-[11px] text-[#8C9198]">
             开始 {formatStepDateTime(step.startedAt)}
             {step.finishedAt ? ` · 结束 ${formatStepDateTime(step.finishedAt)}` : ""}

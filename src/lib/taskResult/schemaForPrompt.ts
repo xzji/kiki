@@ -12,9 +12,9 @@ export const TASK_RESULT_PROMPT_FRAGMENT = `
    - callout：提示/风险/结论，字段 { kind, tone, text }
 3. 需要对比多个方案时优先用 comparison_table；需要用户选择时用 decision；风险、结论、重要提醒用 callout。
 4. 不要发明新的 block kind；不确定的信息形态用 paragraph 或 markdown 兜底。
-5. task_result.meta 必须写入 presentation、primaryFormat、exportableFormats；信息类报告优先使用 presentation=visual_report、primaryFormat=structured_blocks、exportableFormats=["html","markdown"]。
-6. 所有任务的执行结果都必须以 task_result.blocks 作为可组件化渲染的主产出；只返回 artifact、summary 或 final_message 一律不算完成。
-7. artifacts 只能作为导出/下载/兼容镜像，不能作为唯一产出；如果 artifacts 有内容，必须能在 task_result.blocks 中看到同等完整的用户可读产出。
+5. task_result.meta 必须写入 presentation、primaryFormat、exportableFormats；presentation 合法值包括：summary_card、visual_report、comparison_table、checklist、timeline、document、dashboard、handoff_package。信息类报告优先使用 presentation=visual_report、primaryFormat=structured_blocks、exportableFormats=["html","markdown"]。
+6. task_result.blocks 是唯一主产出容器；artifacts 只能作为导出、下载或兼容镜像，不能替代 blocks。
+7. 如果 artifacts 有内容，task_result.blocks 中必须能看到同等完整的用户可读产出。
 
 task_result 示例：
 {

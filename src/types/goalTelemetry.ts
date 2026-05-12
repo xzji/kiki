@@ -8,7 +8,11 @@ export type GoalTaskStepEventType =
   | "assistant_output"
   | "retry_scheduled"
   | "await_user"
-  | "result_ready";
+  | "result_ready"
+  | "resume_mode_started"
+  | "resume_duplicate_tool_call"
+  | "resume_replanning_detected"
+  | "readiness_semantic_judge";
 
 export type GoalProgressStatus = "running" | "completed" | "failed";
 

@@ -1,4 +1,5 @@
 import { createGeneratedInstance } from "@/mocks/goals";
+import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type {
@@ -86,7 +87,7 @@ function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] |
             ? "result"
             : "phase",
     status: step.status,
-    detail: step.thought,
+    detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,

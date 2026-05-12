@@ -1,5 +1,5 @@
 import { readRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
-import { appendRuntimeDaemonLog, writeRuntimeDaemonState } from "@/lib/daemon/daemonState";
+import { appendRuntimeDaemonLog, readRuntimeDaemonState, writeRuntimeDaemonState } from "@/lib/daemon/daemonState";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { readGoalsSnapshot, readRuntimeEnvironmentsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { runGoalSchedulerEngine } from "@/lib/server/worker/goalSchedulerEngine";
@@ -15,6 +15,19 @@ export async function runRuntimeDaemonLoop() {
   const config = readRuntimeDaemonConfig();
   appendRuntimeDaemonLog("KiKi Runtime Daemon 已启动");
   runRecoveryWorker();
+  setInterval(() => {
+    const now = new Date().toISOString();
+    const current = readRuntimeDaemonState();
+    writeRuntimeDaemonState({
+      deviceId: current?.deviceId ?? config.deviceId,
+      status: current?.status ?? "idle",
+      lastHeartbeatAt: now,
+      lastJobId: current?.lastJobId,
+      lastJobFinishedAt: current?.lastJobFinishedAt,
+      lastError: current?.lastError,
+      updatedAt: now,
+    });
+  }, config.heartbeatIntervalMs);
 
   while (true) {
     const runtimeEnvironments = readRuntimeEnvironmentsSnapshot(INITIAL_RUNTIME_ENVIRONMENTS);

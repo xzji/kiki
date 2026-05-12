@@ -109,7 +109,7 @@ export function GoalPlanDrawer({
         <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
           {activeTask ? (
             <div className="mx-auto w-full max-w-3xl px-2 py-2">
-              <TaskDetailBody task={activeTask} />
+              <TaskDetailBody goal={goal} task={activeTask} />
             </div>
           ) : (
             <GoalPlanContent

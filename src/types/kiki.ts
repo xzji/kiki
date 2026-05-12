@@ -217,6 +217,7 @@ export type TaskInstanceExecutionState = {
   startedAt?: string;
   finishedAt?: string;
   lastUpdatedAt?: string;
+  waitingReason?: string;
   errorCategory?: TaskRunErrorCategory;
   errorMessage?: string;
 };
@@ -370,6 +371,13 @@ export type SubGoal = {
   id: string;
   goalId: string;
   title: string;
+  description?: string;
+  why?: string;
+  priority?: TaskPriority;
+  weight?: number;
+  dependencies?: string[];
+  estimatedDurationMinutes?: number;
+  successCriteria?: string[];
   tasks: Task[];
 };
 
@@ -496,8 +504,11 @@ export type GoalBreakdownDraft = {
     id: string;
     title: string;
     description?: string;
+    why?: string;
     priority?: TaskPriority;
+    weight?: number;
     dependencies?: string[];
+    estimatedDurationMinutes?: number;
     successCriteria?: string[];
     tasks: {
       id: string;

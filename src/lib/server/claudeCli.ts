@@ -121,12 +121,16 @@ function readStringField(input: unknown, keys: string[]) {
 }
 
 function parseToolInput(rawInput: unknown, partialJson: string) {
-  if (rawInput !== undefined) return rawInput;
-  if (!partialJson.trim()) return undefined;
+  const hasRawInput =
+    rawInput !== undefined &&
+    (!Array.isArray(rawInput) || rawInput.length > 0) &&
+    (typeof rawInput !== "object" || rawInput === null || Object.keys(rawInput as Record<string, unknown>).length > 0);
+  if (hasRawInput) return rawInput;
+  if (!partialJson.trim()) return rawInput;
   try {
     return JSON.parse(partialJson) as unknown;
   } catch {
-    return undefined;
+    return rawInput;
   }
 }
 

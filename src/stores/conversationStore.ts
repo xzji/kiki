@@ -30,7 +30,7 @@ type ConversationStore = {
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 
-const MOCK_BASELINE_RESET_VERSION = 1;
+const MOCK_BASELINE_RESET_VERSION = 2;
 
 export const useConversationStore = create<ConversationStore>()(
   persist(

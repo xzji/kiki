@@ -58,6 +58,30 @@ function defaultOptionsFor(instance: TaskInstance) {
   return ["确认继续", "需要修改", "补充更多信息"];
 }
 
+function dedupeKeepOrder(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+const GENERIC_CONTEXT_OPTIONS = new Set(["补充具体信息", "补充缺失信息", "补充约束或偏好", "说明暂时无法提供", "填写其他信息"]);
+
+function normalizeSpecificOptions(values: string[]) {
+  const options = dedupeKeepOrder(values).filter((item) => item.length >= 2 && item.length <= 24);
+  const specificOptions = options.filter((item) => !GENERIC_CONTEXT_OPTIONS.has(item));
+  return (specificOptions.length ? specificOptions : options).slice(0, 3);
+}
+
+function pickThreeOptions(values: string[]) {
+  return normalizeSpecificOptions(values);
+}
+
 function optionTextForSubmit(option: string, instance: TaskInstance, item?: ReadinessItem) {
   if (item) return `${item.label}：${option}`;
   const type = instance.awaitingUser?.interactionRequirement?.type;
@@ -112,25 +136,17 @@ function missingItemsFrom(readiness: TaskReadiness | null) {
 }
 
 function defaultOptionsForMissingItem(item: ReadinessItem) {
-  if (item.options?.length) return item.options;
-  if (/城市|出发地|目的地/.test(item.label)) return ["上海", "广州", "北京", "深圳", "其他城市"];
-  if (/日期|时间/.test(item.label)) return ["今天", "明天", "本周末", "指定日期"];
-  if (/预算|费用|价格/.test(item.label)) return ["预算不限", "性价比优先", "补充预算上限"];
-  return [`补充${item.label}`, "暂时无法提供"];
-}
-
-function readinessStatusLabel(item: ReadinessItem) {
-  if (item.status === "missing_user") return "需要你提供";
-  if (item.status === "agent_retrievable") return "KiKi 可获取";
-  if (item.status === "available") return "已具备";
-  return "不需要";
-}
-
-function readinessStatusClassName(item: ReadinessItem) {
-  if (item.status === "missing_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
-  if (item.status === "agent_retrievable") return "bg-[#EEF6FF] text-[#0D47A1]";
-  if (item.status === "available") return "bg-[#E8F5E9] text-[#25663A]";
-  return "bg-[#F5F6F8] text-[#6B7280]";
+  if (item.options?.length) return item.options.slice(0, 3);
+  const text = `${item.label} ${item.description} ${item.reason}`;
+  if (/住宿区域.*酒店类型|酒店类型.*住宿区域|住宿偏好|住哪/.test(text)) {
+    return ["海滩区 + 度假酒店", "市中心 + 高性价比酒店", "度假区/珍珠岛 + 一站式酒店"];
+  }
+  if (/住宿区域|酒店区域|住哪/.test(text)) return ["海滩区", "市中心", "度假区/珍珠岛"];
+  if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型/.test(text)) return ["高性价比经济型", "舒适型四星", "度假型五星/海景"];
+  if (/城市|出发地|目的地/.test(text)) return ["上海", "广州", "北京"];
+  if (/日期|时间/.test(text)) return ["补充出发日期", "补充返回日期", "补充完整日期范围"];
+  if (/预算|费用|价格/.test(text)) return ["控制预算", "舒适优先", "高性价比优先"];
+  return [];
 }
 
 export function AwaitingUserResumePanel({
@@ -157,8 +173,19 @@ export function AwaitingUserResumePanel({
   const options = useMemo(() => {
     if (missingItems.length > 0) return [];
     const raw = requirement?.options?.length ? requirement.options : defaultOptionsFor(instance);
-    return Array.from(new Set(raw.map((item) => item.trim()).filter(Boolean))).slice(0, 5);
+    return pickThreeOptions(raw);
   }, [instance, missingItems.length, requirement?.options]);
+
+  const suggestedOptions = useMemo(() => {
+    const raw = instance.awaitingUser?.suggestedActions ?? [];
+    return pickThreeOptions(raw);
+  }, [instance.awaitingUser?.suggestedActions]);
+
+  const optionsForMissingItem = (item: ReadinessItem) => {
+    if (item.options?.length) return pickThreeOptions(item.options);
+    if (suggestedOptions.length) return suggestedOptions;
+    return pickThreeOptions(defaultOptionsForMissingItem(item));
+  };
 
   const chooseOption = (option: string, item?: ReadinessItem) => {
     setCustomMode(false);
@@ -205,6 +232,7 @@ export function AwaitingUserResumePanel({
         progress: state.progress,
         logs: state.logs,
         trajectory: state.trajectory,
+        waitingReason: state.waitingReason,
       });
       setFeedback("");
       setCustomMode(false);
@@ -218,38 +246,22 @@ export function AwaitingUserResumePanel({
 
   if (!instance.awaitingUser) return null;
 
+  const headline =
+    requirement?.question?.trim() ||
+    (missingItems.length === 1
+      ? `请补充：${missingItems[0].label}`
+      : missingItems.length > 1
+        ? `请补充：${missingItems.map((item) => item.label).join("、")}`
+        : instance.awaitingUser.reason);
+
   return (
     <div className="rounded-xl border border-[#F5D58B] bg-[#FFF9E8] p-4 text-[13px] leading-6 text-[#6E5A16]">
       <div className="font-medium text-[#8A6D3B]">{titleFor(instance)}</div>
-      <div className="mt-2">{instance.awaitingUser.reason}</div>
-      {requirement?.question ? (
-        <div className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-[#1F2328]">{requirement.question}</div>
-      ) : null}
-      {readiness?.items.length ? (
-        <div className="mt-3 rounded-lg border border-[#E5D7A8] bg-white/70 p-3">
-          <div className="text-[12px] font-medium text-[#8A6D3B]">执行所需信息检查</div>
-          <div className="mt-2 space-y-2">
-            {readiness.items.map((item) => (
-              <div key={item.id} className="rounded-lg bg-white px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[13px] font-medium text-[#1F2328]">{item.label}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${readinessStatusClassName(item)}`}>
-                    {readinessStatusLabel(item)}
-                  </span>
-                </div>
-                <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{item.description}</div>
-                {item.status === "missing_user" ? (
-                  <div className="mt-1 text-[12px] leading-5 text-[#8A6D3B]">{item.reason}</div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      <div className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-[13px] leading-6 text-[#1F2328]">{headline}</div>
       {missingItems.length ? (
         <div className="mt-3 space-y-3">
           {missingItems.map((item) => {
-            const itemOptions = defaultOptionsForMissingItem(item);
+            const itemOptions = optionsForMissingItem(item);
             return (
               <div key={item.id} className="rounded-lg border border-[#E5D7A8] bg-white/60 p-3">
                 <div className="text-[12px] font-medium text-[#8A6D3B]">请选择{item.label}</div>
@@ -280,7 +292,7 @@ export function AwaitingUserResumePanel({
                         : "rounded-full border border-dashed border-[#E5D7A8] bg-white px-3 py-1 text-[12px] text-[#6E5A16] hover:border-[#8A6D3B]"
                     }
                   >
-                    其他{item.label}
+                    都不是，自己填写
                   </button>
                 </div>
               </div>
@@ -289,7 +301,6 @@ export function AwaitingUserResumePanel({
         </div>
       ) : (
         <div className="mt-3">
-          <div className="text-[12px] font-medium text-[#8A6D3B]">请选择一个操作，或填写其他信息</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {options.map((option) => {
               const selected = feedback === optionTextForSubmit(option, instance) && !customMode;
@@ -322,9 +333,6 @@ export function AwaitingUserResumePanel({
           </div>
         </div>
       )}
-      {instance.awaitingUser.suggestedActions?.length ? (
-        <div className="mt-2">建议操作：{instance.awaitingUser.suggestedActions.join(" / ")}</div>
-      ) : null}
       {blocker ? (
         <div className="mt-4 space-y-3">
           <textarea

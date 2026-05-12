@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
@@ -26,7 +27,7 @@ import type {
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
-const MOCK_BASELINE_RESET_VERSION = 1;
+const MOCK_BASELINE_RESET_VERSION = 2;
 
 function finalizeGoal(goal: Goal): Goal {
   const tasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
@@ -76,6 +77,229 @@ function normalizeTask(task: Task): Task {
     executionStrategy: task.executionStrategy ?? "agent_autonomous",
     executionObjective: task.executionObjective ?? task.description,
     instances: task.instances.map((instance) => normalizeInstance(instance, task)),
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function getTrimmedString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function getTrimmedStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item): item is string => Boolean(item));
+}
+
+function dedupeStrings(values: Array<string | undefined>, limit = 6) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function stripSubGoalPrefix(value: string) {
+  return value.replace(/^子目标\d+：/, "").trim();
+}
+
+function joinNaturalList(items: string[], conjunction = "、") {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} 和 ${items[1]}`;
+  return `${items.slice(0, -1).join(conjunction)} 和 ${items[items.length - 1]}`;
+}
+
+function normalizeSentence(value: string) {
+  return value.trim().replace(/[。；;，,\s]+$/g, "");
+}
+
+function extractGoalPlanningContext(goal: Goal) {
+  const collectedInfo = isObject(goal.workflow?.collectedInfo) ? goal.workflow?.collectedInfo : undefined;
+  const goalAnalysis = isObject(collectedInfo?.goalAnalysis) ? collectedInfo.goalAnalysis : undefined;
+  const collectedInfoSummary = isObject(collectedInfo?.collectedInfoSummary)
+    ? collectedInfo.collectedInfoSummary
+    : undefined;
+
+  return {
+    coreIntent: getTrimmedString(goalAnalysis?.coreIntent),
+    successState: getTrimmedString(goalAnalysis?.successState),
+    goalDetails: getTrimmedString(collectedInfoSummary?.goalDetails),
+    summary: getTrimmedString(collectedInfoSummary?.summary) ?? goal.summary,
+    executionOrder: getTrimmedString(collectedInfo?.executionOrder),
+    reviewSummary: getTrimmedStringArray(collectedInfo?.reviewSummary),
+  };
+}
+
+function extractSubGoalReviewSummary(reviewSummary: string[], subGoalTitle: string) {
+  const plainTitle = stripSubGoalPrefix(subGoalTitle);
+  const match = reviewSummary.find((item) => {
+    const [prefix] = item.split("：");
+    return prefix?.trim() === subGoalTitle.trim() || prefix?.trim() === plainTitle;
+  });
+  if (!match) return undefined;
+  const [, detail = ""] = match.split(/：(.+)/);
+  const trimmed = detail.trim();
+  return trimmed && !/^已根据 review 调整/.test(trimmed) ? trimmed : undefined;
+}
+
+function inferSubGoalPriority(subGoal: Goal["subGoals"][number]): Goal["subGoals"][number]["priority"] {
+  const priorityRank: Record<NonNullable<Task["priority"]>, number> = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+  };
+  let bestPriority: NonNullable<Task["priority"]> | undefined;
+
+  for (const task of subGoal.tasks) {
+    if (!task.priority) continue;
+    if (!bestPriority || priorityRank[task.priority] > priorityRank[bestPriority]) {
+      bestPriority = task.priority;
+    }
+  }
+
+  return bestPriority;
+}
+
+function inferSubGoalDependencies(goal: Goal, subGoal: Goal["subGoals"][number]) {
+  const dependencyIds = new Set<string>();
+  const taskToSubGoalId = new Map<string, string>();
+
+  goal.subGoals.forEach((item) => {
+    item.tasks.forEach((task) => {
+      taskToSubGoalId.set(task.id, item.id);
+    });
+  });
+
+  subGoal.tasks.forEach((task) => {
+    task.dependencies?.forEach((dependencyId) => {
+      const ownerSubGoalId = taskToSubGoalId.get(dependencyId);
+      if (ownerSubGoalId && ownerSubGoalId !== subGoal.id) {
+        dependencyIds.add(ownerSubGoalId);
+      }
+    });
+  });
+
+  return Array.from(dependencyIds);
+}
+
+function inferSubGoalSuccessCriteria(subGoal: Goal["subGoals"][number]) {
+  return dedupeStrings(
+    subGoal.tasks.flatMap((task) => [
+      task.expectedResult?.completionCriteria,
+      task.expectedResult?.description,
+      task.collaboration?.completionDefinition,
+      task.expectedOutcome,
+    ]),
+    5,
+  );
+}
+
+function inferSubGoalEstimatedDuration(subGoal: Goal["subGoals"][number]) {
+  if (subGoal.tasks.length === 0) return undefined;
+  return subGoal.tasks.reduce((total, task) => {
+    const taskTypeMinutes =
+      task.taskType === "one_shot" ? 90 : task.taskType === "monitoring" ? 45 : 60;
+    const executionBonus =
+      task.executionMode === "interactive" ? 30 : task.executionMode === "monitoring" ? 15 : 0;
+    return total + taskTypeMinutes + executionBonus;
+  }, 0);
+}
+
+function inferSubGoalWeight(goal: Goal, subGoal: Goal["subGoals"][number]) {
+  const totalTaskCount = goal.subGoals.reduce((count, item) => count + item.tasks.length, 0);
+  if (totalTaskCount === 0 || subGoal.tasks.length === 0) return undefined;
+  return Number((subGoal.tasks.length / totalTaskCount).toFixed(2));
+}
+
+function inferSubGoalWhy(
+  goal: Goal,
+  subGoal: Goal["subGoals"][number],
+  successCriteria: string[],
+  reviewDetail?: string,
+) {
+  const context = extractGoalPlanningContext(goal);
+  const anchor = context.coreIntent ?? context.successState ?? goal.title;
+  if (reviewDetail) {
+    return `该子目标直接支撑「${anchor}」，${normalizeSentence(reviewDetail)}。`;
+  }
+  const primaryOutcome = successCriteria[0] ?? subGoal.tasks[0]?.expectedOutcome;
+  return primaryOutcome
+    ? `该子目标直接支撑「${anchor}」，并以「${normalizeSentence(primaryOutcome)}」作为阶段性成果。`
+    : undefined;
+}
+
+function inferSubGoalDescription(
+  goal: Goal,
+  subGoal: Goal["subGoals"][number],
+  successCriteria: string[],
+  reviewDetail?: string,
+) {
+  const taskFocus = dedupeStrings(
+    subGoal.tasks.map((task) => normalizeSentence(task.executionObjective ?? task.description)),
+    2,
+  );
+  const deliverables = dedupeStrings(
+    subGoal.tasks.map((task) => normalizeSentence(task.expectedResult?.description ?? task.expectedOutcome)),
+    2,
+  );
+  const context = extractGoalPlanningContext(goal);
+  const plainTitle = stripSubGoalPrefix(subGoal.title);
+
+  const focusSegment = taskFocus.length > 0 ? `围绕 ${joinNaturalList(taskFocus)} 展开` : "围绕当前关键任务推进";
+  const deliverableSegment =
+    deliverables.length > 0
+      ? `并沉淀 ${joinNaturalList(deliverables)} 等阶段结果`
+      : successCriteria[0]
+        ? `并以 ${normalizeSentence(successCriteria[0])} 作为核心完成标志`
+        : "";
+  const reviewSegment = reviewDetail ? `，重点关注 ${normalizeSentence(reviewDetail)}` : "";
+  const contextSegment = context.goalDetails || context.summary ? `，服务于「${plainTitle}」这一阶段目标` : "";
+
+  return `${plainTitle}${contextSegment}，${focusSegment}${deliverableSegment}${reviewSegment}。`;
+}
+
+function enrichSubGoalMetadata(goal: Goal): Goal {
+  const context = extractGoalPlanningContext(goal);
+
+  return {
+    ...goal,
+    subGoals: goal.subGoals.map((subGoal) => {
+      const reviewDetail = extractSubGoalReviewSummary(context.reviewSummary, subGoal.title);
+      const successCriteria =
+        subGoal.successCriteria && subGoal.successCriteria.length > 0
+          ? subGoal.successCriteria
+          : inferSubGoalSuccessCriteria(subGoal);
+
+      return {
+        ...subGoal,
+        description:
+          getTrimmedString(subGoal.description) ??
+          inferSubGoalDescription(goal, subGoal, successCriteria, reviewDetail),
+        why: getTrimmedString(subGoal.why) ?? inferSubGoalWhy(goal, subGoal, successCriteria, reviewDetail),
+        priority: subGoal.priority ?? inferSubGoalPriority(subGoal),
+        weight: typeof subGoal.weight === "number" ? subGoal.weight : inferSubGoalWeight(goal, subGoal),
+        dependencies:
+          subGoal.dependencies && subGoal.dependencies.length > 0
+            ? subGoal.dependencies
+            : inferSubGoalDependencies(goal, subGoal),
+        estimatedDurationMinutes:
+          typeof subGoal.estimatedDurationMinutes === "number"
+            ? subGoal.estimatedDurationMinutes
+            : inferSubGoalEstimatedDuration(subGoal),
+        successCriteria,
+      };
+    }),
   };
 }
 
@@ -137,7 +361,7 @@ function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] |
             ? "result"
             : "phase",
     status: step.status,
-    detail: step.thought,
+    detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
@@ -226,13 +450,13 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
 }
 
 function normalizeGoal(goal: Goal): Goal {
-  return finalizeGoal({
+  return finalizeGoal(enrichSubGoalMetadata({
     ...goal,
     subGoals: goal.subGoals.map((subGoal) => ({
       ...subGoal,
       tasks: subGoal.tasks.map((task) => normalizeTask(task)),
     })),
-  });
+  }));
 }
 
 function findTaskLocation(goals: Goal[], taskId: string) {
@@ -291,6 +515,7 @@ type GoalStore = {
     progress: GoalServerProgress | null;
     logs?: GoalServerLogEntry[];
     trajectory?: ExecutionTrajectoryStep[];
+    waitingReason?: string;
   }) => void;
   retryTaskInstanceRun: (taskId: string, instanceId: string) => void;
   stopTaskInstanceRun: (taskId: string, instanceId: string) => void;
@@ -579,6 +804,14 @@ export const useGoalStore = create<GoalStore>()(
           })),
         };
 
+        const subGoalIdMap = new Map<string, string>();
+        base.subGoals.forEach((baseSubGoal, sgIndex) => {
+          const nextSubGoal = nextGoal.subGoals[sgIndex];
+          if (nextSubGoal) {
+            subGoalIdMap.set(baseSubGoal.id, nextSubGoal.id);
+          }
+        });
+
         const taskIdMap = new Map<string, string>();
         draft.subGoals.forEach((draftSubGoal, sgIndex) => {
           const nextSubGoal = nextGoal.subGoals[sgIndex];
@@ -605,6 +838,16 @@ export const useGoalStore = create<GoalStore>()(
           return {
             ...sg,
             title: draftSubGoal?.title ?? sg.title,
+            description: draftSubGoal?.description ?? sg.description,
+            why: draftSubGoal?.why ?? sg.why,
+            priority: draftSubGoal?.priority ?? sg.priority,
+            weight: draftSubGoal?.weight ?? sg.weight,
+            dependencies:
+              sg.dependencies?.map((dependencyId) => subGoalIdMap.get(dependencyId) ?? dependencyId) ??
+              draftSubGoal?.dependencies,
+            estimatedDurationMinutes:
+              draftSubGoal?.estimatedDurationMinutes ?? sg.estimatedDurationMinutes,
+            successCriteria: draftSubGoal?.successCriteria ?? sg.successCriteria,
             tasks: sg.tasks.map((t, tIndex) => {
               const draftTask = draftSubGoal?.tasks?.[tIndex];
               return draftTask
@@ -760,7 +1003,7 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
-      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs, trajectory }) => {
+      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs, trajectory, waitingReason }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => {
             const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
@@ -821,6 +1064,7 @@ export const useGoalStore = create<GoalStore>()(
                       startedAt: instance.execution?.startedAt ?? progress?.startedAt ?? instance.createdAt,
                       finishedAt: progress?.finishedAt,
                       lastUpdatedAt: progress?.updatedAt ?? nowIso(),
+                      waitingReason: nextStatus === "in_progress" ? waitingReason : undefined,
                       errorCategory:
                         nextStatus === "error"
                           ? ((progress?.resultPayload?.errorCategory as TaskRunErrorCategory | undefined) ?? "unknown")

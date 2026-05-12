@@ -11,6 +11,7 @@ import { ReadingDigestView } from "@/components/execution/ReadingDigestView";
 import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
+import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { useGoalStore } from "@/stores/goalStore";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, InteractionSubmission, Task, TaskInstance } from "@/types/kiki";
@@ -45,11 +46,35 @@ function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined)
             ? "result" as const
             : "phase" as const,
     status: step.status,
-    detail: step.thought,
+    detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
   }));
+}
+
+function applyWaitingReasonToSteps(steps: NonNullable<Task["instances"][number]["timeline"]>, waitingReason: string | undefined) {
+  if (!waitingReason?.trim()) return steps;
+  const nextSteps = [...steps];
+  for (let index = nextSteps.length - 1; index >= 0; index -= 1) {
+    const step = nextSteps[index];
+    if (step.toolName) continue;
+    if (step.status !== "pending" && step.status !== "running") continue;
+    if (!/等待 Agent 开始执行|调度器已生成任务实例|任务已创建/.test(step.title)) continue;
+    nextSteps[index] = {
+      ...step,
+      detail: waitingReason.trim(),
+    };
+    return nextSteps;
+  }
+  return nextSteps.concat({
+    id: `waiting-reason-${nextSteps.at(-1)?.id ?? "step"}`,
+    title: "等待 Agent 开始执行",
+    type: "phase",
+    status: "pending",
+    detail: waitingReason.trim(),
+    startedAt: nextSteps.at(-1)?.startedAt ?? new Date().toISOString(),
+  });
 }
 
 export function ExecutionResultBody(props: {
@@ -93,6 +118,7 @@ export function ExecutionResultBody(props: {
         progress: state.progress,
         logs: state.logs,
         trajectory: state.trajectory,
+        waitingReason: state.waitingReason,
       });
       if (state.progress?.status === "running") {
         window.setTimeout(() => {
@@ -235,7 +261,12 @@ export function ExecutionResultBody(props: {
         执行链路
       </summary>
       <div className="border-t border-[#E5E7EB] p-4">
-        <TaskExecutionTimeline steps={trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? []} />
+        <TaskExecutionTimeline
+          steps={applyWaitingReasonToSteps(
+            trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
+            instance.execution?.waitingReason,
+          )}
+        />
       </div>
     </details>
   );

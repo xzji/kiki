@@ -159,6 +159,18 @@ function hasDateValue(text: string) {
   return /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}|(?:明天|后天|下周|本周|周[一二三四五六日天])/.test(text);
 }
 
+function hasBudgetValue(input: RunGoalTaskInput, text: string) {
+  if (/\d+\s*(元|块|人民币|rmb|¥)/i.test(text)) return true;
+  // 用户已表态「不限制 / 无预算 / 任意预算 / 不设上限 / 按性价比 / 暂不限制」等口径，均视为已提供。
+  if (/(暂不|暂时不|不|无|无需|无需要|没有|不设).{0,4}(限制|预算|上限|要求)/.test(text)) return true;
+  if (/(任意|任何|无|没有).{0,4}预算/.test(text)) return true;
+  if (/(性价比|按.{0,4}性价比|性价比.{0,4}优先)/.test(text)) return true;
+  // 在用户反馈中明确填写了"预算"字段，无论文本是否命中数字，都视为用户已表态。
+  const feedback = extractUserFeedback(input);
+  if (feedback && /预算/.test(feedback)) return true;
+  return false;
+}
+
 function buildTaskReadinessCheck(input: RunGoalTaskInput): TaskReadinessCheck {
   const text = taskExecutionText(input);
   const items: TaskReadinessInfoItem[] = [];
@@ -202,17 +214,22 @@ function buildTaskReadinessCheck(input: RunGoalTaskInput): TaskReadinessCheck {
   }
 
   if (/预算|价格上限|费用上限|人均|总价/.test(text)) {
+    const budgetAvailable = hasBudgetValue(input, text);
     addItem({
       id: "budget_constraint",
       label: "预算约束",
       description: "涉及筛选或推荐时需要知道预算边界。",
       source: "user",
-      status: /\d+\s*(元|块|人民币|rmb|¥)/i.test(text) ? "available" : "missing_user",
-      reason: /\d+\s*(元|块|人民币|rmb|¥)/i.test(text) ? "已在任务上下文中找到预算数字。" : "预算是用户偏好，Agent 不能自行假设。",
+      status: budgetAvailable ? "available" : "missing_user",
+      reason: budgetAvailable ? "已在任务上下文或用户反馈中找到预算信息。" : "预算是用户偏好，Agent 不能自行假设。",
       options: ["补充预算上限", "暂不限制预算", "按性价比优先"],
     });
   }
 
+  return finalizeReadiness(items);
+}
+
+function finalizeReadiness(items: TaskReadinessInfoItem[]): TaskReadinessCheck {
   const missingUserInfo = items.filter((item) => item.status === "missing_user" && item.source === "user");
   const agentRetrievableInfo = items.filter((item) => item.status === "agent_retrievable");
   const availableInfo = items.filter((item) => item.status === "available");
@@ -227,6 +244,124 @@ function buildTaskReadinessCheck(input: RunGoalTaskInput): TaskReadinessCheck {
     agentRetrievableInfo,
     availableInfo,
   };
+}
+
+type ReadinessJudgeVerdict = {
+  fieldId: string;
+  decision: "available" | "missing_user";
+  reason: string;
+};
+
+async function judgeMissingFieldsWithClaude(
+  input: RunGoalTaskInput,
+  candidates: TaskReadinessInfoItem[],
+  feedback: string,
+): Promise<ReadinessJudgeVerdict[]> {
+  if (!candidates.length || !feedback) return [];
+  const fieldsBlock = candidates
+    .map((item) => `- id: ${item.id}\n  label: ${item.label}\n  说明: ${item.description}`)
+    .join("\n");
+  const judgePrompt = [
+    "你是一个只读的字段判定器。请基于「用户反馈」判断下列字段是否已经被用户表态过。",
+    "判定规则：",
+    "1. 用户给出明确数值、地点、日期 → available。",
+    "2. 用户明确表示『不限制 / 不设上限 / 任意 / 由你判断 / 按性价比 / 没有要求』等口径，等同于已表态 → available。",
+    "3. 用户没有提到该字段，或仅说『不知道 / 帮我看看 / 你来决定具体要选什么』而没有授权你自行选择 → missing_user。",
+    "4. 用户授权你做决定（如『你来定 / 你判断 / 推荐就好 / 任意』）→ available。",
+    "",
+    "字段清单：",
+    fieldsBlock,
+    "",
+    "用户反馈原文：",
+    feedback,
+    "",
+    "请只返回严格 JSON，不要任何解释：",
+    `{ "verdicts": [ { "fieldId": "<id>", "decision": "available" | "missing_user", "reason": "<不超过30字>" } ] }`,
+  ].join("\n");
+  let raw = "";
+  try {
+    raw = await runClaudePrompt(input, judgePrompt, "readonly");
+  } catch (error) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "warn",
+      phase: "executing",
+      message: "Readiness 语义判定调用失败，回退到规则判定",
+      details: error instanceof Error ? error.message : String(error),
+      eventType: "readiness_semantic_judge",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+    return [];
+  }
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return [];
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as { verdicts?: ReadinessJudgeVerdict[] };
+    const verdicts = Array.isArray(parsed.verdicts) ? parsed.verdicts : [];
+    return verdicts.filter(
+      (v): v is ReadinessJudgeVerdict =>
+        !!v && typeof v.fieldId === "string" && (v.decision === "available" || v.decision === "missing_user"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function buildTaskReadinessCheckWithJudge(input: RunGoalTaskInput): Promise<TaskReadinessCheck> {
+  const baseReadiness = buildTaskReadinessCheck(input);
+  const feedback = extractUserFeedback(input);
+  const ruleMissing = baseReadiness.items.filter(
+    (item) => item.status === "missing_user" && item.source === "user",
+  );
+  // 规则未判 missing 或用户没有反馈，直接走规则结论，零额外成本。
+  if (!ruleMissing.length || !feedback) return baseReadiness;
+
+  const verdicts = await judgeMissingFieldsWithClaude(input, ruleMissing, feedback);
+  if (!verdicts.length) return baseReadiness;
+
+  const verdictMap = new Map(verdicts.map((v) => [v.fieldId, v]));
+  const adjustedItems = baseReadiness.items.map((item) => {
+    const verdict = verdictMap.get(item.id);
+    if (!verdict || verdict.decision !== "available") return item;
+    return {
+      ...item,
+      status: "available" as const,
+      reason: `用户反馈已覆盖该字段：${verdict.reason}`,
+      value: feedback,
+    };
+  });
+
+  const upgraded = ruleMissing
+    .filter((item) => verdictMap.get(item.id)?.decision === "available")
+    .map((item) => item.id);
+  appendGoalLog({
+    requestId: input.requestId,
+    scope: "goal_task_execute",
+    level: upgraded.length ? "info" : "warn",
+    phase: "executing",
+    message: upgraded.length
+      ? `Readiness 语义判定放行字段：${upgraded.join(", ")}`
+      : "Readiness 语义判定未放行任何字段，仍判定为缺失",
+    details: JSON.stringify({ feedback, verdicts }),
+    eventType: "readiness_semantic_judge",
+    goalId: input.goal.id,
+    taskId: input.task.id,
+    taskInstanceId: input.instance.id,
+  });
+  updateGoalTelemetry({
+    requestId: input.requestId,
+    scope: "goal_task_execute",
+    phase: "executing",
+    message: "Readiness 语义判定完成",
+    goalId: input.goal.id,
+    taskId: input.task.id,
+    taskInstanceId: input.instance.id,
+    summary: upgraded.length ? `放行字段：${upgraded.join(", ")}` : "未放行字段",
+  });
+  return finalizeReadiness(adjustedItems);
 }
 
 function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): TaskResult {
@@ -422,10 +557,45 @@ function extractExampleOptions(text: string) {
     .slice(0, 5);
 }
 
+const GENERIC_CONTEXT_OPTIONS = new Set(["补充具体信息", "补充缺失信息", "补充约束或偏好", "说明暂时无法提供", "填写其他信息"]);
+
+function normalizeSuggestedContextOptions(values: string[]) {
+  const options = uniqueStrings(values)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && item.length <= 24);
+  const specificOptions = options.filter((item) => !GENERIC_CONTEXT_OPTIONS.has(item));
+  return (specificOptions.length ? specificOptions : options).slice(0, 3);
+}
+
+function inferContextOptionsFromText(text: string) {
+  const normalized = text.replace(/\s+/g, "");
+  if (/住宿区域.*酒店类型|酒店类型.*住宿区域|住宿偏好|住在哪|住哪片|酒店区域/.test(normalized)) {
+    return ["海滩区 + 度假酒店", "市中心 + 高性价比酒店", "度假区/珍珠岛 + 一站式酒店"];
+  }
+  if (/住宿区域|酒店区域|住在哪|住哪片/.test(normalized)) {
+    return ["海滩区", "市中心", "度假区/珍珠岛"];
+  }
+  if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型偏好/.test(normalized)) {
+    return ["高性价比经济型", "舒适型四星", "度假型五星/海景"];
+  }
+  if (/预算|费用|价格/.test(normalized)) {
+    return ["控制预算", "舒适优先", "高性价比优先"];
+  }
+  if (/出发城市|出发地|从哪里出发/.test(normalized)) {
+    return ["上海", "广州", "北京"];
+  }
+  if (/出发日期|返回日期|往返日期|旅行日期|行程时间/.test(normalized)) {
+    return ["补充出发日期", "补充返回日期", "补充完整日期范围"];
+  }
+  return [];
+}
+
 function defaultContextOptions(result: ParsedTaskRunnerResult) {
   const text = textForUserInputDetection(result);
   const exampleOptions = extractExampleOptions(text);
-  if (exampleOptions.length >= 2) return exampleOptions;
+  const inferredOptions = inferContextOptionsFromText(text);
+  const options = normalizeSuggestedContextOptions([...exampleOptions, ...inferredOptions]);
+  if (options.length >= 2) return options;
   return ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"];
 }
 
@@ -447,7 +617,12 @@ function buildReadinessFromUserBlockers(blockers: string[], summary: string): Ta
     source: "user" as const,
     status: "missing_user" as const,
     reason: blocker,
-    options: ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
+    options: (() => {
+      const options = normalizeSuggestedContextOptions(
+        inferContextOptionsFromText(`${normalizeBlockerLabel(blocker, index)}\n${blocker}`),
+      );
+      return options.length ? options : ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"];
+    })(),
   }));
   return {
     status: "blocked",
@@ -713,6 +888,29 @@ function shouldRetry(category: TaskRunErrorCategory, attemptCount: number) {
   return category === "transient_cli" || category === "transient_network";
 }
 
+function detectAgentReplanning(rawOutput: string): { detected: boolean; reason: string; matched?: string } {
+  if (!rawOutput) return { detected: false, reason: "" };
+  const text = rawOutput.slice(0, 8000);
+  const replanningKeywords = [
+    "重新规划",
+    "重新拆解",
+    "重新制定计划",
+    "重新梳理思路",
+    "从零开始",
+    "重新搜索",
+    "整体计划如下",
+    "Step 1：明确目标",
+    "Plan:",
+    "重新分析任务",
+  ];
+  for (const keyword of replanningKeywords) {
+    if (text.includes(keyword)) {
+      return { detected: true, reason: `Agent 输出中包含重新规划关键词「${keyword}」`, matched: keyword };
+    }
+  }
+  return { detected: false, reason: "未检测到重新规划信号" };
+}
+
 function shouldCreateUserBlocker(interactionRequirement: InteractionRequirement) {
   return (
     interactionRequirement.type === "confirm" ||
@@ -834,13 +1032,28 @@ function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTas
   const userBlockers = uniqueStrings(report.userBlockers.length ? report.userBlockers : [report.summary]);
   const reason = userBlockers.length ? userBlockers.join("；") : report.summary;
   const readiness = buildReadinessFromUserBlockers(userBlockers, reason);
+  const options = normalizeSuggestedContextOptions([
+    ...(readiness?.missingUserInfo.flatMap((item) => item.options ?? []) ?? []),
+    ...defaultContextOptions({
+      ...result,
+      awaitingUser: true,
+      awaitingReason: reason,
+      interactionRequirement: {
+        ...result.interactionRequirement,
+        type: "provide_context",
+        timing: "after_agent_output",
+        reason,
+        question: userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason,
+      },
+    }),
+  ]);
   const interactionRequirement: InteractionRequirement = {
     type: "provide_context",
     timing: "after_agent_output",
     reason,
     question: userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason,
-    options: ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
-    suggestedActions: ["补充具体信息", "补充约束或偏好"],
+    options: options.length ? options : ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
+    suggestedActions: options.length ? options : ["补充具体信息", "补充约束或偏好"],
     shouldNotifyUser: true,
   };
   return coerceMissingUserContextBlocker(input, {
@@ -1106,6 +1319,14 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   let finalMessage = "";
   let lastStatus: "checking" | "running" | "completed" | null = null;
   const trajectory: ExecutionTrajectoryStep[] = [...(input.initialTrajectory ?? [])];
+  const isResumeRun = Boolean(input.resumeContext) || (input.initialTrajectory?.length ?? 0) > 0;
+  const previousToolSignatures = new Set(
+    (input.initialTrajectory ?? [])
+      .filter((step) => step.type === "tool_call" && step.toolCall)
+      .map((step) => `${step.toolCall?.name ?? ""}::${JSON.stringify(step.toolCall?.input ?? null)}`),
+  );
+  let resumeNewToolCallCount = 0;
+  let resumeDuplicateToolCallCount = 0;
   const appendTrajectory = (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => {
     trajectory.push(createTrajectoryStep({ ...step, index: trajectory.length }));
     persistTrajectorySnapshot(input.requestId, trajectory);
@@ -1117,6 +1338,40 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     title: input.resumeContext ? `开始第 ${input.attemptCount} 轮反思补齐` : `开始第 ${input.attemptCount} 次执行`,
     thought: [input.resumeContext ? "带入上一轮反思上下文继续执行。" : undefined, `任务：${input.task.title}`].filter(Boolean).join("\n"),
   });
+  if (isResumeRun) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "info",
+      phase: "executing",
+      message: "进入恢复执行模式（增量续跑）",
+      details: `前序轨迹步数=${input.initialTrajectory?.length ?? 0}，前序工具调用数=${previousToolSignatures.size}，resumeContext=${input.resumeContext ? "有" : "无"}`,
+      eventType: "resume_mode_started",
+      status: "running",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+    updateGoalTelemetry({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      phase: "executing",
+      message: "进入恢复执行模式（增量续跑）",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+      attemptCount: input.attemptCount,
+      resultPayload: {
+        ...progressPayloadWithTrajectory(trajectory),
+        resumeMode: {
+          enabled: true,
+          previousTrajectorySteps: input.initialTrajectory?.length ?? 0,
+          previousToolCallCount: previousToolSignatures.size,
+          hasResumeContext: Boolean(input.resumeContext),
+        },
+      },
+    });
+  }
   updateGoalTelemetry({
     requestId: input.requestId,
     scope: "goal_task_execute",
@@ -1143,7 +1398,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   });
 
   await streamClaudeCli({
-    message: buildGoalTaskRunnerPrompt(input),
+    message: buildGoalTaskRunnerPrompt({ ...input, initialTrajectory: input.initialTrajectory }),
     workingDirectory: input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
     cliPath: input.runtimeEnv.cliPath,
     permissionMode: input.runtimeEnv.permissionMode,
@@ -1176,6 +1431,29 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
         });
       }
       if (event.type === "tool_call") {
+        if (isResumeRun) {
+          const signature = `${event.toolName}::${JSON.stringify(event.input ?? null)}`;
+          if (previousToolSignatures.has(signature)) {
+            resumeDuplicateToolCallCount += 1;
+            appendGoalLog({
+              requestId: input.requestId,
+              scope: "goal_task_execute",
+              level: "warn",
+              phase: "executing",
+              message: `恢复执行中检测到重复工具调用：${event.toolName}`,
+              details: event.summary,
+              eventType: "resume_duplicate_tool_call",
+              toolName: event.toolName,
+              status: "running",
+              goalId: input.goal.id,
+              taskId: input.task.id,
+              taskInstanceId: input.instance.id,
+            });
+          } else {
+            resumeNewToolCallCount += 1;
+            previousToolSignatures.add(signature);
+          }
+        }
         appendTrajectory({
           type: "tool_call",
           status: "running",
@@ -1223,6 +1501,47 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     thought: finalMessage.slice(0, 2000),
     endedAt: new Date().toISOString(),
   });
+
+  if (isResumeRun) {
+    const replanningSignal = detectAgentReplanning(finalMessage);
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: replanningSignal.detected || resumeDuplicateToolCallCount > 0 ? "warn" : "info",
+      phase: "reviewing",
+      message: replanningSignal.detected
+        ? `恢复执行中检测到 Agent 似乎在重新规划：${replanningSignal.reason}`
+        : "恢复执行完成（增量续跑统计）",
+      details: `重复工具调用=${resumeDuplicateToolCallCount}，新增工具调用=${resumeNewToolCallCount}，replanningDetected=${replanningSignal.detected}${replanningSignal.matched ? `，命中关键词=${replanningSignal.matched}` : ""}`,
+      eventType: replanningSignal.detected ? "resume_replanning_detected" : "resume_mode_started",
+      status: "running",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+    updateGoalTelemetry({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      phase: "reviewing",
+      message: replanningSignal.detected
+        ? "恢复执行中检测到重新规划信号"
+        : "恢复执行：增量续跑指标已记录",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+      attemptCount: input.attemptCount,
+      resultPayload: {
+        ...progressPayloadWithTrajectory(trajectory),
+        resumeMode: {
+          enabled: true,
+          duplicateToolCalls: resumeDuplicateToolCallCount,
+          newToolCalls: resumeNewToolCallCount,
+          replanningDetected: replanningSignal.detected,
+          replanningReason: replanningSignal.reason,
+        },
+      },
+    });
+  }
 
   appendGoalLog({
     requestId: input.requestId,
@@ -1280,7 +1599,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
     attemptCount: 1,
   });
 
-  const readiness = buildTaskReadinessCheck(input);
+  const readiness = await buildTaskReadinessCheckWithJudge(input);
   if (readiness.status === "blocked") {
     const trajectory = [
       createTrajectoryStep({

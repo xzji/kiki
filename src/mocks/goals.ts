@@ -907,6 +907,10 @@ export const initialGoals: Goal[] = [
 
 export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
   const goalId = `goal-${draft.goalTitle.replace(/\s+/g, "-").toLowerCase()}`;
+  const subGoalIdMap = new Map(
+    draft.subGoals.map((subGoal, subGoalIndex) => [subGoal.id, `${goalId}-sg-${subGoalIndex + 1}`]),
+  );
+
   return {
     id: goalId,
     title: draft.goalTitle,
@@ -919,6 +923,15 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       id: `${goalId}-sg-${subGoalIndex + 1}`,
       goalId,
       title: subGoal.title,
+      description: subGoal.description,
+      why: subGoal.why,
+      priority: subGoal.priority,
+      weight: subGoal.weight,
+      dependencies: subGoal.dependencies?.map(
+        (dependencyId) => subGoalIdMap.get(dependencyId) ?? dependencyId,
+      ),
+      estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
+      successCriteria: subGoal.successCriteria,
       tasks: subGoal.tasks.map((taskItem, taskIndex) => ({
         id: `${goalId}-sg-${subGoalIndex + 1}-task-${taskIndex + 1}`,
         subGoalId: `${goalId}-sg-${subGoalIndex + 1}`,

@@ -51,8 +51,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // 任务侧栏改为覆盖式，不再挤压主内容；只有 AssistantSidebar 挤压
   const rightPadding = assistantOpen ? 416 : 0;
   const mainClassName = useImmersiveShell
-    ? "h-screen overflow-hidden bg-white px-0 pb-0 pt-0 transition-[padding,margin] duration-200"
-    : "h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8 transition-[padding,margin] duration-200";
+    ? "h-screen overflow-hidden bg-white px-0 pb-0 pt-0"
+    : "h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8";
   const contentClassName = useImmersiveShell
     ? `mx-auto h-full w-full ${contentWidth}`
     : `mx-auto w-full ${contentWidth}`;

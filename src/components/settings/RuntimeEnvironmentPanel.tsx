@@ -55,6 +55,8 @@ export function RuntimeEnvironmentPanel() {
   const [daemonActionMessage, setDaemonActionMessage] = useState<string | null>(null);
   const [daemonActionError, setDaemonActionError] = useState<string | null>(null);
   const [daemonSwitchPending, setDaemonSwitchPending] = useState(false);
+  const [daemonRefreshPending, setDaemonRefreshPending] = useState(false);
+  const [daemonRefreshFeedback, setDaemonRefreshFeedback] = useState<"success" | "error" | null>(null);
   const [confirm24hOpen, setConfirm24hOpen] = useState(false);
   const [optimisticDaemonEnabled, setOptimisticDaemonEnabled] = useState<boolean | null>(null);
   const visibleEnvironments = useMemo(
@@ -114,6 +116,20 @@ export function RuntimeEnvironmentPanel() {
   const daemonEnabled = Boolean(daemonStatus?.config?.autoStart && daemonStatus?.launchAgentInstalled);
   const effectiveDaemonEnabled = optimisticDaemonEnabled ?? daemonEnabled;
 
+  const refreshDaemonStatus = useCallback(async () => {
+    if (daemonRefreshPending) return;
+    setDaemonRefreshPending(true);
+    setDaemonRefreshFeedback(null);
+    try {
+      await loadDaemonStatus();
+      setDaemonRefreshFeedback("success");
+    } catch {
+      setDaemonRefreshFeedback("error");
+    } finally {
+      setDaemonRefreshPending(false);
+    }
+  }, [daemonRefreshPending, loadDaemonStatus]);
+
   const applyDaemonToggle = useCallback(async (enabled: boolean) => {
     if (enabled && !activeLocalEnvironment) {
       setDaemonActionError("请先连接一个本地 Runtime 环境，再开启 24h 运行");
@@ -124,6 +140,7 @@ export function RuntimeEnvironmentPanel() {
     setOptimisticDaemonEnabled(enabled);
     setDaemonActionMessage(null);
     setDaemonActionError(null);
+    setDaemonRefreshFeedback(null);
     try {
       await setRuntimeDaemonAutoStart(
         enabled
@@ -152,6 +169,22 @@ export function RuntimeEnvironmentPanel() {
       setDaemonSwitchPending(false);
     }
   }, [activeLocalEnvironment, loadDaemonStatus]);
+
+  const daemonStatusBadge = useMemo(() => {
+    if (daemonSwitchPending) return { label: "加载中", tone: "neutral" as const, loading: true };
+    if (daemonRefreshPending) return { label: "刷新中", tone: "neutral" as const, loading: true };
+    if (daemonRefreshFeedback === "success") return { label: "刷新成功", tone: "success" as const, loading: false };
+    if (daemonRefreshFeedback === "error") return { label: "刷新失败", tone: "error" as const, loading: false };
+    if (!effectiveDaemonEnabled) return { label: "已关闭", tone: "neutral" as const, loading: false };
+    if (daemonStatus?.state?.status === "error") return { label: "异常", tone: "error" as const, loading: false };
+    return { label: "运行中", tone: "neutral" as const, loading: false };
+  }, [daemonRefreshFeedback, daemonRefreshPending, daemonStatus?.state?.status, daemonSwitchPending, effectiveDaemonEnabled]);
+
+  useEffect(() => {
+    if (!daemonRefreshFeedback) return;
+    const timer = window.setTimeout(() => setDaemonRefreshFeedback(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [daemonRefreshFeedback]);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,29 +366,35 @@ export function RuntimeEnvironmentPanel() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="text-[13px] font-medium text-[#111]">24h 运行</div>
-                        <span className="rounded-full border border-[#E5E7EB] px-2 py-1 text-[11px] text-[#111]">
-                          {daemonSwitchPending ? (
+                        <span
+                          className={cn(
+                            "rounded-full border px-2 py-1 text-[11px]",
+                            daemonStatusBadge.tone === "success"
+                              ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#166534]"
+                              : daemonStatusBadge.tone === "error"
+                                ? "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]"
+                                : "border-[#E5E7EB] bg-white text-[#111]",
+                          )}
+                        >
+                          {daemonStatusBadge.loading ? (
                             <span className="inline-flex items-center gap-1">
                               <Loader2 className="h-3 w-3 animate-spin" />
-                              加载中
+                              {daemonStatusBadge.label}
                             </span>
-                          ) : effectiveDaemonEnabled ? (
-                            daemonStatus?.state?.status === "running" ? "运行中" : daemonStatus?.state?.status === "error" ? "异常" : "待机"
-                          ) : "已关闭"}
+                          ) : daemonStatusBadge.label}
                         </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            setDaemonActionMessage(null);
-                            setDaemonActionError(null);
-                            void loadDaemonStatus().catch(() => {
-                              setDaemonActionError("本地 Runtime Daemon 状态获取失败");
-                            });
-                          }}
-                          disabled={daemonSwitchPending}
-                          className="inline-flex h-7 items-center gap-1 rounded-full border border-[#E5E7EB] bg-white px-2.5 text-[11px] text-[#475467] hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={() => void refreshDaemonStatus()}
+                          disabled={daemonSwitchPending || daemonRefreshPending}
+                          className={cn(
+                            "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-70",
+                            daemonRefreshPending
+                              ? "border-[#111] bg-[#111] text-white"
+                              : "border-[#E5E7EB] bg-white text-[#475467] hover:border-[#D0D5DD] hover:bg-[#F8F9FB]",
+                          )}
                         >
-                          <RefreshCw className={cn("h-3.5 w-3.5", daemonSwitchPending && "animate-spin")} />
+                          <RefreshCw className={cn("h-3.5 w-3.5", daemonRefreshPending && "animate-spin")} />
                           刷新状态
                         </button>
                       </div>

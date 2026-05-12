@@ -13,10 +13,13 @@ import {
   claimQueuedRuntimeJobs,
   getRuntimeJobByRequestId,
   releaseExpiredRuntimeJobLeases,
+  renewRuntimeJobLease,
   updateRuntimeJobExecution,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 
 const DAEMON_VERSION = "0.1.0";
+const LEASE_RENEW_INTERVAL_MS = 30 * 1000;
+const LEASE_RENEW_DURATION_MS = 2 * 60 * 1000;
 
 function ensureDeviceState(deviceId: string) {
   const current = readRuntimeDaemonDeviceState();
@@ -57,7 +60,31 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
       updatedAt: new Date().toISOString(),
     });
     appendRuntimeDaemonLog(`开始执行任务 ${job.id}`);
+    let renewTimer: NodeJS.Timeout | null = null;
     try {
+      renewTimer = setInterval(() => {
+        try {
+          const renewResult = renewRuntimeJobLease(job.id, {
+            leaseOwner,
+            leaseMs: LEASE_RENEW_DURATION_MS,
+          });
+          if (!renewResult.renewed) {
+            appendRuntimeDaemonLog(`任务 ${job.id} 续租失败：lease 已被其他 owner 占用或任务已不在 running 状态`);
+            return;
+          }
+          const now = new Date().toISOString();
+          writeRuntimeDaemonState({
+            deviceId: device.deviceId,
+            status: "running",
+            lastHeartbeatAt: now,
+            lastJobId: job.id,
+            updatedAt: now,
+          });
+        } catch (renewError) {
+          const message = renewError instanceof Error ? renewError.message : String(renewError);
+          appendRuntimeDaemonLog(`任务 ${job.id} 续租异常: ${message}`);
+        }
+      }, LEASE_RENEW_INTERVAL_MS);
       await runGoalTask({
         requestId: job.requestId ?? `goal-task-${Date.now()}`,
         goal: job.payload.goal,
@@ -66,6 +93,7 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         instance: job.payload.instance,
         runtimeEnv: job.payload.runtimeEnv,
         resumeContext: job.payload.resumeContext,
+        initialTrajectory: job.trajectory,
       });
 
       const latestProgress = getGoalTelemetryProgress(job.requestId ?? "");
@@ -158,6 +186,11 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         updatedAt: new Date().toISOString(),
       });
       appendRuntimeDaemonLog(`任务 ${job.id} 执行失败: ${message}`);
+    } finally {
+      if (renewTimer) {
+        clearInterval(renewTimer);
+        renewTimer = null;
+      }
     }
   }
 

@@ -19,7 +19,14 @@ function useBackendLogs() {
         method: "GET",
         cache: "no-store",
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        const message = `日志接口返回异常（${response.status}）`;
+        setLogsError(message);
+        return {
+          ok: false as const,
+          message,
+        };
+      }
       const data = (await response.json()) as {
         logs?: GoalServerLogEntry[];
         activeRequests?: GoalServerProgress[];
@@ -27,9 +34,18 @@ function useBackendLogs() {
       setLogs(data.logs ?? []);
       setActiveRequests(data.activeRequests ?? []);
       setLogsError(null);
+      return {
+        ok: true as const,
+        message: "日志已刷新",
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知错误";
-      setLogsError(`日志接口暂时不可用：${message}`);
+      const nextMessage = `日志接口暂时不可用：${message}`;
+      setLogsError(nextMessage);
+      return {
+        ok: false as const,
+        message: nextMessage,
+      };
     } finally {
       setLogsLoading(false);
     }
@@ -69,13 +85,44 @@ function formatRealWorldTime(timestamp: string) {
 export function BackendLogsPanel() {
   const { logs, activeRequests, logsLoading, logsError, fetchLogs } = useBackendLogs();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
   const orderedLogs = useMemo(() => [...logs].reverse(), [logs]);
+  const [refreshFeedback, setRefreshFeedback] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
   }, [orderedLogs]);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleManualRefresh = async () => {
+    const result = await fetchLogs();
+    if (!result) return;
+
+    setRefreshFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.ok ? "刷新成功" : `刷新失败：${result.message}`,
+    });
+
+    if (feedbackTimerRef.current) {
+      window.clearTimeout(feedbackTimerRef.current);
+    }
+    feedbackTimerRef.current = window.setTimeout(() => {
+      setRefreshFeedback(null);
+      feedbackTimerRef.current = null;
+    }, 2200);
+  };
 
   return (
     <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
@@ -86,14 +133,28 @@ export function BackendLogsPanel() {
             用于排查 /goal 规划和任务执行是否正常推进，可看到当前正在跑的阶段和最近日志。
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void fetchLogs()}
-          className="inline-flex items-center gap-2 rounded-lg border border-[#D0D7DE] px-3 py-2 text-[12px] font-medium text-[#374151] hover:border-[#111] hover:text-[#111]"
-        >
-          <RefreshCcw className={cn("h-3.5 w-3.5", logsLoading && "animate-spin")} />
-          刷新
-        </button>
+        <div className="relative shrink-0">
+          {refreshFeedback ? (
+            <div
+              className={cn(
+                "absolute -top-11 right-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] shadow-sm",
+                refreshFeedback.tone === "success"
+                  ? "border border-[#BBF7D0] bg-[#F0FDF4] text-[#166534]"
+                  : "border border-[#FECACA] bg-[#FEF2F2] text-[#B42318]",
+              )}
+            >
+              {refreshFeedback.message}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleManualRefresh()}
+            className="inline-flex items-center gap-2 rounded-lg border border-[#D0D7DE] px-3 py-2 text-[12px] font-medium text-[#374151] hover:border-[#111] hover:text-[#111]"
+          >
+            <RefreshCcw className={cn("h-3.5 w-3.5", logsLoading && "animate-spin")} />
+            刷新
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#FAFAFB] p-3">

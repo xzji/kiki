@@ -18,12 +18,13 @@ async function getTaskRunProgress(input: { requestId?: string; taskInstanceId?: 
     cache: "no-store",
   });
   if (!response.ok) {
-    return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[] };
+    return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined as string | undefined };
   }
   return (await response.json()) as {
     progress: GoalServerProgress | null;
     logs: GoalServerLogEntry[];
     trajectory: ExecutionTrajectoryStep[];
+    waitingReason?: string;
   };
 }
 
@@ -64,7 +65,7 @@ export async function waitForTaskRunCompletion(input: {
   requestId: string;
   taskInstanceId: string;
   signal?: AbortSignal;
-  onProgress?: (payload: { progress: GoalServerProgress | null; logs: GoalServerLogEntry[]; trajectory: ExecutionTrajectoryStep[] }) => void;
+  onProgress?: (payload: { progress: GoalServerProgress | null; logs: GoalServerLogEntry[]; trajectory: ExecutionTrajectoryStep[]; waitingReason?: string }) => void;
 }) {
   while (!input.signal?.aborted) {
     const state = await getTaskRunProgress({
@@ -78,7 +79,7 @@ export async function waitForTaskRunCompletion(input: {
     }
     await sleep(1000);
   }
-  return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[] };
+  return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined as string | undefined };
 }
 
 export async function fetchTaskRunProgress(input: {
@@ -109,6 +110,7 @@ export async function resumeTaskRun(input: {
     progress?: GoalServerProgress | null;
     logs?: GoalServerLogEntry[];
     trajectory?: ExecutionTrajectoryStep[];
+    waitingReason?: string;
   };
   if (!response.ok) {
     throw new Error(data.reason || "任务恢复失败");
@@ -117,5 +119,6 @@ export async function resumeTaskRun(input: {
     progress: data.progress ?? null,
     logs: data.logs ?? [],
     trajectory: data.trajectory ?? [],
+    waitingReason: data.waitingReason,
   };
 }

@@ -1944,8 +1944,11 @@ export async function generateGoalPlanWithClaude(input: {
       id: `draft-subgoal-${subGoal.id}`,
       title: subGoal.name,
       description: subGoal.description,
+      why: subGoal.why,
       priority: subGoal.priority,
+      weight: subGoal.weight,
       dependencies: subGoal.dependencies.map((dependency: number) => `draft-subgoal-${dependency}`),
+      estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
       successCriteria: subGoal.successCriteria.map(
         (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
       ),

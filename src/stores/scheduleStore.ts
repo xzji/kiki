@@ -7,7 +7,7 @@ import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 
 const STORAGE_KEY = "kiki.schedule.events";
 const RESET_VERSION_KEY = "kiki.schedule.events.reset-version";
-const MOCK_BASELINE_RESET_VERSION = "1";
+const MOCK_BASELINE_RESET_VERSION = "2";
 
 function loadEvents(): AgentEvent[] {
   if (typeof window === "undefined") return initialScheduleEvents;
