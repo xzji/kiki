@@ -55,10 +55,21 @@ export type RuntimeDiscoveryResult = {
 
 export type ClaudeChatRequest = {
   message: string;
-  conversationId?: string;
+  conversationId: string;
   runtimeEnv: RuntimeEnvironment;
   claudeSessionId?: string;
   source: "assistant-sidebar" | "conversation";
+  workspaceMode?: "conversation" | "task";
+  taskRef?: {
+    goalId: string;
+    subGoalId: string;
+    taskId: string;
+    instanceId: string;
+  };
+  contextSnapshot?: {
+    conversation: import("@/types/kiki").Conversation;
+    goal?: import("@/types/kiki").Goal | null;
+  };
   quotedMessage?: {
     roleLabel: string;
     content: string;

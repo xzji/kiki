@@ -10,6 +10,12 @@ import {
   upsertGoalTaskInstanceSnapshot,
 } from "@/lib/server/runtime/goalStateSnapshot";
 import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
+import {
+  ensureConversationWorkspace,
+  ensureTaskWorkspace,
+  writeTaskPromptFile,
+} from "@/lib/server/workspace/conversationWorkspace";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -36,6 +42,29 @@ export async function POST(request: NextRequest) {
   if (body.runtimeEnv.type !== "local") {
     return NextResponse.json({ reason: "当前没有可用的本地 Claude 环境" }, { status: 400 });
   }
+  const conversationId = body.goal.conversationId;
+  if (!conversationId) {
+    return NextResponse.json({ reason: "任务缺少 conversationId，无法创建隔离 workspace" }, { status: 400 });
+  }
+
+  const conversationWorkspace = ensureConversationWorkspace(conversationId);
+  const taskWorkspaceDir = ensureTaskWorkspace({
+    conversationId,
+    taskId: body.task.id,
+    instanceId: body.instance.id,
+  });
+  const prompt = buildGoalTaskRunnerPrompt({
+    goal: body.goal,
+    subGoal: body.subGoal,
+    task: body.task,
+    instance: body.instance,
+  });
+  writeTaskPromptFile({
+    conversationId,
+    taskId: body.task.id,
+    instanceId: body.instance.id,
+    content: prompt,
+  });
 
   const existing = getRuntimeJobByTaskInstanceId(body.instance.id);
   if (existing && (existing.status === "queued" || existing.status === "running" || existing.status === "awaiting_user")) {
@@ -59,7 +88,7 @@ export async function POST(request: NextRequest) {
     requestId,
     runtimeEnvId: body.runtimeEnv.id,
     permissionMode: body.runtimeEnv.permissionMode,
-    workingDirectory: body.task.recommendedWorkingDirectory || body.runtimeEnv.workingDirectory,
+    workingDirectory: taskWorkspaceDir,
   });
   upsertGoalsSnapshot(nextGoals);
 
@@ -70,6 +99,8 @@ export async function POST(request: NextRequest) {
       task: body.task,
       instance: body.instance,
       runtimeEnv: body.runtimeEnv,
+      conversationWorkspaceDir: conversationWorkspace.workspaceDir,
+      taskWorkspaceDir,
     },
     { requestId },
   );
@@ -89,6 +120,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     requestId,
     taskInstanceId: body.instance.id,
+    workspacePath: taskWorkspaceDir,
     queued: true,
   });
 }

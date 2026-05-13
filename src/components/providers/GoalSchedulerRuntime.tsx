@@ -405,7 +405,7 @@ function runGoalSchedulerCycle() {
           requestId: run.requestId,
           runtimeEnvId: runtimeEnv.id,
           permissionMode: runtimeEnv.permissionMode,
-          workingDirectory: effectiveTask.recommendedWorkingDirectory || runtimeEnv.workingDirectory,
+          workingDirectory: run.workspacePath,
         });
         const result = await waitForTaskRunCompletion({
           requestId: run.requestId,

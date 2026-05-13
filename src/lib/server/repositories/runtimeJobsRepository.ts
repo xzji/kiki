@@ -21,6 +21,8 @@ export type RuntimeJobPayload = {
   task: Task;
   instance: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
+  conversationWorkspaceDir?: string;
+  taskWorkspaceDir?: string;
   resumeContext?: string;
 };
 
@@ -348,4 +350,48 @@ export function releaseExpiredRuntimeJobLeases() {
         AND status IN ('running')
     `,
   ).run(now, now);
+}
+
+export function cancelRuntimeJobsByConversationId(conversationId: string) {
+  const db = getDatabase();
+  const now = nowIso();
+  const result = db
+    .prepare(
+      `
+        UPDATE runtime_jobs
+        SET status = 'cancelled',
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            finished_at = COALESCE(finished_at, ?),
+            updated_at = ?
+        WHERE conversation_id = ?
+          AND status IN ('queued', 'running', 'awaiting_user')
+      `,
+    )
+    .run(now, now, conversationId);
+  return result.changes;
+}
+
+export function releaseRuntimeJobLeasesByConversationId(conversationId: string) {
+  const db = getDatabase();
+  const now = nowIso();
+  const result = db
+    .prepare(
+      `
+        UPDATE runtime_jobs
+        SET lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = ?
+        WHERE conversation_id = ?
+          AND lease_owner IS NOT NULL
+      `,
+    )
+    .run(now, conversationId);
+  return result.changes;
+}
+
+export function deleteRuntimeJobsByConversationId(conversationId: string) {
+  const db = getDatabase();
+  const result = db.prepare(`DELETE FROM runtime_jobs WHERE conversation_id = ?`).run(conversationId);
+  return result.changes;
 }

@@ -10,6 +10,11 @@ import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/sta
 import { getGoalTelemetryProgress, getTaskTelemetryLogs } from "@/lib/server/goalTelemetry";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
 import {
+  ensureConversationWorkspace,
+  ensureTaskWorkspace,
+  writeTaskRunSnapshot,
+} from "@/lib/server/workspace/conversationWorkspace";
+import {
   claimQueuedRuntimeJobs,
   getRuntimeJobByRequestId,
   releaseExpiredRuntimeJobLeases,
@@ -62,6 +67,19 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
     appendRuntimeDaemonLog(`开始执行任务 ${job.id}`);
     let renewTimer: NodeJS.Timeout | null = null;
     try {
+      const conversationId = job.conversationId ?? job.payload.goal.conversationId;
+      const conversationWorkspaceDir = conversationId
+        ? job.payload.conversationWorkspaceDir ?? ensureConversationWorkspace(conversationId).workspaceDir
+        : job.payload.conversationWorkspaceDir;
+      const taskWorkspaceDir =
+        job.payload.taskWorkspaceDir ??
+        (conversationId
+          ? ensureTaskWorkspace({
+              conversationId,
+              taskId: job.payload.task.id,
+              instanceId: job.payload.instance.id,
+            })
+          : undefined);
       renewTimer = setInterval(() => {
         try {
           const renewResult = renewRuntimeJobLease(job.id, {
@@ -92,6 +110,8 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         task: job.payload.task,
         instance: job.payload.instance,
         runtimeEnv: job.payload.runtimeEnv,
+        conversationWorkspaceDir,
+        taskWorkspaceDir,
         resumeContext: job.payload.resumeContext,
         initialTrajectory: job.trajectory,
       });
@@ -104,6 +124,16 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
           )
         : job.trajectory;
       const latestBlocker = latestProgress?.resultPayload?.blocker ?? null;
+      if (conversationId) {
+        writeTaskRunSnapshot({
+          conversationId,
+          taskId: job.payload.task.id,
+          instanceId: job.payload.instance.id,
+          progress: latestProgress,
+          trajectory: latestTrajectory,
+          result: latestProgress?.resultPayload ?? null,
+        });
+      }
       const nextStatus =
         latestProgress?.status === "failed"
           ? "failed"

@@ -1,6 +1,10 @@
 "use client";
 
 import { advanceGoalInfoCollection, generateGoalPlan } from "@/lib/api/goals";
+import {
+  ensureConversationWorkspaceApi,
+  writeConversationContextApi,
+} from "@/lib/api/conversationWorkspace";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -9,6 +13,7 @@ import type {
   CollectedInfoSummary,
   GoalInfoCollection,
   GoalInfoCollectionRound,
+  GoalPlanningRecoveryAction,
   GoalWorkflowPhase,
 } from "@/types/kiki";
 
@@ -79,6 +84,19 @@ function getOrCreateGoalConversation(goalText: string, conversationId?: string) 
   return conversationStore.createConversation(goalText.slice(0, 24) || "新目标");
 }
 
+async function ensureClientConversationWorkspace(conversationId: string) {
+  const workspacePath = await ensureConversationWorkspaceApi(conversationId);
+  useConversationStore.getState().setConversationWorkspace(conversationId, workspacePath);
+  return workspacePath;
+}
+
+async function writeCurrentConversationContext(conversationId: string, goalId?: string) {
+  const conversation = useConversationStore.getState().conversations.find((item) => item.id === conversationId);
+  if (!conversation) return;
+  const goal = goalId ? useGoalStore.getState().goals.find((item) => item.id === goalId) ?? null : null;
+  await writeConversationContextApi({ conversation, goal }).catch(() => undefined);
+}
+
 function createInfoCollectionRound(
   questions: string[],
   askedAt = new Date().toISOString(),
@@ -128,6 +146,34 @@ function mergeCollectedInfoSummary(
   };
 }
 
+function recordPlanningFailure(input: {
+  conversationId: string;
+  goalText: string;
+  phase: GoalWorkflowPhase;
+  action: GoalPlanningRecoveryAction;
+  error: unknown;
+  lastUserMessage?: string;
+}) {
+  const now = new Date().toISOString();
+  const message = input.error instanceof Error ? input.error.message : "目标规划生成失败";
+  useConversationStore.getState().setPlanningRunState(input.conversationId, {
+    status: "failed",
+    phase: input.phase,
+    action: input.action,
+    goalText: input.goalText,
+    errorMessage: message,
+    failedAt: now,
+    updatedAt: now,
+    lastUserMessage: input.lastUserMessage,
+  });
+  void writeCurrentConversationContext(input.conversationId);
+}
+
+function clearPlanningFailure(conversationId: string) {
+  useConversationStore.getState().setPlanningRunState(conversationId, null);
+  void writeCurrentConversationContext(conversationId);
+}
+
 async function runGoalPlanning(input: {
   goalText: string;
   conversationId: string;
@@ -141,44 +187,61 @@ async function runGoalPlanning(input: {
   const goalStore = useGoalStore.getState();
   const conversation = conversationStore.conversations.find((item) => item.id === input.conversationId);
   const collection = conversation?.goalInfoCollection;
+  await ensureClientConversationWorkspace(input.conversationId);
 
   input.onProgress?.({ phase: "decomposing", message: "正在拆解子目标..." });
   input.onProgress?.({ phase: "generating_tasks", message: "正在生成任务计划..." });
-  const draft = await generateGoalPlan({
-    goalText: input.goalText,
-    runtimeEnv,
-    config: goalConfig,
-    conversationId: input.conversationId,
-    conversationContext: buildConversationContext(input.conversationId),
-    collectedInfo: collection ? buildCollectedInfoTranscript(collection.rounds) : undefined,
-    signal: input.signal,
-    onServerProgress: (progress) => {
-      input.onProgress?.({
-        phase: progress.phase,
-        message: progress.message,
-      });
-    },
-  });
+  let currentPhase: GoalWorkflowPhase = "generating_tasks";
+  try {
+    const draft = await generateGoalPlan({
+      goalText: input.goalText,
+      runtimeEnv,
+      config: goalConfig,
+      conversationId: input.conversationId,
+      conversationContext: buildConversationContext(input.conversationId),
+      collectedInfo: collection ? buildCollectedInfoTranscript(collection.rounds) : undefined,
+      signal: input.signal,
+      onServerProgress: (progress) => {
+        currentPhase = progress.phase;
+        input.onProgress?.({
+          phase: progress.phase,
+          message: progress.message,
+        });
+      },
+    });
 
-  if (input.summary) {
-    draft.collectedInfoSummary = mergeCollectedInfoSummary(draft.collectedInfoSummary, input.summary);
+    if (input.summary) {
+      draft.collectedInfoSummary = mergeCollectedInfoSummary(draft.collectedInfoSummary, input.summary);
+    }
+
+    input.onProgress?.({ phase: "reviewing_tasks", message: "正在检查任务覆盖度..." });
+    const goal = goalStore.createGoalFromDraft(draft, { conversationId: input.conversationId });
+    conversationStore.setGoalForConversation(input.conversationId, goal.id);
+    conversationStore.renameConversation(input.conversationId, draft.goalTitle);
+    conversationStore.setGoalInfoCollection(input.conversationId, null);
+    clearPlanningFailure(input.conversationId);
+    await writeCurrentConversationContext(input.conversationId, goal.id);
+    input.onProgress?.({ phase: "presenting_plan", message: "目标规划草案已生成，等待你确认启动。" });
+
+    return {
+      goalId: goal.id,
+      conversationId: input.conversationId,
+      goalTitle: draft.goalTitle,
+      summary: draft.summary,
+      subGoalCount: draft.subGoals.length,
+      taskCount: draft.subGoals.reduce((sum, subGoal) => sum + subGoal.tasks.length, 0),
+    } satisfies GoalWorkflowResult;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    recordPlanningFailure({
+      conversationId: input.conversationId,
+      goalText: input.goalText,
+      phase: currentPhase,
+      action: "retry_plan",
+      error,
+    });
+    throw error;
   }
-
-  input.onProgress?.({ phase: "reviewing_tasks", message: "正在检查任务覆盖度..." });
-  const goal = goalStore.createGoalFromDraft(draft, { conversationId: input.conversationId });
-  conversationStore.setGoalForConversation(input.conversationId, goal.id);
-  conversationStore.renameConversation(input.conversationId, draft.goalTitle);
-  conversationStore.setGoalInfoCollection(input.conversationId, null);
-  input.onProgress?.({ phase: "presenting_plan", message: "目标规划草案已生成，等待你确认启动。" });
-
-  return {
-    goalId: goal.id,
-    conversationId: input.conversationId,
-    goalTitle: draft.goalTitle,
-    summary: draft.summary,
-    subGoalCount: draft.subGoals.length,
-    taskCount: draft.subGoals.reduce((sum, subGoal) => sum + subGoal.tasks.length, 0),
-  } satisfies GoalWorkflowResult;
 }
 
 export async function startGoalWorkflow(input: {
@@ -195,6 +258,7 @@ export async function startGoalWorkflow(input: {
   }
 
   const conversation = getOrCreateGoalConversation(goalText, input.conversationId);
+  await ensureClientConversationWorkspace(conversation.id);
   return runGoalPlanning({
     goalText,
     conversationId: conversation.id,
@@ -221,24 +285,40 @@ export async function startGoalInfoCollection(input: {
 
   input.onProgress?.({ phase: "collecting_info", message: "正在准备几个关键澄清问题..." });
   const conversation = getOrCreateGoalConversation(goalText, input.conversationId);
+  await ensureClientConversationWorkspace(conversation.id);
 
-  const result = await advanceGoalInfoCollection({
-    goalText,
-    runtimeEnv,
-    config: goalConfig,
-    conversationId: conversation.id,
-    conversationContext: buildConversationContext(conversation.id),
-    history: [],
-    minRounds: goalConfig.minInfoCollectionRounds,
-    maxRounds: goalConfig.maxInfoCollectionRounds,
-    signal: input.signal,
-    onServerProgress: (progress) => {
-      input.onProgress?.({
-        phase: progress.phase,
-        message: progress.message,
-      });
-    },
-  });
+  let currentPhase: GoalWorkflowPhase = "collecting_info";
+  let result;
+  try {
+    result = await advanceGoalInfoCollection({
+      goalText,
+      runtimeEnv,
+      config: goalConfig,
+      conversationId: conversation.id,
+      conversationContext: buildConversationContext(conversation.id),
+      history: [],
+      minRounds: goalConfig.minInfoCollectionRounds,
+      maxRounds: goalConfig.maxInfoCollectionRounds,
+      signal: input.signal,
+      onServerProgress: (progress) => {
+        currentPhase = progress.phase;
+        input.onProgress?.({
+          phase: progress.phase,
+          message: progress.message,
+        });
+      },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    recordPlanningFailure({
+      conversationId: conversation.id,
+      goalText,
+      phase: currentPhase,
+      action: "retry_collect",
+      error,
+    });
+    throw error;
+  }
 
   if (result.status !== "continue" || !result.questions?.length) {
     throw new Error("首轮信息收集未返回可提问的问题");
@@ -257,6 +337,7 @@ export async function startGoalInfoCollection(input: {
     assistantMessage: result.assistantMessage,
   };
   conversationStore.setGoalInfoCollection(conversation.id, collection);
+  clearPlanningFailure(conversation.id);
 
   return {
     conversationId: conversation.id,
@@ -300,27 +381,45 @@ export async function continueGoalWorkflowAfterInfo(input: {
   conversationStore.setGoalInfoCollection(input.conversationId, {
     ...collection,
     status: "processing",
+    rounds: answeredRounds,
+    currentRound: answeredRounds.length,
     updatedAt: answeredAt,
   });
   input.onProgress?.({ phase: "collecting_info", message: "正在整理你刚补充的背景信息..." });
 
-  const decision = await advanceGoalInfoCollection({
-    goalText: collection.goalText,
-    runtimeEnv,
-    config: goalConfig,
-    conversationId: input.conversationId,
-    conversationContext: buildConversationContext(input.conversationId),
-    history: serializeCollectionHistory(answeredRounds),
-    minRounds: collection.minRounds,
-    maxRounds: collection.maxRounds,
-    signal: input.signal,
-    onServerProgress: (progress) => {
-      input.onProgress?.({
-        phase: progress.phase,
-        message: progress.message,
-      });
-    },
-  });
+  let currentPhase: GoalWorkflowPhase = "collecting_info";
+  let decision;
+  try {
+    decision = await advanceGoalInfoCollection({
+      goalText: collection.goalText,
+      runtimeEnv,
+      config: goalConfig,
+      conversationId: input.conversationId,
+      conversationContext: buildConversationContext(input.conversationId),
+      history: serializeCollectionHistory(answeredRounds),
+      minRounds: collection.minRounds,
+      maxRounds: collection.maxRounds,
+      signal: input.signal,
+      onServerProgress: (progress) => {
+        currentPhase = progress.phase;
+        input.onProgress?.({
+          phase: progress.phase,
+          message: progress.message,
+        });
+      },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    recordPlanningFailure({
+      conversationId: input.conversationId,
+      goalText: collection.goalText,
+      phase: currentPhase,
+      action: "retry_collect",
+      error,
+      lastUserMessage: answer,
+    });
+    throw error;
+  }
 
   const mergedSummary = mergeCollectedInfoSummary(collection.summary, decision.summary);
 
@@ -364,6 +463,113 @@ export async function continueGoalWorkflowAfterInfo(input: {
       goalText: collection.goalText,
       conversationId: input.conversationId,
       summary: mergedSummary,
+      signal: input.signal,
+      onProgress: input.onProgress,
+    })),
+  };
+}
+
+export async function resumeGoalWorkflowFromRecovery(input: {
+  conversationId: string;
+  userMessage: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: GoalWorkflowProgress) => void;
+}): Promise<GoalInfoCollectionStepResult> {
+  const conversation = useConversationStore.getState().conversations.find((item) => item.id === input.conversationId);
+  const recovery = conversation?.planningRunState;
+  if (!conversation || !recovery) {
+    throw new Error("当前会话没有可恢复的目标规划任务。");
+  }
+
+  input.onProgress?.({
+    phase: recovery.phase,
+    message:
+      recovery.action === "retry_collect"
+        ? "正在基于已保存的目标上下文重新收集关键信息..."
+        : "正在基于已保存的目标上下文继续生成目标规划...",
+  });
+
+  if (recovery.action === "retry_collect") {
+    const runtimeEnv = assertClaudeRuntime();
+    const goalConfig = useEasterEggSettingsStore.getState().getSettings();
+    const collection = conversation.goalInfoCollection;
+    const answeredRounds = collection?.rounds.filter((round) => round.answer?.trim()) ?? [];
+    if (collection && answeredRounds.length > 0) {
+      const decision = await advanceGoalInfoCollection({
+        goalText: collection.goalText,
+        runtimeEnv,
+        config: goalConfig,
+        conversationId: input.conversationId,
+        conversationContext: buildConversationContext(input.conversationId),
+        history: serializeCollectionHistory(collection.rounds),
+        minRounds: collection.minRounds,
+        maxRounds: collection.maxRounds,
+        signal: input.signal,
+        onServerProgress: (progress) => {
+          input.onProgress?.({
+            phase: progress.phase,
+            message: progress.message,
+          });
+        },
+      });
+      const mergedSummary = mergeCollectedInfoSummary(collection.summary, decision.summary);
+      if (decision.status === "continue" && decision.questions?.length) {
+        const nextCollection: GoalInfoCollection = {
+          ...collection,
+          status: "awaiting_user",
+          rounds: [...collection.rounds, createInfoCollectionRound(decision.questions)],
+          currentRound: collection.rounds.length + 1,
+          updatedAt: new Date().toISOString(),
+          summary: mergedSummary,
+          assistantMessage: decision.assistantMessage,
+        };
+        useConversationStore.getState().setGoalInfoCollection(input.conversationId, nextCollection);
+        clearPlanningFailure(input.conversationId);
+        return {
+          kind: "collecting_info",
+          conversationId: input.conversationId,
+          collection: nextCollection,
+          assistantMessage: decision.assistantMessage,
+        };
+      }
+      const readyCollection: GoalInfoCollection = {
+        ...collection,
+        status: "ready_for_planning",
+        updatedAt: new Date().toISOString(),
+        summary: mergedSummary,
+        assistantMessage: decision.assistantMessage,
+      };
+      useConversationStore.getState().setGoalInfoCollection(input.conversationId, readyCollection);
+      return {
+        kind: "planned",
+        ...(await runGoalPlanning({
+          goalText: collection.goalText,
+          conversationId: input.conversationId,
+          summary: mergedSummary,
+          signal: input.signal,
+          onProgress: input.onProgress,
+        })),
+      };
+    }
+    return {
+      kind: "collecting_info",
+      ...(await startGoalInfoCollection({
+        goalText: recovery.goalText,
+        source: "conversation",
+        conversationId: input.conversationId,
+        signal: input.signal,
+        onProgress: input.onProgress,
+      })),
+    };
+  }
+
+  const collection = conversation.goalInfoCollection;
+  return {
+    kind: "planned",
+    ...(await runGoalPlanning({
+      goalText: collection?.goalText || recovery.goalText,
+      conversationId: input.conversationId,
+      summary: collection?.summary,
       signal: input.signal,
       onProgress: input.onProgress,
     })),

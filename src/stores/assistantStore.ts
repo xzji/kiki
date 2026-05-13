@@ -7,7 +7,7 @@ import { continueGoalWorkflowAfterInfo, startGoalInfoCollection } from "@/lib/go
 import { parseSlashCommand } from "@/lib/slashCommands";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
-import type { GoalInfoCollection } from "@/types/kiki";
+import type { Conversation, ConversationMessage, GoalInfoCollection } from "@/types/kiki";
 import type { ClaudeStreamEvent, RuntimeEnvironment } from "@/types/runtime";
 
 export type AssistantMessage = {
@@ -49,6 +49,7 @@ type AssistantState = {
 };
 
 const STORAGE_KEY = "kiki.assistant.isOpen";
+const ASSISTANT_SIDEBAR_CONVERSATION_ID = "assistant-sidebar";
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -71,6 +72,29 @@ function writePersistedOpen(open: boolean) {
   } catch {
     // ignore
   }
+}
+
+function toConversationMessage(message: AssistantMessage): ConversationMessage {
+  return {
+    id: message.id,
+    kind: "text",
+    role: message.role,
+    content: message.content,
+    createdAt: message.createdAt,
+    status: message.status,
+    source: message.role,
+  };
+}
+
+function buildSidebarConversationSnapshot(messages: AssistantMessage[]): Conversation {
+  const latest = messages[messages.length - 1];
+  return {
+    id: ASSISTANT_SIDEBAR_CONVERSATION_ID,
+    title: "KiKi 侧边栏助手",
+    status: "streaming",
+    messages: messages.map(toConversationMessage),
+    updatedAt: latest?.createdAt ?? new Date().toISOString(),
+  };
 }
 
 export const useAssistantStore = create<AssistantState>((set, get) => ({
@@ -368,6 +392,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     };
     const assistantId = `k-${Date.now() + 1}`;
     const controller = new AbortController();
+    const contextMessages = [...get().messages, userMsg];
     const kikiMsg: AssistantMessage = {
       id: assistantId,
       role: "kiki",
@@ -439,8 +464,13 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       await streamClaudeChat(
         {
           message: trimmed,
+          conversationId: ASSISTANT_SIDEBAR_CONVERSATION_ID,
           runtimeEnv,
           source: "assistant-sidebar",
+          contextSnapshot: {
+            conversation: buildSidebarConversationSnapshot(contextMessages),
+            goal: null,
+          },
           quotedMessage,
         },
         { onEvent: handleEvent },

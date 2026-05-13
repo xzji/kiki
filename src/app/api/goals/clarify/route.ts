@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
       goalText,
       runtimeEnv: body.runtimeEnv,
       config: body.config,
+      conversationId: body.conversationId,
       conversationContext: body.conversationContext,
       signal: request.signal,
     });

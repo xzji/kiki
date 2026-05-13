@@ -1,6 +1,8 @@
 import { appendGoalLog, beginGoalTelemetry, failGoalTelemetry, finishGoalTelemetry, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
 import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
+import { ensureTaskWorkspace, writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
+import { buildTaskContextPack } from "@/lib/server/workspace/contextPack";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
 import { validateTaskResultLocally } from "@/lib/taskResult/localValidation";
@@ -31,6 +33,8 @@ type RunGoalTaskInput = {
   task: Task;
   instance: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
+  conversationWorkspaceDir?: string;
+  taskWorkspaceDir?: string;
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
 };
@@ -971,14 +975,35 @@ function progressPayloadWithTrajectory(trajectory: ExecutionTrajectoryStep[], re
   };
 }
 
+function resolveGoalTaskWorkspace(input: RunGoalTaskInput) {
+  if (input.taskWorkspaceDir) return input.taskWorkspaceDir;
+  if (input.goal.conversationId) {
+    return ensureTaskWorkspace({
+      conversationId: input.goal.conversationId,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+    });
+  }
+  throw new Error("任务缺少 conversationId，无法进入隔离 task workspace");
+}
+
 async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
   let finalMessage = "";
   await streamClaudeCli({
     message,
-    workingDirectory: input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
+    workingDirectory: resolveGoalTaskWorkspace(input),
     cliPath: input.runtimeEnv.cliPath,
     permissionMode,
     claudeSessionId: undefined,
+    contextPack: buildTaskContextPack({
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      trajectory: input.initialTrajectory,
+      resumeContext: input.resumeContext,
+    }),
+    workspacePolicy: "task",
     onEvent: (event) => {
       if (event.type === "delta" && event.text.trim()) finalMessage += event.text;
       if (event.type === "message") finalMessage = event.content;
@@ -1397,12 +1422,31 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
+  const runnerPrompt = buildGoalTaskRunnerPrompt({ ...input, initialTrajectory: input.initialTrajectory });
+  if (input.goal.conversationId) {
+    writeTaskPromptFile({
+      conversationId: input.goal.conversationId,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      content: runnerPrompt,
+    });
+  }
+
   await streamClaudeCli({
-    message: buildGoalTaskRunnerPrompt({ ...input, initialTrajectory: input.initialTrajectory }),
-    workingDirectory: input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
+    message: runnerPrompt,
+    workingDirectory: resolveGoalTaskWorkspace(input),
     cliPath: input.runtimeEnv.cliPath,
     permissionMode: input.runtimeEnv.permissionMode,
     claudeSessionId: undefined,
+    contextPack: buildTaskContextPack({
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      trajectory,
+      resumeContext: input.resumeContext,
+    }),
+    workspacePolicy: "task",
     onEvent: (event) => {
       if (event.type === "delta" && event.text.trim()) {
         finalMessage += event.text;

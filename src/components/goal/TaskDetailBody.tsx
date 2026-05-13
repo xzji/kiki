@@ -156,9 +156,11 @@ export function TaskDetailBody({
         ? awaitingTaskStatusLabel(task)
         : taskState === "in_progress"
           ? "进行中"
-          : taskState === "paused"
-            ? "已暂停"
-            : "待开始";
+          : taskState === "error"
+            ? "执行失败"
+            : taskState === "paused"
+              ? "已暂停"
+              : "待开始";
   const executionAction = getExecutionAction(task, taskState);
   const cleanTitle = task.title.replace(/^任务\d+：/, "");
 
@@ -167,7 +169,7 @@ export function TaskDetailBody({
     [task.instances],
   );
   const pendingInstances = useMemo(
-    () => sortedInstances.filter((item) => item.status === "pending" || item.status === "paused" || item.status === "error"),
+    () => sortedInstances.filter((item) => item.status === "pending" || item.status === "paused"),
     [sortedInstances],
   );
   const runningInstances = useMemo(
@@ -175,7 +177,7 @@ export function TaskDetailBody({
     [sortedInstances],
   );
   const completedInstances = useMemo(
-    () => sortedInstances.filter((item) => item.status === "completed" && !item.awaitingUser),
+    () => sortedInstances.filter((item) => isArchivedExecutionInstance(item)),
     [sortedInstances],
   );
 
@@ -486,7 +488,7 @@ function InstanceSection({
 }
 
 function pendingLength(task: Task) {
-  return task.instances.filter((item) => item.status === "pending" || item.status === "paused" || item.status === "error").length;
+  return task.instances.filter((item) => item.status === "pending" || item.status === "paused").length;
 }
 
 function runningLength(task: Task) {
@@ -494,7 +496,11 @@ function runningLength(task: Task) {
 }
 
 function completedLength(task: Task) {
-  return task.instances.filter((item) => item.status === "completed" && !item.awaitingUser).length;
+  return task.instances.filter((item) => isArchivedExecutionInstance(item)).length;
+}
+
+function isArchivedExecutionInstance(instance: TaskInstance) {
+  return (instance.status === "completed" && !instance.awaitingUser) || instance.status === "error";
 }
 
 function formatDeliverablePresentation(task: Task) {
@@ -562,8 +568,13 @@ function InstanceCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const canExpand = instance.status === "in_progress" || instance.status === "awaiting_user" || instance.status === "completed";
-  const resultLine = instance.status === "completed" ? getInstanceResultLine(task, instance) : "";
+  const canExpand =
+    instance.status === "in_progress" ||
+    instance.status === "awaiting_user" ||
+    instance.status === "completed" ||
+    instance.status === "error" ||
+    Boolean(instance.timeline?.length || instance.trajectory?.length || instance.result);
+  const resultLine = isArchivedExecutionInstance(instance) ? getInstanceResultLine(task, instance) : "";
   const executionSteps = applyWaitingReasonToSteps(
     trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
     instance.execution?.waitingReason,
@@ -591,8 +602,17 @@ function InstanceCard({
             </div>
             <p className="mt-2 text-[14px] leading-6 text-[#1F2328]">{instance.intro}</p>
             {resultLine ? (
-              <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3">
-                <div className="shrink-0 text-[11px] text-[#8C9198]">执行结果</div>
+              <div
+                className={cn(
+                  "mt-3 flex items-start gap-2 rounded-xl border px-3 py-3",
+                  instance.status === "error"
+                    ? "border-[#FECACA] bg-[#FEF2F2]"
+                    : "border-[#E5E7EB] bg-[#F8F9FB]",
+                )}
+              >
+                <div className="shrink-0 text-[11px] text-[#8C9198]">
+                  {instance.status === "error" ? "失败原因" : "执行结果"}
+                </div>
                 <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-6 text-[#1F2328]">
                   {resultLine}
                 </div>
@@ -618,9 +638,11 @@ function InstanceCard({
               </div>
               <ExecutionMessageStream steps={executionSteps} />
             </div>
-            {instance.status === "completed" || instance.status === "awaiting_user" ? (
+            {instance.status === "completed" || instance.status === "awaiting_user" || instance.status === "error" ? (
               <div className="min-w-0">
-                <div className="mb-2 text-[12px] font-medium text-[#6B7280]">执行结果</div>
+                <div className="mb-2 text-[12px] font-medium text-[#6B7280]">
+                  {instance.status === "error" ? "执行结果 / 失败原因" : "执行结果"}
+                </div>
                 <InstanceResultPanel task={task} instance={instance} />
               </div>
             ) : null}
@@ -633,6 +655,7 @@ function InstanceCard({
 
 function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskInstance }) {
   const resultLine = getInstanceResultLine(task, instance);
+  const failed = instance.status === "error";
   const genericSummary =
     instance.result?.summary ??
     (instance.payload.kind === "generic_result" ? instance.payload.summary : undefined) ??
@@ -651,8 +674,8 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
-        <div className="text-[12px] text-[#8C9198]">结果内容</div>
-        <div className="mt-2 text-[14px] leading-7 text-[#1F2328]">
+        <div className="text-[12px] text-[#8C9198]">{failed ? "失败原因" : "结果内容"}</div>
+        <div className={cn("mt-2 whitespace-pre-wrap text-[14px] leading-7", failed ? "text-[#B42318]" : "text-[#1F2328]")}>
           {resultLine || "该任务暂未产出最终结果。"}
         </div>
         {resultSummary ? (
@@ -799,6 +822,15 @@ function getPayloadSummaryLines(instance: TaskInstance) {
 }
 
 function getInstanceResultLine(task: Task, instance: TaskInstance) {
+  if (instance.status === "error") {
+    return (
+      instance.execution?.errorMessage ||
+      instance.result?.summary ||
+      instance.result?.finalMessage ||
+      (instance.payload.kind === "generic_result" ? instance.payload.summary ?? instance.payload.details : undefined) ||
+      "任务执行失败，但未返回具体失败原因。"
+    );
+  }
   const directResult =
     instance.notification?.resultSummary.headline ??
     instance.result?.summary ??
@@ -854,6 +886,7 @@ function getTaskDisplayState(task: Task) {
   if (latestStatus === "completed" || task.progress >= 100) return "completed" as const;
   if (latestStatus === "paused") return "paused" as const;
   if (latestStatus === "in_progress") return "in_progress" as const;
+  if (latestStatus === "error") return "error" as const;
   if (latestStatus === "pending") return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
   return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
 }
@@ -861,6 +894,7 @@ function getTaskDisplayState(task: Task) {
 function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisplayState>) {
   if (taskState === "completed") return { label: "重新执行", action: "rerun" as const };
   if (taskState === "awaiting_user") return null;
+  if (taskState === "error") return { label: "重试", action: "start" as const };
   const latest = [...task.instances]
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     .find((instance) => instance.status !== "completed");
@@ -876,6 +910,7 @@ function taskStatusClassName(state: ReturnType<typeof getTaskDisplayState>) {
   if (state === "completed") return "bg-[#E5E7EB] text-[#6B7280]";
   if (state === "awaiting_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
   if (state === "in_progress") return "bg-[#DDE1E7] text-[#1F2328]";
+  if (state === "error") return "bg-[#FDECEC] text-[#B42318]";
   if (state === "paused") return "bg-[#E5E7EB] text-[#6B7280]";
   return "bg-[#F5F6F8] text-[#8C9198]";
 }

@@ -12,6 +12,7 @@ import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePan
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
+import { runTaskExecutionAction } from "@/lib/taskExecution";
 import { useGoalStore } from "@/stores/goalStore";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, InteractionSubmission, Task, TaskInstance } from "@/types/kiki";
@@ -86,7 +87,6 @@ export function ExecutionResultBody(props: {
   const { task, instance } = props;
   const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
   const completeTaskInstance = useGoalStore((state) => state.completeTaskInstance);
-  const retryTaskInstanceRun = useGoalStore((state) => state.retryTaskInstanceRun);
   const stopTaskInstanceRun = useGoalStore((state) => state.stopTaskInstanceRun);
   const [refreshTick, setRefreshTick] = useState(0);
   const currentKind = task.resultViewKind ?? task.executionKind;
@@ -291,7 +291,11 @@ export function ExecutionResultBody(props: {
             {instance.status === "error" || instance.status === "paused" ? (
               <button
                 type="button"
-                onClick={() => retryTaskInstanceRun(task.id, instance.id)}
+                onClick={() => {
+                  void runTaskExecutionAction(task.id, instance.status === "paused" ? "resume" : "start").catch((error) => {
+                    window.alert(error instanceof Error ? error.message : "任务执行失败");
+                  });
+                }}
                 className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
               >
                 重试

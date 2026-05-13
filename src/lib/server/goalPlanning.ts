@@ -3,13 +3,14 @@ import { spawn } from "child_process";
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
 import { appendGoalLog } from "@/lib/server/goalTelemetry";
+import { ensureConversationWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, TaskExpectedResult } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 import { buildClaudeEnv } from "./claudeEnv";
-import { normalizeWorkingDirectory, resolveCliPath } from "./runtimeEnvValidation";
+import { resolveCliPath } from "./runtimeEnvValidation";
 
 type ClaudeJsonPayload = {
   result?: string;
@@ -547,12 +548,17 @@ JSON schema：
 async function runClaudeJson(input: {
   runtimeEnv: RuntimeEnvironment;
   prompt: string;
+  conversationId?: string;
+  workspaceDir?: string;
   signal?: AbortSignal;
   abortMessage: string;
   failureMessage: string;
   context?: ClaudeRunContext;
 }) {
-  const cwd = normalizeWorkingDirectory(input.runtimeEnv.workingDirectory);
+  const cwd = input.workspaceDir ?? (input.conversationId ? ensureConversationWorkspace(input.conversationId).workspaceDir : null);
+  if (!cwd) {
+    throw new Error("目标规划缺少 conversationId，无法进入隔离 conversation workspace");
+  }
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   return new Promise<string>((resolve, reject) => {
     const startedAt = Date.now();
@@ -755,6 +761,7 @@ function repairCommonJsonIssues(text: string) {
 async function repairMalformedJsonWithClaude(input: {
   runtimeEnv: RuntimeEnvironment;
   malformedJson: string;
+  conversationId?: string;
   signal?: AbortSignal;
 }) {
   const prompt = `你是 JSON 修复助手。请把下面这段不合法或不完整的 JSON 修复为严格合法的 JSON。
@@ -770,6 +777,7 @@ ${input.malformedJson}`;
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt,
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "JSON 修复已中断",
     failureMessage: "Claude CLI JSON 修复失败",
@@ -783,6 +791,7 @@ async function parseClaudeJson<T>(input: {
   validator: (value: unknown) => T;
   errorMessage: string;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   signal?: AbortSignal;
   context?: ClaudeRunContext;
 }) {
@@ -842,6 +851,7 @@ async function parseClaudeJson<T>(input: {
     const repaired = await repairMalformedJsonWithClaude({
       runtimeEnv: input.runtimeEnv,
       malformedJson: primary,
+      conversationId: input.conversationId,
       signal: input.signal,
     });
     const repairedCandidate = repairCommonJsonIssues(extractBalancedJsonSnippet(repaired));
@@ -1458,6 +1468,7 @@ async function summarizeCollectedInfoWithClaude(input: {
   goalText: string;
   collectedInfo: string;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   conversationContext?: string;
   signal?: AbortSignal;
   requestId?: string;
@@ -1465,6 +1476,7 @@ async function summarizeCollectedInfoWithClaude(input: {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildCollectedInfoSummaryPrompt(input.goalText, input.collectedInfo, input.conversationContext),
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "目标信息整理已中断",
     failureMessage: "Claude CLI 信息摘要生成失败",
@@ -1481,6 +1493,7 @@ async function summarizeCollectedInfoWithClaude(input: {
       validator: validateCollectedInfoSummary,
       errorMessage: "Claude 信息摘要 JSON 解析失败",
       runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
       signal: input.signal,
       context: {
         requestId: input.requestId,
@@ -1508,12 +1521,14 @@ async function decomposeGoalWithClaude(input: {
   userContext: Record<string, unknown>;
   config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   signal?: AbortSignal;
   requestId?: string;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildDecomposePrompt(input),
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "子目标拆解已中断",
     failureMessage: "Claude CLI 子目标拆解失败",
@@ -1529,6 +1544,7 @@ async function decomposeGoalWithClaude(input: {
     validator: validateDecomposition,
     errorMessage: "Claude 子目标拆解 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     signal: input.signal,
     context: {
       requestId: input.requestId,
@@ -1548,6 +1564,7 @@ async function generateTasksForSubGoalWithClaude(input: {
   successCriteria: string[];
   config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   signal?: AbortSignal;
   requestId?: string;
   subGoalIndex?: number;
@@ -1556,6 +1573,7 @@ async function generateTasksForSubGoalWithClaude(input: {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildTaskGenerationPrompt(input),
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "任务生成已中断",
     failureMessage: "Claude CLI 任务生成失败",
@@ -1571,6 +1589,7 @@ async function generateTasksForSubGoalWithClaude(input: {
     validator: validateTaskGeneration,
     errorMessage: "Claude 任务生成 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     signal: input.signal,
     context: {
       requestId: input.requestId,
@@ -1587,6 +1606,7 @@ async function reviewTasksWithClaude(input: {
   goalDescription: string;
   tasksJson: string;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   signal?: AbortSignal;
   requestId?: string;
   subGoalIndex?: number;
@@ -1595,6 +1615,7 @@ async function reviewTasksWithClaude(input: {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildTaskReviewPrompt(input),
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "任务 review 已中断",
     failureMessage: "Claude CLI 任务 review 失败",
@@ -1610,6 +1631,7 @@ async function reviewTasksWithClaude(input: {
     validator: validateTaskReview,
     errorMessage: "Claude 任务 review JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     signal: input.signal,
     context: {
       requestId: input.requestId,
@@ -1630,12 +1652,14 @@ async function buildPlanPresentationWithClaude(input: {
     uncoveredRisks?: string[];
   }>;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   signal?: AbortSignal;
   requestId?: string;
 }) {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildPlanPresentationPrompt(input),
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "计划摘要生成已中断",
     failureMessage: "Claude CLI 计划摘要生成失败",
@@ -1651,6 +1675,7 @@ async function buildPlanPresentationWithClaude(input: {
     validator: validatePlanPresentation,
     errorMessage: "Claude 计划摘要 JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     signal: input.signal,
     context: {
       requestId: input.requestId,
@@ -1795,6 +1820,7 @@ export async function generateGoalPlanWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
   config?: EasterEggSettings;
+  conversationId?: string;
   conversationContext?: string;
   collectedInfo?: string;
   signal?: AbortSignal;
@@ -1813,6 +1839,7 @@ export async function generateGoalPlanWithClaude(input: {
         goalText: input.goalText,
         collectedInfo: input.collectedInfo,
         runtimeEnv: input.runtimeEnv,
+        conversationId: input.conversationId,
         conversationContext: input.conversationContext,
         signal: input.signal,
         requestId: input.requestId,
@@ -1854,6 +1881,7 @@ export async function generateGoalPlanWithClaude(input: {
     userContext,
     config,
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     signal: input.signal,
     requestId: input.requestId,
   });
@@ -1900,6 +1928,7 @@ export async function generateGoalPlanWithClaude(input: {
       ),
       config,
       runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
       signal: input.signal,
       requestId: input.requestId,
       subGoalIndex: subGoalIndex + 1,
@@ -1916,6 +1945,7 @@ export async function generateGoalPlanWithClaude(input: {
       goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
       tasksJson: JSON.stringify(generatedTasks.tasks, null, 2),
       runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
       signal: input.signal,
       requestId: input.requestId,
       subGoalIndex: subGoalIndex + 1,
@@ -1984,6 +2014,7 @@ export async function generateGoalPlanWithClaude(input: {
     decomposition,
     taskPlanningSummary,
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     signal: input.signal,
     requestId: input.requestId,
   });
@@ -2034,6 +2065,7 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
   config?: EasterEggSettings;
+  conversationId?: string;
   conversationContext?: string;
   signal?: AbortSignal;
   requestId?: string;
@@ -2042,6 +2074,7 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt,
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "目标信息收集已中断",
     failureMessage: "Claude CLI 澄清问题生成失败",
@@ -2059,6 +2092,7 @@ export async function generateGoalClarificationQuestionsWithClaude(input: {
       validator: validateClarificationQuestions,
       errorMessage: "Claude 澄清问题 JSON 解析失败",
       runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
       signal: input.signal,
       context: {
         requestId: input.requestId,
@@ -2105,6 +2139,7 @@ function decideGoalInfoCollectionByRounds(input: {
 async function generateGoalFollowUpQuestionsWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   conversationContext?: string;
   history: GoalInfoCollectionHistoryItem[];
   answeredRounds: number;
@@ -2116,6 +2151,7 @@ async function generateGoalFollowUpQuestionsWithClaude(input: {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
     prompt: buildGoalFollowUpQuestionsPrompt(input),
+    conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "目标补充问题生成已中断",
     failureMessage: "Claude CLI 补充问题生成失败",
@@ -2133,6 +2169,7 @@ async function generateGoalFollowUpQuestionsWithClaude(input: {
       validator: validateClarificationQuestions,
       errorMessage: "Claude 补充问题 JSON 解析失败",
       runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
       signal: input.signal,
       context: {
         requestId: input.requestId,
@@ -2163,6 +2200,7 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
   goalText: string;
   runtimeEnv: RuntimeEnvironment;
   config?: EasterEggSettings;
+  conversationId?: string;
   conversationContext?: string;
   history: GoalInfoCollectionHistoryItem[];
   minRounds?: number;
@@ -2187,6 +2225,7 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
       goalText: input.goalText,
       runtimeEnv: input.runtimeEnv,
       config,
+      conversationId: input.conversationId,
       conversationContext: input.conversationContext,
       signal: input.signal,
       requestId: input.requestId,
@@ -2238,6 +2277,7 @@ export async function advanceGoalInfoCollectionWithClaude(input: {
   const followUp = await generateGoalFollowUpQuestionsWithClaude({
     goalText: input.goalText,
     runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
     conversationContext: input.conversationContext,
     history: input.history,
     answeredRounds,

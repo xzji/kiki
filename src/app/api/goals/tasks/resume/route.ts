@@ -6,6 +6,11 @@ import {
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import { syncGoalInstanceFromProgress } from "@/lib/server/runtime/goalStateSnapshot";
 import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import {
+  ensureTaskWorkspace,
+  writeJsonFileAtomic,
+  writeTaskRunSnapshot,
+} from "@/lib/server/workspace/conversationWorkspace";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
@@ -329,6 +334,26 @@ export async function POST(request: NextRequest) {
   }
 
   const resolvedBlocker = resolveBlocker(job.blocker, body);
+  const conversationId = job.conversationId ?? job.payload.goal.conversationId;
+  const taskWorkspaceDir =
+    job.payload.taskWorkspaceDir ??
+    (conversationId
+      ? ensureTaskWorkspace({
+          conversationId,
+          taskId: job.payload.task.id,
+          instanceId: job.payload.instance.id,
+        })
+      : undefined);
+  if (taskWorkspaceDir) {
+    writeJsonFileAtomic(`${taskWorkspaceDir}/resume-input.json`, {
+      submittedAt: nowIso(),
+      approved: body.approved,
+      action: body.action,
+      feedback: body.feedback,
+      fields: body.fields,
+      resumeToken: body.resumeToken,
+    });
+  }
   const nextTrajectory = [
     ...job.trajectory,
     createTrajectoryStep({
@@ -389,6 +414,16 @@ export async function POST(request: NextRequest) {
       trajectory: nextTrajectory,
     });
     upsertGoalsSnapshot(nextGoals);
+    if (conversationId) {
+      writeTaskRunSnapshot({
+        conversationId,
+        taskId: job.payload.task.id,
+        instanceId: job.payload.instance.id,
+        progress: nextProgress,
+        trajectory: nextTrajectory,
+        result: resultPayload,
+      });
+    }
     updateRuntimeJobExecution(job.id, {
       status: "completed",
       progress: nextProgress,
@@ -455,10 +490,21 @@ export async function POST(request: NextRequest) {
     trajectory: nextTrajectory,
   });
   upsertGoalsSnapshot(nextGoals);
+  if (conversationId) {
+    writeTaskRunSnapshot({
+      conversationId,
+      taskId: job.payload.task.id,
+      instanceId: job.payload.instance.id,
+      progress: nextProgress,
+      trajectory: nextTrajectory,
+      result: resultPayload,
+    });
+  }
   updateRuntimeJobExecution(job.id, {
     status: "queued",
     payload: {
       ...job.payload,
+      taskWorkspaceDir,
       resumeContext: [
         `用户对上一次阻塞点的决定：${body.approved ? "确认继续" : "拒绝当前方案/要求修改"}`,
         `用户反馈：${feedback}`,

@@ -41,6 +41,8 @@ type ClaudeStreamOptions = {
   cliPath: string;
   permissionMode: RuntimePermissionMode;
   claudeSessionId?: string;
+  contextPack?: string;
+  workspacePolicy?: "conversation" | "task" | string;
   quotedMessage?: {
     roleLabel: string;
     content: string;
@@ -85,6 +87,30 @@ function buildPrompt(
     );
   }
   parts.push(`当前用户消息：`, message);
+  return parts.join("\n");
+}
+
+function buildWorkspaceBoundPrompt(input: {
+  message: string;
+  quotedMessage?: ClaudeStreamOptions["quotedMessage"];
+  contextPack?: string;
+  workspaceDir: string;
+  workspacePolicy?: string;
+}) {
+  const parts: string[] = [
+    "你是 KiKi 当前会话助手，不是代码仓库开发助手。",
+    `当前工作目录是隔离 workspace：${input.workspaceDir}`,
+    "你只能依据当前上下文包、用户消息和当前工作目录内的文件回答。",
+    "不得读取父目录、项目源码目录、其他会话 workspace 或 IDE 上下文。",
+    "如果用户要求继续/恢复，但当前上下文包没有可恢复状态，请说明当前会话没有找到可恢复任务。",
+  ];
+  if (input.workspacePolicy) {
+    parts.push(`workspaceMode: ${input.workspacePolicy}`);
+  }
+  if (input.contextPack?.trim()) {
+    parts.push("", "【当前会话上下文包】", input.contextPack.trim());
+  }
+  parts.push("", buildPrompt(input.message, input.quotedMessage));
   return parts.join("\n");
 }
 
@@ -202,7 +228,15 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
   if (allowedTools.length > 0) {
     args.push("--allowedTools", ...allowedTools);
   }
-  args.push(buildPrompt(options.message, options.quotedMessage));
+  args.push(
+    buildWorkspaceBoundPrompt({
+      message: options.message,
+      quotedMessage: options.quotedMessage,
+      contextPack: options.contextPack,
+      workspaceDir: cwd,
+      workspacePolicy: options.workspacePolicy,
+    }),
+  );
 
   await new Promise<void>((resolve) => {
     const child = spawn(cliPath, args, {

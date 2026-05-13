@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       goalText,
       runtimeEnv: body.runtimeEnv,
       config: body.config,
+      conversationId: body.conversationId,
       conversationContext: body.conversationContext,
       collectedInfo: body.collectedInfo,
       signal: request.signal,

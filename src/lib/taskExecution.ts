@@ -27,7 +27,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
   }
 
   let current = location;
-  let targetInstance = action === "rerun" ? null : getLatestRunnableInstance(current.task);
+  let targetInstance = getLatestRunnableInstance(current.task, action);
 
   if (!targetInstance) {
     const created =
@@ -60,7 +60,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       requestId: run.requestId,
       runtimeEnvId: runtimeEnv.id,
       permissionMode: runtimeEnv.permissionMode,
-      workingDirectory: current.task.recommendedWorkingDirectory || runtimeEnv.workingDirectory,
+      workingDirectory: run.workspacePath,
     });
 
     void waitForTaskRunCompletion({
@@ -110,7 +110,9 @@ function findTaskLocation(goals: Goal[], taskId: string) {
   return null;
 }
 
-function getLatestRunnableInstance(task: Task): TaskInstance | null {
+function getLatestRunnableInstance(task: Task, action: TaskExecutionAction): TaskInstance | null {
+  if (action === "rerun") return null;
   const sorted = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  return sorted.find((instance) => instance.status !== "completed") ?? null;
+  if (action === "resume") return sorted.find((instance) => instance.status === "paused") ?? null;
+  return sorted.find((instance) => instance.status === "pending") ?? null;
 }

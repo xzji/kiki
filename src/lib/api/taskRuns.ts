@@ -52,12 +52,13 @@ export async function startTaskRun(input: {
     }),
     signal: input.signal,
   });
-  const data = (await response.json()) as { requestId?: string; reason?: string };
+  const data = (await response.json()) as { requestId?: string; workspacePath?: string; reason?: string };
   if (!response.ok || !data.requestId) {
     throw new Error(data.reason || "任务执行启动失败");
   }
   return {
     requestId: data.requestId,
+    workspacePath: data.workspacePath,
   };
 }
 

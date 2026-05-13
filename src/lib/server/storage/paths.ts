@@ -24,6 +24,14 @@ export function getStorageRootDir() {
   return ensureDir(path.join(getProjectRootDataDir(), "storage"));
 }
 
+export function getWorkspaceStorageRootDir() {
+  return ensureDir(path.join(getProjectRootDataDir(), "workspaces"));
+}
+
+export function getConversationWorkspacesRootDir() {
+  return ensureDir(path.join(getWorkspaceStorageRootDir(), "conversations"));
+}
+
 export function getTelemetryFilePath() {
   return path.join(getStorageRootDir(), "kiki-goal-telemetry.json");
 }

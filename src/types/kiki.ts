@@ -81,6 +81,7 @@ export type TaskExecutionPhase =
   | "preparing"
   | "running"
   | "awaiting_user"
+  | "paused"
   | "completed"
   | "retrying"
   | "failed"
@@ -150,6 +151,19 @@ export type GoalInfoCollection = {
   assistantMessage?: string;
 };
 
+export type GoalPlanningRecoveryAction = "retry_collect" | "retry_plan";
+
+export type GoalPlanningRunState = {
+  status: "failed";
+  phase: GoalWorkflowPhase;
+  action: GoalPlanningRecoveryAction;
+  goalText: string;
+  errorMessage: string;
+  failedAt: string;
+  updatedAt: string;
+  lastUserMessage?: string;
+};
+
 export type GoalAnalysis = {
   coreIntent: string;
   successState: string;
@@ -214,6 +228,7 @@ export type TaskInstanceRunnerState = {
 export type TaskInstanceExecutionState = {
   phase: TaskExecutionPhase;
   status: TaskInstanceStatus;
+  workspacePath?: string;
   startedAt?: string;
   finishedAt?: string;
   lastUpdatedAt?: string;
@@ -480,6 +495,9 @@ export type Conversation = {
   title: string;
   goalId?: string;
   goalInfoCollection?: GoalInfoCollection;
+  planningRunState?: GoalPlanningRunState;
+  workspacePath?: string;
+  workspaceInitializedAt?: string;
   runtimeEnvId?: string;
   claudeSessionId?: string;
   status?: "idle" | "streaming" | "error";

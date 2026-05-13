@@ -13,13 +13,15 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { deleteClaudeSession } from "@/lib/api/claude";
+import {
+  deleteConversationWorkspaceApi,
+  ensureConversationWorkspaceApi,
+} from "@/lib/api/conversationWorkspace";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
-import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Conversation } from "@/types/kiki";
 
 export const NAV_SIDEBAR_EXPANDED_WIDTH = 260;
@@ -33,9 +35,9 @@ export function Sidebar() {
   const markConversationUnread = useConversationStore((state) => state.markConversationUnread);
   const deleteConversation = useConversationStore((state) => state.deleteConversation);
   const renameConversation = useConversationStore((state) => state.renameConversation);
+  const setConversationWorkspace = useConversationStore((state) => state.setConversationWorkspace);
   const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
   const deleteGoalsByConversationId = useGoalStore((state) => state.deleteGoalsByConversationId);
-  const runtimeEnvironments = useRuntimeEnvStore((state) => state.environments);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
   const setCollapsed = useNavSidebarStore((state) => state.setCollapsed);
@@ -64,6 +66,11 @@ export function Sidebar() {
 
   const onCreateConversation = () => {
     const next = createConversation();
+    void ensureConversationWorkspaceApi(next.id)
+      .then((workspacePath) => setConversationWorkspace(next.id, workspacePath))
+      .catch(() => {
+        // 使用时服务端还会懒初始化，创建入口不因 workspace 预创建失败而阻塞。
+      });
     router.push(`/conversations/${next.id}`);
   };
 
@@ -71,13 +78,10 @@ export function Sidebar() {
     if (!deleteTarget || deletePending) return;
     setDeletePending(true);
     try {
-      if (deleteTarget.claudeSessionId) {
-        const runtimeEnv = runtimeEnvironments.find((item) => item.id === deleteTarget.runtimeEnvId);
-        await deleteClaudeSession({
-          sessionId: deleteTarget.claudeSessionId,
-          workingDirectory: runtimeEnv?.workingDirectory,
-        });
-      }
+      await deleteConversationWorkspaceApi({
+        conversationId: deleteTarget.id,
+        claudeSessionId: deleteTarget.claudeSessionId,
+      });
       deleteGoalsByConversationId(deleteTarget.id);
       deleteConversation(deleteTarget.id);
       if (pathname.startsWith(`/conversations/${deleteTarget.id}`)) {

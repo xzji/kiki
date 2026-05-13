@@ -6,6 +6,10 @@ import { persist } from "zustand/middleware";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
+import {
+  applyTaskInstanceTransition,
+  normalizeTaskInstanceExecution,
+} from "@/stores/taskInstanceStateMachine";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
@@ -401,22 +405,10 @@ function normalizeNotificationFromProgress(
 }
 
 function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
-  const status = instance.execution?.status ?? instance.status;
-  const phase =
-    instance.execution?.phase ??
-    (status === "completed"
-      ? "completed"
-      : status === "awaiting_user"
-        ? "awaiting_user"
-        : status === "in_progress"
-          ? "running"
-          : status === "error"
-            ? "failed"
-            : status === "paused"
-              ? "failed"
-              : "queued");
+  const lifecycle = normalizeTaskInstanceExecution(instance);
   return {
     ...instance,
+    status: lifecycle.status,
     payload:
       instance.payload ??
       ({
@@ -428,10 +420,7 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
       ...instance.runner,
     },
     execution: {
-      phase,
-      status,
-      lastUpdatedAt: instance.execution?.lastUpdatedAt ?? instance.createdAt,
-      ...instance.execution,
+      ...lifecycle.execution,
     },
     timeline:
       instance.timeline ??
@@ -440,10 +429,10 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
           id: `${instance.id}-queued`,
           title: "任务已创建",
           type: "phase",
-          status: status === "pending" ? "running" : "completed",
+          status: lifecycle.status === "pending" ? "running" : "completed",
           detail: instance.intro,
           startedAt: instance.createdAt,
-          finishedAt: status === "pending" ? undefined : instance.createdAt,
+          finishedAt: lifecycle.status === "pending" ? undefined : instance.createdAt,
         },
       ],
   };

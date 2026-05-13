@@ -1,5 +1,6 @@
 "use client";
 
+import { ensureConversationWorkspaceApi, writeConversationContextApi } from "@/lib/api/conversationWorkspace";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import type { GoalBreakdownDraft } from "@/types/kiki";
@@ -172,6 +173,14 @@ export function seedToeflMockGoalPlanConversation() {
       taskCount: taskCountFromDraft(TOEFL_PLAN_MOCK_DRAFT),
     },
   });
+
+  void ensureConversationWorkspaceApi(conversation.id)
+    .then((workspacePath) => conversationStore.setConversationWorkspace(conversation.id, workspacePath))
+    .then(() => {
+      const current = useConversationStore.getState().conversations.find((item) => item.id === conversation.id);
+      if (current) void writeConversationContextApi({ conversation: current, goal });
+    })
+    .catch(() => undefined);
 
   return {
     conversationId: conversation.id,

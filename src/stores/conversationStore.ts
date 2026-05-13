@@ -5,7 +5,7 @@ import { persist } from "zustand/middleware";
 
 import { buildConversationsFromGoals } from "@/mocks/conversations";
 import { initialGoals } from "@/mocks/goals";
-import type { Conversation, ConversationMessage, GoalInfoCollection } from "@/types/kiki";
+import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 
 type ConversationStore = {
   conversations: Conversation[];
@@ -24,7 +24,9 @@ type ConversationStore = {
   toggleConversationPinned: (conversationId: string) => void;
   setGoalForConversation: (conversationId: string, goalId: string) => void;
   setGoalInfoCollection: (conversationId: string, collection: GoalInfoCollection | null) => void;
+  setPlanningRunState: (conversationId: string, state: GoalPlanningRunState | null) => void;
   renameConversation: (conversationId: string, title: string) => void;
+  setConversationWorkspace: (conversationId: string, workspacePath: string) => void;
   setConversationRuntimeEnv: (conversationId: string, runtimeEnvId: string) => void;
   setClaudeSessionId: (conversationId: string, claudeSessionId: string) => void;
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
@@ -157,10 +159,31 @@ export const useConversationStore = create<ConversationStore>()(
           ),
         });
       },
+      setPlanningRunState: (conversationId, state) => {
+        set({
+          conversations: get().conversations.map((item) =>
+            item.id === conversationId ? { ...item, planningRunState: state ?? undefined } : item,
+          ),
+        });
+      },
       renameConversation: (conversationId, title) => {
         set({
           conversations: get().conversations.map((item) =>
             item.id === conversationId ? { ...item, title } : item,
+          ),
+        });
+      },
+      setConversationWorkspace: (conversationId, workspacePath) => {
+        const now = new Date().toISOString();
+        set({
+          conversations: get().conversations.map((item) =>
+            item.id === conversationId
+              ? {
+                  ...item,
+                  workspacePath,
+                  workspaceInitializedAt: item.workspaceInitializedAt || now,
+                }
+              : item,
           ),
         });
       },
