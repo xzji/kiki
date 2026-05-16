@@ -8,7 +8,7 @@ import type {
   GoalBreakdownDraft,
   InteractionRequirement,
   Task,
-  TaskCollaborationContract,
+  TaskCollaborationRequirements,
   TaskExpectedResult,
   TaskExecutionStep,
   TaskInstance,
@@ -73,7 +73,7 @@ function statusToPhase(status: TaskInstance["status"]) {
   return "queued" as const;
 }
 
-function collaborationFor(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationContract {
+function collaborationFor(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
   if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
     return {
       mode: "agent_user_collaborative",

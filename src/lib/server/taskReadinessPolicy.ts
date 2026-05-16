@@ -11,6 +11,8 @@ export type TaskReadinessInfoItem = {
   reason: string;
   value?: string;
   options?: string[];
+  optionQuestion?: string;
+  inputPlaceholder?: string;
 };
 
 export type TaskReadinessCheck = {
@@ -110,7 +112,6 @@ export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadines
       status: available ? "available" : "missing_user",
       reason: available ? "已在任务上下文或用户反馈中找到出发城市。" : "这是用户个人行程信息，Agent 不能自行猜测或默认选择。",
       value: userFeedback || undefined,
-      options: ["上海出发（航班多）", "广州出发（华南方便）", "北京出发（北方方便）"],
     });
     addItem({
       id: "flight_inventory",
@@ -130,7 +131,6 @@ export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadines
       source: "user",
       status: hasDateValue(text) ? "available" : "missing_user",
       reason: hasDateValue(text) ? "已在任务上下文中找到日期。" : "日期属于用户行程约束，缺失时不能默认假设。",
-      options: ["周末短途（2-3天）", "工作日错峰（更便宜）", "节假日出行（需早订）"],
     });
   }
 
@@ -143,7 +143,6 @@ export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadines
       source: "user",
       status: budgetAvailable ? "available" : "missing_user",
       reason: budgetAvailable ? "已在任务上下文或用户反馈中找到预算信息。" : "预算是用户偏好，Agent 不能自行假设。",
-      options: ["经济优先（少花钱）", "性价比优先（均衡）", "舒适优先（体验好）"],
     });
   }
 

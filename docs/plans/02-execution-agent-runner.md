@@ -31,7 +31,7 @@ KiKi 现在的 `goalTaskRunner` 是 fire-and-forget 单轮执行：把任务 pro
 | `runtime_jobs` 表 | 新增 `trajectory` JSONB 列存 step 序列 |
 | `inboxStore.ts` | 新增 `pending_approval` 卡片类型，承接审批 |
 | `easterEggSettingsStore.ts` | 新增 `maxIterations / approvalPolicy / sideEffectStrictness` |
-| 方案 1 的 `TaskResult` | 作为本方案的最终产出契约 |
+| 方案 1 的 `TaskResult` | 作为本方案的最终产出要求 |
 
 ---
 
@@ -87,7 +87,7 @@ export type TaskExecution = z.infer<typeof TaskExecution>;
 **三类终止条件**：`done` / `blocked_on_user`（等审批或等用户输入）/ `failed`。
 **`blocked_on_user` 是常态而非异常**——长程目标的本质就是会反复回到用户。
 
-### 3.2 Capability 契约
+### 3.2 Capability 要求
 
 新增 `src/lib/capabilities/types.ts`：
 

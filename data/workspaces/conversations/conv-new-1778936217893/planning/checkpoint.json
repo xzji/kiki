@@ -1,0 +1,3104 @@
+{
+  "version": 1,
+  "goalText": "托福考试110",
+  "status": "completed",
+  "stage": "presenting_plan",
+  "requestId": "goal-plan-resume-1778940357525-28cbn0",
+  "collectedInfo": "第 1 轮澄清问题：\n1. 你目前的英语水平如何？（如：四六级成绩、雅思成绩、或之前托福成绩）听说读写哪项最薄弱？\n2. 你计划什么时候参加托福考试？距离考试还有多长时间？\n3. 你每周能投入多少小时备考？是否打算报班还是自学？\n\n用户回答：\n当前托福90，7.1考试，每天2小时",
+  "completedSubGoals": [
+    {
+      "id": "draft-subgoal-1",
+      "title": "精准诊断，明确提分空间",
+      "description": "完成2-3套全真模考，分析各科得分分布，定位薄弱题型和知识盲区，制定个性化提分策略。明确每科需要提升的具体分数和关键题型。",
+      "why": "知己知彼，百战不殆。精准诊断是高效提分的前提，避免盲目刷题浪费时间。从90分到110分，需要知道这20分从哪些题型、哪些科目来。",
+      "priority": "critical",
+      "weight": 0.15,
+      "dependencies": [],
+      "estimatedDurationMinutes": 480,
+      "successCriteria": [
+        "完成至少2套完整模考并记录各科成绩",
+        "形成详细的强弱项分析报告（各科得分、错题类型分布）",
+        "制定个性化提分计划（每科目标分数、重点突破题型、时间分配）"
+      ],
+      "tasks": [
+        {
+          "id": "draft-task-1",
+          "title": "完成2套全真模考",
+          "description": "在规定时间内完成2套完整的托福模考试卷（听力、阅读、口语、写作四科），记录各科原始分数。建议使用TPO或官方模考资源，模拟真实考试环境。",
+          "expectedOutcome": "用户完成2套模考，记录每套各科成绩（听力/阅读/口语/写作）",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "confirm_action",
+          "resultViewKind": "confirm_action",
+          "executionStrategy": "user_interactive",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "action",
+            "description": "用户完成2套模考，记录每套各科成绩（听力/阅读/口语/写作）",
+            "format": "json",
+            "presentation": "checklist",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value"
+            ],
+            "completionCriteria": "用户提交2套模考的完整四科成绩数据"
+          },
+          "executionObjective": "在规定时间内完成2套完整的托福模考试卷（听力、阅读、口语、写作四科），记录各科原始分数。建议使用TPO或官方模考资源，模拟真实考试环境。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "user_primary_agent_assistive",
+            "agentResponsibilities": [
+              "提供模考资源推荐",
+              "制定模考时间安排建议",
+              "发送模考提醒"
+            ],
+            "userResponsibilities": [
+              "线下完成模考",
+              "记录各科成绩",
+              "提交成绩数据"
+            ],
+            "userInteractionType": "perform_offline_action",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始模考",
+            "shouldNotifyUser": true,
+            "completionOwner": "user",
+            "completionDefinition": "用户提交2套模考的完整成绩记录"
+          }
+        },
+        {
+          "id": "draft-task-2",
+          "title": "生成强弱项分析报告",
+          "description": "基于用户提交的模考成绩数据，分析各科得分分布、错题类型统计，识别薄弱题型和知识盲区，生成可视化诊断报告。",
+          "expectedOutcome": "包含各科得分分布图、错题类型统计表、强弱项识别的可视化报告",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [
+            "task-1"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "information",
+            "description": "包含各科得分分布图、错题类型统计表、强弱项识别的可视化报告",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "comparison_table",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "生成包含四科得分对比、错题分布、强弱项识别的完整报告"
+          },
+          "executionObjective": "基于用户提交的模考成绩数据，分析各科得分分布、错题类型统计，识别薄弱题型和知识盲区，生成可视化诊断报告。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "分析成绩数据",
+              "生成可视化图表",
+              "识别薄弱题型",
+              "输出分析报告"
+            ],
+            "userResponsibilities": [
+              "确认错题类型分类是否准确",
+              "补充错题原因说明"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "查看并补充分析",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认分析报告内容准确无误"
+          }
+        },
+        {
+          "id": "draft-task-3",
+          "title": "制定个性化提分计划",
+          "description": "根据强弱项分析结果，结合用户时间约束（1.5个月、日均2小时），制定具体的提分计划：明确每科目标分数、重点突破题型、每周学习时间分配、阶段性里程碑。",
+          "expectedOutcome": "个性化提分计划，包含每科目标分、重点题型、时间分配表、周计划",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "high",
+          "dependencies": [
+            "task-2"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "个性化提分计划，包含每科目标分、重点题型、时间分配表、周计划",
+            "format": "json",
+            "presentation": "timeline",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "comparison_table",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "生成包含四科目标分数、重点题型、6周时间规划的完整计划"
+          },
+          "executionObjective": "根据强弱项分析结果，结合用户时间约束（1.5个月、日均2小时），制定具体的提分计划：明确每科目标分数、重点突破题型、每周学习时间分配、阶段性里程碑。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": true,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "计算提分空间",
+              "制定时间分配方案",
+              "生成提分计划"
+            ],
+            "userResponsibilities": [
+              "确认计划可行性",
+              "提出调整建议"
+            ],
+            "userInteractionType": "confirm",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "确认提分计划",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认并采纳提分计划"
+          }
+        },
+        {
+          "id": "draft-task-4",
+          "title": "模考进度跟踪",
+          "description": "在整个备考周期内，定期跟踪模考成绩变化，对比计划与实际进度，及时调整策略。",
+          "expectedOutcome": "每周学习进度报告，包含成绩变化趋势、计划完成度、调整建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周一次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "low",
+          "dependencies": [
+            "task-3"
+          ],
+          "executionMode": "standard",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "information",
+            "description": "每周学习进度报告，包含成绩变化趋势、计划完成度、调整建议",
+            "format": "json",
+            "presentation": "dashboard",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "comparison_table",
+              "callout"
+            ],
+            "completionCriteria": "每周生成进度报告并推送用户"
+          },
+          "executionObjective": "在整个备考周期内，定期跟踪模考成绩变化，对比计划与实际进度，及时调整策略。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_autonomous",
+            "agentResponsibilities": [
+              "汇总周学习数据",
+              "生成进度报告",
+              "识别偏差并提出调整建议"
+            ],
+            "userResponsibilities": [],
+            "userInteractionType": "none",
+            "userInteractionTiming": "not_required",
+            "userFacingActionLabel": "查看周报",
+            "shouldNotifyUser": true,
+            "completionOwner": "agent",
+            "completionDefinition": "每周自动生成并推送进度报告"
+          }
+        }
+      ]
+    },
+    {
+      "id": "draft-subgoal-2",
+      "title": "词汇与基础夯实",
+      "description": "系统背诵托福核心词汇（约3000-4000词），掌握高频同义替换和学科词汇。复习语法难点（从句、非谓语、虚拟语气等），确保阅读长难句和写作语法的准确性。",
+      "why": "词汇量是听说读写的基础，90分瓶颈往往源于词汇量不足和语法不扎实。这个子目标贯穿全程，为各科突破提供支撑。",
+      "priority": "critical",
+      "weight": 0.2,
+      "dependencies": [
+        "draft-subgoal-1"
+      ],
+      "estimatedDurationMinutes": 1200,
+      "successCriteria": [
+        "掌握托福核心词汇3000+，识别率达90%以上",
+        "完成语法专项训练，长难句理解正确率达85%+",
+        "建立个人错题本，记录高频生词和语法盲点"
+      ],
+      "tasks": [
+        {
+          "id": "draft-task-1",
+          "title": "每日词汇闪卡训练",
+          "description": "每日背诵托福核心词汇，使用间隔重复算法（Spaced Repetition）安排复习。每日新词70个，复习旧词约140个，确保45天内覆盖3000+核心词汇。包含单词、音标、释义、例句、同义替换及学科分类标签。",
+          "expectedOutcome": "每日词汇学习报告，包含当日新词数、复习词数、正确率、累计进度、需重点复习词汇清单",
+          "taskType": "daily_repeat",
+          "triggerRule": "每日一次，建议早晨或固定时段执行",
+          "executionKind": "flashcard",
+          "resultViewKind": "flashcard",
+          "executionStrategy": "user_interactive",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "每日词汇学习报告，包含当日新词数、复习词数、正确率、累计进度、需重点复习词汇清单",
+            "format": "json",
+            "presentation": "dashboard",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "json"
+            ],
+            "requiredBlocks": [
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "单日词汇学习完成且正确率记录在案"
+          },
+          "executionObjective": "每日背诵托福核心词汇，使用间隔重复算法（Spaced Repetition）安排复习。每日新词70个，复习旧词约140个，确保45天内覆盖3000+核心词汇。包含单词、音标、释义、例句、同义替换及学科分类标签。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "user_primary_agent_assistive",
+            "agentResponsibilities": [
+              "根据记忆曲线算法生成每日词汇卡片",
+              "提供单词释义、例句、同义替换、学科标签",
+              "记录用户答题结果，计算正确率",
+              "生成每日学习报告和复习建议",
+              "标记需重点复习的生词"
+            ],
+            "userResponsibilities": [
+              "每日完成词汇闪卡学习和测试",
+              "对不熟悉词汇主动标记或提问",
+              "每周检查学习进度报告"
+            ],
+            "userInteractionType": "answer",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始今日词汇训练",
+            "shouldNotifyUser": true,
+            "completionOwner": "user",
+            "completionDefinition": "用户完成当日全部词汇卡片的测试作答"
+          }
+        },
+        {
+          "id": "draft-task-2",
+          "title": "词汇进度周回顾",
+          "description": "每周生成词汇学习进度报告，分析本周新词掌握情况、正确率趋势、高频错误词汇、记忆薄弱环节，并调整下周学习计划。提供可视化进度图表和针对性复习建议。",
+          "expectedOutcome": "周度词汇学习分析报告，包含进度统计、正确率趋势图、高频错误词表、薄弱环节分析、下周学习策略调整建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周一次，建议周日晚执行",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [
+            "vocab-daily-flashcard"
+          ],
+          "executionMode": "standard",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "information",
+            "description": "周度词汇学习分析报告，包含进度统计、正确率趋势图、高频错误词表、薄弱环节分析、下周学习策略调整建议",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout",
+              "comparison_table"
+            ],
+            "completionCriteria": "报告生成并展示给用户"
+          },
+          "executionObjective": "每周生成词汇学习进度报告，分析本周新词掌握情况、正确率趋势、高频错误词汇、记忆薄弱环节，并调整下周学习计划。提供可视化进度图表和针对性复习建议。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": true,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "汇总本周词汇学习数据",
+              "分析正确率趋势和错误模式",
+              "生成可视化进度报告",
+              "提出下周学习策略建议"
+            ],
+            "userResponsibilities": [
+              "确认报告内容准确性",
+              "决定是否采纳学习策略调整建议"
+            ],
+            "userInteractionType": "confirm",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "查看周报并确认",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认收到报告并决定是否采纳调整建议"
+          }
+        },
+        {
+          "id": "draft-task-3",
+          "title": "语法专项模块训练",
+          "description": "完成托福高频语法难点专项训练，分为三个子模块：从句模块（定语从句、状语从句、名词性从句）、非谓语模块（不定式、动名词、分词）、虚拟语气模块。每个模块包含语法精讲、长难句分析、专项练习和测试。",
+          "expectedOutcome": "语法模块训练报告，包含各模块知识点掌握情况、练习正确率、长难句分析能力评估、薄弱语法点清单",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "reading_digest",
+          "resultViewKind": "reading_digest",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "语法模块训练报告，包含各模块知识点掌握情况、练习正确率、长难句分析能力评估、薄弱语法点清单",
+            "format": "json",
+            "presentation": "checklist",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value",
+              "comparison_table"
+            ],
+            "completionCriteria": "三个语法模块全部完成且测试正确率记录在案"
+          },
+          "executionObjective": "完成托福高频语法难点专项训练，分为三个子模块：从句模块（定语从句、状语从句、名词性从句）、非谓语模块（不定式、动名词、分词）、虚拟语气模块。每个模块包含语法精讲、长难句分析、专项练习和测试。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "提供各模块语法知识点精讲材料",
+              "准备长难句分析示例和练习题",
+              "批改用户作答并给出解析",
+              "记录各模块正确率和错误点",
+              "生成模块训练总结报告"
+            ],
+            "userResponsibilities": [
+              "阅读语法知识讲解",
+              "完成长难句分析练习",
+              "参与模块测试并作答",
+              "对错误题目进行复盘理解"
+            ],
+            "userInteractionType": "answer",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始语法模块训练",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成所有模块练习和测试，Agent 生成训练报告"
+          }
+        },
+        {
+          "id": "draft-task-4",
+          "title": "个人错题本建立与维护",
+          "description": "建立系统化的个人错题本，用于记录词汇和语法学习中的高频错误、生词盲点、语法误区。支持分类标签（词汇/语法）、来源标记、错误原因分析、复习状态追踪。生成周期性错题复习计划，确保薄弱环节得到针对性强化。",
+          "expectedOutcome": "个人错题本数据集，包含错题条目、分类标签、错误原因、复习次数、掌握状态；定期生成错题复习报告",
+          "taskType": "daily_repeat",
+          "triggerRule": "每日更新，每3天生成一次错题复习任务",
+          "executionKind": "freeform_chat",
+          "resultViewKind": "freeform_chat",
+          "executionStrategy": "hybrid",
+          "priority": "high",
+          "dependencies": [
+            "vocab-daily-flashcard",
+            "grammar-module-training"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "个人错题本数据集，包含错题条目、分类标签、错误原因、复习次数、掌握状态；定期生成错题复习报告",
+            "format": "json",
+            "presentation": "dashboard",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "json"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value"
+            ],
+            "completionCriteria": "错题本数据持续更新，每周至少完成1次错题复习"
+          },
+          "executionObjective": "建立系统化的个人错题本，用于记录词汇和语法学习中的高频错误、生词盲点、语法误区。支持分类标签（词汇/语法）、来源标记、错误原因分析、复习状态追踪。生成周期性错题复习计划，确保薄弱环节得到针对性强化。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "自动从词汇和语法任务中提取错误条目",
+              "整理错题数据，生成分类标签",
+              "分析错误模式和薄弱环节",
+              "定期生成错题复习计划",
+              "追踪复习进度和掌握状态"
+            ],
+            "userResponsibilities": [
+              "主动补充线下学习发现的错误",
+              "标注错误原因和理解的难点",
+              "完成错题复习并反馈掌握情况"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "during_execution",
+            "userFacingActionLabel": "添加错题 / 开始错题复习",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "错题本条目持续更新，用户完成当日错题复习任务"
+          }
+        },
+        {
+          "id": "draft-task-5",
+          "title": "长难句理解强化训练",
+          "description": "针对托福阅读长难句进行专项强化训练。每日选取2-3个典型长难句，进行结构拆解、成分分析、翻译练习，提升句子理解速度和准确度。训练材料涵盖学术、科学、历史等托福常见题材。",
+          "expectedOutcome": "每日长难句训练报告，包含句子分析、用户翻译、正确率统计、累计训练句数、理解薄弱类型分析",
+          "taskType": "daily_repeat",
+          "triggerRule": "每日一次，建议晚间执行",
+          "executionKind": "reading_digest",
+          "resultViewKind": "reading_digest",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "每日长难句训练报告，包含句子分析、用户翻译、正确率统计、累计训练句数、理解薄弱类型分析",
+            "format": "json",
+            "presentation": "summary_card",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "comparison_table",
+              "key_value"
+            ],
+            "completionCriteria": "当日长难句训练完成，正确率记录在案"
+          },
+          "executionObjective": "针对托福阅读长难句进行专项强化训练。每日选取2-3个典型长难句，进行结构拆解、成分分析、翻译练习，提升句子理解速度和准确度。训练材料涵盖学术、科学、历史等托福常见题材。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "选取典型长难句训练材料",
+              "提供句子结构拆解示范",
+              "评估用户翻译和分析的准确性",
+              "记录错误类型并提供针对性讲解",
+              "统计累计正确率"
+            ],
+            "userResponsibilities": [
+              "完成句子结构分析和翻译作答",
+              "对照示范找出理解偏差",
+              "标记难以理解的句子类型"
+            ],
+            "userInteractionType": "answer",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始长难句训练",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成当日长难句分析和翻译，Agent 给出评估"
+          }
+        }
+      ]
+    },
+    {
+      "id": "draft-subgoal-3",
+      "title": "阅读与听力双科突破",
+      "description": "阅读：训练快速定位、信息整合、推断题技巧，每篇文章限时18分钟，正确率稳定在28+/30。听力：强化笔记技巧、结构把握、细节捕捉，conversation和lecture分别达到90%和85%正确率。",
+      "why": "阅读和听力是中国学生的传统强项，提分性价比最高。从90分到110分，阅读听力至少贡献12-15分的提升空间，是关键突破口。",
+      "priority": "critical",
+      "weight": 0.3,
+      "dependencies": [
+        "draft-subgoal-1",
+        "draft-subgoal-2"
+      ],
+      "estimatedDurationMinutes": 1800,
+      "successCriteria": [
+        "阅读模考稳定在28分以上，时间控制在54分钟内",
+        "听力模考稳定在27分以上，笔记体系完善",
+        "完成至少20篇阅读精读和30篇听力精听"
+      ],
+      "tasks": [
+        {
+          "id": "draft-task-1",
+          "title": "阅读技巧专题训练",
+          "description": "针对托福阅读三大核心技巧进行专题训练：快速定位、信息整合、推断题。每个技巧进行方法论讲解、例题示范、练习巩固三阶段训练。用户完成线下阅读练习并记录错题，Agent分析错题模式并提供针对性改进建议。",
+          "expectedOutcome": "阅读技巧训练报告，包含技巧掌握度评估、错题分析、针对性改进建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周2次，持续6周",
+          "executionKind": "reading_digest",
+          "resultViewKind": "reading_digest",
+          "executionStrategy": "user_interactive",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "阅读技巧训练报告，包含技巧掌握度评估、错题分析、针对性改进建议",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value",
+              "comparison_table"
+            ],
+            "completionCriteria": "三大核心技巧全部完成专题训练，每个技巧至少完成5道练习题并形成错题分析"
+          },
+          "executionObjective": "针对托福阅读三大核心技巧进行专题训练：快速定位、信息整合、推断题。每个技巧进行方法论讲解、例题示范、练习巩固三阶段训练。用户完成线下阅读练习并记录错题，Agent分析错题模式并提供针对性改进建议。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "user_primary_agent_assistive",
+            "agentResponsibilities": [
+              "提供阅读技巧方法论讲解",
+              "分析用户提交的错题模式",
+              "生成个性化改进建议报告",
+              "追踪技巧掌握进度"
+            ],
+            "userResponsibilities": [
+              "线下完成阅读练习题目",
+              "记录错题及做题思路",
+              "提交错题分析数据",
+              "实践技巧改进建议"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "提交阅读练习结果",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成线下练习并提交结果，Agent完成分析报告生成"
+          }
+        },
+        {
+          "id": "draft-task-2",
+          "title": "阅读精读训练",
+          "description": "系统性精读托福阅读文章，每篇文章限时18分钟完成。精读要求：逐句理解、标记段落主旨、标注题型与解题思路、记录生词和长难句。目标是完成20篇精读，正确率稳定在28+/30。",
+          "expectedOutcome": "精读训练记录与进步追踪报告，包含正确率趋势、时间控制情况、薄弱题型分析、词汇积累统计",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周4篇，持续5周",
+          "executionKind": "reading_digest",
+          "resultViewKind": "reading_digest",
+          "executionStrategy": "user_interactive",
+          "priority": "critical",
+          "dependencies": [
+            "task-rl-1"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "精读训练记录与进步追踪报告，包含正确率趋势、时间控制情况、薄弱题型分析、词汇积累统计",
+            "format": "json",
+            "presentation": "dashboard",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout",
+              "comparison_table"
+            ],
+            "completionCriteria": "完成20篇精读，记录每篇的正确题数、用时、错题类型分析"
+          },
+          "executionObjective": "系统性精读托福阅读文章，每篇文章限时18分钟完成。精读要求：逐句理解、标记段落主旨、标注题型与解题思路、记录生词和长难句。目标是完成20篇精读，正确率稳定在28+/30。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "user_primary_agent_assistive",
+            "agentResponsibilities": [
+              "追踪精读进度统计",
+              "分析正确率与时间趋势",
+              "识别薄弱题型模式",
+              "生成阶段性进步报告"
+            ],
+            "userResponsibilities": [
+              "线下限时完成阅读文章",
+              "记录每题答案与解题思路",
+              "标注错题与不确定题目",
+              "提交精读数据"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "提交精读记录",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成精读并提交记录，Agent生成进度分析报告"
+          }
+        },
+        {
+          "id": "draft-task-3",
+          "title": "听力笔记体系构建与精听训练",
+          "description": "建立适合托福听力的笔记体系，包括conversation和lecture两种类型。笔记要点：结构标记法、关键词捕捉、信号词识别。通过30篇精听训练强化笔记技巧，conversation目标正确率90%，lecture目标正确率85%。",
+          "expectedOutcome": "听力笔记体系指南与精听训练追踪报告，包含笔记模板、正确率统计、笔记效果评估、改进建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周6篇（2conversation+4lecture），持续5周",
+          "executionKind": "listening_qa",
+          "resultViewKind": "listening_qa",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "听力笔记体系指南与精听训练追踪报告，包含笔记模板、正确率统计、笔记效果评估、改进建议",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value",
+              "comparison_table"
+            ],
+            "completionCriteria": "笔记体系模板完成，30篇精听记录完整，conversation和lecture正确率达标"
+          },
+          "executionObjective": "建立适合托福听力的笔记体系，包括conversation和lecture两种类型。笔记要点：结构标记法、关键词捕捉、信号词识别。通过30篇精听训练强化笔记技巧，conversation目标正确率90%，lecture目标正确率85%。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "提供笔记体系方法论与模板",
+              "评估用户提交的笔记质量",
+              "分析听力正确率趋势",
+              "优化笔记技巧建议"
+            ],
+            "userResponsibilities": [
+              "学习笔记体系方法",
+              "线下完成听力练习并记笔记",
+              "提交笔记与答案记录",
+              "实践笔记改进建议"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "提交听力笔记与练习结果",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成精听并提交笔记与结果，Agent完成评估与分析"
+          }
+        },
+        {
+          "id": "draft-task-4",
+          "title": "阅读听力双科模考测评",
+          "description": "每周进行阅读和听力双科模考，检验阶段性训练效果。阅读模考3篇文章54分钟，听力模考包含conversation和lecture各若干篇。记录分数、时间、错误类型，分析进步趋势与薄弱环节。",
+          "expectedOutcome": "模考成绩追踪报告，包含分数趋势图、时间控制分析、错误类型分布、薄弱环节诊断、下周训练重点建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周1次，持续6周",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [
+            "task-rl-1",
+            "task-rl-2",
+            "task-rl-3"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "information",
+            "description": "模考成绩追踪报告，包含分数趋势图、时间控制分析、错误类型分布、薄弱环节诊断、下周训练重点建议",
+            "format": "json",
+            "presentation": "dashboard",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout",
+              "comparison_table"
+            ],
+            "completionCriteria": "完成6次模考，阅读模考连续3次达28分以上，听力模考连续3次达27分以上"
+          },
+          "executionObjective": "每周进行阅读和听力双科模考，检验阶段性训练效果。阅读模考3篇文章54分钟，听力模考包含conversation和lecture各若干篇。记录分数、时间、错误类型，分析进步趋势与薄弱环节。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "汇总模考数据",
+              "生成成绩趋势分析",
+              "诊断薄弱环节",
+              "提供训练调整建议"
+            ],
+            "userResponsibilities": [
+              "线下完成模考",
+              "记录分数与用时",
+              "提交错题信息"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "before_execution",
+            "userFacingActionLabel": "提交模考成绩",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成模考并提交成绩，Agent生成分析报告，用户确认下周训练重点"
+          }
+        },
+        {
+          "id": "draft-task-5",
+          "title": "双科学习进度总评与策略调整",
+          "description": "每两周汇总阅读和听力训练数据，进行综合性进度评估。分析完成标准达成情况，识别进度滞后领域，调整后续训练策略与时间分配。确保在考前完成所有训练目标。",
+          "expectedOutcome": "阶段性进度总评报告，包含完成标准达成度评估、进度风险评估、策略调整方案、考前冲刺计划",
+          "taskType": "daily_repeat",
+          "triggerRule": "每两周1次，共3次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "high",
+          "dependencies": [
+            "task-rl-4"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "decision",
+            "description": "阶段性进度总评报告，包含完成标准达成度评估、进度风险评估、策略调整方案、考前冲刺计划",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value",
+              "comparison_table"
+            ],
+            "completionCriteria": "完成3次进度总评，每次形成明确的策略调整方案"
+          },
+          "executionObjective": "每两周汇总阅读和听力训练数据，进行综合性进度评估。分析完成标准达成情况，识别进度滞后领域，调整后续训练策略与时间分配。确保在考前完成所有训练目标。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": true,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "汇总所有训练数据",
+              "评估完成标准达成度",
+              "识别风险与薄弱环节",
+              "提出策略调整方案"
+            ],
+            "userResponsibilities": [
+              "查看进度报告",
+              "确认策略调整方案",
+              "反馈训练执行情况"
+            ],
+            "userInteractionType": "confirm",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "确认策略调整方案",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "Agent完成报告生成，用户确认策略调整方案"
+          }
+        }
+      ]
+    },
+    {
+      "id": "draft-subgoal-4",
+      "title": "口语与写作输出强化",
+      "description": "口语：准备万能素材和答题模板，强化独立口语流利度和综合口语信息整合能力，目标26+。写作：建立高分文章结构，积累论证素材，综合写作和独立写作分别达到27+和27+。",
+      "why": "口语和写作是输出型科目，短期突破难度较大，但通过模板和素材积累可实现快速提升。目标是稳住基本盘，争取额外5-8分提升。",
+      "priority": "high",
+      "weight": 0.25,
+      "dependencies": [
+        "draft-subgoal-1",
+        "draft-subgoal-2"
+      ],
+      "estimatedDurationMinutes": 1500,
+      "successCriteria": [
+        "口语独立题流利度达26+，综合任务信息完整度达85%",
+        "写作独立任务稳定27+，综合任务完成度达28+",
+        "准备口语万能素材库（人物、地点、事件等）和写作论证素材库"
+      ],
+      "tasks": [
+        {
+          "id": "draft-task-1",
+          "title": "口语万能素材库与答题模板建立",
+          "description": "系统整理口语万能素材库，覆盖人物、地点、事件、物品等核心类别，并建立独立口语答题模板，帮助快速构建回答框架。素材库需具备可迁移性，能够适应不同话题。",
+          "expectedOutcome": "口语万能素材库（含人物、地点、事件、物品、活动等类别）及独立口语答题模板",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "standard",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "口语万能素材库（含人物、地点、事件、物品、活动等类别）及独立口语答题模板",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown",
+              "json"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value",
+              "comparison_table"
+            ],
+            "completionCriteria": "素材库覆盖5大类别，每类至少3个可迁移素材；答题模板覆盖常见话题类型"
+          },
+          "executionObjective": "系统整理口语万能素材库，覆盖人物、地点、事件、物品等核心类别，并建立独立口语答题模板，帮助快速构建回答框架。素材库需具备可迁移性，能够适应不同话题。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": true,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "根据托福口语常见话题整理素材库",
+              "设计独立口语答题模板",
+              "提供素材应用示例"
+            ],
+            "userResponsibilities": [
+              "确认素材库实用性",
+              "根据个人经历补充个性化素材"
+            ],
+            "userInteractionType": "confirm",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "确认素材库",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认素材库和模板具有实用性，可用于后续训练"
+          }
+        },
+        {
+          "id": "draft-task-2",
+          "title": "独立口语流利度训练",
+          "description": "每周定期进行独立口语练习，运用万能素材和答题模板，强化流利度和表达连贯性。每次练习包含题目呈现、计时答题、自我评估和改进建议。",
+          "expectedOutcome": "每次训练的口语录音、自我评估记录和改进建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周3-4次，每次30分钟",
+          "executionKind": "flashcard",
+          "resultViewKind": "flashcard",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [
+            "task-1"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "action",
+            "description": "每次训练的口语录音、自我评估记录和改进建议",
+            "format": "json",
+            "presentation": "checklist",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "每周完成3-4次训练，流利度逐步提升至26+水平"
+          },
+          "executionObjective": "每周定期进行独立口语练习，运用万能素材和答题模板，强化流利度和表达连贯性。每次练习包含题目呈现、计时答题、自我评估和改进建议。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "提供口语题目",
+              "计时器控制",
+              "提供评分标准和自我评估指导",
+              "根据万能素材提供改进建议"
+            ],
+            "userResponsibilities": [
+              "完成口语答题",
+              "进行流利度自我评估",
+              "记录需要改进的地方"
+            ],
+            "userInteractionType": "answer",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始答题",
+            "shouldNotifyUser": true,
+            "completionOwner": "user",
+            "completionDefinition": "每次练习完成答题和自我评估"
+          }
+        },
+        {
+          "id": "draft-task-3",
+          "title": "综合口语信息整合训练",
+          "description": "针对综合口语Task 3-6，训练听力材料信息捕捉、笔记整理和信息整合输出能力。每次训练包含听力材料、笔记指导、回答构建和完整度评估。",
+          "expectedOutcome": "每次训练的听力笔记、整合回答录音和信息完整度评估",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周2-3次，每次40分钟",
+          "executionKind": "listening_qa",
+          "resultViewKind": "listening_qa",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [
+            "task-1"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "action",
+            "description": "每次训练的听力笔记、整合回答录音和信息完整度评估",
+            "format": "json",
+            "presentation": "checklist",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "信息完整度达到85%以上"
+          },
+          "executionObjective": "针对综合口语Task 3-6，训练听力材料信息捕捉、笔记整理和信息整合输出能力。每次训练包含听力材料、笔记指导、回答构建和完整度评估。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "提供综合口语材料（阅读+听力）",
+              "笔记记录指导",
+              "计时器控制",
+              "提供信息完整度评估标准"
+            ],
+            "userResponsibilities": [
+              "完成听力笔记",
+              "整合信息并作答",
+              "评估信息完整度"
+            ],
+            "userInteractionType": "answer",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始答题",
+            "shouldNotifyUser": true,
+            "completionOwner": "user",
+            "completionDefinition": "每次训练完成答题和完整度评估"
+          }
+        },
+        {
+          "id": "draft-task-4",
+          "title": "写作论证素材库与高分结构建立",
+          "description": "系统整理写作论证素材库，覆盖教育、科技、环境、社会、工作等话题，并建立独立写作和综合写作的高分文章结构模板，包含开头段、主体段、结尾段的写作框架。",
+          "expectedOutcome": "写作论证素材库（含各话题论据、例子、数据）及独立写作、综合写作高分结构模板",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "standard",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "写作论证素材库（含各话题论据、例子、数据）及独立写作、综合写作高分结构模板",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown",
+              "json"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "comparison_table",
+              "key_value"
+            ],
+            "completionCriteria": "素材库覆盖5大话题领域，每领域至少5个论证素材；结构模板适用于独立和综合写作"
+          },
+          "executionObjective": "系统整理写作论证素材库，覆盖教育、科技、环境、社会、工作等话题，并建立独立写作和综合写作的高分文章结构模板，包含开头段、主体段、结尾段的写作框架。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": true,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "整理各话题论证素材",
+              "设计高分文章结构模板",
+              "提供素材应用示例"
+            ],
+            "userResponsibilities": [
+              "确认素材库实用性",
+              "根据个人知识背景补充论证素材"
+            ],
+            "userInteractionType": "confirm",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "确认素材库",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认素材库和结构模板具有实用性，可用于后续写作练习"
+          }
+        },
+        {
+          "id": "draft-task-5",
+          "title": "写作实战练习与反馈",
+          "description": "每周定期进行写作实战练习，交替进行独立写作和综合写作。运用论证素材和高分结构，完成后进行自我评估和改进分析。",
+          "expectedOutcome": "每次练习的写作文章、自我评估记录和改进建议",
+          "taskType": "daily_repeat",
+          "triggerRule": "每周2次，每次60分钟",
+          "executionKind": "draft_review",
+          "resultViewKind": "draft_review",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [
+            "task-4"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "action",
+            "description": "每次练习的写作文章、自我评估记录和改进建议",
+            "format": "markdown",
+            "presentation": "document",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value"
+            ],
+            "completionCriteria": "独立写作稳定达到27+，综合写作完成度达28+"
+          },
+          "executionObjective": "每周定期进行写作实战练习，交替进行独立写作和综合写作。运用论证素材和高分结构，完成后进行自我评估和改进分析。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "提供写作题目",
+              "提供结构模板和素材建议",
+              "提供评分标准和自我评估指导",
+              "分析文章结构并提供改进建议"
+            ],
+            "userResponsibilities": [
+              "完成写作文章",
+              "进行自我评估",
+              "记录需要改进的地方"
+            ],
+            "userInteractionType": "perform_offline_action",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始写作",
+            "shouldNotifyUser": true,
+            "completionOwner": "user",
+            "completionDefinition": "每次练习完成文章写作和自我评估"
+          }
+        }
+      ]
+    },
+    {
+      "id": "draft-subgoal-5",
+      "title": "全真模考与状态调整",
+      "description": "最后2周进行至少4次全真模考（完整4小时流程），模拟真实考试环境。分析每次模考成绩，针对性补强薄弱项。调整生物钟，确保考试时段最佳状态。",
+      "why": "模考是检验备考成果的关键，也是适应考试节奏、发现隐患的必要环节。确保临场发挥稳定，避免因紧张或时间分配失误丢分。",
+      "priority": "high",
+      "weight": 0.1,
+      "dependencies": [
+        "draft-subgoal-3",
+        "draft-subgoal-4"
+      ],
+      "estimatedDurationMinutes": 720,
+      "successCriteria": [
+        "完成至少4次全真模考，总分稳定在110+",
+        "形成最终考试策略（时间分配、答题顺序、心态调整）",
+        "最后一次模考各科成绩无短板（最低不低于25）"
+      ],
+      "tasks": [
+        {
+          "id": "draft-task-1",
+          "title": "全真模考执行与成绩记录",
+          "description": "按照真实考试流程执行全真模考（完整4小时），记录各科成绩及用时分布。模考需在最后2周内完成至少4次，建议间隔2-3天进行一次。每次模考前确保环境安静、设备完备，严格计时。",
+          "expectedOutcome": "每次模考的完整成绩记录表，包含总分、各科分数、各部分用时、错题分布",
+          "taskType": "daily_repeat",
+          "triggerRule": "最后2周内完成4次，建议每2-3天一次，固定在上午9点开始模拟真实考试时段",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "user_interactive",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "interactive",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "每次模考的完整成绩记录表，包含总分、各科分数、各部分用时、错题分布",
+            "format": "json",
+            "presentation": "checklist",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "comparison_table",
+              "callout"
+            ],
+            "completionCriteria": "完成4次模考，每次记录完整成绩数据，包含阅读、听力、口语、写作四科分数及时间分布"
+          },
+          "executionObjective": "按照真实考试流程执行全真模考（完整4小时），记录各科成绩及用时分布。模考需在最后2周内完成至少4次，建议间隔2-3天进行一次。每次模考前确保环境安静、设备完备，严格计时。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "user_primary_agent_assistive",
+            "agentResponsibilities": [
+              "生成模考记录模板",
+              "提醒模考时间安排",
+              "收集并整理用户提交的成绩数据",
+              "生成成绩趋势图表"
+            ],
+            "userResponsibilities": [
+              "按真实流程完成模考",
+              "记录各科成绩和用时",
+              "提交模考结果数据"
+            ],
+            "userInteractionType": "perform_offline_action",
+            "userInteractionTiming": "core_task_step",
+            "userFacingActionLabel": "开始模考 / 提交成绩",
+            "shouldNotifyUser": true,
+            "completionOwner": "user",
+            "completionDefinition": "用户完成模考并提交完整成绩数据后视为完成"
+          }
+        },
+        {
+          "id": "draft-task-2",
+          "title": "模考成绩分析与薄弱项诊断",
+          "description": "每次模考后深入分析成绩数据，识别薄弱科目和题型，对比目标分差，生成针对性提升建议。跟踪分数变化趋势，评估备考效果。",
+          "expectedOutcome": "每次模考的详细分析报告，包含薄弱项诊断、提升建议、分数趋势对比",
+          "taskType": "daily_repeat",
+          "triggerRule": "每次模考后立即执行",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [
+            "task-mock-exam-execution"
+          ],
+          "executionMode": "standard",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "information",
+            "description": "每次模考的详细分析报告，包含薄弱项诊断、提升建议、分数趋势对比",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "comparison_table",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "生成包含分数分析、薄弱项识别、提升建议的完整报告，并提供与上次模考的对比"
+          },
+          "executionObjective": "每次模考后深入分析成绩数据，识别薄弱科目和题型，对比目标分差，生成针对性提升建议。跟踪分数变化趋势，评估备考效果。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_autonomous",
+            "agentResponsibilities": [
+              "分析成绩数据",
+              "识别薄弱科目和题型",
+              "计算目标分差",
+              "生成针对性提升建议",
+              "绘制分数趋势图"
+            ],
+            "userResponsibilities": [],
+            "userInteractionType": "none",
+            "userInteractionTiming": "not_required",
+            "userFacingActionLabel": "查看分析报告",
+            "shouldNotifyUser": true,
+            "completionOwner": "agent",
+            "completionDefinition": "Agent生成完整分析报告后视为完成"
+          }
+        },
+        {
+          "id": "draft-task-3",
+          "title": "最终考试策略制定",
+          "description": "基于模考经验，制定完整考试策略，涵盖时间分配方案、答题顺序优化、心态调整技巧三大核心模块。策略需针对用户个人特点量身定制，确保考试当天发挥最佳水平。",
+          "expectedOutcome": "最终考试策略文档，包含时间分配表、答题顺序建议、心态调整清单",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "hybrid",
+          "priority": "critical",
+          "dependencies": [
+            "task-mock-exam-execution",
+            "task-score-analysis"
+          ],
+          "executionMode": "interactive",
+          "executionCycle": "once",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "最终考试策略文档，包含时间分配表、答题顺序建议、心态调整清单",
+            "format": "markdown",
+            "presentation": "document",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "comparison_table",
+              "key_value"
+            ],
+            "completionCriteria": "形成用户确认的三大策略：各科时间分配方案、最优答题顺序、心态调整检查清单"
+          },
+          "executionObjective": "基于模考经验，制定完整考试策略，涵盖时间分配方案、答题顺序优化、心态调整技巧三大核心模块。策略需针对用户个人特点量身定制，确保考试当天发挥最佳水平。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "分析模考数据提炼策略要点",
+              "生成策略初稿",
+              "根据用户反馈优化策略"
+            ],
+            "userResponsibilities": [
+              "确认时间分配偏好",
+              "验证答题顺序可行性",
+              "补充个人心态调整经验"
+            ],
+            "userInteractionType": "answer",
+            "userInteractionTiming": "during_execution",
+            "userFacingActionLabel": "确认并完善策略",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认最终策略内容后视为完成"
+          }
+        },
+        {
+          "id": "draft-task-4",
+          "title": "生物钟调整与状态管理",
+          "description": "制定并跟踪生物钟调整计划，确保考试时段（上午9点-下午1点）达到最佳精神状态。包括作息时间调整、考前饮食建议、压力管理技巧。",
+          "expectedOutcome": "每日状态跟踪记录和调整建议，最终形成考试日作息方案",
+          "taskType": "daily_repeat",
+          "triggerRule": "每日跟踪检查，持续2周",
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "user_interactive",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "standard",
+          "executionCycle": "recurring",
+          "expectedResult": {
+            "type": "action",
+            "description": "每日状态跟踪记录和调整建议，最终形成考试日作息方案",
+            "format": "json",
+            "presentation": "timeline",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "完成14天状态跟踪记录，形成考试日作息时间表和注意事项清单"
+          },
+          "executionObjective": "制定并跟踪生物钟调整计划，确保考试时段（上午9点-下午1点）达到最佳精神状态。包括作息时间调整、考前饮食建议、压力管理技巧。",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "user_primary_agent_assistive",
+            "agentResponsibilities": [
+              "生成每日状态检查清单",
+              "提供作息调整建议",
+              "跟踪调整进度",
+              "生成考试日作息方案"
+            ],
+            "userResponsibilities": [
+              "记录每日睡眠和状态",
+              "执行作息调整计划",
+              "反馈调整效果"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "during_execution",
+            "userFacingActionLabel": "记录今日状态",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户完成状态记录并形成最终考试日作息方案后视为完成"
+          }
+        }
+      ]
+    }
+  ],
+  "taskPlanningSummary": [
+    {
+      "subGoalName": "精准诊断，明确提分空间",
+      "taskCount": 4,
+      "uncoveredRisks": [
+        "用户可能因时间紧张未能完成2套完整模考，建议提供分段模考选项作为备选"
+      ]
+    },
+    {
+      "subGoalName": "词汇与基础夯实",
+      "taskCount": 5,
+      "uncoveredRisks": [
+        "用户每日执行意愿可能因疲劳下降，建议设置激励机制或调整任务强度",
+        "未涵盖同义词替换专项训练，可考虑在词汇任务中强化或在后续阅读任务中补充"
+      ]
+    },
+    {
+      "subGoalName": "阅读与听力双科突破",
+      "taskCount": 5,
+      "uncoveredRisks": [
+        "词汇量不足可能影响阅读正确率提升，建议用户额外安排词汇积累时间",
+        "每日2小时学习时间较紧张，若用户执行效率低可能无法完成全部训练量"
+      ]
+    },
+    {
+      "subGoalName": "口语与写作输出强化",
+      "taskCount": 5,
+      "uncoveredRisks": [
+        "口语和写作的实际评分需要专业评估，自我评估可能存在偏差",
+        "周期性任务的执行频率需要根据实际进度调整",
+        "1.5个月时间较紧，需要用户保证每天2小时的学习投入"
+      ]
+    },
+    {
+      "subGoalName": "全真模考与状态调整",
+      "taskCount": 4,
+      "uncoveredRisks": [
+        "若用户模考成绩始终未达110+，需增加针对性强化训练任务",
+        "若某科持续低于25分，可能需要额外专项突破计划"
+      ]
+    }
+  ],
+  "reviewSummary": [
+    "精准诊断，明确提分空间：4个任务完整覆盖三个完成标准：task-1覆盖模考执行，task-2覆盖强弱项分析报告，task-3覆盖个性化提分计划，task-4提供持续跟踪确保计划落地。任务数量适中，优先级清晰。",
+    "精准诊断，明确提分空间：已根据 review 调整 1 个任务。",
+    "词汇与基础夯实：任务设计覆盖了子目标的三大核心要求：1) 每日词汇闪卡训练+周进度回顾，确保3000+词汇的系统记忆和正确率追踪；2) 语法专项模块训练+长难句强化，覆盖从句、非谓语、虚拟语气三大难点，并通过每日练习确保长难句理解正确率≥85%；3) 错题本任务持续记录生词和语法盲点，支持周期复习。任务粒度合理，既有周期性任务保障日常积累，也有一次性专项任务完成集中突破。",
+    "阅读与听力双科突破：任务覆盖阅读技巧训练、阅读精读、听力笔记体系与精听、双科模考、进度追踪五大核心模块。阅读方面：技巧专题训练覆盖快速定位、信息整合、推断题三大技巧；精读训练确保完成20篇目标；模考验证28分以上达标。听力方面：笔记体系构建覆盖conversation和lecture两种类型；精听训练确保完成30篇目标；模考验证27分以上达标。进度追踪任务确保及时调整策略，应对1.5个月时间压力。",
+    "口语与写作输出强化：任务设计覆盖了口语和写作的核心需求：task-1和task-4建立了素材库和模板基础，task-2和task-3针对口语的独立题流利度和综合任务整合能力进行周期性训练，task-5针对写作实战进行周期性练习。整体任务数量适中（5个），优先级设置合理，协作模式明确。",
+    "全真模考与状态调整：任务设计覆盖了全部完成标准：task-mock-exam-execution确保4次模考执行；task-score-analysis提供成绩分析和薄弱项诊断；task-exam-strategy形成最终策略；task-biorhythm-adjustment负责状态调整。任务间依赖关系清晰，协作分工明确。"
+  ],
+  "reviewRisks": [
+    "用户可能因时间紧张未能完成2套完整模考，建议提供分段模考选项作为备选",
+    "用户每日执行意愿可能因疲劳下降，建议设置激励机制或调整任务强度",
+    "未涵盖同义词替换专项训练，可考虑在词汇任务中强化或在后续阅读任务中补充",
+    "词汇量不足可能影响阅读正确率提升，建议用户额外安排词汇积累时间",
+    "每日2小时学习时间较紧张，若用户执行效率低可能无法完成全部训练量",
+    "口语和写作的实际评分需要专业评估，自我评估可能存在偏差",
+    "周期性任务的执行频率需要根据实际进度调整",
+    "1.5个月时间较紧，需要用户保证每天2小时的学习投入",
+    "若用户模考成绩始终未达110+，需增加针对性强化训练任务",
+    "若某科持续低于25分，可能需要额外专项突破计划"
+  ],
+  "nextSubGoalIndex": 5,
+  "createdAt": "2026-05-16T13:40:55.431Z",
+  "updatedAt": "2026-05-16T14:17:37.162Z",
+  "collectedInfoSummary": {
+    "goalDetails": "托福考试总分达到110分，需从当前90分提升20分",
+    "timeline": "考试日期为7月1日，距离考试约1.5个月",
+    "resources": "每天可投入2小时学习时间，当前托福成绩90分",
+    "constraints": "",
+    "challenges": "短期内需提升20分，时间紧迫，日均学习时间有限",
+    "preferences": "",
+    "summary": "用户目标为托福110分，当前成绩90分，需在约1.5个月内提升20分。每天可投入2小时学习时间，时间较紧张，需要高效备考策略。"
+  },
+  "userContext": {
+    "goalText": "托福考试110",
+    "goalDetails": "托福考试总分达到110分，需从当前90分提升20分",
+    "timeline": "考试日期为7月1日，距离考试约1.5个月",
+    "resources": "每天可投入2小时学习时间，当前托福成绩90分",
+    "constraints": "",
+    "challenges": "短期内需提升20分，时间紧迫，日均学习时间有限",
+    "preferences": "",
+    "summary": "用户目标为托福110分，当前成绩90分，需在约1.5个月内提升20分。每天可投入2小时学习时间，时间较紧张，需要高效备考策略。"
+  },
+  "decomposition": {
+    "goalAnalysis": {
+      "coreIntent": "在1.5个月内通过精准诊断和针对性训练，将托福成绩从90分提升至110分",
+      "successState": "考试日稳定发挥，总分达到110+，各科成绩均衡（阅读28+、听力27+、口语26+、写作27+），具备申请顶尖院校的语言竞争力",
+      "assumptions": [
+        "假设1：当前90分为真实水平，各科成绩相对均衡或有明确薄弱项",
+        "假设2：每天2小时学习时间可保证持续性和专注度",
+        "假设3：用户具备一定的英语基础，重点在于技巧和方法突破",
+        "假设4：有条件进行模考练习，能获取真实的备考反馈"
+      ]
+    },
+    "subGoals": [
+      {
+        "id": 1,
+        "name": "精准诊断，明确提分空间",
+        "description": "完成2-3套全真模考，分析各科得分分布，定位薄弱题型和知识盲区，制定个性化提分策略。明确每科需要提升的具体分数和关键题型。",
+        "why": "知己知彼，百战不殆。精准诊断是高效提分的前提，避免盲目刷题浪费时间。从90分到110分，需要知道这20分从哪些题型、哪些科目来。",
+        "priority": "critical",
+        "weight": 0.15,
+        "dependencies": [],
+        "estimatedDurationMinutes": 480,
+        "successCriteria": [
+          {
+            "description": "完成至少2套完整模考并记录各科成绩",
+            "type": "milestone"
+          },
+          {
+            "description": "形成详细的强弱项分析报告（各科得分、错题类型分布）",
+            "type": "deliverable"
+          },
+          {
+            "description": "制定个性化提分计划（每科目标分数、重点突破题型、时间分配）",
+            "type": "deliverable"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "词汇与基础夯实",
+        "description": "系统背诵托福核心词汇（约3000-4000词），掌握高频同义替换和学科词汇。复习语法难点（从句、非谓语、虚拟语气等），确保阅读长难句和写作语法的准确性。",
+        "why": "词汇量是听说读写的基础，90分瓶颈往往源于词汇量不足和语法不扎实。这个子目标贯穿全程，为各科突破提供支撑。",
+        "priority": "critical",
+        "weight": 0.2,
+        "dependencies": [
+          1
+        ],
+        "estimatedDurationMinutes": 1200,
+        "successCriteria": [
+          {
+            "description": "掌握托福核心词汇3000+，识别率达90%以上",
+            "type": "milestone"
+          },
+          {
+            "description": "完成语法专项训练，长难句理解正确率达85%+",
+            "type": "milestone"
+          },
+          {
+            "description": "建立个人错题本，记录高频生词和语法盲点",
+            "type": "deliverable"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "name": "阅读与听力双科突破",
+        "description": "阅读：训练快速定位、信息整合、推断题技巧，每篇文章限时18分钟，正确率稳定在28+/30。听力：强化笔记技巧、结构把握、细节捕捉，conversation和lecture分别达到90%和85%正确率。",
+        "why": "阅读和听力是中国学生的传统强项，提分性价比最高。从90分到110分，阅读听力至少贡献12-15分的提升空间，是关键突破口。",
+        "priority": "critical",
+        "weight": 0.3,
+        "dependencies": [
+          1,
+          2
+        ],
+        "estimatedDurationMinutes": 1800,
+        "successCriteria": [
+          {
+            "description": "阅读模考稳定在28分以上，时间控制在54分钟内",
+            "type": "milestone"
+          },
+          {
+            "description": "听力模考稳定在27分以上，笔记体系完善",
+            "type": "milestone"
+          },
+          {
+            "description": "完成至少20篇阅读精读和30篇听力精听",
+            "type": "deliverable"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "name": "口语与写作输出强化",
+        "description": "口语：准备万能素材和答题模板，强化独立口语流利度和综合口语信息整合能力，目标26+。写作：建立高分文章结构，积累论证素材，综合写作和独立写作分别达到27+和27+。",
+        "why": "口语和写作是输出型科目，短期突破难度较大，但通过模板和素材积累可实现快速提升。目标是稳住基本盘，争取额外5-8分提升。",
+        "priority": "high",
+        "weight": 0.25,
+        "dependencies": [
+          1,
+          2
+        ],
+        "estimatedDurationMinutes": 1500,
+        "successCriteria": [
+          {
+            "description": "口语独立题流利度达26+，综合任务信息完整度达85%",
+            "type": "milestone"
+          },
+          {
+            "description": "写作独立任务稳定27+，综合任务完成度达28+",
+            "type": "milestone"
+          },
+          {
+            "description": "准备口语万能素材库（人物、地点、事件等）和写作论证素材库",
+            "type": "deliverable"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "name": "全真模考与状态调整",
+        "description": "最后2周进行至少4次全真模考（完整4小时流程），模拟真实考试环境。分析每次模考成绩，针对性补强薄弱项。调整生物钟，确保考试时段最佳状态。",
+        "why": "模考是检验备考成果的关键，也是适应考试节奏、发现隐患的必要环节。确保临场发挥稳定，避免因紧张或时间分配失误丢分。",
+        "priority": "high",
+        "weight": 0.1,
+        "dependencies": [
+          3,
+          4
+        ],
+        "estimatedDurationMinutes": 720,
+        "successCriteria": [
+          {
+            "description": "完成至少4次全真模考，总分稳定在110+",
+            "type": "milestone"
+          },
+          {
+            "description": "形成最终考试策略（时间分配、答题顺序、心态调整）",
+            "type": "deliverable"
+          },
+          {
+            "description": "最后一次模考各科成绩无短板（最低不低于25）",
+            "type": "milestone"
+          }
+        ]
+      }
+    ],
+    "executionOrder": "推荐执行顺序：阶段一（第1周）：子目标1诊断+子目标2词汇语法启动，快速定位问题；阶段二（第2-4周）：子目标2持续+子目标3阅读听力突破为主，子目标4口语写作同步启动；阶段三（第5-6周）：子目标3、4全面强化，进入攻坚期；阶段四（最后2周）：子目标5模考冲刺，查漏补缺，状态调整。建议每日时间分配：词汇30分钟、阅读听力60分钟、口语写作30分钟，周末可延长至3-4小时进行模考。",
+    "risks": [
+      "风险点1：时间紧迫，日均2小时难以完成全部训练。应对：采用二八法则，集中火力突破阅读听力（提分性价比高），口语写作保证基础分。",
+      "风险点2：某科存在明显短板，拉低总分。应对：诊断阶段明确短板，优先突破，必要时寻求一对一辅导。",
+      "风险点3：学习连续性难以保证，容易中断。应对：制定详细学习计划表，每日打卡，设置阶段性奖励机制。",
+      "风险点4：模考成绩波动大，影响信心。应对：关注整体趋势而非单次成绩，每次模考后深入分析原因。",
+      "风险点5：考试紧张导致发挥失常。应对：通过多次全真模考适应考试节奏，学习放松技巧，确保考试日状态最佳。"
+    ],
+    "reasoning": "拆解采用逆向推演法，从考试日终态倒推关键里程碑。整体策略是'诊断先行、基础为根、强弱分明、冲刺收官'。五个子目标分别对应诊断、基础、输入（阅读听力）、输出（口语写作）、冲刺五个阶段，符合MECE原则：各阶段目标独立、完整覆盖备考全过程。时间分配上，阅读听力作为提分主战场占30%权重，口语写作作为输出强化占25%，词汇基础贯穿始终占20%，确保资源投入与提分潜力匹配。关键成功因素是：精准诊断避免盲目、持续积累确保基础、重点突破实现效率、模考冲刺保证发挥。"
+  },
+  "presentation": {
+    "goalTitle": "托福110分冲刺计划",
+    "summary": "从当前90分提升至110分，采用'诊断先行、基础为根、强弱分明、冲刺收官'四阶段策略。重点突破阅读听力（贡献主要提分空间），同步强化口语写作输出能力，通过23项具体任务确保目标达成。",
+    "deadline": "2026-07-01T23:59:59+08:00",
+    "notificationStrategy": "每日学习提醒（词汇+专项训练），每周进度复盘（对比模考成绩趋势），里程碑节点通知（完成诊断报告、达到阶段性分数目标），考前2周强化提醒（模考冲刺、状态调整），风险预警（连续3天未完成任务或模考成绩低于预期时触发）。"
+  },
+  "draft": {
+    "goalTitle": "托福110分冲刺计划",
+    "summary": "从当前90分提升至110分，采用'诊断先行、基础为根、强弱分明、冲刺收官'四阶段策略。重点突破阅读听力（贡献主要提分空间），同步强化口语写作输出能力，通过23项具体任务确保目标达成。",
+    "deadline": "2026-07-01T23:59:59+08:00",
+    "goalAnalysis": {
+      "coreIntent": "在1.5个月内通过精准诊断和针对性训练，将托福成绩从90分提升至110分",
+      "successState": "考试日稳定发挥，总分达到110+，各科成绩均衡（阅读28+、听力27+、口语26+、写作27+），具备申请顶尖院校的语言竞争力",
+      "assumptions": [
+        "假设1：当前90分为真实水平，各科成绩相对均衡或有明确薄弱项",
+        "假设2：每天2小时学习时间可保证持续性和专注度",
+        "假设3：用户具备一定的英语基础，重点在于技巧和方法突破",
+        "假设4：有条件进行模考练习，能获取真实的备考反馈"
+      ]
+    },
+    "collectedInfoSummary": {
+      "goalDetails": "托福考试总分达到110分，需从当前90分提升20分",
+      "timeline": "考试日期为7月1日，距离考试约1.5个月",
+      "resources": "每天可投入2小时学习时间，当前托福成绩90分",
+      "constraints": "",
+      "challenges": "短期内需提升20分，时间紧迫，日均学习时间有限",
+      "preferences": "",
+      "summary": "用户目标为托福110分，当前成绩90分，需在约1.5个月内提升20分。每天可投入2小时学习时间，时间较紧张，需要高效备考策略。"
+    },
+    "assumptions": [
+      "假设1：当前90分为真实水平，各科成绩相对均衡或有明确薄弱项",
+      "假设2：每天2小时学习时间可保证持续性和专注度",
+      "假设3：用户具备一定的英语基础，重点在于技巧和方法突破",
+      "假设4：有条件进行模考练习，能获取真实的备考反馈"
+    ],
+    "risks": [
+      "风险点1：时间紧迫，日均2小时难以完成全部训练。应对：采用二八法则，集中火力突破阅读听力（提分性价比高），口语写作保证基础分。",
+      "风险点2：某科存在明显短板，拉低总分。应对：诊断阶段明确短板，优先突破，必要时寻求一对一辅导。",
+      "风险点3：学习连续性难以保证，容易中断。应对：制定详细学习计划表，每日打卡，设置阶段性奖励机制。",
+      "风险点4：模考成绩波动大，影响信心。应对：关注整体趋势而非单次成绩，每次模考后深入分析原因。",
+      "风险点5：考试紧张导致发挥失常。应对：通过多次全真模考适应考试节奏，学习放松技巧，确保考试日状态最佳。",
+      "用户可能因时间紧张未能完成2套完整模考，建议提供分段模考选项作为备选",
+      "用户每日执行意愿可能因疲劳下降，建议设置激励机制或调整任务强度",
+      "未涵盖同义词替换专项训练，可考虑在词汇任务中强化或在后续阅读任务中补充",
+      "词汇量不足可能影响阅读正确率提升，建议用户额外安排词汇积累时间",
+      "每日2小时学习时间较紧张，若用户执行效率低可能无法完成全部训练量",
+      "口语和写作的实际评分需要专业评估，自我评估可能存在偏差",
+      "周期性任务的执行频率需要根据实际进度调整",
+      "1.5个月时间较紧，需要用户保证每天2小时的学习投入",
+      "若用户模考成绩始终未达110+，需增加针对性强化训练任务",
+      "若某科持续低于25分，可能需要额外专项突破计划"
+    ],
+    "reasoning": "拆解采用逆向推演法，从考试日终态倒推关键里程碑。整体策略是'诊断先行、基础为根、强弱分明、冲刺收官'。五个子目标分别对应诊断、基础、输入（阅读听力）、输出（口语写作）、冲刺五个阶段，符合MECE原则：各阶段目标独立、完整覆盖备考全过程。时间分配上，阅读听力作为提分主战场占30%权重，口语写作作为输出强化占25%，词汇基础贯穿始终占20%，确保资源投入与提分潜力匹配。关键成功因素是：精准诊断避免盲目、持续积累确保基础、重点突破实现效率、模考冲刺保证发挥。",
+    "executionOrder": "推荐执行顺序：阶段一（第1周）：子目标1诊断+子目标2词汇语法启动，快速定位问题；阶段二（第2-4周）：子目标2持续+子目标3阅读听力突破为主，子目标4口语写作同步启动；阶段三（第5-6周）：子目标3、4全面强化，进入攻坚期；阶段四（最后2周）：子目标5模考冲刺，查漏补缺，状态调整。建议每日时间分配：词汇30分钟、阅读听力60分钟、口语写作30分钟，周末可延长至3-4小时进行模考。",
+    "reviewSummary": [
+      "精准诊断，明确提分空间：4个任务完整覆盖三个完成标准：task-1覆盖模考执行，task-2覆盖强弱项分析报告，task-3覆盖个性化提分计划，task-4提供持续跟踪确保计划落地。任务数量适中，优先级清晰。",
+      "精准诊断，明确提分空间：已根据 review 调整 1 个任务。",
+      "词汇与基础夯实：任务设计覆盖了子目标的三大核心要求：1) 每日词汇闪卡训练+周进度回顾，确保3000+词汇的系统记忆和正确率追踪；2) 语法专项模块训练+长难句强化，覆盖从句、非谓语、虚拟语气三大难点，并通过每日练习确保长难句理解正确率≥85%；3) 错题本任务持续记录生词和语法盲点，支持周期复习。任务粒度合理，既有周期性任务保障日常积累，也有一次性专项任务完成集中突破。",
+      "阅读与听力双科突破：任务覆盖阅读技巧训练、阅读精读、听力笔记体系与精听、双科模考、进度追踪五大核心模块。阅读方面：技巧专题训练覆盖快速定位、信息整合、推断题三大技巧；精读训练确保完成20篇目标；模考验证28分以上达标。听力方面：笔记体系构建覆盖conversation和lecture两种类型；精听训练确保完成30篇目标；模考验证27分以上达标。进度追踪任务确保及时调整策略，应对1.5个月时间压力。",
+      "口语与写作输出强化：任务设计覆盖了口语和写作的核心需求：task-1和task-4建立了素材库和模板基础，task-2和task-3针对口语的独立题流利度和综合任务整合能力进行周期性训练，task-5针对写作实战进行周期性练习。整体任务数量适中（5个），优先级设置合理，协作模式明确。",
+      "全真模考与状态调整：任务设计覆盖了全部完成标准：task-mock-exam-execution确保4次模考执行；task-score-analysis提供成绩分析和薄弱项诊断；task-exam-strategy形成最终策略；task-biorhythm-adjustment负责状态调整。任务间依赖关系清晰，协作分工明确。"
+    ],
+    "notificationStrategy": "每日学习提醒（词汇+专项训练），每周进度复盘（对比模考成绩趋势），里程碑节点通知（完成诊断报告、达到阶段性分数目标），考前2周强化提醒（模考冲刺、状态调整），风险预警（连续3天未完成任务或模考成绩低于预期时触发）。",
+    "subGoals": [
+      {
+        "id": "draft-subgoal-1",
+        "title": "精准诊断，明确提分空间",
+        "description": "完成2-3套全真模考，分析各科得分分布，定位薄弱题型和知识盲区，制定个性化提分策略。明确每科需要提升的具体分数和关键题型。",
+        "why": "知己知彼，百战不殆。精准诊断是高效提分的前提，避免盲目刷题浪费时间。从90分到110分，需要知道这20分从哪些题型、哪些科目来。",
+        "priority": "critical",
+        "weight": 0.15,
+        "dependencies": [],
+        "estimatedDurationMinutes": 480,
+        "successCriteria": [
+          "完成至少2套完整模考并记录各科成绩",
+          "形成详细的强弱项分析报告（各科得分、错题类型分布）",
+          "制定个性化提分计划（每科目标分数、重点突破题型、时间分配）"
+        ],
+        "tasks": [
+          {
+            "id": "draft-task-1",
+            "title": "完成2套全真模考",
+            "description": "在规定时间内完成2套完整的托福模考试卷（听力、阅读、口语、写作四科），记录各科原始分数。建议使用TPO或官方模考资源，模拟真实考试环境。",
+            "expectedOutcome": "用户完成2套模考，记录每套各科成绩（听力/阅读/口语/写作）",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "confirm_action",
+            "resultViewKind": "confirm_action",
+            "executionStrategy": "user_interactive",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "action",
+              "description": "用户完成2套模考，记录每套各科成绩（听力/阅读/口语/写作）",
+              "format": "json",
+              "presentation": "checklist",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value"
+              ],
+              "completionCriteria": "用户提交2套模考的完整四科成绩数据"
+            },
+            "executionObjective": "在规定时间内完成2套完整的托福模考试卷（听力、阅读、口语、写作四科），记录各科原始分数。建议使用TPO或官方模考资源，模拟真实考试环境。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "user_primary_agent_assistive",
+              "agentResponsibilities": [
+                "提供模考资源推荐",
+                "制定模考时间安排建议",
+                "发送模考提醒"
+              ],
+              "userResponsibilities": [
+                "线下完成模考",
+                "记录各科成绩",
+                "提交成绩数据"
+              ],
+              "userInteractionType": "perform_offline_action",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始模考",
+              "shouldNotifyUser": true,
+              "completionOwner": "user",
+              "completionDefinition": "用户提交2套模考的完整成绩记录"
+            }
+          },
+          {
+            "id": "draft-task-2",
+            "title": "生成强弱项分析报告",
+            "description": "基于用户提交的模考成绩数据，分析各科得分分布、错题类型统计，识别薄弱题型和知识盲区，生成可视化诊断报告。",
+            "expectedOutcome": "包含各科得分分布图、错题类型统计表、强弱项识别的可视化报告",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [
+              "task-1"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "information",
+              "description": "包含各科得分分布图、错题类型统计表、强弱项识别的可视化报告",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "comparison_table",
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "生成包含四科得分对比、错题分布、强弱项识别的完整报告"
+            },
+            "executionObjective": "基于用户提交的模考成绩数据，分析各科得分分布、错题类型统计，识别薄弱题型和知识盲区，生成可视化诊断报告。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "分析成绩数据",
+                "生成可视化图表",
+                "识别薄弱题型",
+                "输出分析报告"
+              ],
+              "userResponsibilities": [
+                "确认错题类型分类是否准确",
+                "补充错题原因说明"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "查看并补充分析",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户确认分析报告内容准确无误"
+            }
+          },
+          {
+            "id": "draft-task-3",
+            "title": "制定个性化提分计划",
+            "description": "根据强弱项分析结果，结合用户时间约束（1.5个月、日均2小时），制定具体的提分计划：明确每科目标分数、重点突破题型、每周学习时间分配、阶段性里程碑。",
+            "expectedOutcome": "个性化提分计划，包含每科目标分、重点题型、时间分配表、周计划",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "high",
+            "dependencies": [
+              "task-2"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "个性化提分计划，包含每科目标分、重点题型、时间分配表、周计划",
+              "format": "json",
+              "presentation": "timeline",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "comparison_table",
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "生成包含四科目标分数、重点题型、6周时间规划的完整计划"
+            },
+            "executionObjective": "根据强弱项分析结果，结合用户时间约束（1.5个月、日均2小时），制定具体的提分计划：明确每科目标分数、重点突破题型、每周学习时间分配、阶段性里程碑。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": true,
+            "collaboration": {
+              "mode": "agent_with_user_confirmation",
+              "agentResponsibilities": [
+                "计算提分空间",
+                "制定时间分配方案",
+                "生成提分计划"
+              ],
+              "userResponsibilities": [
+                "确认计划可行性",
+                "提出调整建议"
+              ],
+              "userInteractionType": "confirm",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "确认提分计划",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户确认并采纳提分计划"
+            }
+          },
+          {
+            "id": "draft-task-4",
+            "title": "模考进度跟踪",
+            "description": "在整个备考周期内，定期跟踪模考成绩变化，对比计划与实际进度，及时调整策略。",
+            "expectedOutcome": "每周学习进度报告，包含成绩变化趋势、计划完成度、调整建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周一次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "low",
+            "dependencies": [
+              "task-3"
+            ],
+            "executionMode": "standard",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "information",
+              "description": "每周学习进度报告，包含成绩变化趋势、计划完成度、调整建议",
+              "format": "json",
+              "presentation": "dashboard",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "comparison_table",
+                "callout"
+              ],
+              "completionCriteria": "每周生成进度报告并推送用户"
+            },
+            "executionObjective": "在整个备考周期内，定期跟踪模考成绩变化，对比计划与实际进度，及时调整策略。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_autonomous",
+              "agentResponsibilities": [
+                "汇总周学习数据",
+                "生成进度报告",
+                "识别偏差并提出调整建议"
+              ],
+              "userResponsibilities": [],
+              "userInteractionType": "none",
+              "userInteractionTiming": "not_required",
+              "userFacingActionLabel": "查看周报",
+              "shouldNotifyUser": true,
+              "completionOwner": "agent",
+              "completionDefinition": "每周自动生成并推送进度报告"
+            }
+          }
+        ]
+      },
+      {
+        "id": "draft-subgoal-2",
+        "title": "词汇与基础夯实",
+        "description": "系统背诵托福核心词汇（约3000-4000词），掌握高频同义替换和学科词汇。复习语法难点（从句、非谓语、虚拟语气等），确保阅读长难句和写作语法的准确性。",
+        "why": "词汇量是听说读写的基础，90分瓶颈往往源于词汇量不足和语法不扎实。这个子目标贯穿全程，为各科突破提供支撑。",
+        "priority": "critical",
+        "weight": 0.2,
+        "dependencies": [
+          "draft-subgoal-1"
+        ],
+        "estimatedDurationMinutes": 1200,
+        "successCriteria": [
+          "掌握托福核心词汇3000+，识别率达90%以上",
+          "完成语法专项训练，长难句理解正确率达85%+",
+          "建立个人错题本，记录高频生词和语法盲点"
+        ],
+        "tasks": [
+          {
+            "id": "draft-task-1",
+            "title": "每日词汇闪卡训练",
+            "description": "每日背诵托福核心词汇，使用间隔重复算法（Spaced Repetition）安排复习。每日新词70个，复习旧词约140个，确保45天内覆盖3000+核心词汇。包含单词、音标、释义、例句、同义替换及学科分类标签。",
+            "expectedOutcome": "每日词汇学习报告，包含当日新词数、复习词数、正确率、累计进度、需重点复习词汇清单",
+            "taskType": "daily_repeat",
+            "triggerRule": "每日一次，建议早晨或固定时段执行",
+            "executionKind": "flashcard",
+            "resultViewKind": "flashcard",
+            "executionStrategy": "user_interactive",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "每日词汇学习报告，包含当日新词数、复习词数、正确率、累计进度、需重点复习词汇清单",
+              "format": "json",
+              "presentation": "dashboard",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "json"
+              ],
+              "requiredBlocks": [
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "单日词汇学习完成且正确率记录在案"
+            },
+            "executionObjective": "每日背诵托福核心词汇，使用间隔重复算法（Spaced Repetition）安排复习。每日新词70个，复习旧词约140个，确保45天内覆盖3000+核心词汇。包含单词、音标、释义、例句、同义替换及学科分类标签。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "user_primary_agent_assistive",
+              "agentResponsibilities": [
+                "根据记忆曲线算法生成每日词汇卡片",
+                "提供单词释义、例句、同义替换、学科标签",
+                "记录用户答题结果，计算正确率",
+                "生成每日学习报告和复习建议",
+                "标记需重点复习的生词"
+              ],
+              "userResponsibilities": [
+                "每日完成词汇闪卡学习和测试",
+                "对不熟悉词汇主动标记或提问",
+                "每周检查学习进度报告"
+              ],
+              "userInteractionType": "answer",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始今日词汇训练",
+              "shouldNotifyUser": true,
+              "completionOwner": "user",
+              "completionDefinition": "用户完成当日全部词汇卡片的测试作答"
+            }
+          },
+          {
+            "id": "draft-task-2",
+            "title": "词汇进度周回顾",
+            "description": "每周生成词汇学习进度报告，分析本周新词掌握情况、正确率趋势、高频错误词汇、记忆薄弱环节，并调整下周学习计划。提供可视化进度图表和针对性复习建议。",
+            "expectedOutcome": "周度词汇学习分析报告，包含进度统计、正确率趋势图、高频错误词表、薄弱环节分析、下周学习策略调整建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周一次，建议周日晚执行",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "critical",
+            "dependencies": [
+              "vocab-daily-flashcard"
+            ],
+            "executionMode": "standard",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "information",
+              "description": "周度词汇学习分析报告，包含进度统计、正确率趋势图、高频错误词表、薄弱环节分析、下周学习策略调整建议",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "callout",
+                "comparison_table"
+              ],
+              "completionCriteria": "报告生成并展示给用户"
+            },
+            "executionObjective": "每周生成词汇学习进度报告，分析本周新词掌握情况、正确率趋势、高频错误词汇、记忆薄弱环节，并调整下周学习计划。提供可视化进度图表和针对性复习建议。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": true,
+            "collaboration": {
+              "mode": "agent_with_user_confirmation",
+              "agentResponsibilities": [
+                "汇总本周词汇学习数据",
+                "分析正确率趋势和错误模式",
+                "生成可视化进度报告",
+                "提出下周学习策略建议"
+              ],
+              "userResponsibilities": [
+                "确认报告内容准确性",
+                "决定是否采纳学习策略调整建议"
+              ],
+              "userInteractionType": "confirm",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "查看周报并确认",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户确认收到报告并决定是否采纳调整建议"
+            }
+          },
+          {
+            "id": "draft-task-3",
+            "title": "语法专项模块训练",
+            "description": "完成托福高频语法难点专项训练，分为三个子模块：从句模块（定语从句、状语从句、名词性从句）、非谓语模块（不定式、动名词、分词）、虚拟语气模块。每个模块包含语法精讲、长难句分析、专项练习和测试。",
+            "expectedOutcome": "语法模块训练报告，包含各模块知识点掌握情况、练习正确率、长难句分析能力评估、薄弱语法点清单",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "reading_digest",
+            "resultViewKind": "reading_digest",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "语法模块训练报告，包含各模块知识点掌握情况、练习正确率、长难句分析能力评估、薄弱语法点清单",
+              "format": "json",
+              "presentation": "checklist",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value",
+                "comparison_table"
+              ],
+              "completionCriteria": "三个语法模块全部完成且测试正确率记录在案"
+            },
+            "executionObjective": "完成托福高频语法难点专项训练，分为三个子模块：从句模块（定语从句、状语从句、名词性从句）、非谓语模块（不定式、动名词、分词）、虚拟语气模块。每个模块包含语法精讲、长难句分析、专项练习和测试。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "提供各模块语法知识点精讲材料",
+                "准备长难句分析示例和练习题",
+                "批改用户作答并给出解析",
+                "记录各模块正确率和错误点",
+                "生成模块训练总结报告"
+              ],
+              "userResponsibilities": [
+                "阅读语法知识讲解",
+                "完成长难句分析练习",
+                "参与模块测试并作答",
+                "对错误题目进行复盘理解"
+              ],
+              "userInteractionType": "answer",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始语法模块训练",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成所有模块练习和测试，Agent 生成训练报告"
+            }
+          },
+          {
+            "id": "draft-task-4",
+            "title": "个人错题本建立与维护",
+            "description": "建立系统化的个人错题本，用于记录词汇和语法学习中的高频错误、生词盲点、语法误区。支持分类标签（词汇/语法）、来源标记、错误原因分析、复习状态追踪。生成周期性错题复习计划，确保薄弱环节得到针对性强化。",
+            "expectedOutcome": "个人错题本数据集，包含错题条目、分类标签、错误原因、复习次数、掌握状态；定期生成错题复习报告",
+            "taskType": "daily_repeat",
+            "triggerRule": "每日更新，每3天生成一次错题复习任务",
+            "executionKind": "freeform_chat",
+            "resultViewKind": "freeform_chat",
+            "executionStrategy": "hybrid",
+            "priority": "high",
+            "dependencies": [
+              "vocab-daily-flashcard",
+              "grammar-module-training"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "个人错题本数据集，包含错题条目、分类标签、错误原因、复习次数、掌握状态；定期生成错题复习报告",
+              "format": "json",
+              "presentation": "dashboard",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "json"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value"
+              ],
+              "completionCriteria": "错题本数据持续更新，每周至少完成1次错题复习"
+            },
+            "executionObjective": "建立系统化的个人错题本，用于记录词汇和语法学习中的高频错误、生词盲点、语法误区。支持分类标签（词汇/语法）、来源标记、错误原因分析、复习状态追踪。生成周期性错题复习计划，确保薄弱环节得到针对性强化。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "自动从词汇和语法任务中提取错误条目",
+                "整理错题数据，生成分类标签",
+                "分析错误模式和薄弱环节",
+                "定期生成错题复习计划",
+                "追踪复习进度和掌握状态"
+              ],
+              "userResponsibilities": [
+                "主动补充线下学习发现的错误",
+                "标注错误原因和理解的难点",
+                "完成错题复习并反馈掌握情况"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "during_execution",
+              "userFacingActionLabel": "添加错题 / 开始错题复习",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "错题本条目持续更新，用户完成当日错题复习任务"
+            }
+          },
+          {
+            "id": "draft-task-5",
+            "title": "长难句理解强化训练",
+            "description": "针对托福阅读长难句进行专项强化训练。每日选取2-3个典型长难句，进行结构拆解、成分分析、翻译练习，提升句子理解速度和准确度。训练材料涵盖学术、科学、历史等托福常见题材。",
+            "expectedOutcome": "每日长难句训练报告，包含句子分析、用户翻译、正确率统计、累计训练句数、理解薄弱类型分析",
+            "taskType": "daily_repeat",
+            "triggerRule": "每日一次，建议晚间执行",
+            "executionKind": "reading_digest",
+            "resultViewKind": "reading_digest",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "每日长难句训练报告，包含句子分析、用户翻译、正确率统计、累计训练句数、理解薄弱类型分析",
+              "format": "json",
+              "presentation": "summary_card",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "comparison_table",
+                "key_value"
+              ],
+              "completionCriteria": "当日长难句训练完成，正确率记录在案"
+            },
+            "executionObjective": "针对托福阅读长难句进行专项强化训练。每日选取2-3个典型长难句，进行结构拆解、成分分析、翻译练习，提升句子理解速度和准确度。训练材料涵盖学术、科学、历史等托福常见题材。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "选取典型长难句训练材料",
+                "提供句子结构拆解示范",
+                "评估用户翻译和分析的准确性",
+                "记录错误类型并提供针对性讲解",
+                "统计累计正确率"
+              ],
+              "userResponsibilities": [
+                "完成句子结构分析和翻译作答",
+                "对照示范找出理解偏差",
+                "标记难以理解的句子类型"
+              ],
+              "userInteractionType": "answer",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始长难句训练",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成当日长难句分析和翻译，Agent 给出评估"
+            }
+          }
+        ]
+      },
+      {
+        "id": "draft-subgoal-3",
+        "title": "阅读与听力双科突破",
+        "description": "阅读：训练快速定位、信息整合、推断题技巧，每篇文章限时18分钟，正确率稳定在28+/30。听力：强化笔记技巧、结构把握、细节捕捉，conversation和lecture分别达到90%和85%正确率。",
+        "why": "阅读和听力是中国学生的传统强项，提分性价比最高。从90分到110分，阅读听力至少贡献12-15分的提升空间，是关键突破口。",
+        "priority": "critical",
+        "weight": 0.3,
+        "dependencies": [
+          "draft-subgoal-1",
+          "draft-subgoal-2"
+        ],
+        "estimatedDurationMinutes": 1800,
+        "successCriteria": [
+          "阅读模考稳定在28分以上，时间控制在54分钟内",
+          "听力模考稳定在27分以上，笔记体系完善",
+          "完成至少20篇阅读精读和30篇听力精听"
+        ],
+        "tasks": [
+          {
+            "id": "draft-task-1",
+            "title": "阅读技巧专题训练",
+            "description": "针对托福阅读三大核心技巧进行专题训练：快速定位、信息整合、推断题。每个技巧进行方法论讲解、例题示范、练习巩固三阶段训练。用户完成线下阅读练习并记录错题，Agent分析错题模式并提供针对性改进建议。",
+            "expectedOutcome": "阅读技巧训练报告，包含技巧掌握度评估、错题分析、针对性改进建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周2次，持续6周",
+            "executionKind": "reading_digest",
+            "resultViewKind": "reading_digest",
+            "executionStrategy": "user_interactive",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "阅读技巧训练报告，包含技巧掌握度评估、错题分析、针对性改进建议",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value",
+                "comparison_table"
+              ],
+              "completionCriteria": "三大核心技巧全部完成专题训练，每个技巧至少完成5道练习题并形成错题分析"
+            },
+            "executionObjective": "针对托福阅读三大核心技巧进行专题训练：快速定位、信息整合、推断题。每个技巧进行方法论讲解、例题示范、练习巩固三阶段训练。用户完成线下阅读练习并记录错题，Agent分析错题模式并提供针对性改进建议。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "user_primary_agent_assistive",
+              "agentResponsibilities": [
+                "提供阅读技巧方法论讲解",
+                "分析用户提交的错题模式",
+                "生成个性化改进建议报告",
+                "追踪技巧掌握进度"
+              ],
+              "userResponsibilities": [
+                "线下完成阅读练习题目",
+                "记录错题及做题思路",
+                "提交错题分析数据",
+                "实践技巧改进建议"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "提交阅读练习结果",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成线下练习并提交结果，Agent完成分析报告生成"
+            }
+          },
+          {
+            "id": "draft-task-2",
+            "title": "阅读精读训练",
+            "description": "系统性精读托福阅读文章，每篇文章限时18分钟完成。精读要求：逐句理解、标记段落主旨、标注题型与解题思路、记录生词和长难句。目标是完成20篇精读，正确率稳定在28+/30。",
+            "expectedOutcome": "精读训练记录与进步追踪报告，包含正确率趋势、时间控制情况、薄弱题型分析、词汇积累统计",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周4篇，持续5周",
+            "executionKind": "reading_digest",
+            "resultViewKind": "reading_digest",
+            "executionStrategy": "user_interactive",
+            "priority": "critical",
+            "dependencies": [
+              "task-rl-1"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "精读训练记录与进步追踪报告，包含正确率趋势、时间控制情况、薄弱题型分析、词汇积累统计",
+              "format": "json",
+              "presentation": "dashboard",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "callout",
+                "comparison_table"
+              ],
+              "completionCriteria": "完成20篇精读，记录每篇的正确题数、用时、错题类型分析"
+            },
+            "executionObjective": "系统性精读托福阅读文章，每篇文章限时18分钟完成。精读要求：逐句理解、标记段落主旨、标注题型与解题思路、记录生词和长难句。目标是完成20篇精读，正确率稳定在28+/30。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "user_primary_agent_assistive",
+              "agentResponsibilities": [
+                "追踪精读进度统计",
+                "分析正确率与时间趋势",
+                "识别薄弱题型模式",
+                "生成阶段性进步报告"
+              ],
+              "userResponsibilities": [
+                "线下限时完成阅读文章",
+                "记录每题答案与解题思路",
+                "标注错题与不确定题目",
+                "提交精读数据"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "提交精读记录",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成精读并提交记录，Agent生成进度分析报告"
+            }
+          },
+          {
+            "id": "draft-task-3",
+            "title": "听力笔记体系构建与精听训练",
+            "description": "建立适合托福听力的笔记体系，包括conversation和lecture两种类型。笔记要点：结构标记法、关键词捕捉、信号词识别。通过30篇精听训练强化笔记技巧，conversation目标正确率90%，lecture目标正确率85%。",
+            "expectedOutcome": "听力笔记体系指南与精听训练追踪报告，包含笔记模板、正确率统计、笔记效果评估、改进建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周6篇（2conversation+4lecture），持续5周",
+            "executionKind": "listening_qa",
+            "resultViewKind": "listening_qa",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "听力笔记体系指南与精听训练追踪报告，包含笔记模板、正确率统计、笔记效果评估、改进建议",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value",
+                "comparison_table"
+              ],
+              "completionCriteria": "笔记体系模板完成，30篇精听记录完整，conversation和lecture正确率达标"
+            },
+            "executionObjective": "建立适合托福听力的笔记体系，包括conversation和lecture两种类型。笔记要点：结构标记法、关键词捕捉、信号词识别。通过30篇精听训练强化笔记技巧，conversation目标正确率90%，lecture目标正确率85%。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "提供笔记体系方法论与模板",
+                "评估用户提交的笔记质量",
+                "分析听力正确率趋势",
+                "优化笔记技巧建议"
+              ],
+              "userResponsibilities": [
+                "学习笔记体系方法",
+                "线下完成听力练习并记笔记",
+                "提交笔记与答案记录",
+                "实践笔记改进建议"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "提交听力笔记与练习结果",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成精听并提交笔记与结果，Agent完成评估与分析"
+            }
+          },
+          {
+            "id": "draft-task-4",
+            "title": "阅读听力双科模考测评",
+            "description": "每周进行阅读和听力双科模考，检验阶段性训练效果。阅读模考3篇文章54分钟，听力模考包含conversation和lecture各若干篇。记录分数、时间、错误类型，分析进步趋势与薄弱环节。",
+            "expectedOutcome": "模考成绩追踪报告，包含分数趋势图、时间控制分析、错误类型分布、薄弱环节诊断、下周训练重点建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周1次，持续6周",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "critical",
+            "dependencies": [
+              "task-rl-1",
+              "task-rl-2",
+              "task-rl-3"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "information",
+              "description": "模考成绩追踪报告，包含分数趋势图、时间控制分析、错误类型分布、薄弱环节诊断、下周训练重点建议",
+              "format": "json",
+              "presentation": "dashboard",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "callout",
+                "comparison_table"
+              ],
+              "completionCriteria": "完成6次模考，阅读模考连续3次达28分以上，听力模考连续3次达27分以上"
+            },
+            "executionObjective": "每周进行阅读和听力双科模考，检验阶段性训练效果。阅读模考3篇文章54分钟，听力模考包含conversation和lecture各若干篇。记录分数、时间、错误类型，分析进步趋势与薄弱环节。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_with_user_confirmation",
+              "agentResponsibilities": [
+                "汇总模考数据",
+                "生成成绩趋势分析",
+                "诊断薄弱环节",
+                "提供训练调整建议"
+              ],
+              "userResponsibilities": [
+                "线下完成模考",
+                "记录分数与用时",
+                "提交错题信息"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "before_execution",
+              "userFacingActionLabel": "提交模考成绩",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成模考并提交成绩，Agent生成分析报告，用户确认下周训练重点"
+            }
+          },
+          {
+            "id": "draft-task-5",
+            "title": "双科学习进度总评与策略调整",
+            "description": "每两周汇总阅读和听力训练数据，进行综合性进度评估。分析完成标准达成情况，识别进度滞后领域，调整后续训练策略与时间分配。确保在考前完成所有训练目标。",
+            "expectedOutcome": "阶段性进度总评报告，包含完成标准达成度评估、进度风险评估、策略调整方案、考前冲刺计划",
+            "taskType": "daily_repeat",
+            "triggerRule": "每两周1次，共3次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "high",
+            "dependencies": [
+              "task-rl-4"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "decision",
+              "description": "阶段性进度总评报告，包含完成标准达成度评估、进度风险评估、策略调整方案、考前冲刺计划",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value",
+                "comparison_table"
+              ],
+              "completionCriteria": "完成3次进度总评，每次形成明确的策略调整方案"
+            },
+            "executionObjective": "每两周汇总阅读和听力训练数据，进行综合性进度评估。分析完成标准达成情况，识别进度滞后领域，调整后续训练策略与时间分配。确保在考前完成所有训练目标。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": true,
+            "collaboration": {
+              "mode": "agent_with_user_confirmation",
+              "agentResponsibilities": [
+                "汇总所有训练数据",
+                "评估完成标准达成度",
+                "识别风险与薄弱环节",
+                "提出策略调整方案"
+              ],
+              "userResponsibilities": [
+                "查看进度报告",
+                "确认策略调整方案",
+                "反馈训练执行情况"
+              ],
+              "userInteractionType": "confirm",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "确认策略调整方案",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "Agent完成报告生成，用户确认策略调整方案"
+            }
+          }
+        ]
+      },
+      {
+        "id": "draft-subgoal-4",
+        "title": "口语与写作输出强化",
+        "description": "口语：准备万能素材和答题模板，强化独立口语流利度和综合口语信息整合能力，目标26+。写作：建立高分文章结构，积累论证素材，综合写作和独立写作分别达到27+和27+。",
+        "why": "口语和写作是输出型科目，短期突破难度较大，但通过模板和素材积累可实现快速提升。目标是稳住基本盘，争取额外5-8分提升。",
+        "priority": "high",
+        "weight": 0.25,
+        "dependencies": [
+          "draft-subgoal-1",
+          "draft-subgoal-2"
+        ],
+        "estimatedDurationMinutes": 1500,
+        "successCriteria": [
+          "口语独立题流利度达26+，综合任务信息完整度达85%",
+          "写作独立任务稳定27+，综合任务完成度达28+",
+          "准备口语万能素材库（人物、地点、事件等）和写作论证素材库"
+        ],
+        "tasks": [
+          {
+            "id": "draft-task-1",
+            "title": "口语万能素材库与答题模板建立",
+            "description": "系统整理口语万能素材库，覆盖人物、地点、事件、物品等核心类别，并建立独立口语答题模板，帮助快速构建回答框架。素材库需具备可迁移性，能够适应不同话题。",
+            "expectedOutcome": "口语万能素材库（含人物、地点、事件、物品、活动等类别）及独立口语答题模板",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "standard",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "口语万能素材库（含人物、地点、事件、物品、活动等类别）及独立口语答题模板",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown",
+                "json"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value",
+                "comparison_table"
+              ],
+              "completionCriteria": "素材库覆盖5大类别，每类至少3个可迁移素材；答题模板覆盖常见话题类型"
+            },
+            "executionObjective": "系统整理口语万能素材库，覆盖人物、地点、事件、物品等核心类别，并建立独立口语答题模板，帮助快速构建回答框架。素材库需具备可迁移性，能够适应不同话题。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": true,
+            "collaboration": {
+              "mode": "agent_with_user_confirmation",
+              "agentResponsibilities": [
+                "根据托福口语常见话题整理素材库",
+                "设计独立口语答题模板",
+                "提供素材应用示例"
+              ],
+              "userResponsibilities": [
+                "确认素材库实用性",
+                "根据个人经历补充个性化素材"
+              ],
+              "userInteractionType": "confirm",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "确认素材库",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户确认素材库和模板具有实用性，可用于后续训练"
+            }
+          },
+          {
+            "id": "draft-task-2",
+            "title": "独立口语流利度训练",
+            "description": "每周定期进行独立口语练习，运用万能素材和答题模板，强化流利度和表达连贯性。每次练习包含题目呈现、计时答题、自我评估和改进建议。",
+            "expectedOutcome": "每次训练的口语录音、自我评估记录和改进建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周3-4次，每次30分钟",
+            "executionKind": "flashcard",
+            "resultViewKind": "flashcard",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [
+              "task-1"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "action",
+              "description": "每次训练的口语录音、自我评估记录和改进建议",
+              "format": "json",
+              "presentation": "checklist",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "每周完成3-4次训练，流利度逐步提升至26+水平"
+            },
+            "executionObjective": "每周定期进行独立口语练习，运用万能素材和答题模板，强化流利度和表达连贯性。每次练习包含题目呈现、计时答题、自我评估和改进建议。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "提供口语题目",
+                "计时器控制",
+                "提供评分标准和自我评估指导",
+                "根据万能素材提供改进建议"
+              ],
+              "userResponsibilities": [
+                "完成口语答题",
+                "进行流利度自我评估",
+                "记录需要改进的地方"
+              ],
+              "userInteractionType": "answer",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始答题",
+              "shouldNotifyUser": true,
+              "completionOwner": "user",
+              "completionDefinition": "每次练习完成答题和自我评估"
+            }
+          },
+          {
+            "id": "draft-task-3",
+            "title": "综合口语信息整合训练",
+            "description": "针对综合口语Task 3-6，训练听力材料信息捕捉、笔记整理和信息整合输出能力。每次训练包含听力材料、笔记指导、回答构建和完整度评估。",
+            "expectedOutcome": "每次训练的听力笔记、整合回答录音和信息完整度评估",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周2-3次，每次40分钟",
+            "executionKind": "listening_qa",
+            "resultViewKind": "listening_qa",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [
+              "task-1"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "action",
+              "description": "每次训练的听力笔记、整合回答录音和信息完整度评估",
+              "format": "json",
+              "presentation": "checklist",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "信息完整度达到85%以上"
+            },
+            "executionObjective": "针对综合口语Task 3-6，训练听力材料信息捕捉、笔记整理和信息整合输出能力。每次训练包含听力材料、笔记指导、回答构建和完整度评估。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "提供综合口语材料（阅读+听力）",
+                "笔记记录指导",
+                "计时器控制",
+                "提供信息完整度评估标准"
+              ],
+              "userResponsibilities": [
+                "完成听力笔记",
+                "整合信息并作答",
+                "评估信息完整度"
+              ],
+              "userInteractionType": "answer",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始答题",
+              "shouldNotifyUser": true,
+              "completionOwner": "user",
+              "completionDefinition": "每次训练完成答题和完整度评估"
+            }
+          },
+          {
+            "id": "draft-task-4",
+            "title": "写作论证素材库与高分结构建立",
+            "description": "系统整理写作论证素材库，覆盖教育、科技、环境、社会、工作等话题，并建立独立写作和综合写作的高分文章结构模板，包含开头段、主体段、结尾段的写作框架。",
+            "expectedOutcome": "写作论证素材库（含各话题论据、例子、数据）及独立写作、综合写作高分结构模板",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "standard",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "写作论证素材库（含各话题论据、例子、数据）及独立写作、综合写作高分结构模板",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown",
+                "json"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "comparison_table",
+                "key_value"
+              ],
+              "completionCriteria": "素材库覆盖5大话题领域，每领域至少5个论证素材；结构模板适用于独立和综合写作"
+            },
+            "executionObjective": "系统整理写作论证素材库，覆盖教育、科技、环境、社会、工作等话题，并建立独立写作和综合写作的高分文章结构模板，包含开头段、主体段、结尾段的写作框架。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": true,
+            "collaboration": {
+              "mode": "agent_with_user_confirmation",
+              "agentResponsibilities": [
+                "整理各话题论证素材",
+                "设计高分文章结构模板",
+                "提供素材应用示例"
+              ],
+              "userResponsibilities": [
+                "确认素材库实用性",
+                "根据个人知识背景补充论证素材"
+              ],
+              "userInteractionType": "confirm",
+              "userInteractionTiming": "after_agent_output",
+              "userFacingActionLabel": "确认素材库",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户确认素材库和结构模板具有实用性，可用于后续写作练习"
+            }
+          },
+          {
+            "id": "draft-task-5",
+            "title": "写作实战练习与反馈",
+            "description": "每周定期进行写作实战练习，交替进行独立写作和综合写作。运用论证素材和高分结构，完成后进行自我评估和改进分析。",
+            "expectedOutcome": "每次练习的写作文章、自我评估记录和改进建议",
+            "taskType": "daily_repeat",
+            "triggerRule": "每周2次，每次60分钟",
+            "executionKind": "draft_review",
+            "resultViewKind": "draft_review",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [
+              "task-4"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "action",
+              "description": "每次练习的写作文章、自我评估记录和改进建议",
+              "format": "markdown",
+              "presentation": "document",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "key_value"
+              ],
+              "completionCriteria": "独立写作稳定达到27+，综合写作完成度达28+"
+            },
+            "executionObjective": "每周定期进行写作实战练习，交替进行独立写作和综合写作。运用论证素材和高分结构，完成后进行自我评估和改进分析。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "提供写作题目",
+                "提供结构模板和素材建议",
+                "提供评分标准和自我评估指导",
+                "分析文章结构并提供改进建议"
+              ],
+              "userResponsibilities": [
+                "完成写作文章",
+                "进行自我评估",
+                "记录需要改进的地方"
+              ],
+              "userInteractionType": "perform_offline_action",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始写作",
+              "shouldNotifyUser": true,
+              "completionOwner": "user",
+              "completionDefinition": "每次练习完成文章写作和自我评估"
+            }
+          }
+        ]
+      },
+      {
+        "id": "draft-subgoal-5",
+        "title": "全真模考与状态调整",
+        "description": "最后2周进行至少4次全真模考（完整4小时流程），模拟真实考试环境。分析每次模考成绩，针对性补强薄弱项。调整生物钟，确保考试时段最佳状态。",
+        "why": "模考是检验备考成果的关键，也是适应考试节奏、发现隐患的必要环节。确保临场发挥稳定，避免因紧张或时间分配失误丢分。",
+        "priority": "high",
+        "weight": 0.1,
+        "dependencies": [
+          "draft-subgoal-3",
+          "draft-subgoal-4"
+        ],
+        "estimatedDurationMinutes": 720,
+        "successCriteria": [
+          "完成至少4次全真模考，总分稳定在110+",
+          "形成最终考试策略（时间分配、答题顺序、心态调整）",
+          "最后一次模考各科成绩无短板（最低不低于25）"
+        ],
+        "tasks": [
+          {
+            "id": "draft-task-1",
+            "title": "全真模考执行与成绩记录",
+            "description": "按照真实考试流程执行全真模考（完整4小时），记录各科成绩及用时分布。模考需在最后2周内完成至少4次，建议间隔2-3天进行一次。每次模考前确保环境安静、设备完备，严格计时。",
+            "expectedOutcome": "每次模考的完整成绩记录表，包含总分、各科分数、各部分用时、错题分布",
+            "taskType": "daily_repeat",
+            "triggerRule": "最后2周内完成4次，建议每2-3天一次，固定在上午9点开始模拟真实考试时段",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "user_interactive",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "interactive",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "每次模考的完整成绩记录表，包含总分、各科分数、各部分用时、错题分布",
+              "format": "json",
+              "presentation": "checklist",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "comparison_table",
+                "callout"
+              ],
+              "completionCriteria": "完成4次模考，每次记录完整成绩数据，包含阅读、听力、口语、写作四科分数及时间分布"
+            },
+            "executionObjective": "按照真实考试流程执行全真模考（完整4小时），记录各科成绩及用时分布。模考需在最后2周内完成至少4次，建议间隔2-3天进行一次。每次模考前确保环境安静、设备完备，严格计时。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "user_primary_agent_assistive",
+              "agentResponsibilities": [
+                "生成模考记录模板",
+                "提醒模考时间安排",
+                "收集并整理用户提交的成绩数据",
+                "生成成绩趋势图表"
+              ],
+              "userResponsibilities": [
+                "按真实流程完成模考",
+                "记录各科成绩和用时",
+                "提交模考结果数据"
+              ],
+              "userInteractionType": "perform_offline_action",
+              "userInteractionTiming": "core_task_step",
+              "userFacingActionLabel": "开始模考 / 提交成绩",
+              "shouldNotifyUser": true,
+              "completionOwner": "user",
+              "completionDefinition": "用户完成模考并提交完整成绩数据后视为完成"
+            }
+          },
+          {
+            "id": "draft-task-2",
+            "title": "模考成绩分析与薄弱项诊断",
+            "description": "每次模考后深入分析成绩数据，识别薄弱科目和题型，对比目标分差，生成针对性提升建议。跟踪分数变化趋势，评估备考效果。",
+            "expectedOutcome": "每次模考的详细分析报告，包含薄弱项诊断、提升建议、分数趋势对比",
+            "taskType": "daily_repeat",
+            "triggerRule": "每次模考后立即执行",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "agent_autonomous",
+            "priority": "critical",
+            "dependencies": [
+              "task-mock-exam-execution"
+            ],
+            "executionMode": "standard",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "information",
+              "description": "每次模考的详细分析报告，包含薄弱项诊断、提升建议、分数趋势对比",
+              "format": "json",
+              "presentation": "visual_report",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "comparison_table",
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "生成包含分数分析、薄弱项识别、提升建议的完整报告，并提供与上次模考的对比"
+            },
+            "executionObjective": "每次模考后深入分析成绩数据，识别薄弱科目和题型，对比目标分差，生成针对性提升建议。跟踪分数变化趋势，评估备考效果。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_autonomous",
+              "agentResponsibilities": [
+                "分析成绩数据",
+                "识别薄弱科目和题型",
+                "计算目标分差",
+                "生成针对性提升建议",
+                "绘制分数趋势图"
+              ],
+              "userResponsibilities": [],
+              "userInteractionType": "none",
+              "userInteractionTiming": "not_required",
+              "userFacingActionLabel": "查看分析报告",
+              "shouldNotifyUser": true,
+              "completionOwner": "agent",
+              "completionDefinition": "Agent生成完整分析报告后视为完成"
+            }
+          },
+          {
+            "id": "draft-task-3",
+            "title": "最终考试策略制定",
+            "description": "基于模考经验，制定完整考试策略，涵盖时间分配方案、答题顺序优化、心态调整技巧三大核心模块。策略需针对用户个人特点量身定制，确保考试当天发挥最佳水平。",
+            "expectedOutcome": "最终考试策略文档，包含时间分配表、答题顺序建议、心态调整清单",
+            "taskType": "one_shot",
+            "triggerRule": "准备好后执行一次",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "hybrid",
+            "priority": "critical",
+            "dependencies": [
+              "task-mock-exam-execution",
+              "task-score-analysis"
+            ],
+            "executionMode": "interactive",
+            "executionCycle": "once",
+            "expectedResult": {
+              "type": "deliverable",
+              "description": "最终考试策略文档，包含时间分配表、答题顺序建议、心态调整清单",
+              "format": "markdown",
+              "presentation": "document",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "callout",
+                "comparison_table",
+                "key_value"
+              ],
+              "completionCriteria": "形成用户确认的三大策略：各科时间分配方案、最优答题顺序、心态调整检查清单"
+            },
+            "executionObjective": "基于模考经验，制定完整考试策略，涵盖时间分配方案、答题顺序优化、心态调整技巧三大核心模块。策略需针对用户个人特点量身定制，确保考试当天发挥最佳水平。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "agent_user_collaborative",
+              "agentResponsibilities": [
+                "分析模考数据提炼策略要点",
+                "生成策略初稿",
+                "根据用户反馈优化策略"
+              ],
+              "userResponsibilities": [
+                "确认时间分配偏好",
+                "验证答题顺序可行性",
+                "补充个人心态调整经验"
+              ],
+              "userInteractionType": "answer",
+              "userInteractionTiming": "during_execution",
+              "userFacingActionLabel": "确认并完善策略",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户确认最终策略内容后视为完成"
+            }
+          },
+          {
+            "id": "draft-task-4",
+            "title": "生物钟调整与状态管理",
+            "description": "制定并跟踪生物钟调整计划，确保考试时段（上午9点-下午1点）达到最佳精神状态。包括作息时间调整、考前饮食建议、压力管理技巧。",
+            "expectedOutcome": "每日状态跟踪记录和调整建议，最终形成考试日作息方案",
+            "taskType": "daily_repeat",
+            "triggerRule": "每日跟踪检查，持续2周",
+            "executionKind": "generic_result",
+            "resultViewKind": "generic_result",
+            "executionStrategy": "user_interactive",
+            "priority": "critical",
+            "dependencies": [],
+            "executionMode": "standard",
+            "executionCycle": "recurring",
+            "expectedResult": {
+              "type": "action",
+              "description": "每日状态跟踪记录和调整建议，最终形成考试日作息方案",
+              "format": "json",
+              "presentation": "timeline",
+              "primaryFormat": "structured_blocks",
+              "exportableFormats": [
+                "html",
+                "markdown"
+              ],
+              "requiredBlocks": [
+                "heading",
+                "key_value",
+                "callout"
+              ],
+              "completionCriteria": "完成14天状态跟踪记录，形成考试日作息时间表和注意事项清单"
+            },
+            "executionObjective": "制定并跟踪生物钟调整计划，确保考试时段（上午9点-下午1点）达到最佳精神状态。包括作息时间调整、考前饮食建议、压力管理技巧。",
+            "autoRunDisabled": false,
+            "requiresConfirmation": false,
+            "collaboration": {
+              "mode": "user_primary_agent_assistive",
+              "agentResponsibilities": [
+                "生成每日状态检查清单",
+                "提供作息调整建议",
+                "跟踪调整进度",
+                "生成考试日作息方案"
+              ],
+              "userResponsibilities": [
+                "记录每日睡眠和状态",
+                "执行作息调整计划",
+                "反馈调整效果"
+              ],
+              "userInteractionType": "provide_context",
+              "userInteractionTiming": "during_execution",
+              "userFacingActionLabel": "记录今日状态",
+              "shouldNotifyUser": true,
+              "completionOwner": "shared",
+              "completionDefinition": "用户完成状态记录并形成最终考试日作息方案后视为完成"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

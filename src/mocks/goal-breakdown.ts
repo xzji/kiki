@@ -1,6 +1,6 @@
-import type { ExecutionKind, GoalBreakdownDraft, TaskCollaborationContract } from "@/types/kiki";
+import type { ExecutionKind, GoalBreakdownDraft, TaskCollaborationRequirements } from "@/types/kiki";
 
-function mockCollaboration(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationContract {
+function mockCollaboration(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
   if (kind === "draft_review" || kind === "confirm_action") {
     return {
       mode: "agent_with_user_confirmation",

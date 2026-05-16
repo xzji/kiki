@@ -7,6 +7,7 @@ import type { RuntimeStatePayload, RuntimeStateRevision, RuntimeStateSyncRespons
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
+import type { Goal } from "@/types/kiki";
 
 function stableStringify(value: unknown) {
   return JSON.stringify(value);
@@ -31,6 +32,12 @@ function mergeSyncRevision(current: RuntimeStateRevision, response: RuntimeState
     runtimeEnvironments: response.results?.runtimeEnvironments?.revision ?? current.runtimeEnvironments,
     scheduleEvents: response.results?.scheduleEvents?.revision ?? current.scheduleEvents,
   };
+}
+
+function mergeRemoteSnapshotWithLocalGoals(remoteGoals: Goal[], localGoals: Goal[]) {
+  const remoteIds = new Set(remoteGoals.map((goal) => goal.id));
+  const localOnlyGoals = localGoals.filter((goal) => !remoteIds.has(goal.id));
+  return [...remoteGoals, ...localOnlyGoals];
 }
 
 export function RuntimeStateBridge() {
@@ -130,9 +137,10 @@ export function RuntimeStateBridge() {
       } catch {
         try {
           const snapshot = await fetchRuntimeStateSnapshot();
+          const mergedGoals = mergeRemoteSnapshotWithLocalGoals(snapshot.goals, useGoalStore.getState().goals);
           isApplyingRemoteRef.current = true;
           remoteRevisionRef.current = revisionFromSnapshot(snapshot);
-          replaceGoals(snapshot.goals);
+          replaceGoals(mergedGoals);
           replaceEnvironments(snapshot.runtimeEnvironments);
           replaceEvents(snapshot.scheduleEvents);
           window.setTimeout(() => {

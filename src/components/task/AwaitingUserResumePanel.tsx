@@ -14,6 +14,8 @@ type ReadinessItem = {
   status: "available" | "missing_user" | "agent_retrievable" | "not_required";
   reason: string;
   options?: string[];
+  optionQuestion?: string;
+  inputPlaceholder?: string;
 };
 
 type TaskReadiness = {
@@ -70,14 +72,6 @@ function submittedDetails(instance: TaskInstance) {
   return [submission.feedback || submission.action].filter(Boolean);
 }
 
-function defaultOptionsFor(instance: TaskInstance) {
-  const type = instance.awaitingUser?.interactionRequirement?.type;
-  if (type === "answer") return ["主流答案（稳妥）", "高频例外（需说明）", "不确定（让 KiKi 判断）"];
-  if (type === "provide_context") return ["主流稳妥方案（风险低）", "高性价比方案（均衡）", "体验优先方案（更舒适）"];
-  if (type === "perform_offline_action") return ["我已完成", "还没完成", "需要 KiKi 调整任务"];
-  return ["采用推荐方案（稳妥）", "换成保守方案（风险低）", "换成体验优先方案"];
-}
-
 export function SubmittedInteractionPanel({ instance }: { instance: TaskInstance }) {
   const submission = instance.result?.interactionSubmission;
   if (!submission || instance.awaitingUser) return null;
@@ -119,23 +113,11 @@ function dedupeKeepOrder(values: string[]) {
   return result;
 }
 
-const GENERIC_CONTEXT_OPTIONS = new Set([
-  "补充具体信息",
-  "补充缺失信息",
-  "补充约束或偏好",
-  "说明暂时无法提供",
-  "填写其他信息",
-  "补充更多信息",
-  "需要更多信息后再决定",
-  "需要更多时间考虑",
-]);
-
 function normalizeSpecificOptions(values: string[]) {
-  const options = dedupeKeepOrder(values)
+  return dedupeKeepOrder(values)
     .map((item) => item.trim())
-    .filter((item) => item.length >= 2);
-  const specificOptions = options.filter((item) => !GENERIC_CONTEXT_OPTIONS.has(item));
-  return specificOptions.slice(0, 3);
+    .filter((item) => item.length >= 2)
+    .slice(0, 3);
 }
 
 function pickThreeOptions(values: string[]) {
@@ -179,20 +161,6 @@ function missingItemsFrom(readiness: TaskReadiness | null) {
   return readiness?.items.filter((item) => item.status === "missing_user" && item.source === "user") ?? [];
 }
 
-function defaultOptionsForMissingItem(item: ReadinessItem) {
-  if (item.options?.length) return item.options.slice(0, 3);
-  const text = `${item.label} ${item.description} ${item.reason}`;
-  if (/住宿区域.*酒店类型|酒店类型.*住宿区域|住宿偏好|住哪/.test(text)) {
-    return ["海滩区 + 度假酒店", "市中心 + 高性价比酒店", "度假区/珍珠岛 + 一站式酒店"];
-  }
-  if (/住宿区域|酒店区域|住哪/.test(text)) return ["海滩区", "市中心", "度假区/珍珠岛"];
-  if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型/.test(text)) return ["高性价比经济型", "舒适型四星", "度假型五星/海景"];
-  if (/城市|出发地|目的地/.test(text)) return ["上海", "广州", "北京"];
-  if (/日期|时间/.test(text)) return ["周末短途（2-3天）", "工作日错峰（更便宜）", "节假日出行（需早订）"];
-  if (/预算|费用|价格/.test(text)) return ["经济优先（少花钱）", "性价比优先（均衡）", "舒适优先（体验好）"];
-  return [];
-}
-
 export function AwaitingUserResumePanel({
   task,
   instance,
@@ -219,23 +187,12 @@ export function AwaitingUserResumePanel({
   const showReviseButton = type === "confirm";
   const options = useMemo(() => {
     if (missingItems.length > 0) return [];
-    const raw = requirement?.options?.length ? requirement.options : defaultOptionsFor(instance);
+    const raw = requirement?.options?.length ? requirement.options : [];
     return pickThreeOptions(raw);
-  }, [instance, missingItems.length, requirement?.options]);
-
-  const suggestedOptions = useMemo(() => {
-    const raw = [
-      ...(requirement?.options ?? []),
-      ...(instance.awaitingUser?.suggestedActions ?? []),
-    ];
-    return pickThreeOptions(raw);
-  }, [instance.awaitingUser?.suggestedActions, requirement?.options]);
+  }, [missingItems.length, requirement?.options]);
 
   const optionsForMissingItem = (item: ReadinessItem) => {
-    const itemOptions = item.options?.length ? pickThreeOptions(item.options) : [];
-    if (itemOptions.length) return itemOptions;
-    if (suggestedOptions.length) return suggestedOptions;
-    return pickThreeOptions(defaultOptionsForMissingItem(item));
+    return item.options?.length ? pickThreeOptions(item.options) : [];
   };
 
   const chooseOption = (option: string, item?: ReadinessItem) => {
@@ -356,7 +313,7 @@ export function AwaitingUserResumePanel({
             const itemOptions = optionsForMissingItem(item);
             return (
               <div key={item.id} className="rounded-lg bg-white/60 px-3 py-3">
-                <div className="text-[12px] font-medium text-[#8A6D3B]">请选择{item.label}</div>
+                <div className="text-[12px] font-medium text-[#8A6D3B]">{item.optionQuestion?.trim() || `请选择${item.label}`}</div>
                 <div className="mt-2 space-y-2">
                   {itemOptions.map((option) => {
                     const selected = selectedItemOptions[item.id] === option && !customItemModes[item.id];
@@ -390,7 +347,7 @@ export function AwaitingUserResumePanel({
                       value={customFields[item.id] ?? ""}
                       onFocus={() => chooseCustom(item)}
                       onChange={(event) => updateCustomValue(event.target.value, item)}
-                      placeholder={`输入${item.label}`}
+                      placeholder={item.inputPlaceholder?.trim() || `输入${item.label}`}
                       className="min-w-0 flex-1 border-b border-[#E5D7A8] bg-transparent px-1 py-1 text-[13px] text-[#1F2328] outline-none placeholder:text-[#B7A66A] focus:border-[#8A6D3B]"
                     />
                   </div>
@@ -434,7 +391,7 @@ export function AwaitingUserResumePanel({
                 value={customMode && missingItems.length === 0 ? customText : ""}
                 onFocus={() => chooseCustom()}
                 onChange={(event) => updateCustomValue(event.target.value)}
-                placeholder="请输入你的选择"
+                placeholder={options.length ? "请输入你的选择" : "请输入需要补充的信息"}
                 className="min-w-0 flex-1 border-b border-[#E5D7A8] bg-transparent px-1 py-1 text-[13px] text-[#1F2328] outline-none placeholder:text-[#B7A66A] focus:border-[#8A6D3B]"
               />
             </div>

@@ -78,6 +78,20 @@ function applyWaitingReasonToSteps(steps: NonNullable<Task["instances"][number][
   });
 }
 
+function shouldDeferConcreteResultUntilUserInput(instance: TaskInstance) {
+  const requirement = instance.awaitingUser?.interactionRequirement ?? instance.result?.interactionRequirement;
+  if (!instance.awaitingUser || !requirement) return false;
+  if (requirement.type === "confirm" && requirement.timing === "after_agent_output") return false;
+  return (
+    requirement.type === "answer" ||
+    requirement.type === "provide_context" ||
+    requirement.type === "perform_offline_action" ||
+    requirement.timing === "before_execution" ||
+    requirement.timing === "during_execution" ||
+    requirement.timing === "core_task_step"
+  );
+}
+
 export function ExecutionResultBody(props: {
   goal: Goal;
   task: Task;
@@ -146,8 +160,9 @@ export function ExecutionResultBody(props: {
   const shouldRenderGenericDeliverable =
     (currentKind === "generic_result" || instance.payload.kind === "generic_result" || !instance.payload) &&
     Boolean(instance.result?.taskResult);
-  const hasDeliverable = hasBuiltInDeliverable || shouldRenderGenericDeliverable;
-  const resultBlock = hasDeliverable ? (
+  const shouldRenderConcreteDeliverable =
+    (hasBuiltInDeliverable || shouldRenderGenericDeliverable) && !shouldDeferConcreteResultUntilUserInput(instance);
+  const resultBlock = shouldRenderConcreteDeliverable ? (
     <div>
       <div className="mb-3 text-[13px] font-medium text-[#1F2328]">产出物</div>
       {currentKind === "flashcard" && instance.payload.kind === "flashcard" ? (

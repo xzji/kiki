@@ -69,7 +69,7 @@ function formatExpectedResult(task: Task) {
   return lines.join("\n");
 }
 
-function formatMachineReadableContract(task: Task) {
+function formatMachineReadableRequirements(task: Task) {
   const expectedResult = task.expectedResult;
   return JSON.stringify(
     {
@@ -87,7 +87,7 @@ function formatMachineReadableContract(task: Task) {
   );
 }
 
-function formatCollaborationContract(task: Task) {
+function formatCollaborationRequirements(task: Task) {
   const collaboration = task.collaboration;
   if (!collaboration) {
     return [
@@ -115,7 +115,7 @@ function formatCollaborationContract(task: Task) {
 
 function buildStepZeroPrompt(isResume: boolean) {
   return `【第一步：执行前提自检（必须先做）】
-先看你当前任务的“协作契约 / 用户介入时机 / 用户介入类型”，按以下规则判断：
+先看你当前任务的“协作要求 / 用户介入时机 / 用户介入类型”，按以下规则判断：
 
 A. 如果 协作模式=agent_user_collaborative 且 用户介入时机=before_execution 且 用户介入类型 ∈ {answer, provide_context}：
    1. 列出任务“用户负责”清单中所有需要用户提供的字段。
@@ -178,9 +178,9 @@ ${resumeContext ? `\n用户恢复上下文（必须纳入本轮执行）：\n${r
     : "";
   const normalizedPresentation = normalizeResultPresentation(task.expectedResult);
 
-  return `你是 KiKi 的后台任务执行 Agent。请以“交付物契约”为核心真实推进任务，而不是只给建议或只总结过程。
+  return `你是 KiKi 的后台任务执行 Agent。请以“交付物要求”为核心真实推进任务，而不是只给建议或只总结过程。
 
-你的任务不是证明自己做过事情，而是交付与任务契约一致的可验收产物。
+你的任务不是证明自己做过事情，而是交付与任务要求一致的可验收产物。
 
 ${buildStepZeroPrompt(isResume)}
 
@@ -203,23 +203,23 @@ ${buildStepZeroPrompt(isResume)}
 依赖任务：
 ${formatTaskDependencies(task, goal)}
 
-交付物契约（必须满足）：
+交付物要求（必须满足）：
 - 预期结果：${task.expectedOutcome}
 ${formatExpectedResult(task)}
 
-【交付物契约机器可读视图】(请把它逐项映射到最终 deliverable_check.criteria_results)
-${formatMachineReadableContract(task)}
+【交付物要求机器可读视图】(请把它逐项映射到最终 deliverable_check.criteria_results)
+${formatMachineReadableRequirements(task)}
 
-协作契约（必须遵守）：
-${formatCollaborationContract(task)}
+协作要求（必须遵守）：
+${formatCollaborationRequirements(task)}
 
 ${resumeBlock}
 
 执行约束：
 1. 先执行“第一步：执行前提自检”。只有确认前提已满足，才允许直接检索、分析、生成最终交付物。
 2. 如果可导出格式包含 html，表示结构化产物必须具备 HTML 渲染/导出的语义；不要直接输出未清洗的 HTML 作为主产物，主产物仍然是 task_result.blocks。
-3. 如果无法满足交付物契约，不要假装完成；必须设置 interaction_requirement.type=agent_revision_required 或 deliverable_gap，并在 deliverable_check.missing_deliverables 中说明缺口。
-4. 如果需要用户确认、作答、补充关键上下文或完成线下动作，请根据协作契约设置 interaction_requirement.type，不要把所有场景都写成 confirm。
+3. 如果无法满足交付物要求，不要假装完成；必须设置 interaction_requirement.type=agent_revision_required 或 deliverable_gap，并在 deliverable_check.missing_deliverables 中说明缺口。
+4. 如果需要用户确认、作答、补充关键上下文或完成线下动作，请根据协作要求设置 interaction_requirement.type，不要把所有场景都写成 confirm。
 5. 如果缺少用户才能提供的关键输入（例如出发城市、账号信息、个人偏好、预算上限、目标选择等），必须立即停止产出最终完成态交付物：
    - awaiting_user 必须为 true。
    - interaction_requirement.question 必须一次性列出本轮所有已知缺失项，不能只问第一个。
@@ -240,7 +240,7 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
 验收规则：
 1. 逐条检查“预期结果”和“完成标准”是否被最终产物覆盖。
 2. deliverable_check.matched 只有在 task_result.blocks 组件化主产出真实覆盖预期结果且没有关键缺口时才能为 true。
-3. 只生成过程描述、泛泛总结、计划、待办列表，不算满足交付物契约。
+3. 只生成过程描述、泛泛总结、计划、待办列表，不算满足交付物要求。
 
 输出模板 A（正常完成，适用于 done / draft）：
 {

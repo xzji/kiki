@@ -1,9 +1,14 @@
 import { spawn } from "child_process";
+import fs from "fs";
 
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
 import { appendGoalLog } from "@/lib/server/goalTelemetry";
-import { ensureConversationWorkspace } from "@/lib/server/workspace/conversationWorkspace";
+import {
+  ensureConversationWorkspace,
+  getPlanningCheckpointFilePath,
+  writeJsonFileAtomic,
+} from "@/lib/server/workspace/conversationWorkspace";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, TaskExpectedResult } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
@@ -142,6 +147,51 @@ type PlanPresentationPayload = {
 };
 
 type DraftTask = GoalBreakdownDraft["subGoals"][number]["tasks"][number];
+type DraftSubGoal = GoalBreakdownDraft["subGoals"][number];
+type TaskPlanningSummaryItem = {
+  subGoalName: string;
+  taskCount: number;
+  uncoveredRisks?: string[];
+};
+
+type GoalPlanningCheckpoint = {
+  version: 1;
+  goalText: string;
+  status: "running" | "completed" | "failed";
+  stage: "collecting_info" | "decomposing" | "generating_tasks" | "reviewing_tasks" | "presenting_plan";
+  requestId?: string;
+  collectedInfo?: string;
+  collectedInfoSummary?: CollectedInfoSummaryPayload;
+  userContext?: Record<string, unknown>;
+  decomposition?: DecompositionPayload;
+  completedSubGoals: DraftSubGoal[];
+  taskPlanningSummary: TaskPlanningSummaryItem[];
+  reviewSummary: string[];
+  reviewRisks: string[];
+  nextSubGoalIndex: number;
+  activeSubGoal?: {
+    index: number;
+    generatedTasks?: TaskGenerationPayload;
+  };
+  presentation?: PlanPresentationPayload;
+  draft?: GoalBreakdownDraft;
+  interrupted?: boolean;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoalPlanningCheckpointStatus = {
+  available: boolean;
+  goalText?: string;
+  status?: GoalPlanningCheckpoint["status"];
+  stage?: GoalPlanningCheckpoint["stage"];
+  completedSubGoalCount?: number;
+  totalSubGoalCount?: number;
+  nextSubGoalIndex?: number;
+  updatedAt?: string;
+  hasCollectedInfo?: boolean;
+};
 
 const DEFAULT_DEADLINE = "2026-06-30T23:59:59+08:00";
 
@@ -202,6 +252,131 @@ function formatTimingDetails(input: Record<string, string | number | boolean | u
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}=${value}`)
     .join(", ");
+}
+
+function createEmptyCheckpoint(input: {
+  goalText: string;
+  collectedInfo?: string;
+  requestId?: string;
+}): GoalPlanningCheckpoint {
+  const now = new Date().toISOString();
+  return {
+    version: 1,
+    goalText: input.goalText,
+    status: "running",
+    stage: "collecting_info",
+    requestId: input.requestId,
+    collectedInfo: input.collectedInfo,
+    completedSubGoals: [],
+    taskPlanningSummary: [],
+    reviewSummary: [],
+    reviewRisks: [],
+    nextSubGoalIndex: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function getCheckpointPath(conversationId?: string) {
+  if (!conversationId) return null;
+  ensureConversationWorkspace(conversationId);
+  return getPlanningCheckpointFilePath(conversationId);
+}
+
+function readGoalPlanningCheckpoint(conversationId?: string) {
+  const filePath = getCheckpointPath(conversationId);
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    if (!isObject(raw) || raw.version !== 1 || typeof raw.goalText !== "string") return null;
+    if (!Array.isArray(raw.completedSubGoals)) return null;
+    if (!Array.isArray(raw.taskPlanningSummary)) return null;
+    if (!Array.isArray(raw.reviewSummary)) return null;
+    if (!Array.isArray(raw.reviewRisks)) return null;
+    return raw as GoalPlanningCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
+export function getGoalPlanningCheckpointStatus(conversationId?: string): GoalPlanningCheckpointStatus {
+  const checkpoint = readGoalPlanningCheckpoint(conversationId);
+  if (!checkpoint || checkpoint.status === "completed") {
+    return { available: false };
+  }
+  return {
+    available: true,
+    goalText: checkpoint.goalText,
+    status: checkpoint.status,
+    stage: checkpoint.stage,
+    completedSubGoalCount: checkpoint.completedSubGoals.length,
+    totalSubGoalCount: checkpoint.decomposition?.subGoals.length ?? checkpoint.completedSubGoals.length,
+    nextSubGoalIndex: checkpoint.nextSubGoalIndex,
+    updatedAt: checkpoint.updatedAt,
+    hasCollectedInfo: Boolean(checkpoint.collectedInfo?.trim()),
+  };
+}
+
+export function getGoalPlanningCheckpointForResume(conversationId?: string) {
+  const checkpoint = readGoalPlanningCheckpoint(conversationId);
+  if (!checkpoint || checkpoint.status === "completed") return null;
+  return {
+    goalText: checkpoint.goalText,
+    collectedInfo: checkpoint.collectedInfo,
+    status: checkpoint.status,
+    stage: checkpoint.stage,
+    completedSubGoalCount: checkpoint.completedSubGoals.length,
+    totalSubGoalCount: checkpoint.decomposition?.subGoals.length ?? checkpoint.completedSubGoals.length,
+    nextSubGoalIndex: checkpoint.nextSubGoalIndex,
+    updatedAt: checkpoint.updatedAt,
+  };
+}
+
+function writeGoalPlanningCheckpoint(conversationId: string | undefined, checkpoint: GoalPlanningCheckpoint) {
+  const filePath = getCheckpointPath(conversationId);
+  if (!filePath) return;
+  writeJsonFileAtomic(filePath, {
+    ...checkpoint,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function clearGoalPlanningCheckpoint(conversationId?: string) {
+  const filePath = getCheckpointPath(conversationId);
+  if (!filePath || !fs.existsSync(filePath)) return;
+  fs.rmSync(filePath, { force: true });
+}
+
+function isCheckpointCompatible(
+  checkpoint: GoalPlanningCheckpoint | null,
+  input: {
+    goalText: string;
+    collectedInfo?: string;
+  },
+): checkpoint is GoalPlanningCheckpoint {
+  if (!checkpoint || checkpoint.status === "completed") return false;
+  return checkpoint.goalText.trim() === input.goalText.trim() && (checkpoint.collectedInfo ?? "") === (input.collectedInfo ?? "");
+}
+
+function emitCheckpointResumeProgress(input: {
+  checkpoint: GoalPlanningCheckpoint;
+  onProgress?: GoalStageProgressHandler;
+}) {
+  const completedCount = input.checkpoint.completedSubGoals.length;
+  const totalCount = input.checkpoint.decomposition?.subGoals.length;
+  const suffix = totalCount ? `${completedCount}/${totalCount}` : String(completedCount);
+  if (input.checkpoint.activeSubGoal?.generatedTasks) {
+    const subGoal = input.checkpoint.decomposition?.subGoals[input.checkpoint.activeSubGoal.index];
+    input.onProgress?.({
+      phase: "reviewing_tasks",
+      message: `已读取 checkpoint，将继续 review 子目标 ${input.checkpoint.activeSubGoal.index + 1}/${totalCount ?? "?"}：${subGoal?.name ?? "未命名子目标"}`,
+    });
+    return;
+  }
+  input.onProgress?.({
+    phase: input.checkpoint.decomposition ? "generating_tasks" : input.checkpoint.stage,
+    message: `已读取 checkpoint，将从已完成子目标 ${suffix} 后继续规划。`,
+  });
 }
 
 function buildGoalClarificationPrompt(goalText: string, conversationContext?: string) {
@@ -490,7 +665,14 @@ ${input.tasksJson}
 2. 与子目标的对齐程度（critical/high/medium/low）
 3. 是否需要调整或删除
 
-请按 JSON 格式返回：
+要求：
+1. 只能输出严格 JSON 对象，不要包含 Markdown、代码块、前后解释或自然语言前导。
+2. 必须使用英文双引号包裹所有 key 和字符串值。
+3. 不允许尾随逗号，不允许注释，不允许省略逗号。
+4. reviewResults 必须覆盖上方每个待 Review 任务，taskId 必须使用原始任务 id。
+5. goalContribution 和 subGoalContribution 只能取 critical、high、medium、low 之一。
+
+JSON schema：
 {
   "reviewResults": [
     {
@@ -805,6 +987,8 @@ async function parseClaudeJson<T>(input: {
   ];
 
   let lastError: unknown = null;
+  let repairedForLog = "";
+  let repairedCandidateForLog = "";
 
   for (const candidate of candidates) {
     if (!candidate.value) continue;
@@ -854,7 +1038,9 @@ async function parseClaudeJson<T>(input: {
       conversationId: input.conversationId,
       signal: input.signal,
     });
+    repairedForLog = repaired;
     const repairedCandidate = repairCommonJsonIssues(extractBalancedJsonSnippet(repaired));
+    repairedCandidateForLog = repairedCandidate;
     const parsed = input.validator(JSON.parse(repairedCandidate) as unknown);
     if (input.context) {
       // #region debug-point goal-planning-latency-parse-repair-finished
@@ -879,13 +1065,40 @@ async function parseClaudeJson<T>(input: {
   }
 
   if (input.context) {
+    const errorDetails = lastError instanceof Error ? lastError.message : input.errorMessage;
     appendGoalLog({
       requestId: input.context.requestId,
       scope: input.context.scope,
       level: "error",
       phase: input.context.phase,
       message: `JSON 解析失败：${input.context.stepLabel}`,
-      details: lastError instanceof Error ? lastError.message : input.errorMessage,
+      details: [
+        `error: ${errorDetails}`,
+        `rawChars: ${primary.length}`,
+        "",
+        "## raw output",
+        "```json",
+        primary,
+        "```",
+        repairedForLog
+          ? [
+              "",
+              `## repaired output`,
+              "```json",
+              repairedForLog,
+              "```",
+            ].join("\n")
+          : "",
+        repairedCandidateForLog
+          ? [
+              "",
+              `## repaired candidate`,
+              "```json",
+              repairedCandidateForLog,
+              "```",
+            ].join("\n")
+          : "",
+      ].filter(Boolean).join("\n"),
     });
   }
   throw new Error(input.errorMessage);
@@ -1823,242 +2036,355 @@ export async function generateGoalPlanWithClaude(input: {
   conversationId?: string;
   conversationContext?: string;
   collectedInfo?: string;
+  resumeFromCheckpoint?: boolean;
   signal?: AbortSignal;
   requestId?: string;
   onProgress?: GoalStageProgressHandler;
 }): Promise<GoalBreakdownDraft> {
   const planStartedAt = Date.now();
   const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
-  input.onProgress?.({
-    phase: "collecting_info",
-    message: "正在整理背景信息...",
-  });
-  const collectedInfoStartedAt = Date.now();
-  const collectedInfoSummary = input.collectedInfo?.trim()
-    ? await summarizeCollectedInfoWithClaude({
+  const restoredCheckpoint = input.resumeFromCheckpoint
+    ? readGoalPlanningCheckpoint(input.conversationId)
+    : null;
+  let checkpoint = isCheckpointCompatible(restoredCheckpoint, input)
+    ? restoredCheckpoint
+    : createEmptyCheckpoint({
         goalText: input.goalText,
         collectedInfo: input.collectedInfo,
+        requestId: input.requestId,
+      });
+
+  if (input.resumeFromCheckpoint && isCheckpointCompatible(restoredCheckpoint, input)) {
+    emitCheckpointResumeProgress({ checkpoint, onProgress: input.onProgress });
+    checkpoint = {
+      ...checkpoint,
+      status: "running",
+      requestId: input.requestId,
+    };
+  } else {
+    clearGoalPlanningCheckpoint(input.conversationId);
+  }
+  writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+
+  try {
+    let collectedInfoSummary = checkpoint.collectedInfoSummary;
+    if (!collectedInfoSummary) {
+      input.onProgress?.({
+        phase: "collecting_info",
+        message: "正在整理背景信息...",
+      });
+      checkpoint = {
+        ...checkpoint,
+        status: "running",
+        stage: "collecting_info",
+      };
+      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+      const collectedInfoStartedAt = Date.now();
+      collectedInfoSummary = input.collectedInfo?.trim()
+        ? await summarizeCollectedInfoWithClaude({
+            goalText: input.goalText,
+            collectedInfo: input.collectedInfo,
+            runtimeEnv: input.runtimeEnv,
+            conversationId: input.conversationId,
+            conversationContext: input.conversationContext,
+            signal: input.signal,
+            requestId: input.requestId,
+          })
+        : buildFallbackCollectedInfoSummary(input.goalText, input.collectedInfo);
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_plan",
+        level: "info",
+        phase: "collecting_info",
+        message: "阶段耗时：整理背景信息",
+        details: formatTimingDetails({
+          elapsedMs: Date.now() - collectedInfoStartedAt,
+          usedClaude: Boolean(input.collectedInfo?.trim()),
+        }),
+      });
+      checkpoint = {
+        ...checkpoint,
+        collectedInfoSummary,
+      };
+      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+    }
+
+    const userContext = checkpoint.userContext ?? {
+      goalText: input.goalText,
+      goalDetails: collectedInfoSummary.goalDetails,
+      timeline: collectedInfoSummary.timeline,
+      resources: collectedInfoSummary.resources,
+      constraints: collectedInfoSummary.constraints,
+      challenges: collectedInfoSummary.challenges,
+      preferences: collectedInfoSummary.preferences,
+      summary: collectedInfoSummary.summary,
+    };
+    checkpoint = {
+      ...checkpoint,
+      userContext,
+    };
+    writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+
+    let decomposition = checkpoint.decomposition;
+    if (!decomposition) {
+      input.onProgress?.({
+        phase: "decomposing",
+        message: "正在拆解子目标...",
+      });
+      checkpoint = {
+        ...checkpoint,
+        stage: "decomposing",
+      };
+      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+      const decompositionStartedAt = Date.now();
+      decomposition = await decomposeGoalWithClaude({
+        goalTitle: input.goalText,
+        goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
+        userContext,
+        config,
         runtimeEnv: input.runtimeEnv,
         conversationId: input.conversationId,
-        conversationContext: input.conversationContext,
         signal: input.signal,
         requestId: input.requestId,
-      })
-    : buildFallbackCollectedInfoSummary(input.goalText, input.collectedInfo);
-  // #region debug-point goal-planning-latency-stage-collected-info
-  appendGoalLog({
-    requestId: input.requestId,
-    scope: "goal_plan",
-    level: "info",
-    phase: "collecting_info",
-    message: "阶段耗时：整理背景信息",
-    details: formatTimingDetails({
-      elapsedMs: Date.now() - collectedInfoStartedAt,
-      usedClaude: Boolean(input.collectedInfo?.trim()),
-    }),
-  });
-  // #endregion
+      });
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_plan",
+        level: "info",
+        phase: "decomposing",
+        message: "阶段耗时：拆解子目标",
+        details: formatTimingDetails({
+          elapsedMs: Date.now() - decompositionStartedAt,
+          subGoalCount: decomposition.subGoals.length,
+        }),
+      });
+      checkpoint = {
+        ...checkpoint,
+        decomposition,
+        nextSubGoalIndex: 0,
+      };
+      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+    }
 
-  const userContext = {
-    goalText: input.goalText,
-    goalDetails: collectedInfoSummary.goalDetails,
-    timeline: collectedInfoSummary.timeline,
-    resources: collectedInfoSummary.resources,
-    constraints: collectedInfoSummary.constraints,
-    challenges: collectedInfoSummary.challenges,
-    preferences: collectedInfoSummary.preferences,
-    summary: collectedInfoSummary.summary,
-  };
+    const totalSubGoals = decomposition.subGoals.length;
+    const taskPlanningSummary: TaskPlanningSummaryItem[] = [...checkpoint.taskPlanningSummary];
+    const subGoals: GoalBreakdownDraft["subGoals"] = [...checkpoint.completedSubGoals];
+    const reviewSummary: string[] = [...checkpoint.reviewSummary];
+    const reviewRisks: string[] = [...checkpoint.reviewRisks];
 
-  input.onProgress?.({
-    phase: "decomposing",
-    message: "正在拆解子目标...",
-  });
-  const decompositionStartedAt = Date.now();
-  const decomposition = await decomposeGoalWithClaude({
-    goalTitle: input.goalText,
-    goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
-    userContext,
-    config,
-    runtimeEnv: input.runtimeEnv,
-    conversationId: input.conversationId,
-    signal: input.signal,
-    requestId: input.requestId,
-  });
-  // #region debug-point goal-planning-latency-stage-decompose
-  appendGoalLog({
-    requestId: input.requestId,
-    scope: "goal_plan",
-    level: "info",
-    phase: "decomposing",
-    message: "阶段耗时：拆解子目标",
-    details: formatTimingDetails({
-      elapsedMs: Date.now() - decompositionStartedAt,
-      subGoalCount: decomposition.subGoals.length,
-    }),
-  });
-  // #endregion
+    for (let subGoalIndex = checkpoint.nextSubGoalIndex; subGoalIndex < decomposition.subGoals.length; subGoalIndex += 1) {
+      const subGoal = decomposition.subGoals[subGoalIndex];
+      const subGoalStartedAt = Date.now();
+      let generatedTasks = checkpoint.activeSubGoal?.index === subGoalIndex
+        ? checkpoint.activeSubGoal.generatedTasks
+        : undefined;
 
-  const taskPlanningSummary: Array<{
-    subGoalName: string;
-    taskCount: number;
-    uncoveredRisks?: string[];
-  }> = [];
+      if (generatedTasks) {
+        input.onProgress?.({
+          phase: "reviewing_tasks",
+          message: `复用 checkpoint 中子目标 ${subGoalIndex + 1}/${totalSubGoals} 的已生成任务：${subGoal.name}`,
+        });
+      } else {
+        input.onProgress?.({
+          phase: "generating_tasks",
+          message: `正在为子目标 ${subGoalIndex + 1}/${totalSubGoals} 生成任务：${subGoal.name}`,
+        });
+        checkpoint = {
+          ...checkpoint,
+          stage: "generating_tasks",
+          activeSubGoal: { index: subGoalIndex },
+        };
+        writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+        generatedTasks = await generateTasksForSubGoalWithClaude({
+          goalTitle: input.goalText,
+          goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
+          userContext,
+          subGoalName: subGoal.name,
+          subGoalDescription: subGoal.description,
+          successCriteria: subGoal.successCriteria.map(
+            (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+          ),
+          config,
+          runtimeEnv: input.runtimeEnv,
+          conversationId: input.conversationId,
+          signal: input.signal,
+          requestId: input.requestId,
+          subGoalIndex: subGoalIndex + 1,
+          totalSubGoals,
+        });
+        checkpoint = {
+          ...checkpoint,
+          activeSubGoal: {
+            index: subGoalIndex,
+            generatedTasks,
+          },
+        };
+        writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+      }
 
-  const subGoals: GoalBreakdownDraft["subGoals"] = [];
-  const reviewSummary: string[] = [];
-  const reviewRisks: string[] = [];
-  const totalSubGoals = decomposition.subGoals.length;
+      input.onProgress?.({
+        phase: "reviewing_tasks",
+        message: `正在 review 子目标 ${subGoalIndex + 1}/${totalSubGoals}：${subGoal.name}`,
+      });
+      checkpoint = {
+        ...checkpoint,
+        stage: "reviewing_tasks",
+        activeSubGoal: {
+          index: subGoalIndex,
+          generatedTasks,
+        },
+      };
+      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+      const review = await reviewTasksWithClaude({
+        goalTitle: input.goalText,
+        subGoalTitle: subGoal.name,
+        goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
+        tasksJson: JSON.stringify(generatedTasks.tasks, null, 2),
+        runtimeEnv: input.runtimeEnv,
+        conversationId: input.conversationId,
+        signal: input.signal,
+        requestId: input.requestId,
+        subGoalIndex: subGoalIndex + 1,
+        totalSubGoals,
+      });
 
-  for (let subGoalIndex = 0; subGoalIndex < decomposition.subGoals.length; subGoalIndex += 1) {
-    const subGoal = decomposition.subGoals[subGoalIndex];
-    const subGoalStartedAt = Date.now();
-    input.onProgress?.({
-      phase: "generating_tasks",
-      message: `正在为子目标 ${subGoalIndex + 1}/${totalSubGoals} 生成任务：${subGoal.name}`,
-    });
-    const generatedTasks = await generateTasksForSubGoalWithClaude({
-      goalTitle: input.goalText,
-      goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
-      userContext,
-      subGoalName: subGoal.name,
-      subGoalDescription: subGoal.description,
-      successCriteria: subGoal.successCriteria.map(
-        (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
-      ),
-      config,
-      runtimeEnv: input.runtimeEnv,
-      conversationId: input.conversationId,
-      signal: input.signal,
-      requestId: input.requestId,
-      subGoalIndex: subGoalIndex + 1,
-      totalSubGoals,
-    });
+      const tasks = applyTaskReview(generatedTasks.tasks, review);
+      const uncoveredRisks = generatedTasks.coverage_validation?.uncovered_risks ?? [];
+      const lowAlignmentCount = review.reviewResults.filter((item) => !item.aligned).length;
+
+      if (generatedTasks.coverage_validation?.explanation) {
+        reviewSummary.push(`${subGoal.name}：${generatedTasks.coverage_validation.explanation}`);
+      }
+      if (lowAlignmentCount > 0) {
+        reviewSummary.push(`${subGoal.name}：已根据 review 调整 ${lowAlignmentCount} 个任务。`);
+      }
+      reviewRisks.push(...uncoveredRisks);
+
+      taskPlanningSummary.push({
+        subGoalName: subGoal.name,
+        taskCount: tasks.length,
+        uncoveredRisks,
+      });
+
+      subGoals.push({
+        id: `draft-subgoal-${subGoal.id}`,
+        title: subGoal.name,
+        description: subGoal.description,
+        why: subGoal.why,
+        priority: subGoal.priority,
+        weight: subGoal.weight,
+        dependencies: subGoal.dependencies.map((dependency: number) => `draft-subgoal-${dependency}`),
+        estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
+        successCriteria: subGoal.successCriteria.map(
+          (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+        ),
+        tasks,
+      });
+
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_plan",
+        level: "info",
+        phase: "reviewing_tasks",
+        message: `阶段耗时：子目标 ${subGoalIndex + 1}/${totalSubGoals}`,
+        details: formatTimingDetails({
+          subGoalName: subGoal.name,
+          elapsedMs: Date.now() - subGoalStartedAt,
+          generatedTaskCount: generatedTasks.tasks.length,
+          finalTaskCount: tasks.length,
+          uncoveredRiskCount: uncoveredRisks.length,
+          resumedFromCheckpoint: Boolean(checkpoint.activeSubGoal?.generatedTasks),
+        }),
+      });
+
+      checkpoint = {
+        ...checkpoint,
+        stage: "generating_tasks",
+        completedSubGoals: subGoals,
+        taskPlanningSummary,
+        reviewSummary,
+        reviewRisks,
+        nextSubGoalIndex: subGoalIndex + 1,
+        activeSubGoal: undefined,
+      };
+      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+    }
 
     input.onProgress?.({
       phase: "reviewing_tasks",
-      message: `正在 review 子目标 ${subGoalIndex + 1}/${totalSubGoals}：${subGoal.name}`,
+      message: "正在汇总规划结果...",
     });
-    const review = await reviewTasksWithClaude({
-      goalTitle: input.goalText,
-      subGoalTitle: subGoal.name,
-      goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
-      tasksJson: JSON.stringify(generatedTasks.tasks, null, 2),
+    checkpoint = {
+      ...checkpoint,
+      stage: "presenting_plan",
+    };
+    writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+    const presentationStartedAt = Date.now();
+    const presentation = checkpoint.presentation ?? await buildPlanPresentationWithClaude({
+      goalText: input.goalText,
+      collectedInfoSummary,
+      decomposition,
+      taskPlanningSummary,
       runtimeEnv: input.runtimeEnv,
       conversationId: input.conversationId,
       signal: input.signal,
       requestId: input.requestId,
-      subGoalIndex: subGoalIndex + 1,
-      totalSubGoals,
     });
-
-    const tasks = applyTaskReview(generatedTasks.tasks, review);
-    const uncoveredRisks = generatedTasks.coverage_validation?.uncovered_risks ?? [];
-    const lowAlignmentCount = review.reviewResults.filter((item) => !item.aligned).length;
-
-    if (generatedTasks.coverage_validation?.explanation) {
-      reviewSummary.push(`${subGoal.name}：${generatedTasks.coverage_validation.explanation}`);
-    }
-    if (lowAlignmentCount > 0) {
-      reviewSummary.push(`${subGoal.name}：已根据 review 调整 ${lowAlignmentCount} 个任务。`);
-    }
-    reviewRisks.push(...uncoveredRisks);
-
-    taskPlanningSummary.push({
-      subGoalName: subGoal.name,
-      taskCount: tasks.length,
-      uncoveredRisks,
-    });
-
-    subGoals.push({
-      id: `draft-subgoal-${subGoal.id}`,
-      title: subGoal.name,
-      description: subGoal.description,
-      why: subGoal.why,
-      priority: subGoal.priority,
-      weight: subGoal.weight,
-      dependencies: subGoal.dependencies.map((dependency: number) => `draft-subgoal-${dependency}`),
-      estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
-      successCriteria: subGoal.successCriteria.map(
-        (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
-      ),
-      tasks,
-    });
-
-    // #region debug-point goal-planning-latency-stage-subgoal
     appendGoalLog({
       requestId: input.requestId,
       scope: "goal_plan",
       level: "info",
       phase: "reviewing_tasks",
-      message: `阶段耗时：子目标 ${subGoalIndex + 1}/${totalSubGoals}`,
+      message: "阶段耗时：生成前端展示摘要",
       details: formatTimingDetails({
-        subGoalName: subGoal.name,
-        elapsedMs: Date.now() - subGoalStartedAt,
-        generatedTaskCount: generatedTasks.tasks.length,
-        finalTaskCount: tasks.length,
-        uncoveredRiskCount: uncoveredRisks.length,
+        elapsedMs: Date.now() - presentationStartedAt,
       }),
     });
-    // #endregion
+
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_plan",
+      level: "info",
+      phase: "presenting_plan",
+      message: "阶段耗时：目标规划总计",
+      details: formatTimingDetails({
+        elapsedMs: Date.now() - planStartedAt,
+        subGoalCount: totalSubGoals,
+      }),
+    });
+
+    const draft = validateGoalDraft({
+      goalTitle: presentation.goalTitle,
+      summary: presentation.summary,
+      deadline: presentation.deadline || normalizeDeadline(collectedInfoSummary.timeline || ""),
+      goalAnalysis: decomposition.goalAnalysis,
+      collectedInfoSummary,
+      assumptions: dedupeStrings(decomposition.goalAnalysis.assumptions ?? []),
+      risks: dedupeStrings([...decomposition.risks, ...reviewRisks]),
+      reasoning: decomposition.reasoning,
+      executionOrder: decomposition.executionOrder,
+      reviewSummary,
+      notificationStrategy: presentation.notificationStrategy,
+      subGoals,
+    });
+    checkpoint = {
+      ...checkpoint,
+      status: "completed",
+      presentation,
+      draft,
+    };
+    writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+    return draft;
+  } catch (error) {
+    checkpoint = {
+      ...checkpoint,
+      status: "failed",
+      interrupted: error instanceof DOMException && error.name === "AbortError",
+      lastError: error instanceof Error ? error.message : "目标规划生成失败",
+    };
+    writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+    throw error;
   }
-
-  input.onProgress?.({
-    phase: "reviewing_tasks",
-    message: "正在汇总规划结果...",
-  });
-  const presentationStartedAt = Date.now();
-  const presentation = await buildPlanPresentationWithClaude({
-    goalText: input.goalText,
-    collectedInfoSummary,
-    decomposition,
-    taskPlanningSummary,
-    runtimeEnv: input.runtimeEnv,
-    conversationId: input.conversationId,
-    signal: input.signal,
-    requestId: input.requestId,
-  });
-  // #region debug-point goal-planning-latency-stage-presentation
-  appendGoalLog({
-    requestId: input.requestId,
-    scope: "goal_plan",
-    level: "info",
-    phase: "reviewing_tasks",
-    message: "阶段耗时：生成前端展示摘要",
-    details: formatTimingDetails({
-      elapsedMs: Date.now() - presentationStartedAt,
-    }),
-  });
-  // #endregion
-
-  // #region debug-point goal-planning-latency-stage-total
-  appendGoalLog({
-    requestId: input.requestId,
-    scope: "goal_plan",
-    level: "info",
-    phase: "presenting_plan",
-    message: "阶段耗时：目标规划总计",
-    details: formatTimingDetails({
-      elapsedMs: Date.now() - planStartedAt,
-      subGoalCount: totalSubGoals,
-    }),
-  });
-  // #endregion
-
-  return validateGoalDraft({
-    goalTitle: presentation.goalTitle,
-    summary: presentation.summary,
-    deadline: presentation.deadline || normalizeDeadline(collectedInfoSummary.timeline || ""),
-    goalAnalysis: decomposition.goalAnalysis,
-    collectedInfoSummary,
-    assumptions: dedupeStrings(decomposition.goalAnalysis.assumptions ?? []),
-    risks: dedupeStrings([...decomposition.risks, ...reviewRisks]),
-    reasoning: decomposition.reasoning,
-    executionOrder: decomposition.executionOrder,
-    reviewSummary,
-    notificationStrategy: presentation.notificationStrategy,
-    subGoals,
-  });
 }
 
 export async function generateGoalClarificationQuestionsWithClaude(input: {

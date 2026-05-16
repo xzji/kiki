@@ -1,10 +1,11 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Minimize2, X } from "lucide-react";
 import { notFound, useRouter } from "next/navigation";
 
 import { ExecutionResultBody, buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
 import { resolveInboxTaskContext } from "@/lib/inboxItem";
+import { taskDrawerReturnPath } from "@/lib/routes";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 
@@ -29,9 +30,17 @@ export default function InboxResultPage({ params }: { params: { itemId: string }
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="ml-auto text-right text-[13px] font-medium text-[#1F2328]">
+        <div className="ml-auto min-w-0 flex-1 truncate text-right text-[13px] font-medium text-[#1F2328]">
           {buildInstanceCardTitle(context.task, context.instance)}
         </div>
+        <button
+          type="button"
+          aria-label="收起为右侧边栏"
+          onClick={() => router.push(taskDrawerReturnPath(context.goal.id, context.task.id))}
+          className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+        >
+          <Minimize2 className="h-4 w-4" />
+        </button>
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">

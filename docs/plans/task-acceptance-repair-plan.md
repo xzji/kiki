@@ -743,7 +743,7 @@ async function runTaskWithAcceptance(input) {
 ### 阶段一：本地校验报告
 
 - 新增 `LocalValidationReport`。
-- 把现有 `enforceDeliverableContract` 拆成可复用本地校验。
+- 把现有 `enforceDeliverableRequirements` 拆成可复用本地校验。
 - 先覆盖：
   - `missing_task_result`
   - `empty_blocks`

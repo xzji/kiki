@@ -485,7 +485,7 @@
       "type": "assistant",
       "status": "running",
       "title": "Agent 过程输出（非最终结果）",
-      "thought": "当前工作目录只有 prompt.md 文件。根据协作契约（用户介入时机=after_agent_output），我需要先产出完整的行程方案，然后等待用户确认。",
+      "thought": "当前工作目录只有 prompt.md 文件。根据协作要求（用户介入时机=after_agent_output），我需要先产出完整的行程方案，然后等待用户确认。",
       "index": 3
     },
     {

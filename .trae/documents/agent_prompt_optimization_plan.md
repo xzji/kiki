@@ -28,7 +28,7 @@
 
 ## 1. 摘要
 
-* 当前 prompt 体量约 **200+ 行**，大量规则互相重复（交付物契约 × 执行约束 × 结构化产物契约 × 返回 JSON 示例），且没有按「执行判断流」组织。
+* 当前 prompt 体量约 **200+ 行**，大量规则互相重复（交付物要求 × 执行约束 × 结构化产物要求 × 返回 JSON 示例），且没有按「执行判断流」组织。
 
 * 对这类 `userInteractionTiming = before_execution`、`userInteractionType = answer`、`mode = agent_user_collaborative` 的任务，prompt 没有**前置判断分支**：Agent 进来第一眼看到的是"你必须真实推进任务"和"必须产出 task\_result.blocks"，然后在第 8 条才出现"缺用户输入要立刻停"。结果就是 Agent 容易先编一份"三个航班方案"占位，再被本地校验判为 `artifact_only / blocked_state_invalid`，触发修复轮，浪费一次 Claude 调用。
 
@@ -44,7 +44,7 @@
 
 ### 2.1 指令顺序让"该停"被"必须交付"淹没
 
-* [goalTaskPrompt.ts:105-107](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/goalTaskPrompt.ts#L105-L107) 开场就是"请以交付物契约为核心真实推进任务"、"不是证明自己做过事情，而是交付可验收产物"——这会把模型推向"赶紧产出 blocks"。
+* [goalTaskPrompt.ts:105-107](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/goalTaskPrompt.ts#L105-L107) 开场就是"请以交付物要求为核心真实推进任务"、"不是证明自己做过事情，而是交付可验收产物"——这会把模型推向"赶紧产出 blocks"。
 
 * [goalTaskPrompt.ts:129](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/goalTaskPrompt.ts#L129) 执行约束第 1 条 `优先直接执行、检索、分析、生成结果` 再次强化。
 
@@ -94,17 +94,17 @@
   "presentation": "${task.expectedResult?.presentation || (...)}"
   ```
 
-* 当前任务 `presentation = comparison_table`（在 prompt 上面交付物契约里展示为"呈现形态：comparison\_table"），但 `TASK_RESULT_PROMPT_FRAGMENT` 里说"信息类报告优先用 `presentation=visual_report`"。两套命名混用，Agent 极可能原样抄成 `meta.presentation = "comparison_table"`——这和前端可视化渲染器期望的枚举对不上。
+* 当前任务 `presentation = comparison_table`（在 prompt 上面交付物要求里展示为"呈现形态：comparison\_table"），但 `TASK_RESULT_PROMPT_FRAGMENT` 里说"信息类报告优先用 `presentation=visual_report`"。两套命名混用，Agent 极可能原样抄成 `meta.presentation = "comparison_table"`——这和前端可视化渲染器期望的枚举对不上。
 
 * 根因：数据源里 `expectedResult.presentation` 把 block 级呈现（`comparison_table`）和结果级呈现（`visual_report`）塞进了同一个字段。
 
-### 2.5 交付物契约表达形式不利于机器对齐
+### 2.5 交付物要求表达形式不利于机器对齐
 
-* 交付物契约用中文散文式 bullet：`- 结果类型：information`、`- 主格式：structured_blocks`、`- 必须包含的 blocks：heading、key_value、comparison_table、callout`。
+* 交付物要求用中文散文式 bullet：`- 结果类型：information`、`- 主格式：structured_blocks`、`- 必须包含的 blocks：heading、key_value、comparison_table、callout`。
 
 * 这些字段是**检查清单**（验收会逐项 match），但在 prompt 里是纯文本，没有结构化 JSON 形态。Agent 难以把它们直接映射到 `meta` 和 `deliverable_check.criteria_results`。
 
-### 2.6 协作契约第 6-10 条的"options 必须 2-5 个"与新 UI 不一致
+### 2.6 协作要求第 6-10 条的"options 必须 2-5 个"与新 UI 不一致
 
 * UI 最近要求"3 个候选 + 1 个自填"（参见最近会话记忆：UI Preference）。
 
@@ -125,7 +125,7 @@
 **位置**：`buildGoalTaskRunnerPrompt` 返回字符串，在当前 L105 的开场语之后、"目标/子目标/任务标题"之前，插入一个 Step 0 块。
 
 **关键：Step 0 内部必须显式分支，避免误伤 agent\_autonomous 任务**
-Step 0 的触发条件绑定协作契约字段，而不是一刀切要求所有任务都走"先问用户"：
+Step 0 的触发条件绑定协作要求字段，而不是一刀切要求所有任务都走"先问用户"：
 
 * `collaboration.mode = agent_user_collaborative` **且** `userInteractionType ∈ {answer, provide_context}` **且** `userInteractionTiming = before_execution` → 走模板 B 检查。
 
@@ -137,7 +137,7 @@ Step 0 的触发条件绑定协作契约字段，而不是一刀切要求所有�
 
 ```
 【第一步：执行前提自检（必须先做）】
-先看你当前任务的"协作契约 / 用户介入时机 / 用户介入类型"，按以下规则判断：
+先看你当前任务的"协作要求 / 用户介入时机 / 用户介入类型"，按以下规则判断：
 
 A. 如果 协作模式=agent_user_collaborative 且 用户介入时机=before_execution 且
    用户介入类型 ∈ {answer, provide_context}：
@@ -155,7 +155,7 @@ B. 如果 协作模式=agent_autonomous：
 C. 如果 用户介入时机 ∈ {during_execution, after_agent_output}：
    1) Agent 应先产出可选方案 / 对比 / 候选集，填入 task_result.blocks；
    2) 在 interaction_requirement 里注明"需要用户在该节点选择/审核"，
-      awaiting_user=true，interaction_requirement.type 按协作契约决定（confirm / answer 等）。
+      awaiting_user=true，interaction_requirement.type 按协作要求决定（confirm / answer 等）。
 
 D. 如果本轮是"恢复执行模式" (resumeBlock 存在)：
    1) 仅针对上一轮新暴露的缺口执行 Step 0；
@@ -235,7 +235,7 @@ D. 如果本轮是"恢复执行模式" (resumeBlock 存在)：
 
   * 是 `comparison_table` / `key_value` / `list` 等 block kind：统一转成 `visual_report`（信息类）或 `document`（deliverable 类）。
 
-* 交付物契约列表里把 `- 呈现形态：comparison_table` 这一行改为两行：
+* 交付物要求列表里把 `- 呈现形态：comparison_table` 这一行改为两行：
 
   * `- 结果级呈现：visual_report`
 
@@ -251,16 +251,16 @@ D. 如果本轮是"恢复执行模式" (resumeBlock 存在)：
 
   * `TASK_RESULT_PROMPT_FRAGMENT` 内的"第 6 条"。
 
-* 删除：执行约束 2、5 和验收规则 4 中的重复；这些位置替换为引用："详见 结构化产物契约 第 6 条"。
+* 删除：执行约束 2、5 和验收规则 4 中的重复；这些位置替换为引用："详见 结构化产物要求 第 6 条"。
 
 * 把"allowed block kinds"从执行约束 3 移除，只保留在 `TASK_RESULT_PROMPT_FRAGMENT`。
 
-### 3.6 交付物契约 → 结构化 JSON 形态
+### 3.6 交付物要求 → 结构化 JSON 形态
 
 * 在当前 bullet 形式之外（保留 bullet 以便人读），**追加**一段：
 
   ```
-  【交付物契约机器可读视图】(Agent 必须把它原样映射到最终 deliverable_check.criteria_results)
+  【交付物要求机器可读视图】(Agent 必须把它原样映射到最终 deliverable_check.criteria_results)
   {
     "resultType": "information",
     "primaryFormat": "structured_blocks",
@@ -295,7 +295,7 @@ D. 如果本轮是"恢复执行模式" (resumeBlock 存在)：
 
 | 文件                                                                                                                                                               | 改动概要                                                                                                                                                                      |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [src/lib/server/goalTaskPrompt.ts](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/goalTaskPrompt.ts)                                   | ① 开场之后插入 Step 0 段落；② 执行约束 8 换成「模板 A / 模板 B」两段示例 JSON；③ L194 修复 presentation 取值映射；④ 交付物契约追加机器可读 JSON；⑤ 清理与 TASK\_RESULT\_PROMPT\_FRAGMENT 重复的条目；⑥ resumeBlock 末尾追加"只补新缺口"。 |
+| [src/lib/server/goalTaskPrompt.ts](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/goalTaskPrompt.ts)                                   | ① 开场之后插入 Step 0 段落；② 执行约束 8 换成「模板 A / 模板 B」两段示例 JSON；③ L194 修复 presentation 取值映射；④ 交付物要求追加机器可读 JSON；⑤ 清理与 TASK\_RESULT\_PROMPT\_FRAGMENT 重复的条目；⑥ resumeBlock 末尾追加"只补新缺口"。 |
 | [src/lib/taskResult/schemaForPrompt.ts](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/taskResult/schemaForPrompt.ts)                         | 第 5 条显式列举 presentation 合法枚举 `visual_report / document / dashboard / kanban`；删除与主 prompt 重复的第 6 条"只返回 artifact 不算完成"（保留在主 prompt 更贴合执行上下文）。                                |
 | 验收端对齐（仅核对，不改） [src/lib/server/goalTaskAcceptancePrompt.ts](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/goalTaskAcceptancePrompt.ts) | 确保 `presentation` 取值改动后，本地校验不再把 `visual_report` 判为 `invalid_block_schema`。                                                                                                |
 
@@ -348,7 +348,7 @@ D. 如果本轮是"恢复执行模式" (resumeBlock 存在)：
    * 任意一个 during\_execution / after\_agent\_output 介入任务 → Step 0 走分支 C。
 
    * 任意一个处于 resume 状态的任务 → Step 0 走分支 D，且 resumeBlock 末尾出现"只补新缺口"。
-2. 每条 prompt 都需出现：Step 0 段、模板 A、模板 B、机器可读交付物契约 JSON、合法 presentation 枚举说明。
+2. 每条 prompt 都需出现：Step 0 段、模板 A、模板 B、机器可读交付物要求 JSON、合法 presentation 枚举说明。
 
 **B. 行为验证（实际执行，跨任务族回归）**
 

@@ -39,7 +39,7 @@ export type UserInteractionTiming =
   | "during_execution"
   | "after_agent_output"
   | "core_task_step";
-export type TaskCollaborationContract = {
+export type TaskCollaborationRequirements = {
   mode: TaskCollaborationMode;
   agentResponsibilities: string[];
   userResponsibilities: string[];
@@ -378,7 +378,7 @@ export type Task = {
   recommendedWorkingDirectory?: string;
   autoRunDisabled?: boolean;
   requiresConfirmation?: boolean;
-  collaboration?: TaskCollaborationContract;
+  collaboration?: TaskCollaborationRequirements;
 };
 
 export type SubGoal = {
@@ -546,7 +546,7 @@ export type GoalBreakdownDraft = {
       recommendedWorkingDirectory?: string;
       autoRunDisabled?: boolean;
       requiresConfirmation?: boolean;
-      collaboration?: TaskCollaborationContract;
+      collaboration?: TaskCollaborationRequirements;
     }[];
   }[];
 };

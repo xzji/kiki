@@ -4,10 +4,13 @@ import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import {
+  buildUserConfirmationOptionsRepairPrompt,
   buildUserConfirmationOptionsPrompt,
   formatOptionLabelsWithHints,
   normalizeConfirmationOptionLabels,
   parseUserConfirmationOptions,
+  type UserConfirmationOptionsContext,
+  type UserConfirmationOptionsResult,
 } from "@/lib/server/userConfirmationOptionsPrompt";
 import {
   buildTaskReadinessCheck,
@@ -261,9 +264,10 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
     readiness.missingUserInfo.length === 1
       ? `请补充${firstMissing.label}，KiKi 才能继续执行「${input.task.title.replace(/^任务\d+：/, "")}」。`
       : `请补充以下必要信息：${readiness.missingUserInfo.map((item) => item.label).join("、")}。`;
-  const options = await generateUserConfirmationOptions(input, question, readiness.missingUserInfo.flatMap((item) => item.options ?? []));
-  const suggestedActions = uniqueStrings([...options, "都不是，我自己描述"]).slice(0, 6);
-  const taskResult = buildReadinessBlockedTaskResult(input, readiness);
+  const readinessWithOptions = await generateOptionsForReadinessItems(input, readiness, question);
+  const options = readinessWithOptions.missingUserInfo.length === 1 ? readinessWithOptions.missingUserInfo[0].options ?? [] : [];
+  const suggestedActions = options;
+  const taskResult = buildReadinessBlockedTaskResult(input, readinessWithOptions);
   const interactionRequirement: InteractionRequirement = {
     type: "provide_context",
     timing: "before_execution",
@@ -292,7 +296,7 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
     interactionRequirement,
     blocker: null,
     structuredOutput: {
-      taskReadiness: readiness,
+      taskReadiness: readinessWithOptions,
       taskResult,
       interactionRequirement,
     },
@@ -415,80 +419,158 @@ function looksLikeMissingUserContext(result: ParsedTaskRunnerResult) {
   return /需要用户|请用户|用户确认|用户补充|补充.*信息|提供.*信息|缺少.*信息|确认.*城市|出发城市|出发地|目的地|预算|偏好|账号|登录|授权|选择|作答/.test(text);
 }
 
-function extractExampleOptions(text: string) {
-  const matches = Array.from(text.matchAll(/(?:如|例如|比如|包含|包括)[:：]?\s*([^\n。；;，,]+(?:[\/、，,][^\n。；;，,]+){1,6})/g));
-  const options = matches.flatMap((match) => match[1].split(/[\/、，,]/).map((item) => item.trim()));
-  return uniqueStrings(options)
-    .filter((item) => item.length >= 2 && item.length <= 16)
-    .slice(0, 5);
+function truncateForLog(value: string, limit = 2000) {
+  return value.length > limit ? `${value.slice(0, limit)}...` : value;
 }
 
-function defaultContextOptions(result: ParsedTaskRunnerResult) {
-  const text = textForUserInputDetection(result);
-  const exampleOptions = extractExampleOptions(text);
-  if (exampleOptions.length >= 2) return exampleOptions;
-  return semanticFallbackOptions(text);
-}
-
-function taskContextForOptionGeneration(input: RunGoalTaskInput) {
+function formatCollaborationSummary(task: Task) {
+  const collaboration = task.collaboration;
+  if (!collaboration) return "未声明协作要求";
   return [
-    `目标：${input.goal.title}`,
-    input.goal.summary ? `目标摘要：${input.goal.summary}` : "",
-    `子目标：${input.subGoal.title}`,
-    `任务标题：${input.task.title}`,
-    `任务描述：${input.task.description}`,
-    input.task.executionObjective ? `执行目标：${input.task.executionObjective}` : "",
-    `预期结果：${input.task.expectedOutcome}`,
-    input.task.expectedResult?.description ? `结果描述：${input.task.expectedResult.description}` : "",
-    input.task.expectedResult?.completionCriteria ? `完成标准：${input.task.expectedResult.completionCriteria}` : "",
-    input.resumeContext ? `恢复/用户反馈上下文：${input.resumeContext}` : "",
-  ].filter(Boolean).join("\n");
+    `协作模式：${collaboration.mode}`,
+    `Agent 负责：${collaboration.agentResponsibilities.join("；") || "完成任务并交付结果"}`,
+    `用户负责：${collaboration.userResponsibilities.join("；") || "无需用户参与"}`,
+    `用户介入类型：${collaboration.userInteractionType}`,
+    `用户介入时机：${collaboration.userInteractionTiming}`,
+    `用户动作文案：${collaboration.userFacingActionLabel}`,
+    `完成定义：${collaboration.completionDefinition}`,
+  ].join("\n");
 }
 
-function semanticFallbackOptions(text: string) {
-  if (/签证|visa/i.test(text)) {
-    return ["电子签 e-Visa（90天）", "落地签（需邀请函）", "贴纸签（使馆办理）"];
-  }
-  if (/住宿区域.*酒店类型|酒店类型.*住宿区域|住宿偏好|住哪|酒店/.test(text)) {
-    return ["海滩区+度假酒店（放松）", "市中心+四星酒店（便利）", "度假区+五星酒店（省心）"];
-  }
-  if (/住宿区域|酒店区域|住哪/.test(text)) return ["海滩区（看海方便）", "市中心（交通便利）", "度假区（安静省心）"];
-  if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型/.test(text)) return ["经济型（控制预算）", "四星舒适型（均衡）", "五星度假型（体验优先）"];
-  if (/城市|出发地|出发城市/.test(text)) return ["上海出发（航班多）", "广州出发（华南方便）", "北京出发（北方方便）"];
-  if (/日期|时间|出行/.test(text)) return ["周末短途（2-3天）", "工作日错峰（更便宜）", "节假日出行（需早订）"];
-  if (/预算|费用|价格/.test(text)) return ["经济优先（少花钱）", "性价比优先（均衡）", "舒适优先（体验好）"];
-  if (/餐厅|吃|美食/.test(text)) return ["本地小吃（便宜地道）", "热门餐厅（稳妥）", "高评分餐厅（体验好）"];
-  return ["主流稳妥方案（风险低）", "高性价比方案（均衡）", "体验优先方案（更舒适）"];
+function buildOptionGenerationContext(input: RunGoalTaskInput, options: {
+  question: string;
+  missingItems: TaskReadinessInfoItem[];
+  seedOptions?: string[];
+}): UserConfirmationOptionsContext {
+  return {
+    question: options.question,
+    goalTitle: input.goal.title,
+    goalSummary: input.goal.summary,
+    subGoalTitle: input.subGoal.title,
+    taskTitle: input.task.title,
+    taskDescription: input.task.description,
+    executionObjective: input.task.executionObjective,
+    expectedOutcome: input.task.expectedOutcome,
+    expectedResultDescription: input.task.expectedResult?.description,
+    completionCriteria: input.task.expectedResult?.completionCriteria,
+    collaborationSummary: formatCollaborationSummary(input.task),
+    missingItems: options.missingItems.map((item) => ({
+      id: item.id,
+      label: item.label,
+      description: item.description,
+      reason: item.reason,
+    })),
+    resumeContext: input.resumeContext,
+    seedOptions: normalizeConfirmationOptionLabels(options.seedOptions ?? []),
+  };
 }
 
-async function generateUserConfirmationOptions(input: RunGoalTaskInput, question: string, seedOptions: string[] = []) {
-  const normalizedSeedOptions = normalizeConfirmationOptionLabels(seedOptions);
-  if (normalizedSeedOptions.length >= 3) return normalizedSeedOptions;
-
-  const prompt = buildUserConfirmationOptionsPrompt({
-    question,
-    context: taskContextForOptionGeneration(input),
-  });
+async function runOptionGenerationPrompt(input: RunGoalTaskInput, context: UserConfirmationOptionsContext): Promise<UserConfirmationOptionsResult | null> {
+  let raw = "";
   try {
-    const raw = await runClaudePrompt(input, prompt, "readonly");
-    const generated = formatOptionLabelsWithHints(parseUserConfirmationOptions(raw));
-    const merged = normalizeConfirmationOptionLabels([...generated, ...normalizedSeedOptions]);
-    if (merged.length >= 3) return merged;
+    raw = await runClaudePrompt(input, buildUserConfirmationOptionsPrompt(context), "readonly");
+    const result = parseUserConfirmationOptions(raw);
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "info",
+      phase: "executing",
+      message: "用户候选项提示词生成成功",
+      details: JSON.stringify({
+        missingItemCount: context.missingItems.length,
+        optionCounts: result.items.map((item) => ({ id: item.id, count: item.options.length })),
+      }),
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+    return result;
   } catch (error) {
+    const firstError = error instanceof Error ? error.message : String(error);
     appendGoalLog({
       requestId: input.requestId,
       scope: "goal_task_execute",
       level: "warn",
       phase: "executing",
-      message: "用户确认候选项生成失败，回退到语义兜底",
-      details: error instanceof Error ? error.message : String(error),
+      message: "用户候选项提示词生成失败，准备重试",
+      details: JSON.stringify({ error: firstError, rawOutput: truncateForLog(raw) }),
       goalId: input.goal.id,
       taskId: input.task.id,
       taskInstanceId: input.instance.id,
     });
+    let repairRaw = "";
+    try {
+      repairRaw = await runClaudePrompt(
+        input,
+        buildUserConfirmationOptionsRepairPrompt({
+          context,
+          rawOutput: truncateForLog(raw),
+          errorSummary: firstError,
+        }),
+        "readonly",
+      );
+      return parseUserConfirmationOptions(repairRaw);
+    } catch (repairError) {
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_task_execute",
+        level: "warn",
+        phase: "executing",
+        message: "用户候选项生成重试失败，将仅展示自定义输入",
+        details: JSON.stringify({
+          error: repairError instanceof Error ? repairError.message : String(repairError),
+          rawOutput: truncateForLog(repairRaw),
+        }),
+        goalId: input.goal.id,
+        taskId: input.task.id,
+        taskInstanceId: input.instance.id,
+      });
+      return null;
+    }
   }
+}
 
-  return normalizeConfirmationOptionLabels([...normalizedSeedOptions, ...semanticFallbackOptions(`${question}\n${taskContextForOptionGeneration(input)}`)]);
+function generatedOptionsForItem(result: UserConfirmationOptionsResult | null, item: TaskReadinessInfoItem) {
+  if (!result) return [];
+  const matchedItem = result.items.find((entry) => entry.id === item.id) ?? result.items.find((entry) => entry.label === item.label);
+  if (!matchedItem) return [];
+  return formatOptionLabelsWithHints({ question: result.question, items: [matchedItem] }, matchedItem.id);
+}
+
+function generatedOptionMetaForItem(result: UserConfirmationOptionsResult | null, item: TaskReadinessInfoItem) {
+  return result?.items.find((entry) => entry.id === item.id) ?? result?.items.find((entry) => entry.label === item.label);
+}
+
+function applyGeneratedOptionsToReadiness(readiness: TaskReadinessCheck, result: UserConfirmationOptionsResult | null): TaskReadinessCheck {
+  const items = readiness.items.map((item) => {
+    if (item.status !== "missing_user" || item.source !== "user") return item;
+    const generatedMeta = generatedOptionMetaForItem(result, item);
+    return {
+      ...item,
+      options: generatedOptionsForItem(result, item),
+      optionQuestion: generatedMeta?.question,
+      inputPlaceholder: generatedMeta?.inputPlaceholder,
+    };
+  });
+  return {
+    ...readiness,
+    items,
+    missingUserInfo: items.filter((item) => item.status === "missing_user" && item.source === "user"),
+    agentRetrievableInfo: items.filter((item) => item.status === "agent_retrievable"),
+    availableInfo: items.filter((item) => item.status === "available"),
+  };
+}
+
+async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readiness: TaskReadinessCheck, question: string, seedOptions: string[] = []) {
+  const result = await runOptionGenerationPrompt(
+    input,
+    buildOptionGenerationContext(input, {
+      question,
+      missingItems: readiness.missingUserInfo,
+      seedOptions,
+    }),
+  );
+  return applyGeneratedOptionsToReadiness(readiness, result);
 }
 
 function normalizeBlockerLabel(value: string, index: number) {
@@ -509,7 +591,6 @@ function buildReadinessFromUserBlockers(blockers: string[], summary: string): Ta
     source: "user" as const,
     status: "missing_user" as const,
     reason: blocker,
-    options: semanticFallbackOptions(`${blocker}\n${summary}`),
   }));
   return {
     status: "blocked",
@@ -614,12 +695,8 @@ function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: Parsed
   const rawOptions = result.interactionRequirement.options?.length
     ? normalizeConfirmationOptionLabels(result.interactionRequirement.options)
     : [];
-  const options = rawOptions.length ? rawOptions : defaultContextOptions(result);
-  const suggestedActions = uniqueStrings([
-    ...(options ?? []),
-    ...(result.suggestedActions ?? []),
-    "都不是，我自己描述",
-  ]).slice(0, 5);
+  const options = rawOptions;
+  const suggestedActions = uniqueStrings([...(options ?? []), ...(result.suggestedActions ?? [])]).slice(0, 5);
   const deliverableCheck = result.deliverableCheck ?? buildFallbackDeliverableCheck(input, reason);
   const normalizedDeliverableCheck: DeliverableCheck = {
     ...deliverableCheck,
@@ -995,7 +1072,8 @@ async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: Par
   const reason = userBlockers.length ? userBlockers.join("；") : report.summary;
   const readiness = buildReadinessFromUserBlockers(userBlockers, reason);
   const question = userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason;
-  const options = await generateUserConfirmationOptions(input, question, readiness?.missingUserInfo.flatMap((item) => item.options ?? []) ?? userBlockers);
+  const readinessWithOptions = readiness ? await generateOptionsForReadinessItems(input, readiness, question, userBlockers) : null;
+  const options = readinessWithOptions?.missingUserInfo.length === 1 ? readinessWithOptions.missingUserInfo[0].options ?? [] : [];
   const interactionRequirement: InteractionRequirement = {
     type: "provide_context",
     timing: "after_agent_output",
@@ -1015,7 +1093,7 @@ async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: Par
     interactionRequirement,
     structuredOutput: {
       ...(result.structuredOutput ?? {}),
-      ...(readiness ? { taskReadiness: readiness } : {}),
+      ...(readinessWithOptions ? { taskReadiness: readinessWithOptions } : {}),
       acceptanceReport: report,
       acceptanceRuntime: runtime,
     },
@@ -1063,19 +1141,8 @@ function looksLikeUnstructuredConfirmationOutput(input: RunGoalTaskInput, rawOut
   return /用户确认|请用户确认|让用户确认|等待用户|确认选择|确认签证|选择.*方案|候选方案|对比分析|推荐方案/.test(rawOutput);
 }
 
-function inferConfirmationOptions(rawOutput: string, task: Task) {
-  const options = [
-    /电子签|E-?Visa/i.test(rawOutput) ? "电子签 e-Visa（90天）" : "",
-    /落地签/.test(rawOutput) ? "落地签（需邀请函）" : "",
-    /另纸签|纸质签/.test(rawOutput) ? "贴纸签（使馆办理）" : "",
-    /推荐/.test(rawOutput) ? "采用推荐方案（更稳妥）" : "",
-    ...semanticFallbackOptions(`${task.title}\n${task.description}\n${rawOutput}`),
-  ].filter(Boolean);
-  return normalizeConfirmationOptionLabels(uniqueStrings(options));
-}
-
 function buildAwaitingConfirmationFromRaw(input: RunGoalTaskInput, rawOutput: string): ParsedTaskRunnerResult {
-  const options = inferConfirmationOptions(rawOutput, input.task);
+  const options: string[] = [];
   const question =
     input.task.collaboration?.userFacingActionLabel ||
     `请确认「${input.task.title}」采用哪个方案？`;
@@ -1126,7 +1193,7 @@ function buildAwaitingConfirmationFromRaw(input: RunGoalTaskInput, rawOutput: st
       {
         criterion: input.task.expectedResult?.completionCriteria || input.task.expectedOutcome,
         status: "unknown",
-        evidence: "Agent 已产出候选内容，但协作契约要求用户确认后才能继续。",
+        evidence: "Agent 已产出候选内容，但协作要求要求用户确认后才能继续。",
       },
     ],
     gapReason: reason,
@@ -1823,7 +1890,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         notificationDecision,
       } satisfies Record<string, unknown>;
       if (unresolvedAgentRevision) {
-        const errorMessage = result.awaitingReason || "任务缺少组件化产出，Agent 自动补齐后仍未满足交付物契约。";
+        const errorMessage = result.awaitingReason || "任务缺少组件化产出，Agent 自动补齐后仍未满足交付物要求。";
         failGoalTelemetry({
           requestId: input.requestId,
           scope: "goal_task_execute",

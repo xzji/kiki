@@ -1,6 +1,6 @@
 # KiKi Agent 执行体系演进总规划
 
-> 目标：把 KiKi 的长程任务执行体系，从当前的“单轮契约化 Prompt + 结果回写”，演进为“结构化产物 + 可观测执行 + 可审批动作 + 可恢复任务 + 能力扩展”的完整 Agent 平台。
+> 目标：把 KiKi 的长程任务执行体系，从当前的“单轮要求化 Prompt + 结果回写”，演进为“结构化产物 + 可观测执行 + 可审批动作 + 可恢复任务 + 能力扩展”的完整 Agent 平台。
 
 本文是以下三份方案的上位路线图：
 
@@ -39,8 +39,8 @@
 
 ### 2.1 已具备能力
 
-- 目标规划：`/goal` 已能生成目标、子目标、任务与协作契约。
-- 协作契约：任务已包含 `TaskCollaborationContract`，区分 Agent / 用户职责。
+- 目标规划：`/goal` 已能生成目标、子目标、任务与协作要求。
+- 协作要求：任务已包含 `TaskCollaborationRequirements`，区分 Agent / 用户职责。
 - 执行 Prompt：`goalTaskPrompt.ts` 已硬绑定 `expectedOutcome` 和交付物验收。
 - 执行 Runner：`goalTaskRunner.ts` 已能调用 Claude CLI、解析 JSON、执行 deliverable check。
 - 后台任务：`runtime_jobs` 已支持本地 SQLite 持久化、worker 领取、状态同步。
@@ -75,7 +75,7 @@ goalPlanning
   → TaskDetailBody / ExecutionResultBody / Inbox
 ```
 
-### 3.2 结果契约优先
+### 3.2 结果要求优先
 
 先把“Agent 到底交付了什么”标准化，再升级执行循环。
 
@@ -207,7 +207,7 @@ Claude 输出 TaskResult
 
 | 模块 | 改造 |
 |---|---|
-| `goalTaskPrompt.ts` | 注入 TaskResult 输出契约 |
+| `goalTaskPrompt.ts` | 注入 TaskResult 输出要求 |
 | `goalTaskRunner.ts` | 解析 TaskResult，并派生 legacy 字段 |
 | `types/kiki.ts` | 在 `TaskInstanceResult` 中增加 `taskResult?: TaskResult` |
 | `GenericAgentResultView.tsx` | 优先渲染 `taskResult.blocks` |
@@ -331,13 +331,13 @@ Agent 执行
   → 从 blockedStepIndex 恢复
 ```
 
-### 和现有协作契约的关系
+### 和现有协作要求的关系
 
-`TaskCollaborationContract` 决定任务预期协作模式，`InteractionRequirement` 决定本轮执行实际需要什么介入。
+`TaskCollaborationRequirements` 决定任务预期协作模式，`InteractionRequirement` 决定本轮执行实际需要什么介入。
 
 两者需要保持一致：
 
-| 协作契约 | 运行时介入 |
+| 协作要求 | 运行时介入 |
 |---|---|
 | `agent_autonomous` | 默认不需要用户；`deliverable_gap` 由 Agent 自修 |
 | `agent_with_user_confirmation` | 结果完成后进入 `confirm` |
@@ -377,7 +377,7 @@ Agent 执行
 | 文件、代码、Shell、搜索等 Claude 内置能力 | 继续交给 Claude CLI，KiKi 做观察和记录 |
 | 邮件、日历、浏览器自动化、支付、第三方 SaaS | 进入 KiKi Capability Registry |
 
-### Capability 契约
+### Capability 要求
 
 ```ts
 type Capability = {
@@ -532,7 +532,7 @@ type CapabilityGap = {
 
 如果先做 Plan-Act-Reflect，会让执行过程更复杂，但最终仍可能产出不可验收结果。
 
-因此第一阶段要先建立“结果契约”：
+因此第一阶段要先建立“结果要求”：
 
 ```text
 expectedOutcome

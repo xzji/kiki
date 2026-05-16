@@ -4,6 +4,7 @@ import { ArrowUp, ChevronDown, Link2, Plus, Square, X } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 import { getSlashCommandSuggestions } from "@/lib/slashCommands";
+import type { SlashCommand } from "@/lib/slashCommands";
 
 type Props = {
   onSubmit: (
@@ -25,6 +26,10 @@ type Props = {
   autoFocus?: boolean;
 };
 
+function getCommandPayloadPlaceholder(command: SlashCommand) {
+  return command.placeholder.replace(new RegExp(`/${command.name}\\s*`), "");
+}
+
 export function AssistantComposer({
   onSubmit,
   placeholder = "输入任何想法，我会帮助你，没有什么大不了的事",
@@ -41,13 +46,17 @@ export function AssistantComposer({
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
+  const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isEmpty = value.trim().length === 0;
-  const commandSuggestions = disabled ? [] : getSlashCommandSuggestions(value);
+  const commandSuggestions = disabled || selectedCommand ? [] : getSlashCommandSuggestions(value);
   const showCommandMenu = commandSuggestions.length > 0 && !commandMenuDismissed;
+  const inputPlaceholder = selectedCommand
+    ? getCommandPayloadPlaceholder(selectedCommand)
+    : placeholder;
 
   const connectorItems = ["Notion", "Google Drive", "Slack", "Linear"];
   const modelItems = localMode ? ["Claude Code Local"] : ["GPT 5.4", "Claude 4.1", "Gemini 2.5 Pro"];
@@ -55,19 +64,22 @@ export function AssistantComposer({
   const selectCommand = (index: number) => {
     const command = commandSuggestions[index];
     if (!command) return;
-    setValue(`/${command.name} `);
+    setSelectedCommand(command);
+    setValue("");
     setActiveCommandIndex(0);
     setCommandMenuDismissed(true);
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(command.name.length + 2, command.name.length + 2);
+      textareaRef.current?.setSelectionRange(0, 0);
     });
   };
 
   const submit = () => {
-    const next = value.trim();
-    if (!next || disabled) return;
+    const payload = value.trim();
+    if (!payload || disabled) return;
+    const next = selectedCommand ? `/${selectedCommand.name} ${payload}` : payload;
     setValue("");
+    setSelectedCommand(null);
     if (textareaRef.current) textareaRef.current.value = "";
     setAttachments([]);
     void onSubmit(next, quotedMessage);
@@ -124,48 +136,66 @@ export function AssistantComposer({
             </button>
           </div>
         ) : null}
-        <textarea
-          ref={textareaRef}
-          autoFocus={autoFocus}
-          value={value}
-          onChange={(event) => {
-            setValue(event.target.value);
-            setActiveCommandIndex(0);
-            setCommandMenuDismissed(false);
-          }}
-          disabled={disabled}
-          onKeyDown={(event) => {
-            if (showCommandMenu) {
-              if (event.key === "ArrowDown") {
+        <div className="flex min-h-[48px] items-start gap-2">
+          {selectedCommand ? (
+            <span className="mt-0.5 shrink-0 rounded-md bg-[#111] px-2 py-1 font-mono text-[12px] leading-4 text-white">
+              /{selectedCommand.name}
+            </span>
+          ) : null}
+          <textarea
+            ref={textareaRef}
+            autoFocus={autoFocus}
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setActiveCommandIndex(0);
+              setCommandMenuDismissed(Boolean(selectedCommand));
+            }}
+            disabled={disabled}
+            onKeyDown={(event) => {
+              if (
+                selectedCommand &&
+                event.key === "Backspace" &&
+                event.currentTarget.selectionStart === 0 &&
+                event.currentTarget.selectionEnd === 0
+              ) {
                 event.preventDefault();
-                setActiveCommandIndex((prev) => (prev + 1) % commandSuggestions.length);
+                setSelectedCommand(null);
+                setCommandMenuDismissed(false);
                 return;
               }
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setActiveCommandIndex((prev) => (prev - 1 + commandSuggestions.length) % commandSuggestions.length);
-                return;
+              if (showCommandMenu) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setActiveCommandIndex((prev) => (prev + 1) % commandSuggestions.length);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setActiveCommandIndex((prev) => (prev - 1 + commandSuggestions.length) % commandSuggestions.length);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setCommandMenuDismissed(true);
+                  setActiveCommandIndex(0);
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  selectCommand(activeCommandIndex);
+                  return;
+                }
               }
-              if (event.key === "Escape") {
+              if (event.key === "Enter" && !event.shiftKey && !disabled) {
                 event.preventDefault();
-                setCommandMenuDismissed(true);
-                setActiveCommandIndex(0);
-                return;
+                submit();
               }
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                selectCommand(activeCommandIndex);
-                return;
-              }
-            }
-            if (event.key === "Enter" && !event.shiftKey && !disabled) {
-              event.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={placeholder}
-          className="min-h-[48px] w-full resize-none bg-transparent text-sm leading-6 text-[#1F2328] outline-none placeholder:text-[#9197A3]"
-        />
+            }}
+            placeholder={inputPlaceholder}
+            className="min-h-[48px] min-w-0 flex-1 resize-none bg-transparent text-sm leading-6 text-[#1F2328] outline-none placeholder:text-[#9197A3]"
+          />
+        </div>
         {showCommandMenu ? (
           <div className="absolute bottom-[74px] left-3 z-20 w-[300px] rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
             {commandSuggestions.map((command, index) => (

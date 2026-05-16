@@ -117,7 +117,7 @@ export function TaskAgentPromptDrawer({
             {promptText}
           </pre>
           <p className="mt-3 text-[12px] text-[#8C9198]">
-            说明：上述内容是 KiKi 在执行该任务时实时拼装并发送给 Agent 的完整 prompt。修改任务字段（标题、描述、执行目标、交付物契约、协作契约等）后，重新打开本面板会自动重新生成。
+            说明：上述内容是 KiKi 在执行该任务时实时拼装并发送给 Agent 的完整 prompt。修改任务字段（标题、描述、执行目标、交付物要求、协作要求等）后，重新打开本面板会自动重新生成。
           </p>
         </div>
       </div>

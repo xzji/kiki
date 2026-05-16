@@ -20,6 +20,7 @@ type RequestBody = {
   conversationId?: string;
   conversationContext?: string;
   collectedInfo?: string;
+  resumeFromCheckpoint?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
       conversationId: body.conversationId,
       conversationContext: body.conversationContext,
       collectedInfo: body.collectedInfo,
+      resumeFromCheckpoint: body.resumeFromCheckpoint,
       signal: request.signal,
       requestId,
       onProgress: ({ phase, message, details }) => {

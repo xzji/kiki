@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import { streamClaudeChat } from "@/lib/api/claude";
 import { continueGoalWorkflowAfterInfo, startGoalInfoCollection } from "@/lib/goalWorkflow";
+import { appendGoalProgressMessage } from "@/lib/goalProgressLog";
 import { parseSlashCommand } from "@/lib/slashCommands";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -183,7 +184,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
           onProgress: (progress) => {
             set({
               messages: get().messages.map((message) =>
-                message.id === assistantId ? { ...message, content: progress.message } : message,
+                message.id === assistantId
+                  ? { ...message, content: appendGoalProgressMessage(message.content, progress.message) }
+                  : message,
               ),
             });
           },
@@ -318,7 +321,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
           onProgress: (progress) => {
             set({
               messages: get().messages.map((message) =>
-                message.id === assistantId ? { ...message, content: progress.message } : message,
+                message.id === assistantId
+                  ? { ...message, content: appendGoalProgressMessage(message.content, progress.message) }
+                  : message,
               ),
             });
           },

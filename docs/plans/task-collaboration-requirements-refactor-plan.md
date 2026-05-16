@@ -1,4 +1,4 @@
-# 任务协作契约与结果推送改造方案
+# 任务协作要求与结果推送改造方案
 
 ## 背景
 
@@ -34,7 +34,7 @@
 
 ### 执行阶段
 
-当前执行 Prompt 已改为交付物契约驱动，要求 Claude 返回 `deliverable_check`，并要求主交付物放在 `artifacts[0]`。
+当前执行 Prompt 已改为交付物要求驱动，要求 Claude 返回 `deliverable_check`，并要求主交付物放在 `artifacts[0]`。
 
 当前问题：
 
@@ -59,7 +59,7 @@
 
 ## 目标模型
 
-新增任务协作契约 `TaskCollaborationContract`，在规划阶段明确 Agent 与用户的职责边界。
+新增任务协作要求 `TaskCollaborationRequirements`，在规划阶段明确 Agent 与用户的职责边界。
 
 ### 任务协作类型
 
@@ -119,7 +119,7 @@ export type UserInteractionTiming =
 ### 建议新增字段
 
 ```ts
-export type TaskCollaborationContract = {
+export type TaskCollaborationRequirements = {
   mode: TaskCollaborationMode;
   agentResponsibilities: string[];
   userResponsibilities: string[];
@@ -137,7 +137,7 @@ export type TaskCollaborationContract = {
 ```ts
 export type Task = {
   // existing fields...
-  collaboration?: TaskCollaborationContract;
+  collaboration?: TaskCollaborationRequirements;
 };
 ```
 
@@ -322,7 +322,7 @@ export type TaskResultNotificationType =
 ### 类型定义
 
 - `src/types/kiki.ts`
-  - 新增 `TaskCollaborationContract`
+  - 新增 `TaskCollaborationRequirements`
   - 新增 `InteractionRequirement`
   - 扩展 `Task`
   - 扩展 `TaskInstanceResult` 或 result payload
@@ -337,7 +337,7 @@ export type TaskResultNotificationType =
 ### 执行层
 
 - `src/lib/server/goalTaskPrompt.ts`
-  - 注入 collaboration contract
+  - 注入 collaboration requirements
   - 要求返回 `interaction_requirement`
 
 - `src/lib/server/goalTaskRunner.ts`
@@ -382,7 +382,7 @@ export type TaskResultNotificationType =
 
 ### 第一阶段：模型补齐
 
-1. 在 `kiki.ts` 新增协作契约和用户介入类型。
+1. 在 `kiki.ts` 新增协作要求和用户介入类型。
 2. 在规划 prompt 中要求输出 collaboration。
 3. normalize 旧任务时自动推断 collaboration。
 

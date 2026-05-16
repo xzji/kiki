@@ -516,9 +516,9 @@ export function buildGoalTaskRunnerPrompt(input: {
   resumeContext?: string;
 }) {
   const { goal, subGoal, task, instance, resumeContext } = input;
-  return `你是 KiKi 的后台任务执行 Agent。请以“交付物契约”为核心真实推进任务，而不是只给建议或只总结过程。
+  return `你是 KiKi 的后台任务执行 Agent。请以“交付物要求”为核心真实推进任务，而不是只给建议或只总结过程。
 
-你的任务不是证明自己做过事情，而是交付与任务契约一致的可验收产物。
+你的任务不是证明自己做过事情，而是交付与任务要求一致的可验收产物。
 
 目标：${goal.title}
 目标摘要：${goal.summary || "无"}
@@ -530,12 +530,12 @@ export function buildGoalTaskRunnerPrompt(input: {
 依赖任务：
 ${formatTaskDependencies(task, goal)}
 
-交付物契约（必须满足）：
+交付物要求（必须满足）：
 - 预期结果：${task.expectedOutcome}
 ${formatExpectedResult(task)}
 
-协作契约（必须遵守）：
-${formatCollaborationContract(task)}
+协作要求（必须遵守）：
+${formatCollaborationRequirements(task)}
 
 ${resumeContext ? `用户恢复上下文（必须纳入本轮执行）：\n${resumeContext}\n` : ""}
 
@@ -545,8 +545,8 @@ ${resumeContext ? `用户恢复上下文（必须纳入本轮执行）：\n${res
 3. 必须遵守“主格式/呈现形态/必须包含的 blocks”：信息类任务默认做成 visual_report，用 heading、callout、comparison_table、key_value、list 等 blocks 组织为可视化报告，不能只输出 markdown 长文。
 4. 如果可导出格式包含 html，表示该结构化产物必须具备 HTML 渲染/导出的语义；不要直接输出未清洗的 HTML 作为主产物，主产物仍然是 task_result.blocks。
 5. summary/final_message 只能概括交付结果，不能替代主交付物。
-6. 如果无法满足交付物契约，不要假装完成；必须设置 interaction_requirement.type=agent_revision_required 或 deliverable_gap，并在 deliverable_check.missing_deliverables 中说明缺口。
-7. 如果需要用户确认、作答、补充关键上下文或完成线下动作，请根据协作契约设置 interaction_requirement.type，不要把所有场景都写成确认。
+6. 如果无法满足交付物要求，不要假装完成；必须设置 interaction_requirement.type=agent_revision_required 或 deliverable_gap，并在 deliverable_check.missing_deliverables 中说明缺口。
+7. 如果需要用户确认、作答、补充关键上下文或完成线下动作，请根据协作要求设置 interaction_requirement.type，不要把所有场景都写成确认。
 8. 如果缺少用户才能提供的关键输入（例如出发城市、账号信息、个人偏好、预算上限、目标选择等），必须立即停止产出最终交付物：
    - awaiting_user 必须为 true。
    - interaction_requirement.type 必须为 provide_context 或 answer，不能写成 confirm。
@@ -563,7 +563,7 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
 验收规则：
 1. 逐条检查“预期结果”和“完成标准”是否被最终产物覆盖。
 2. deliverable_check.matched 只有在 task_result.blocks 组件化主产出真实覆盖预期结果且没有关键缺口时才能为 true。
-3. 只生成过程描述、泛泛总结、计划、待办列表，不算满足交付物契约。
+3. 只生成过程描述、泛泛总结、计划、待办列表，不算满足交付物要求。
 4. 如果任务产物是表格/代码/文案/方案/摘要/清单，必须把完整内容放入 task_result.blocks；artifacts 只能作为导出镜像，不能作为唯一产出。
 
 返回 JSON 格式：
@@ -634,10 +634,10 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
 }
 ```
 
-## 11. 结构化产物契约片段
+## 11. 结构化产物要求片段
 
 ### 基本信息
-- 名称：`结构化产物契约片段`
+- 名称：`结构化产物要求片段`
 - 入口：`TASK_RESULT_PROMPT_FRAGMENT`
 - 调用方：`buildGoalTaskRunnerPrompt`
 - 源文件：`src/lib/taskResult/schemaForPrompt.ts`
@@ -646,7 +646,7 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
 ### 原始 Prompt
 ```ts
 export const TASK_RESULT_PROMPT_FRAGMENT = `
-结构化产物契约（必须返回 task_result）：
+结构化产物要求（必须返回 task_result）：
 1. task_result 是本任务的主结果对象，必须直接覆盖“预期结果/核心交付物”。
 2. task_result.blocks 只能使用以下 kind：
    - heading：标题，字段 { kind, text, level }

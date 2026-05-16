@@ -74,6 +74,20 @@ function isVisibleExecutionStep(step: TaskExecutionStep) {
   );
 }
 
+function shouldDeferConcreteResultUntilUserInput(instance: TaskInstance) {
+  const requirement = instance.awaitingUser?.interactionRequirement ?? instance.result?.interactionRequirement;
+  if (!instance.awaitingUser || !requirement) return false;
+  if (requirement.type === "confirm" && requirement.timing === "after_agent_output") return false;
+  return (
+    requirement.type === "answer" ||
+    requirement.type === "provide_context" ||
+    requirement.type === "perform_offline_action" ||
+    requirement.timing === "before_execution" ||
+    requirement.timing === "during_execution" ||
+    requirement.timing === "core_task_step"
+  );
+}
+
 function isAssistantProcessStep(step: TaskExecutionStep) {
   return step.type === "assistant" && !step.toolName && step.title === "Agent 过程输出（非最终结果）";
 }
@@ -749,6 +763,14 @@ function InstanceCard({
 }
 
 function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskInstance }) {
+  if (shouldDeferConcreteResultUntilUserInput(instance)) {
+    return (
+      <div className="space-y-3">
+        <AwaitingUserResumePanel task={task} instance={instance} />
+      </div>
+    );
+  }
+
   const resultLine = getInstanceResultLine(task, instance);
   const failed = instance.status === "error";
   const genericSummary =

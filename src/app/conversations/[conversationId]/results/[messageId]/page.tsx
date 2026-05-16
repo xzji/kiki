@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Minimize2, X } from "lucide-react";
 import { notFound, useRouter } from "next/navigation";
 
 import { ExecutionResultBody, buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
@@ -42,9 +42,19 @@ export default function ConversationResultPage({
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="ml-auto text-right text-[13px] font-medium text-[#1F2328]">
+        <div className="ml-auto min-w-0 flex-1 truncate text-right text-[13px] font-medium text-[#1F2328]">
           {buildInstanceCardTitle(task, instance)}
         </div>
+        <button
+          type="button"
+          aria-label="收起为右侧边栏"
+          onClick={() =>
+            router.push(`/conversations/${conversation.id}?resultMessageId=${encodeURIComponent(message.id)}`)
+          }
+          className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+        >
+          <Minimize2 className="h-4 w-4" />
+        </button>
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">

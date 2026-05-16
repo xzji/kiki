@@ -481,7 +481,7 @@ await runtimeJobsRepository.completeJob(jobId, {
 |---|---|
 | 第 1 周 D1-D3 | 定义 `taskResult.ts` 全部 block 类型 + JSON Schema 自动生成脚本 |
 | 第 1 周 D4-D5 | 实现 `BlockRenderer` + 至少 8 个核心 block 组件（heading / paragraph / list / key_value / comparison_table / decision / action_request / callout） |
-| 第 2 周 D1-D2 | 改造 `goalTaskRunner.ts` 输出契约 + ajv 校验 + 容错链复用 |
+| 第 2 周 D1-D2 | 改造 `goalTaskRunner.ts` 输出要求 + ajv 校验 + 容错链复用 |
 | 第 2 周 D3 | `ArtifactSandbox` 实现 + mermaid/vega 两种 artifactType |
 | 第 2 周 D4 | 三个老组件重构为模板特征匹配 |
 | 第 2 周 D5 | 端到端联调：跑通"调研 SUV 车型"任务，产出 `comparison_table + decision` |

@@ -21,7 +21,7 @@ docs/
 | [01-presentation-block-renderer.md](./plans/01-presentation-block-renderer.md) | 呈现层方案：Block JSON + Artifact 沙箱，用通用渲染原语承载任务产物 |
 | [02-execution-agent-runner.md](./plans/02-execution-agent-runner.md) | 执行层方案：Capability + Plan-Act-Reflect，升级任务执行循环与副作用治理 |
 | [03-evolution-capability-forge.md](./plans/03-evolution-capability-forge.md) | 进化层方案：Capability Forge，通过能力缺口发现与锻造机制扩展 Agent 能力 |
-| [task-collaboration-contract-refactor-plan.md](./plans/task-collaboration-contract-refactor-plan.md) | 任务协作契约（TaskCollaborationContract）重构方案：明确 Agent / 用户职责分工与介入类型 |
+| [task-collaboration-requirements-refactor-plan.md](./plans/task-collaboration-requirements-refactor-plan.md) | 任务协作要求（TaskCollaborationRequirements）重构方案：明确 Agent / 用户职责分工与介入类型 |
 | [result-notification-judge-plan.md](./plans/result-notification-judge-plan.md) | 结果通知门禁逻辑：按 interaction type 决定何时推送会话卡片 |
 | [task-acceptance-repair-plan.md](./plans/task-acceptance-repair-plan.md) | 任务验收与补齐闭环：本地硬校验、独立验收员、定向修复与内容补齐 |
 | [goal-agent-autonomous-execution-plan.md](./plans/goal-agent-autonomous-execution-plan.md) | 长程目标 Agent 自主执行链路设计 |
@@ -31,7 +31,7 @@ docs/
 | [local-runtime-24h-daemon-product-plan.md](./plans/local-runtime-24h-daemon-product-plan.md) | 本地 Runtime 24h 守护进程（LaunchAgent）产品方案 |
 | [server-persistence-and-sync-architecture-plan.md](./plans/server-persistence-and-sync-architecture-plan.md) | 服务端持久化与前后端状态同步架构 |
 | [schedule-page-v1-and-v2-plan.md](./plans/schedule-page-v1-and-v2-plan.md) | 日程页 v1 / v2 设计与演进 |
-| [project-prompts-inventory.md](./plans/project-prompts-inventory.md) | 项目 Prompt 集中清单：Claude 会话、目标规划、任务执行与结构化产物契约 |
+| [project-prompts-inventory.md](./plans/project-prompts-inventory.md) | 项目 Prompt 集中清单：Claude 会话、目标规划、任务执行与结构化产物要求 |
 
 ## designs/ ｜ 设计与演示稿
 

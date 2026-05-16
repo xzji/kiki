@@ -44,6 +44,10 @@ export function getPlanningStateFilePath(conversationId: string) {
   return path.join(getConversationWorkspaceDir(conversationId), "planning", "state.json");
 }
 
+export function getPlanningCheckpointFilePath(conversationId: string) {
+  return path.join(getConversationWorkspaceDir(conversationId), "planning", "checkpoint.json");
+}
+
 export function getGoalSnapshotFilePath(conversationId: string) {
   return path.join(getConversationWorkspaceDir(conversationId), "goals", "goal.json");
 }

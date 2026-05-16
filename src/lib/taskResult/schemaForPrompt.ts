@@ -1,5 +1,5 @@
 export const TASK_RESULT_PROMPT_FRAGMENT = `
-结构化产物契约（必须返回 task_result）：
+结构化产物要求（必须返回 task_result）：
 1. task_result 是本任务的主结果对象，必须直接覆盖“预期结果/核心交付物”。
 2. task_result.blocks 只能使用以下 kind：
    - heading：标题，字段 { kind, text, level }

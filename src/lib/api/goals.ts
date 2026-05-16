@@ -68,6 +68,7 @@ export async function generateGoalPlan(input: {
   conversationId?: string;
   conversationContext?: string;
   collectedInfo?: string;
+  resumeFromCheckpoint?: boolean;
   signal?: AbortSignal;
   onServerProgress?: (progress: GoalServerProgress) => void;
 }): Promise<GoalBreakdownDraft> {
@@ -92,6 +93,72 @@ export async function generateGoalPlan(input: {
 
   if (!response.ok || !data.draft) {
     throw new Error(data.reason || "目标规划生成失败");
+  }
+
+  return data.draft;
+}
+
+export type GoalPlanCheckpointStatus = {
+  available: boolean;
+  checkpoint?: {
+    available: true;
+    goalText: string;
+    status: "running" | "completed" | "failed";
+    stage: string;
+    completedSubGoalCount: number;
+    totalSubGoalCount: number;
+    nextSubGoalIndex: number;
+    updatedAt: string;
+    hasCollectedInfo: boolean;
+  };
+  reason?: string;
+};
+
+export async function getGoalPlanCheckpoint(conversationId: string, signal?: AbortSignal) {
+  const response = await fetch(
+    `/api/goals/plan/checkpoint?conversationId=${encodeURIComponent(conversationId)}`,
+    {
+      method: "GET",
+      signal,
+      cache: "no-store",
+    },
+  );
+  const data = (await response.json()) as GoalPlanCheckpointStatus;
+  if (!response.ok) {
+    throw new Error(data.reason || "目标规划断点查询失败");
+  }
+  return data;
+}
+
+export async function resumeGoalPlanFromCheckpoint(input: {
+  conversationId: string;
+  runtimeEnv: RuntimeEnvironment;
+  config?: EasterEggSettings;
+  conversationContext?: string;
+  signal?: AbortSignal;
+  onServerProgress?: (progress: GoalServerProgress) => void;
+}): Promise<GoalBreakdownDraft> {
+  const { signal, ...body } = input;
+  const requestId = `goal-plan-resume-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const response = await withGoalProgressPolling({
+    requestId,
+    signal,
+    onProgress: input.onServerProgress,
+    task: () =>
+      fetch("/api/goals/plan/resume", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goal-request-id": requestId,
+        },
+        body: JSON.stringify(body),
+        signal,
+      }),
+  });
+  const data = (await response.json()) as { draft?: GoalBreakdownDraft; reason?: string };
+
+  if (!response.ok || !data.draft) {
+    throw new Error(data.reason || "目标规划断点恢复失败");
   }
 
   return data.draft;

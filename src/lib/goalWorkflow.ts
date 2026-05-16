@@ -1,6 +1,11 @@
 "use client";
 
-import { advanceGoalInfoCollection, generateGoalPlan } from "@/lib/api/goals";
+import {
+  advanceGoalInfoCollection,
+  generateGoalPlan,
+  getGoalPlanCheckpoint,
+  resumeGoalPlanFromCheckpoint,
+} from "@/lib/api/goals";
 import {
   ensureConversationWorkspaceApi,
   writeConversationContextApi,
@@ -11,6 +16,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type {
   CollectedInfoSummary,
+  GoalBreakdownDraft,
   GoalInfoCollection,
   GoalInfoCollectionRound,
   GoalPlanningRecoveryAction,
@@ -174,18 +180,39 @@ function clearPlanningFailure(conversationId: string) {
   void writeCurrentConversationContext(conversationId);
 }
 
+async function commitGoalDraftToStores(input: {
+  conversationId: string;
+  draft: GoalBreakdownDraft;
+}): Promise<GoalWorkflowResult> {
+  const conversationStore = useConversationStore.getState();
+  const goalStore = useGoalStore.getState();
+  const goal = goalStore.createGoalFromDraft(input.draft, { conversationId: input.conversationId });
+  conversationStore.setGoalForConversation(input.conversationId, goal.id);
+  conversationStore.renameConversation(input.conversationId, input.draft.goalTitle);
+  conversationStore.setGoalInfoCollection(input.conversationId, null);
+  clearPlanningFailure(input.conversationId);
+  await writeCurrentConversationContext(input.conversationId, goal.id);
+  return {
+    goalId: goal.id,
+    conversationId: input.conversationId,
+    goalTitle: input.draft.goalTitle,
+    summary: input.draft.summary,
+    subGoalCount: input.draft.subGoals.length,
+    taskCount: input.draft.subGoals.reduce((sum, subGoal) => sum + subGoal.tasks.length, 0),
+  };
+}
+
 async function runGoalPlanning(input: {
   goalText: string;
   conversationId: string;
   summary?: CollectedInfoSummary;
+  resumeFromCheckpoint?: boolean;
   signal?: AbortSignal;
   onProgress?: (progress: GoalWorkflowProgress) => void;
 }) {
   const runtimeEnv = assertClaudeRuntime();
   const goalConfig = useEasterEggSettingsStore.getState().getSettings();
-  const conversationStore = useConversationStore.getState();
-  const goalStore = useGoalStore.getState();
-  const conversation = conversationStore.conversations.find((item) => item.id === input.conversationId);
+  const conversation = useConversationStore.getState().conversations.find((item) => item.id === input.conversationId);
   const collection = conversation?.goalInfoCollection;
   await ensureClientConversationWorkspace(input.conversationId);
 
@@ -200,6 +227,7 @@ async function runGoalPlanning(input: {
       conversationId: input.conversationId,
       conversationContext: buildConversationContext(input.conversationId),
       collectedInfo: collection ? buildCollectedInfoTranscript(collection.rounds) : undefined,
+      resumeFromCheckpoint: input.resumeFromCheckpoint,
       signal: input.signal,
       onServerProgress: (progress) => {
         currentPhase = progress.phase;
@@ -215,22 +243,9 @@ async function runGoalPlanning(input: {
     }
 
     input.onProgress?.({ phase: "reviewing_tasks", message: "正在检查任务覆盖度..." });
-    const goal = goalStore.createGoalFromDraft(draft, { conversationId: input.conversationId });
-    conversationStore.setGoalForConversation(input.conversationId, goal.id);
-    conversationStore.renameConversation(input.conversationId, draft.goalTitle);
-    conversationStore.setGoalInfoCollection(input.conversationId, null);
-    clearPlanningFailure(input.conversationId);
-    await writeCurrentConversationContext(input.conversationId, goal.id);
+    const result = await commitGoalDraftToStores({ conversationId: input.conversationId, draft });
     input.onProgress?.({ phase: "presenting_plan", message: "目标规划草案已生成，等待你确认启动。" });
-
-    return {
-      goalId: goal.id,
-      conversationId: input.conversationId,
-      goalTitle: draft.goalTitle,
-      summary: draft.summary,
-      subGoalCount: draft.subGoals.length,
-      taskCount: draft.subGoals.reduce((sum, subGoal) => sum + subGoal.tasks.length, 0),
-    } satisfies GoalWorkflowResult;
+    return result;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     recordPlanningFailure({
@@ -242,6 +257,48 @@ async function runGoalPlanning(input: {
     });
     throw error;
   }
+}
+
+export async function hasRecoverableGoalPlanCheckpoint(conversationId: string, signal?: AbortSignal) {
+  try {
+    const checkpoint = await getGoalPlanCheckpoint(conversationId, signal);
+    return Boolean(checkpoint.available);
+  } catch {
+    return false;
+  }
+}
+
+export async function resumeGoalWorkflowFromCheckpoint(input: {
+  conversationId: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: GoalWorkflowProgress) => void;
+}): Promise<GoalInfoCollectionStepResult> {
+  const runtimeEnv = assertClaudeRuntime();
+  const goalConfig = useEasterEggSettingsStore.getState().getSettings();
+  input.onProgress?.({
+    phase: "generating_tasks",
+    message: "正在从已保存断点继续目标规划...",
+  });
+  const draft = await resumeGoalPlanFromCheckpoint({
+    conversationId: input.conversationId,
+    runtimeEnv,
+    config: goalConfig,
+    conversationContext: buildConversationContext(input.conversationId),
+    signal: input.signal,
+    onServerProgress: (progress) => {
+      input.onProgress?.({
+        phase: progress.phase,
+        message: progress.message,
+      });
+    },
+  });
+  input.onProgress?.({ phase: "reviewing_tasks", message: "正在检查任务覆盖度..." });
+  const result = await commitGoalDraftToStores({ conversationId: input.conversationId, draft });
+  input.onProgress?.({ phase: "presenting_plan", message: "目标规划草案已生成，等待你确认启动。" });
+  return {
+    kind: "planned",
+    ...result,
+  };
 }
 
 export async function startGoalWorkflow(input: {
@@ -546,6 +603,7 @@ export async function resumeGoalWorkflowFromRecovery(input: {
           goalText: collection.goalText,
           conversationId: input.conversationId,
           summary: mergedSummary,
+          resumeFromCheckpoint: true,
           signal: input.signal,
           onProgress: input.onProgress,
         })),
@@ -570,6 +628,7 @@ export async function resumeGoalWorkflowFromRecovery(input: {
       goalText: collection?.goalText || recovery.goalText,
       conversationId: input.conversationId,
       summary: collection?.summary,
+      resumeFromCheckpoint: true,
       signal: input.signal,
       onProgress: input.onProgress,
     })),

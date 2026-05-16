@@ -1,12 +1,16 @@
 "use client";
 
+import { Minimize2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+
 import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { ExecutionShell } from "@/components/task/ExecutionShell";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { taskDrawerReturnPath } from "@/lib/routes";
 import { useGoalStore } from "@/stores/goalStore";
 import type { Goal, Task } from "@/types/kiki";
-import { useEffect, useMemo, useState } from "react";
 
 function safeDecodeRouteParam(value: string) {
   try {
@@ -37,6 +41,7 @@ export default function TaskDetailPage({
   params: { goalId: string; taskId: string };
   searchParams?: { view?: string; instanceId?: string };
 }) {
+  const router = useRouter();
   const goals = useGoalStore((state) => state.goals);
   const replaceGoals = useGoalStore((state) => state.replaceGoals);
   const goalId = safeDecodeRouteParam(params.goalId);
@@ -95,12 +100,22 @@ export default function TaskDetailPage({
 
   return (
     <div className="mx-auto w-full max-w-3xl px-2 py-2">
-      <GoalPlanBreadcrumb
-        goalId={goal.id}
-        goalTitle={goal.title}
-        taskTitle={task.title.replace(/^任务\d+：/, "")}
-        className="mb-4"
-      />
+      <div className="mb-4 flex items-center gap-3">
+        <GoalPlanBreadcrumb
+          goalId={goal.id}
+          goalTitle={goal.title}
+          taskTitle={task.title.replace(/^任务\d+：/, "")}
+          className="min-w-0 flex-1 justify-start text-left"
+        />
+        <button
+          type="button"
+          aria-label="收起为右侧边栏"
+          onClick={() => router.push(taskDrawerReturnPath(goal.id, task.id))}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+        >
+          <Minimize2 className="h-4 w-4" />
+        </button>
+      </div>
       <TaskDetailBody goal={goal} task={task} />
     </div>
   );

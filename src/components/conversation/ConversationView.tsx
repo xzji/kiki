@@ -2,7 +2,7 @@
 
 import { ChevronsRight, LayoutList, Maximize2 } from "lucide-react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AssistantComposer } from "@/components/layout/AssistantComposer";
@@ -14,9 +14,12 @@ import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
 import {
   continueGoalWorkflowAfterInfo,
+  hasRecoverableGoalPlanCheckpoint,
+  resumeGoalWorkflowFromCheckpoint,
   resumeGoalWorkflowFromRecovery,
   startGoalInfoCollection,
 } from "@/lib/goalWorkflow";
+import { appendGoalProgressMessage } from "@/lib/goalProgressLog";
 import { openSettings } from "@/lib/settings";
 import { parseSlashCommand } from "@/lib/slashCommands";
 import { taskDetailPath } from "@/lib/routes";
@@ -91,6 +94,13 @@ function planningFailureMessage(error: unknown) {
   return `${message}\n\n已保留当前上下文。你可以回复“继续”“重试”或补充新的要求，KiKi 会判断是否从上次失败点恢复。`;
 }
 
+function appendTerminalNotice(content: string, notice: string, emptyContent: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return emptyContent;
+  if (trimmed.includes(notice) || trimmed.includes(emptyContent)) return content;
+  return `${content}\n\n${notice}`;
+}
+
 /**
  * 会话视图：
  * - 顶部栏：会话标题 + 右上角「目标规划」按钮（仅绑定目标时显示）
@@ -98,6 +108,8 @@ function planningFailureMessage(error: unknown) {
  * - 底部：输入框
  */
 export function ConversationView({ conversationId }: { conversationId: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const conversations = useConversationStore((state) => state.conversations);
   const appendMessage = useConversationStore((state) => state.appendMessage);
   const updateMessage = useConversationStore((state) => state.updateMessage);
@@ -129,6 +141,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const initializedConversationRef = useRef<string | null>(null);
   const [entryUnreadIds, setEntryUnreadIds] = useState<string[]>([]);
   const [showUnreadJump, setShowUnreadJump] = useState(false);
+  const [hasLocalActiveStream, setHasLocalActiveStream] = useState(false);
+  const resultMessageIdFromQuery = searchParams.get("resultMessageId");
 
   // 进入会话标记为已读
   useEffect(() => {
@@ -158,6 +172,53 @@ export function ConversationView({ conversationId }: { conversationId: string })
     el.scrollTop = el.scrollHeight;
   }, [sortedMessages.length]);
 
+  useEffect(() => {
+    if (!conversation || !resultMessageIdFromQuery) return;
+    const message = conversation.messages.find((item) => item.id === resultMessageIdFromQuery);
+    if (message?.kind !== "task_card") return;
+    setResultMessage(message);
+    router.replace(`/conversations/${conversation.id}`, { scroll: false });
+  }, [conversation, resultMessageIdFromQuery, router]);
+
+  useEffect(() => {
+    if (!conversation || conversation.status !== "streaming") return;
+    const activeAssistantId = activeAssistantMessageIdRef.current;
+    const hasActiveController =
+      Boolean(streamAbortRef.current) &&
+      Boolean(
+        activeAssistantId &&
+          conversation.messages.some(
+            (message) => message.id === activeAssistantId && message.status === "streaming",
+          ),
+      );
+    if (hasActiveController) return;
+
+    const streamingMessages = conversation.messages.filter((message) => message.status === "streaming");
+    const lastStreamingKikiMessage = [...streamingMessages]
+      .reverse()
+      .find((message) => message.role === "kiki");
+
+    streamingMessages.forEach((message) => {
+      updateMessage(conversation.id, message.id, (current) => ({
+        ...current,
+        status: "done",
+        content:
+          current.id === lastStreamingKikiMessage?.id
+            ? appendTerminalNotice(
+                current.content,
+                "（已停止，未检测到正在运行的任务）",
+                "已停止，未检测到正在运行的任务。",
+              )
+            : current.content,
+      }));
+    });
+    setConversationStatus(conversation.id, "idle");
+    setStreamError(null);
+    streamAbortRef.current = null;
+    activeAssistantMessageIdRef.current = null;
+    setHasLocalActiveStream(false);
+  }, [conversation, setConversationStatus, updateMessage]);
+
   const firstUnreadId = entryUnreadIds[0] ?? null;
   const unreadCount = entryUnreadIds.length;
 
@@ -178,7 +239,29 @@ export function ConversationView({ conversationId }: { conversationId: string })
     return () => window.cancelAnimationFrame(frame);
   }, [firstUnreadId, sortedMessages.length]);
 
-  if (!conversation) return notFound();
+  if (!conversation) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-white">
+        <header className="flex h-11 flex-none items-center border-b border-[#E5E7EB] px-2">
+          <div className="text-[15px] font-semibold text-[#1F2328]">会话不存在</div>
+        </header>
+        <div className="flex flex-1 items-center justify-center px-6">
+          <div className="max-w-sm text-center">
+            <div className="text-[15px] font-medium text-[#1F2328]">会话不存在或已被删除</div>
+            <div className="mt-2 text-[13px] leading-5 text-[#6B7280]">
+              当前链接指向的会话不在本地状态中，可能已经被清理或尚未成功保存。
+            </div>
+            <Link
+              href="/conversations"
+              className="mt-4 inline-flex rounded-lg border border-[#D0D7DE] px-3 py-2 text-[13px] text-[#1F2328] hover:border-[#111]"
+            >
+              返回会话列表
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const taskInfo = (() => {
     if (!taskInfoMessage || taskInfoMessage.kind !== "task_card") return null;
@@ -215,10 +298,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
     } | null,
   ) => {
     const parsedCommand = parseSlashCommand(text);
-    if (
-      conversation.planningRunState?.status === "failed" &&
+    const canResumePlanning =
       !(parsedCommand.kind === "command" && parsedCommand.command === "goal") &&
-      shouldResumePlanningFromMessage(text)
+      shouldResumePlanningFromMessage(text);
+    const hasLocalPlanningFailure = conversation.planningRunState?.status === "failed";
+    const hasCheckpointPlanningFailure =
+      canResumePlanning && !hasLocalPlanningFailure
+        ? await hasRecoverableGoalPlanCheckpoint(conversation.id)
+        : false;
+    if (
+      canResumePlanning &&
+      (hasLocalPlanningFailure || hasCheckpointPlanningFailure)
     ) {
       const now = new Date().toISOString();
       const userId = `msg-user-${Date.now()}`;
@@ -226,6 +316,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
+      setHasLocalActiveStream(true);
       appendMessage(conversation.id, {
         id: userId,
         kind: "text",
@@ -239,7 +330,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
         id: assistantId,
         kind: "text",
         role: "kiki",
-        content: "正在从上次失败点恢复目标规划...",
+        content: hasLocalPlanningFailure
+          ? "正在从上次失败点恢复目标规划..."
+          : "正在从已保存断点继续目标规划...",
         createdAt: now,
         status: "streaming",
         source: "kiki",
@@ -248,17 +341,24 @@ export function ConversationView({ conversationId }: { conversationId: string })
       setStreamError(null);
 
       try {
-        const result = await resumeGoalWorkflowFromRecovery({
-          conversationId: conversation.id,
-          userMessage: text,
-          signal: controller.signal,
-          onProgress: (progress) => {
-            updateMessage(conversation.id, assistantId, (message) => ({
-              ...message,
-              content: progress.message,
-            }));
-          },
-        });
+        const progressHandler = (progress: { message: string }) => {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: appendGoalProgressMessage(message.content, progress.message),
+          }));
+        };
+        const result = hasLocalPlanningFailure
+          ? await resumeGoalWorkflowFromRecovery({
+              conversationId: conversation.id,
+              userMessage: text,
+              signal: controller.signal,
+              onProgress: progressHandler,
+            })
+          : await resumeGoalWorkflowFromCheckpoint({
+              conversationId: conversation.id,
+              signal: controller.signal,
+              onProgress: progressHandler,
+            });
         if (result.kind === "collecting_info") {
           const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
           const questionText = latestRound.questions
@@ -295,6 +395,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
       } catch (error) {
         if (isAbortError(error)) {
           setConversationStatus(conversation.id, "idle");
+          if (streamAbortRef.current === controller) {
+            streamAbortRef.current = null;
+            activeAssistantMessageIdRef.current = null;
+            setHasLocalActiveStream(false);
+          }
           return;
         }
         updateMessage(conversation.id, assistantId, (message) => ({
@@ -308,6 +413,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         if (streamAbortRef.current === controller) {
           streamAbortRef.current = null;
           activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
         }
       }
       setQuotedMessage(null);
@@ -325,6 +431,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
+      setHasLocalActiveStream(true);
       appendMessage(conversation.id, {
         id: userId,
         kind: "text",
@@ -355,7 +462,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           onProgress: (progress) => {
             updateMessage(conversation.id, assistantId, (message) => ({
               ...message,
-              content: progress.message,
+              content: appendGoalProgressMessage(message.content, progress.message),
             }));
           },
         });
@@ -408,6 +515,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         if (streamAbortRef.current === controller) {
           streamAbortRef.current = null;
           activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
         }
       }
       setQuotedMessage(null);
@@ -426,6 +534,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
+      setHasLocalActiveStream(true);
       appendMessage(conversation.id, {
         id: userId,
         kind: "text",
@@ -456,7 +565,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           onProgress: (progress) => {
             updateMessage(conversation.id, assistantId, (message) => ({
               ...message,
-              content: progress.message,
+              content: appendGoalProgressMessage(message.content, progress.message),
             }));
           },
         });
@@ -486,6 +595,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       if (streamAbortRef.current === controller) {
         streamAbortRef.current = null;
         activeAssistantMessageIdRef.current = null;
+        setHasLocalActiveStream(false);
       }
       setQuotedMessage(null);
       return;
@@ -521,6 +631,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     };
     streamAbortRef.current = controller;
     activeAssistantMessageIdRef.current = assistantId;
+    setHasLocalActiveStream(true);
     if (!conversation.goalId && conversation.title === "新会话" && conversation.messages.length === 0) {
       renameConversation(conversation.id, buildAutoConversationTitle(text));
     }
@@ -615,6 +726,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       if (streamAbortRef.current === controller) {
         streamAbortRef.current = null;
         activeAssistantMessageIdRef.current = null;
+        setHasLocalActiveStream(false);
       }
     }
     setQuotedMessage(null);
@@ -627,13 +739,14 @@ export function ConversationView({ conversationId }: { conversationId: string })
       updateMessage(conversation.id, assistantId, (message) => ({
         ...message,
         status: "done",
-        content: message.content.trim() ? `${message.content}\n\n（已中断）` : "已中断",
+        content: appendTerminalNotice(message.content, "（已中断）", "已中断"),
       }));
     }
     setConversationStatus(conversation.id, "idle");
     setStreamError(null);
     streamAbortRef.current = null;
     activeAssistantMessageIdRef.current = null;
+    setHasLocalActiveStream(false);
   };
 
   return (
@@ -756,10 +869,10 @@ export function ConversationView({ conversationId }: { conversationId: string })
         <div className="mx-auto max-w-3xl">
           <AssistantComposer
             onSubmit={onSend}
-            disabled={conversation.status === "streaming"}
+            disabled={hasLocalActiveStream}
             autoFocus={conversation.messages.length === 0}
             localMode
-            onStop={conversation.status === "streaming" ? stopGeneration : undefined}
+            onStop={hasLocalActiveStream ? stopGeneration : undefined}
             quotedMessage={
               quotedMessage
                 ? {
