@@ -22,8 +22,8 @@ type Props = {
 
 const permissionOptions: { value: RuntimePermissionMode; label: string; description: string }[] = [
   { value: "readonly", label: "只读聊天", description: "只用于问答，不允许 Runtime 改动项目" },
-  { value: "confirm", label: "手动确认", description: "默认模式，遇到高风险指令先提示你确认权限" },
-  { value: "execute", label: "项目内可执行", description: "允许 Runtime 在当前项目目录内执行工具能力" },
+  { value: "confirm", label: "手动确认", description: "遇到需要工具权限的操作时交给 Claude CLI 确认" },
+  { value: "execute", label: "项目内可执行", description: "默认模式，允许 Runtime 在当前项目目录内执行工具能力" },
 ];
 
 const runtimeMeta: Record<LocalRuntimeKind, { accent: string; icon: ReactNode }> = {
@@ -39,7 +39,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
   const [runtimes, setRuntimes] = useState<RuntimeDiscoveryItem[]>([]);
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeDiscoveryItem | null>(null);
   const [workingDirectory, setWorkingDirectory] = useState("");
-  const [permissionMode, setPermissionMode] = useState<RuntimePermissionMode>("confirm");
+  const [permissionMode, setPermissionMode] = useState<RuntimePermissionMode>("execute");
   const [isScanning, setIsScanning] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isSelectingDirectory, setIsSelectingDirectory] = useState(false);
@@ -63,7 +63,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
     setRuntimes([]);
     setSelectedRuntime(null);
     setWorkingDirectory("");
-    setPermissionMode("confirm");
+    setPermissionMode("execute");
     setResult(null);
     setError(null);
     setIsScanning(false);

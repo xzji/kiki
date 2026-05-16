@@ -1,15 +1,28 @@
 "use client";
 
-import { startTaskRun, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import { cancelTaskRun, startTaskRun, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
 type TaskExecutionAction = "start" | "pause" | "resume" | "rerun";
 
-export async function runTaskExecutionAction(taskId: string, action: TaskExecutionAction) {
+export function canStopTaskInstance(instance: TaskInstance) {
+  return instance.status === "in_progress" || instance.status === "awaiting_user" || Boolean(instance.awaitingUser);
+}
+
+export async function runTaskExecutionAction(taskId: string, action: TaskExecutionAction, options?: { instanceId?: string }) {
   if (action === "pause") {
-    useGoalStore.getState().controlTaskExecution(taskId, action);
+    const location = findTaskLocation(useGoalStore.getState().goals, taskId);
+    if (!location) throw new Error("未找到对应任务。");
+    const target = resolveTargetInstance(location.task, "pause", options?.instanceId);
+    if (!target) throw new Error("未找到可停止的任务实例。");
+    if (!canStopTaskInstance(target)) throw new Error("当前任务实例不在执行中。");
+    await cancelTaskRun({
+      requestId: target.runner?.requestId,
+      taskInstanceId: target.id,
+    });
+    useGoalStore.getState().stopTaskInstanceRun(taskId, target.id);
     return;
   }
 
@@ -27,7 +40,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
   }
 
   let current = location;
-  let targetInstance = getLatestRunnableInstance(current.task, action);
+  let targetInstance = resolveTargetInstance(current.task, action, options?.instanceId);
 
   if (!targetInstance) {
     const created =
@@ -88,7 +101,12 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
         });
       })
       .catch((error) => {
-        useGoalStore.getState().markInstanceStatus(current.task.id, targetInstance!.id, "error");
+        useGoalStore.getState().failTaskInstanceRun({
+          taskId: current.task.id,
+          instanceId: targetInstance!.id,
+          requestId: run.requestId,
+          errorMessage: error instanceof Error ? error.message : "任务执行失败",
+        });
         console.error("手动执行任务失败", error);
       });
   } catch (error) {
@@ -110,9 +128,13 @@ function findTaskLocation(goals: Goal[], taskId: string) {
   return null;
 }
 
-function getLatestRunnableInstance(task: Task, action: TaskExecutionAction): TaskInstance | null {
+function resolveTargetInstance(task: Task, action: TaskExecutionAction, instanceId?: string): TaskInstance | null {
+  if (instanceId) {
+    return task.instances.find((instance) => instance.id === instanceId) ?? null;
+  }
+  if (action === "start") return null;
   if (action === "rerun") return null;
   const sorted = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   if (action === "resume") return sorted.find((instance) => instance.status === "paused") ?? null;
-  return sorted.find((instance) => instance.status === "pending") ?? null;
+  return null;
 }

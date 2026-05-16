@@ -41,8 +41,36 @@ function isVisibleExecutionStep(step: TaskExecutionStep) {
   );
 }
 
+function isAssistantProcessStep(step: TaskExecutionStep) {
+  return step.type === "assistant" && !step.toolName && step.title === "Agent 过程输出（非最终结果）";
+}
+
+function appendAssistantProcessText(previous: string, next: string) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return /[。！？.!?]\s*$/.test(previous) ? `${previous}\n${next}` : `${previous}${next}`;
+}
+
+function mergeAssistantProcessSteps(steps: TaskExecutionStep[]) {
+  const merged: TaskExecutionStep[] = [];
+  for (const step of steps) {
+    const previous = merged.at(-1);
+    if (previous && isAssistantProcessStep(previous) && isAssistantProcessStep(step)) {
+      merged[merged.length - 1] = {
+        ...previous,
+        status: step.status,
+        detail: appendAssistantProcessText(previous.detail?.trim() ?? "", step.detail?.trim() ?? ""),
+        finishedAt: step.finishedAt ?? previous.finishedAt,
+      };
+      continue;
+    }
+    merged.push(step);
+  }
+  return merged;
+}
+
 export function TaskExecutionTimeline({ steps }: { steps: TaskExecutionStep[] }) {
-  const visibleSteps = steps.filter(isVisibleExecutionStep);
+  const visibleSteps = mergeAssistantProcessSteps(steps.filter(isVisibleExecutionStep));
 
   if (visibleSteps.length === 0) {
     return (

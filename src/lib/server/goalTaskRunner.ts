@@ -1,9 +1,21 @@
 import { appendGoalLog, beginGoalTelemetry, failGoalTelemetry, finishGoalTelemetry, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
 import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
-import { ensureTaskWorkspace, writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
-import { buildTaskContextPack } from "@/lib/server/workspace/contextPack";
+import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
+import {
+  buildUserConfirmationOptionsPrompt,
+  formatOptionLabelsWithHints,
+  normalizeConfirmationOptionLabels,
+  parseUserConfirmationOptions,
+} from "@/lib/server/userConfirmationOptionsPrompt";
+import {
+  buildTaskReadinessCheck,
+  extractUserFeedback,
+  finalizeReadiness,
+  type TaskReadinessCheck,
+  type TaskReadinessInfoItem,
+} from "@/lib/server/taskReadinessPolicy";
 import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
 import { validateTaskResultLocally } from "@/lib/taskResult/localValidation";
 import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";
@@ -37,6 +49,7 @@ type RunGoalTaskInput = {
   taskWorkspaceDir?: string;
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
+  signal?: AbortSignal;
 };
 
 type DeliverableCheckStatus = "passed" | "failed" | "unknown";
@@ -77,48 +90,6 @@ type TaskRunAttemptResult = ParsedTaskRunnerResult & {
   acceptanceRuntime?: TaskAcceptanceRuntimeState;
 };
 
-type TaskReadinessInfoStatus = "available" | "missing_user" | "agent_retrievable" | "not_required";
-
-type TaskReadinessInfoItem = {
-  id: string;
-  label: string;
-  description: string;
-  source: "user" | "agent" | "system";
-  status: TaskReadinessInfoStatus;
-  reason: string;
-  value?: string;
-  options?: string[];
-};
-
-type TaskReadinessCheck = {
-  status: "ready" | "blocked";
-  generatedAt: string;
-  summary: string;
-  items: TaskReadinessInfoItem[];
-  missingUserInfo: TaskReadinessInfoItem[];
-  agentRetrievableInfo: TaskReadinessInfoItem[];
-  availableInfo: TaskReadinessInfoItem[];
-};
-
-function extractJsonObject(raw: string) {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("任务执行结果不是合法 JSON");
-  }
-  return raw.slice(start, end + 1);
-}
-
-function classifyTaskRunError(error: unknown): TaskRunErrorCategory {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/abort|中断|cancel/i.test(message)) return "aborted";
-  if (/permission|权限|accept/i.test(message)) return "permission";
-  if (/network|fetch|ECONN|timed out|timeout|socket/i.test(message)) return "transient_network";
-  if (/spawn|ENOENT|启动失败|cli/i.test(message)) return "transient_cli";
-  if (/json|parse|格式|schema/i.test(message)) return "logic";
-  return "unknown";
-}
-
 function normalizeStringList(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
@@ -129,125 +100,14 @@ function uniqueStrings(items: Array<string | undefined>) {
   return Array.from(new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))));
 }
 
-function taskExecutionText(input: RunGoalTaskInput) {
-  return [
-    input.goal.title,
-    input.goal.summary,
-    input.subGoal.title,
-    input.task.title,
-    input.task.description,
-    input.task.executionObjective,
-    input.task.expectedOutcome,
-    input.task.expectedResult?.description,
-    input.task.expectedResult?.completionCriteria,
-    input.task.triggerRule,
-    input.instance.intro,
-    input.resumeContext,
-  ].filter(Boolean).join("\n");
-}
-
-function extractUserFeedback(input: RunGoalTaskInput) {
-  const match = input.resumeContext?.match(/用户反馈：([\s\S]+)/);
-  const feedback = match?.[1]?.trim();
-  if (!feedback) return "";
-  if (/^(补充缺失信息|补充具体信息|补充约束或偏好|说明暂时无法提供|确认继续)$/.test(feedback)) return "";
-  return feedback;
-}
-
-function hasExplicitDepartureCity(input: RunGoalTaskInput, text: string) {
-  if (extractUserFeedback(input)) return true;
-  return /出发城市[:：]\s*[\u4e00-\u9fa5A-Za-z]{2,20}|出发地[:：]\s*[\u4e00-\u9fa5A-Za-z]{2,20}|从[\u4e00-\u9fa5A-Za-z]{2,20}(?:出发|飞)|[\u4e00-\u9fa5A-Za-z]{2,20}出发/.test(text);
-}
-
-function hasDateValue(text: string) {
-  return /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}|(?:明天|后天|下周|本周|周[一二三四五六日天])/.test(text);
-}
-
-function hasBudgetValue(input: RunGoalTaskInput, text: string) {
-  if (/\d+\s*(元|块|人民币|rmb|¥)/i.test(text)) return true;
-  // 用户已表态「不限制 / 无预算 / 任意预算 / 不设上限 / 按性价比 / 暂不限制」等口径，均视为已提供。
-  if (/(暂不|暂时不|不|无|无需|无需要|没有|不设).{0,4}(限制|预算|上限|要求)/.test(text)) return true;
-  if (/(任意|任何|无|没有).{0,4}预算/.test(text)) return true;
-  if (/(性价比|按.{0,4}性价比|性价比.{0,4}优先)/.test(text)) return true;
-  // 在用户反馈中明确填写了"预算"字段，无论文本是否命中数字，都视为用户已表态。
-  const feedback = extractUserFeedback(input);
-  if (feedback && /预算/.test(feedback)) return true;
-  return false;
-}
-
-function buildTaskReadinessCheck(input: RunGoalTaskInput): TaskReadinessCheck {
-  const text = taskExecutionText(input);
-  const items: TaskReadinessInfoItem[] = [];
-  const addItem = (item: TaskReadinessInfoItem) => {
-    if (!items.some((entry) => entry.id === item.id)) items.push(item);
-  };
-
-  if (/航班|机票|飞往|往返|出发城市|出发地|从哪个城市|哪里出发/.test(text)) {
-    const userFeedback = extractUserFeedback(input);
-    const available = hasExplicitDepartureCity(input, text);
-    addItem({
-      id: "departure_city",
-      label: "出发城市",
-      description: "查询航班和价格必须先知道用户从哪个城市出发。",
-      source: "user",
-      status: available ? "available" : "missing_user",
-      reason: available ? "已在任务上下文或用户反馈中找到出发城市。" : "这是用户个人行程信息，Agent 不能自行猜测或默认选择。",
-      value: userFeedback || undefined,
-      options: ["上海", "广州", "北京", "深圳", "其他城市"],
-    });
-    addItem({
-      id: "flight_inventory",
-      label: "航班时刻与价格",
-      description: "可在具备出发城市、目的地和日期后由 Agent 查询。",
-      source: "agent",
-      status: "agent_retrievable",
-      reason: "属于公开或可检索信息，不需要用户手动提供。",
-    });
-  }
-
-  if (/出发日期|返回日期|往返日期|旅行日期|行程时间/.test(text)) {
-    addItem({
-      id: "travel_dates",
-      label: "出行日期",
-      description: "查询交通、住宿或行程安排需要明确日期范围。",
-      source: "user",
-      status: hasDateValue(text) ? "available" : "missing_user",
-      reason: hasDateValue(text) ? "已在任务上下文中找到日期。" : "日期属于用户行程约束，缺失时不能默认假设。",
-      options: ["补充出发日期", "补充返回日期", "补充完整日期范围"],
-    });
-  }
-
-  if (/预算|价格上限|费用上限|人均|总价/.test(text)) {
-    const budgetAvailable = hasBudgetValue(input, text);
-    addItem({
-      id: "budget_constraint",
-      label: "预算约束",
-      description: "涉及筛选或推荐时需要知道预算边界。",
-      source: "user",
-      status: budgetAvailable ? "available" : "missing_user",
-      reason: budgetAvailable ? "已在任务上下文或用户反馈中找到预算信息。" : "预算是用户偏好，Agent 不能自行假设。",
-      options: ["补充预算上限", "暂不限制预算", "按性价比优先"],
-    });
-  }
-
-  return finalizeReadiness(items);
-}
-
-function finalizeReadiness(items: TaskReadinessInfoItem[]): TaskReadinessCheck {
-  const missingUserInfo = items.filter((item) => item.status === "missing_user" && item.source === "user");
-  const agentRetrievableInfo = items.filter((item) => item.status === "agent_retrievable");
-  const availableInfo = items.filter((item) => item.status === "available");
-  return {
-    status: missingUserInfo.length ? "blocked" : "ready",
-    generatedAt: new Date().toISOString(),
-    summary: missingUserInfo.length
-      ? `缺少 ${missingUserInfo.map((item) => item.label).join("、")}，需要用户补充后才能执行。`
-      : "执行当前任务所需的用户侧关键信息已具备。",
-    items,
-    missingUserInfo,
-    agentRetrievableInfo,
-    availableInfo,
-  };
+function classifyTaskRunError(error: unknown): TaskRunErrorCategory {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/abort|中断|cancel/i.test(message)) return "aborted";
+  if (/permission|权限|accept/i.test(message)) return "permission";
+  if (/network|fetch|ECONN|timed out|timeout|socket/i.test(message)) return "transient_network";
+  if (/spawn|ENOENT|启动失败|cli/i.test(message)) return "transient_cli";
+  if (/json|parse|格式|schema/i.test(message)) return "logic";
+  return "unknown";
 }
 
 type ReadinessJudgeVerdict = {
@@ -395,21 +255,21 @@ function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: Tas
   };
 }
 
-function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): ParsedTaskRunnerResult {
+async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): Promise<ParsedTaskRunnerResult> {
   const firstMissing = readiness.missingUserInfo[0];
   const question =
     readiness.missingUserInfo.length === 1
       ? `请补充${firstMissing.label}，KiKi 才能继续执行「${input.task.title.replace(/^任务\d+：/, "")}」。`
       : `请补充以下必要信息：${readiness.missingUserInfo.map((item) => item.label).join("、")}。`;
-  const options = uniqueStrings(readiness.missingUserInfo.flatMap((item) => item.options ?? [])).slice(0, 5);
-  const suggestedActions = uniqueStrings([...options, "填写其他信息"]).slice(0, 6);
+  const options = await generateUserConfirmationOptions(input, question, readiness.missingUserInfo.flatMap((item) => item.options ?? []));
+  const suggestedActions = uniqueStrings([...options, "都不是，我自己描述"]).slice(0, 6);
   const taskResult = buildReadinessBlockedTaskResult(input, readiness);
   const interactionRequirement: InteractionRequirement = {
     type: "provide_context",
     timing: "before_execution",
     reason: readiness.summary,
     question,
-    options: options.length ? options : ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
+    options,
     suggestedActions,
     shouldNotifyUser: true,
   };
@@ -548,7 +408,9 @@ function textForUserInputDetection(result: ParsedTaskRunnerResult) {
 
 function looksLikeMissingUserContext(result: ParsedTaskRunnerResult) {
   if (!result.awaitingUser) return false;
-  if (result.interactionRequirement.type === "provide_context" || result.interactionRequirement.type === "answer") return true;
+  const requirement = result.interactionRequirement;
+  if (requirement.type === "provide_context" || requirement.type === "answer") return true;
+  if (requirement.type === "confirm" && requirement.timing === "after_agent_output") return false;
   const text = textForUserInputDetection(result);
   return /需要用户|请用户|用户确认|用户补充|补充.*信息|提供.*信息|缺少.*信息|确认.*城市|出发城市|出发地|目的地|预算|偏好|账号|登录|授权|选择|作答/.test(text);
 }
@@ -561,46 +423,72 @@ function extractExampleOptions(text: string) {
     .slice(0, 5);
 }
 
-const GENERIC_CONTEXT_OPTIONS = new Set(["补充具体信息", "补充缺失信息", "补充约束或偏好", "说明暂时无法提供", "填写其他信息"]);
-
-function normalizeSuggestedContextOptions(values: string[]) {
-  const options = uniqueStrings(values)
-    .map((item) => item.trim())
-    .filter((item) => item.length >= 2 && item.length <= 24);
-  const specificOptions = options.filter((item) => !GENERIC_CONTEXT_OPTIONS.has(item));
-  return (specificOptions.length ? specificOptions : options).slice(0, 3);
-}
-
-function inferContextOptionsFromText(text: string) {
-  const normalized = text.replace(/\s+/g, "");
-  if (/住宿区域.*酒店类型|酒店类型.*住宿区域|住宿偏好|住在哪|住哪片|酒店区域/.test(normalized)) {
-    return ["海滩区 + 度假酒店", "市中心 + 高性价比酒店", "度假区/珍珠岛 + 一站式酒店"];
-  }
-  if (/住宿区域|酒店区域|住在哪|住哪片/.test(normalized)) {
-    return ["海滩区", "市中心", "度假区/珍珠岛"];
-  }
-  if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型偏好/.test(normalized)) {
-    return ["高性价比经济型", "舒适型四星", "度假型五星/海景"];
-  }
-  if (/预算|费用|价格/.test(normalized)) {
-    return ["控制预算", "舒适优先", "高性价比优先"];
-  }
-  if (/出发城市|出发地|从哪里出发/.test(normalized)) {
-    return ["上海", "广州", "北京"];
-  }
-  if (/出发日期|返回日期|往返日期|旅行日期|行程时间/.test(normalized)) {
-    return ["补充出发日期", "补充返回日期", "补充完整日期范围"];
-  }
-  return [];
-}
-
 function defaultContextOptions(result: ParsedTaskRunnerResult) {
   const text = textForUserInputDetection(result);
   const exampleOptions = extractExampleOptions(text);
-  const inferredOptions = inferContextOptionsFromText(text);
-  const options = normalizeSuggestedContextOptions([...exampleOptions, ...inferredOptions]);
-  if (options.length >= 2) return options;
-  return ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"];
+  if (exampleOptions.length >= 2) return exampleOptions;
+  return semanticFallbackOptions(text);
+}
+
+function taskContextForOptionGeneration(input: RunGoalTaskInput) {
+  return [
+    `目标：${input.goal.title}`,
+    input.goal.summary ? `目标摘要：${input.goal.summary}` : "",
+    `子目标：${input.subGoal.title}`,
+    `任务标题：${input.task.title}`,
+    `任务描述：${input.task.description}`,
+    input.task.executionObjective ? `执行目标：${input.task.executionObjective}` : "",
+    `预期结果：${input.task.expectedOutcome}`,
+    input.task.expectedResult?.description ? `结果描述：${input.task.expectedResult.description}` : "",
+    input.task.expectedResult?.completionCriteria ? `完成标准：${input.task.expectedResult.completionCriteria}` : "",
+    input.resumeContext ? `恢复/用户反馈上下文：${input.resumeContext}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function semanticFallbackOptions(text: string) {
+  if (/签证|visa/i.test(text)) {
+    return ["电子签 e-Visa（90天）", "落地签（需邀请函）", "贴纸签（使馆办理）"];
+  }
+  if (/住宿区域.*酒店类型|酒店类型.*住宿区域|住宿偏好|住哪|酒店/.test(text)) {
+    return ["海滩区+度假酒店（放松）", "市中心+四星酒店（便利）", "度假区+五星酒店（省心）"];
+  }
+  if (/住宿区域|酒店区域|住哪/.test(text)) return ["海滩区（看海方便）", "市中心（交通便利）", "度假区（安静省心）"];
+  if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型/.test(text)) return ["经济型（控制预算）", "四星舒适型（均衡）", "五星度假型（体验优先）"];
+  if (/城市|出发地|出发城市/.test(text)) return ["上海出发（航班多）", "广州出发（华南方便）", "北京出发（北方方便）"];
+  if (/日期|时间|出行/.test(text)) return ["周末短途（2-3天）", "工作日错峰（更便宜）", "节假日出行（需早订）"];
+  if (/预算|费用|价格/.test(text)) return ["经济优先（少花钱）", "性价比优先（均衡）", "舒适优先（体验好）"];
+  if (/餐厅|吃|美食/.test(text)) return ["本地小吃（便宜地道）", "热门餐厅（稳妥）", "高评分餐厅（体验好）"];
+  return ["主流稳妥方案（风险低）", "高性价比方案（均衡）", "体验优先方案（更舒适）"];
+}
+
+async function generateUserConfirmationOptions(input: RunGoalTaskInput, question: string, seedOptions: string[] = []) {
+  const normalizedSeedOptions = normalizeConfirmationOptionLabels(seedOptions);
+  if (normalizedSeedOptions.length >= 3) return normalizedSeedOptions;
+
+  const prompt = buildUserConfirmationOptionsPrompt({
+    question,
+    context: taskContextForOptionGeneration(input),
+  });
+  try {
+    const raw = await runClaudePrompt(input, prompt, "readonly");
+    const generated = formatOptionLabelsWithHints(parseUserConfirmationOptions(raw));
+    const merged = normalizeConfirmationOptionLabels([...generated, ...normalizedSeedOptions]);
+    if (merged.length >= 3) return merged;
+  } catch (error) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "warn",
+      phase: "executing",
+      message: "用户确认候选项生成失败，回退到语义兜底",
+      details: error instanceof Error ? error.message : String(error),
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+  }
+
+  return normalizeConfirmationOptionLabels([...normalizedSeedOptions, ...semanticFallbackOptions(`${question}\n${taskContextForOptionGeneration(input)}`)]);
 }
 
 function normalizeBlockerLabel(value: string, index: number) {
@@ -621,12 +509,7 @@ function buildReadinessFromUserBlockers(blockers: string[], summary: string): Ta
     source: "user" as const,
     status: "missing_user" as const,
     reason: blocker,
-    options: (() => {
-      const options = normalizeSuggestedContextOptions(
-        inferContextOptionsFromText(`${normalizeBlockerLabel(blocker, index)}\n${blocker}`),
-      );
-      return options.length ? options : ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"];
-    })(),
+    options: semanticFallbackOptions(`${blocker}\n${summary}`),
   }));
   return {
     status: "blocked",
@@ -636,6 +519,65 @@ function buildReadinessFromUserBlockers(blockers: string[], summary: string): Ta
     missingUserInfo: items,
     agentRetrievableInfo: [],
     availableInfo: [],
+  };
+}
+
+function shouldAutoResolveRepeatedResumeConfirmation(input: RunGoalTaskInput, result: ParsedTaskRunnerResult) {
+  if (!input.resumeContext || !/用户对上一次阻塞点的决定：确认继续/.test(input.resumeContext)) return false;
+  if (!result.awaitingUser || result.interactionRequirement.timing !== "after_agent_output") return false;
+  if (result.interactionRequirement.type !== "confirm" && result.interactionRequirement.type !== "provide_context") return false;
+  const text = [
+    result.awaitingReason,
+    result.interactionRequirement.reason,
+    result.interactionRequirement.question,
+    ...(result.deliverableCheck?.missingDeliverables ?? []),
+  ].filter(Boolean).join("\n");
+  return /确认|是否符合|是否满意|选择|行程安排/.test(text);
+}
+
+function resolveRepeatedResumeConfirmation(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): ParsedTaskRunnerResult {
+  if (!shouldAutoResolveRepeatedResumeConfirmation(input, result)) return result;
+  const missingDeliverables =
+    result.deliverableCheck?.missingDeliverables.filter((item) => !/用户确认|确认选择|确认行程|用户选择|行程安排是否符合/.test(item)) ?? [];
+  const deliverableCheck = result.deliverableCheck
+    ? {
+        ...result.deliverableCheck,
+        matched: missingDeliverables.length === 0 ? true : result.deliverableCheck.matched,
+        missingDeliverables,
+        gapReason: missingDeliverables.length === 0 ? "" : result.deliverableCheck.gapReason,
+      }
+    : result.deliverableCheck;
+  const interactionRequirement: InteractionRequirement = {
+    type: "none",
+    timing: "not_required",
+    reason: "",
+    question: "",
+    options: [],
+    suggestedActions: [],
+    shouldNotifyUser: false,
+  };
+  const taskResult = result.taskResult
+    ? {
+        ...result.taskResult,
+        status: result.taskResult.status === "pending_user" || result.taskResult.status === "blocked" ? "done" : result.taskResult.status,
+      }
+    : result.taskResult;
+  return {
+    ...result,
+    summary: result.summary || "已吸收用户确认并完成任务。",
+    awaitingUser: false,
+    awaitingReason: "",
+    interactionRequirement,
+    taskResult,
+    deliverableCheck,
+    blocker: null,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      interactionRequirement,
+      ...(taskResult ? { taskResult } : {}),
+      ...(deliverableCheck ? { deliverableCheck } : {}),
+      autoResolvedRepeatedResumeConfirmation: true,
+    },
   };
 }
 
@@ -669,13 +611,14 @@ function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: Parsed
   const readiness =
     result.structuredOutput?.taskReadiness ??
     buildReadinessFromUserBlockers(result.deliverableCheck?.missingDeliverables?.length ? result.deliverableCheck.missingDeliverables : [question], reason);
-  const options = result.interactionRequirement.options?.length
-    ? result.interactionRequirement.options
-    : defaultContextOptions(result);
+  const rawOptions = result.interactionRequirement.options?.length
+    ? normalizeConfirmationOptionLabels(result.interactionRequirement.options)
+    : [];
+  const options = rawOptions.length ? rawOptions : defaultContextOptions(result);
   const suggestedActions = uniqueStrings([
     ...(options ?? []),
     ...(result.suggestedActions ?? []),
-    "填写其他信息",
+    "都不是，我自己描述",
   ]).slice(0, 5);
   const deliverableCheck = result.deliverableCheck ?? buildFallbackDeliverableCheck(input, reason);
   const normalizedDeliverableCheck: DeliverableCheck = {
@@ -932,6 +875,21 @@ function shouldAutoReflect(result: ParsedTaskRunnerResult) {
   );
 }
 
+function shouldCompleteOnApprove(result: ParsedTaskRunnerResult) {
+  if (result.interactionRequirement.type !== "confirm" || result.interactionRequirement.timing !== "after_agent_output") {
+    return false;
+  }
+
+  const text = textForUserInputDetection(result);
+  const asksForFinalization =
+    /确认.*(生成|输出|定稿|最终|执行|继续|按此|满意|修改)|提出修改|修改建议|是否满意|节奏安排|候选|草案|方案.*确认|审核/.test(text);
+  if (asksForFinalization) return false;
+
+  const deliveredFinalResult = result.deliverableCheck?.matched === true && result.taskResult?.status === "done";
+  const explicitlyReceiptOnly = /确认(已读|收到|完成|归档)|无需.*继续|不需要.*继续|仅需.*确认/.test(text);
+  return deliveredFinalResult && explicitlyReceiptOnly;
+}
+
 function createExecutionBlocker(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, trajectory: ExecutionTrajectoryStep[]): ExecutionBlocker | null {
   if (!result.awaitingUser || !shouldCreateUserBlocker(result.interactionRequirement)) return null;
   const now = new Date().toISOString();
@@ -942,10 +900,7 @@ function createExecutionBlocker(input: RunGoalTaskInput, result: ParsedTaskRunne
     blockedStepIndex: Math.max(trajectory.length - 1, 0),
     resumeToken: `resume-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     interactionRequirement: result.interactionRequirement,
-    resumeStrategy:
-      result.interactionRequirement.type === "confirm" && result.interactionRequirement.timing === "after_agent_output"
-        ? "complete_on_approve"
-        : "rerun_with_feedback",
+    resumeStrategy: shouldCompleteOnApprove(result) ? "complete_on_approve" : "rerun_with_feedback",
     status: "waiting",
     createdAt: now,
   };
@@ -975,41 +930,23 @@ function progressPayloadWithTrajectory(trajectory: ExecutionTrajectoryStep[], re
   };
 }
 
-function resolveGoalTaskWorkspace(input: RunGoalTaskInput) {
-  if (input.taskWorkspaceDir) return input.taskWorkspaceDir;
-  if (input.goal.conversationId) {
-    return ensureTaskWorkspace({
-      conversationId: input.goal.conversationId,
-      taskId: input.task.id,
-      instanceId: input.instance.id,
-    });
-  }
-  throw new Error("任务缺少 conversationId，无法进入隔离 task workspace");
-}
-
 async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
   let finalMessage = "";
   await streamClaudeCli({
     message,
-    workingDirectory: resolveGoalTaskWorkspace(input),
+    workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
     cliPath: input.runtimeEnv.cliPath,
     permissionMode,
     claudeSessionId: undefined,
-    contextPack: buildTaskContextPack({
-      goal: input.goal,
-      subGoal: input.subGoal,
-      task: input.task,
-      instance: input.instance,
-      trajectory: input.initialTrajectory,
-      resumeContext: input.resumeContext,
-    }),
-    workspacePolicy: "task",
+    signal: input.signal,
     onEvent: (event) => {
-      if (event.type === "delta" && event.text.trim()) finalMessage += event.text;
       if (event.type === "message") finalMessage = event.content;
       if (event.type === "error") throw new Error(event.message);
     },
   });
+  if (!finalMessage.trim()) {
+    throw new Error("Claude CLI 未返回 result.result，无法提取最终任务结果。");
+  }
   return finalMessage;
 }
 
@@ -1053,32 +990,19 @@ function buildUnfinishedResult(input: RunGoalTaskInput, options: {
   };
 }
 
-function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport, runtime: TaskAcceptanceRuntimeState) {
+async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport, runtime: TaskAcceptanceRuntimeState) {
   const userBlockers = uniqueStrings(report.userBlockers.length ? report.userBlockers : [report.summary]);
   const reason = userBlockers.length ? userBlockers.join("；") : report.summary;
   const readiness = buildReadinessFromUserBlockers(userBlockers, reason);
-  const options = normalizeSuggestedContextOptions([
-    ...(readiness?.missingUserInfo.flatMap((item) => item.options ?? []) ?? []),
-    ...defaultContextOptions({
-      ...result,
-      awaitingUser: true,
-      awaitingReason: reason,
-      interactionRequirement: {
-        ...result.interactionRequirement,
-        type: "provide_context",
-        timing: "after_agent_output",
-        reason,
-        question: userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason,
-      },
-    }),
-  ]);
+  const question = userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason;
+  const options = await generateUserConfirmationOptions(input, question, readiness?.missingUserInfo.flatMap((item) => item.options ?? []) ?? userBlockers);
   const interactionRequirement: InteractionRequirement = {
     type: "provide_context",
     timing: "after_agent_output",
     reason,
-    question: userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason,
-    options: options.length ? options : ["补充具体信息", "补充约束或偏好", "说明暂时无法提供"],
-    suggestedActions: options.length ? options : ["补充具体信息", "补充约束或偏好"],
+    question,
+    options,
+    suggestedActions: options,
     shouldNotifyUser: true,
   };
   return coerceMissingUserContextBlocker(input, {
@@ -1125,6 +1049,109 @@ function applyAcceptedDeliverableCheck(input: RunGoalTaskInput, result: ParsedTa
   };
 }
 
+function taskRequiresAfterOutputConfirmation(task: Task) {
+  return (
+    task.requiresConfirmation === true ||
+    (task.collaboration?.mode === "agent_with_user_confirmation" &&
+      task.collaboration.userInteractionTiming === "after_agent_output" &&
+      task.collaboration.userInteractionType === "confirm")
+  );
+}
+
+function looksLikeUnstructuredConfirmationOutput(input: RunGoalTaskInput, rawOutput: string, parseError?: string) {
+  if (!parseError || !rawOutput.trim() || !taskRequiresAfterOutputConfirmation(input.task)) return false;
+  return /用户确认|请用户确认|让用户确认|等待用户|确认选择|确认签证|选择.*方案|候选方案|对比分析|推荐方案/.test(rawOutput);
+}
+
+function inferConfirmationOptions(rawOutput: string, task: Task) {
+  const options = [
+    /电子签|E-?Visa/i.test(rawOutput) ? "电子签 e-Visa（90天）" : "",
+    /落地签/.test(rawOutput) ? "落地签（需邀请函）" : "",
+    /另纸签|纸质签/.test(rawOutput) ? "贴纸签（使馆办理）" : "",
+    /推荐/.test(rawOutput) ? "采用推荐方案（更稳妥）" : "",
+    ...semanticFallbackOptions(`${task.title}\n${task.description}\n${rawOutput}`),
+  ].filter(Boolean);
+  return normalizeConfirmationOptionLabels(uniqueStrings(options));
+}
+
+function buildAwaitingConfirmationFromRaw(input: RunGoalTaskInput, rawOutput: string): ParsedTaskRunnerResult {
+  const options = inferConfirmationOptions(rawOutput, input.task);
+  const question =
+    input.task.collaboration?.userFacingActionLabel ||
+    `请确认「${input.task.title}」采用哪个方案？`;
+  const reason = "Agent 已产出候选方案/分析内容，需要你确认选择后继续后续任务。";
+  const finalMessage = rawOutput.trim();
+  const interactionRequirement: InteractionRequirement = {
+    type: "confirm",
+    timing: "after_agent_output",
+    reason,
+    question,
+    options,
+    suggestedActions: [],
+    shouldNotifyUser: true,
+  };
+  const taskResult: TaskResult = {
+    schemaVersion: 1,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    title: input.task.expectedOutcome || input.task.title,
+    status: "pending_user",
+    blocks: [
+      { kind: "heading", text: input.task.title, level: 2 },
+      { kind: "markdown", content: finalMessage },
+      {
+        kind: "decision",
+        question,
+        options: options.map((label, index) => ({
+          id: `option-${index + 1}`,
+          label,
+          recommended: index === 0,
+        })),
+      },
+      { kind: "callout", tone: "info", text: reason },
+    ],
+    meta: {
+      producedAt: new Date().toISOString(),
+      presentation: "visual_report",
+      primaryFormat: "structured_blocks",
+      exportableFormats: ["markdown"],
+    },
+  };
+  const deliverableCheck: DeliverableCheck = {
+    matched: false,
+    confidence: "medium",
+    deliveredArtifacts: ["候选方案/分析内容"],
+    missingDeliverables: ["用户确认选择"],
+    criteriaResults: [
+      {
+        criterion: input.task.expectedResult?.completionCriteria || input.task.expectedOutcome,
+        status: "unknown",
+        evidence: "Agent 已产出候选内容，但协作契约要求用户确认后才能继续。",
+      },
+    ],
+    gapReason: reason,
+  };
+  return {
+    summary: "已产出候选方案，等待用户确认。",
+    finalMessage,
+    resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    awaitingUser: true,
+    awaitingReason: reason,
+    suggestedActions: [],
+    artifacts: [],
+    taskResult,
+    deliverableCheck,
+    interactionRequirement,
+    blocker: null,
+    structuredOutput: {
+      taskResult,
+      deliverableCheck,
+      interactionRequirement,
+      recoveredFromUnstructuredConfirmation: true,
+    },
+  };
+}
+
 async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   rawOutput: string;
   parsedResult: ParsedTaskRunnerResult | null;
@@ -1135,6 +1162,16 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   let rawOutput = state.rawOutput;
   let parsedResult = state.parsedResult;
   let parseError = state.parseError;
+  if (!parsedResult && looksLikeUnstructuredConfirmationOutput(input, rawOutput, parseError)) {
+    parsedResult = buildAwaitingConfirmationFromRaw(input, rawOutput);
+    parseError = undefined;
+    state.appendTrajectory({
+      type: "approval",
+      status: "awaiting_user",
+      title: "识别到用户确认节点",
+      thought: "Agent 返回了非 JSON 格式的确认卡片内容，系统已兜底转换为 awaiting_user，等待用户确认。",
+    });
+  }
   let lastReport = validateTaskResultLocally({
     task: input.task,
     rawOutput,
@@ -1212,7 +1249,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceRuntime: runtime };
   }
 
-  let currentResult = coerceMissingUserContextBlocker(input, local.parsedResult);
+  let currentResult = resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult));
   if (currentResult.awaitingUser) {
     return {
       ...currentResult,
@@ -1267,7 +1304,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     }
 
     if (acceptanceReport.verdict === "needs_user") {
-      const userResult = buildNeedsUserFromAcceptance(input, currentResult, acceptanceReport, runtime);
+      const userResult = await buildNeedsUserFromAcceptance(input, currentResult, acceptanceReport, runtime);
       return { ...userResult, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
     }
 
@@ -1328,7 +1365,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       });
       return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
     }
-    currentResult = coerceMissingUserContextBlocker(input, local.parsedResult);
+    currentResult = resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult));
   }
 
   const failed = buildUnfinishedResult(input, {
@@ -1342,6 +1379,9 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
 
 async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   let finalMessage = "";
+  let pendingAssistantProcessOutput = "";
+  let lastAssistantProcessFlushAt = 0;
+  let assistantProcessFlushCount = 0;
   let lastStatus: "checking" | "running" | "completed" | null = null;
   const trajectory: ExecutionTrajectoryStep[] = [...(input.initialTrajectory ?? [])];
   const isResumeRun = Boolean(input.resumeContext) || (input.initialTrajectory?.length ?? 0) > 0;
@@ -1356,6 +1396,26 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     trajectory.push(createTrajectoryStep({ ...step, index: trajectory.length }));
     persistTrajectorySnapshot(input.requestId, trajectory);
     return trajectory;
+  };
+  const flushAssistantProcessOutput = (status: ExecutionTrajectoryStep["status"]) => {
+    const thought = pendingAssistantProcessOutput.trim();
+    if (!thought) return;
+    appendTrajectory({
+      type: "assistant",
+      status,
+      title: "Agent 过程输出（非最终结果）",
+      thought: thought.slice(0, 2000),
+      endedAt: status === "completed" ? new Date().toISOString() : undefined,
+    });
+    pendingAssistantProcessOutput = "";
+    lastAssistantProcessFlushAt = Date.now();
+    assistantProcessFlushCount += 1;
+  };
+  const shouldFlushAssistantProcessOutput = () => {
+    const thought = pendingAssistantProcessOutput.trim();
+    if (thought.length < 30) return false;
+    if (/[。！？.!?]\s*$/.test(thought)) return true;
+    return thought.length >= 500;
   };
   appendTrajectory({
     type: "system",
@@ -1422,34 +1482,23 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
-  const runnerPrompt = buildGoalTaskRunnerPrompt({ ...input, initialTrajectory: input.initialTrajectory });
-  if (input.goal.conversationId) {
-    writeTaskPromptFile({
-      conversationId: input.goal.conversationId,
-      taskId: input.task.id,
-      instanceId: input.instance.id,
-      content: runnerPrompt,
-    });
-  }
-
   await streamClaudeCli({
-    message: runnerPrompt,
-    workingDirectory: resolveGoalTaskWorkspace(input),
+    message: buildGoalTaskRunnerPrompt({ ...input, initialTrajectory: input.initialTrajectory }),
+    workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
     cliPath: input.runtimeEnv.cliPath,
     permissionMode: input.runtimeEnv.permissionMode,
     claudeSessionId: undefined,
-    contextPack: buildTaskContextPack({
-      goal: input.goal,
-      subGoal: input.subGoal,
-      task: input.task,
-      instance: input.instance,
-      trajectory,
-      resumeContext: input.resumeContext,
-    }),
-    workspacePolicy: "task",
+    signal: input.signal,
     onEvent: (event) => {
       if (event.type === "delta" && event.text.trim()) {
-        finalMessage += event.text;
+        pendingAssistantProcessOutput += event.text;
+        if (
+          Date.now() - lastAssistantProcessFlushAt > 3000 &&
+          assistantProcessFlushCount < 5 &&
+          shouldFlushAssistantProcessOutput()
+        ) {
+          flushAssistantProcessOutput("running");
+        }
       }
       if (event.type === "message") {
         finalMessage = event.content;
@@ -1538,6 +1587,10 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     },
   });
 
+  flushAssistantProcessOutput("completed");
+  if (!finalMessage.trim()) {
+    throw new Error("Claude CLI 未返回 result.result，无法提取最终任务结果。");
+  }
   appendTrajectory({
     type: "assistant",
     status: "completed",
@@ -1618,7 +1671,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   });
   const blocker = createExecutionBlocker(input, result, trajectory);
   if (blocker) {
-    updateRuntimeJobExecution(`job-${input.instance.id}`, { blocker, status: "awaiting_user" });
+    updateRuntimeJobExecution(`job-${input.instance.id}`, { blocker });
   }
   return {
     ...result,
@@ -1663,7 +1716,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         endedAt: new Date().toISOString(),
       }),
     ];
-    const blockedResult = buildReadinessBlockedResult(input, readiness);
+    const blockedResult = await buildReadinessBlockedResult(input, readiness);
     const blocker = createExecutionBlocker(input, blockedResult, trajectory);
     const result = {
       ...blockedResult,
@@ -1734,7 +1787,6 @@ export async function runGoalTask(input: RunGoalTaskInput) {
     if (blocker) {
       updateRuntimeJobExecution(`job-${input.instance.id}`, {
         blocker,
-        status: "awaiting_user",
         trajectory,
         result: resultPayload,
       });
@@ -1797,11 +1849,9 @@ export async function runGoalTask(input: RunGoalTaskInput) {
           taskInstanceId: input.instance.id,
         });
         updateRuntimeJobExecution(`job-${input.instance.id}`, {
-          status: "failed",
           result: resultPayload,
           trajectory: result.trajectory,
           lastError: errorMessage,
-          finishedAt: new Date().toISOString(),
         });
         return;
       }

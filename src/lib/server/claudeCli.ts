@@ -48,16 +48,18 @@ type ClaudeStreamOptions = {
     content: string;
   } | null;
   signal?: AbortSignal;
-  onEvent: (event:
-    | { type: "session"; sessionId: string }
-    | { type: "status"; status: "checking" | "running" | "completed" }
-    | { type: "delta"; text: string }
-    | { type: "message"; content: string }
-    | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
-    | { type: "permission_request"; reason: string }
-    | { type: "error"; message: string }
-    | { type: "done" }) => void;
+  onEvent: (event: ClaudeStreamEvent) => void;
 };
+
+type ClaudeStreamEvent =
+  | { type: "session"; sessionId: string }
+  | { type: "status"; status: "checking" | "running" | "completed" }
+  | { type: "delta"; text: string }
+  | { type: "message"; content: string }
+  | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
+  | { type: "permission_request"; reason: string }
+  | { type: "error"; message: string }
+  | { type: "done" };
 
 type ToolUseBlockState = {
   name: string;
@@ -112,12 +114,6 @@ function buildWorkspaceBoundPrompt(input: {
   }
   parts.push("", buildPrompt(input.message, input.quotedMessage));
   return parts.join("\n");
-}
-
-function looksHighRisk(message: string) {
-  return /(修改|编辑|删除|运行|执行|重构|创建文件|安装|修复|改代码|写代码|write|edit|delete|rm |npm |pnpm |yarn |git )/i.test(
-    message,
-  );
 }
 
 function buildAllowedTools(permissionMode: RuntimePermissionMode) {
@@ -201,15 +197,6 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
   const cwd = normalizeWorkingDirectory(options.workingDirectory);
   const cliPath = await resolveCliPath(options.cliPath);
 
-  if (options.permissionMode === "confirm" && looksHighRisk(options.message)) {
-    options.onEvent({
-      type: "permission_request",
-      reason: "这条消息可能触发文件修改或命令执行。当前为手动确认模式，请先切换到“项目内可执行”，或改为只读问题后再发送。",
-    });
-    options.onEvent({ type: "done" });
-    return;
-  }
-
   options.onEvent({ type: "status", status: "checking" });
 
   const args = [
@@ -226,40 +213,75 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
   }
   const allowedTools = buildAllowedTools(options.permissionMode);
   if (allowedTools.length > 0) {
-    args.push("--allowedTools", ...allowedTools);
+    // Claude CLI 的 --allowedTools 在 Commander.js 中被定义为 variadic（<tools...>），
+    // 会贪婪吞掉所有后续位置参数。即使我们用逗号分隔成单 token，后面的 prompt argv 仍然
+    // 会被吃进 tools 列表，导致 CLI 报 "Input must be provided either through stdin or
+    // as a prompt argument when using --print"。
+    // 使用逗号分隔形式，并通过 stdin 传 prompt（见下方 spawn），双重规避。
+    args.push("--allowedTools", allowedTools.join(","));
   }
-  args.push(
-    buildWorkspaceBoundPrompt({
-      message: options.message,
-      quotedMessage: options.quotedMessage,
-      contextPack: options.contextPack,
-      workspaceDir: cwd,
-      workspacePolicy: options.workspacePolicy,
-    }),
-  );
+  const promptInput = buildWorkspaceBoundPrompt({
+    message: options.message,
+    quotedMessage: options.quotedMessage,
+    contextPack: options.contextPack,
+    workspaceDir: cwd,
+    workspacePolicy: options.workspacePolicy,
+  });
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const child = spawn(cliPath, args, {
       cwd,
       env: buildClaudeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+
+    // 通过 stdin 传入 prompt，彻底规避 --allowedTools 的 variadic 参数吞食问题。
+    child.stdin.write(promptInput);
+    child.stdin.end();
 
     let stdoutBuffer = "";
     let stderrBuffer = "";
-    let finalMessage = "";
     let emittedFatalError = false;
     let aborted = false;
     let terminalResultReceived = false;
+    let callbackError: unknown = null;
+    let settled = false;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
+
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    const emitEvent = (event: ClaudeStreamEvent) => {
+      if (callbackError) return false;
+      try {
+        options.onEvent(event);
+        return true;
+      } catch (error) {
+        callbackError = error;
+        emittedFatalError = true;
+        child.kill("SIGTERM");
+        rejectOnce(error);
+        return false;
+      }
+    };
 
     const abort = () => {
       if (terminalResultReceived) return;
       aborted = true;
       emittedFatalError = true;
       child.kill("SIGTERM");
-      options.onEvent({ type: "done" });
-      resolve();
+      if (emitEvent({ type: "done" })) {
+        resolveOnce();
+      }
     };
 
     if (options.signal?.aborted) {
@@ -270,92 +292,98 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
     options.signal?.addEventListener("abort", abort, { once: true });
 
     const consumeLine = (line: string) => {
+      if (callbackError) return;
       if (!line.trim()) return;
 
+      let payload: ClaudeCliPayload;
       try {
-        const payload = JSON.parse(line) as ClaudeCliPayload;
-        const nextSessionId = payload.session_id;
-        if (nextSessionId) {
-          options.onEvent({ type: "session", sessionId: nextSessionId });
-        }
-
-        if (payload.type === "system" && payload.subtype === "status") {
-          const status = payload.status === "requesting" ? "running" : "checking";
-          options.onEvent({ type: "status", status });
-          return;
-        }
-
-        if (payload.type === "stream_event") {
-          const eventType = payload.event?.type;
-          const eventIndex = typeof payload.event?.index === "number" ? payload.event.index : -1;
-          if (eventType === "content_block_start" && payload.event?.content_block?.type === "tool_use" && eventIndex >= 0) {
-            toolUseBlocks.set(eventIndex, {
-              name: payload.event.content_block.name || "Tool",
-              rawInput: payload.event.content_block.input,
-              partialJson: "",
-            });
-            return;
-          }
-          if (eventType === "content_block_delta") {
-            if (payload.event?.delta?.type === "input_json_delta" && eventIndex >= 0) {
-              const currentTool = toolUseBlocks.get(eventIndex);
-              if (currentTool) {
-                currentTool.partialJson += payload.event.delta.partial_json || "";
-              }
-              return;
-            }
-            const text = payload.event?.delta?.text;
-            if (typeof text === "string" && text.length > 0) {
-              options.onEvent({ type: "delta", text });
-            }
-            return;
-          }
-          if (eventType === "content_block_stop" && eventIndex >= 0) {
-            const currentTool = toolUseBlocks.get(eventIndex);
-            if (currentTool) {
-              const parsedInput = parseToolInput(currentTool.rawInput, currentTool.partialJson);
-              options.onEvent({
-                type: "tool_call",
-                toolName: currentTool.name,
-                summary: summarizeToolCall(currentTool.name, parsedInput),
-                input: parsedInput,
-                index: eventIndex,
-              });
-              toolUseBlocks.delete(eventIndex);
-            }
-          }
-          return;
-        }
-
-        if (payload.type === "assistant") {
-          const content =
-            payload.message?.content
-              ?.map((item: { text?: string }) => item.text || "")
-              .join("") || "";
-          finalMessage = content;
-          return;
-        }
-
-        if (payload.type === "result") {
-          terminalResultReceived = true;
-          if (payload.subtype === "success") {
-            finalMessage = payload.result || finalMessage;
-            options.onEvent({ type: "message", content: finalMessage });
-            options.onEvent({ type: "status", status: "completed" });
-          } else {
-            emittedFatalError = true;
-            options.onEvent({
-              type: "error",
-              message:
-                payload.result ||
-                payload.errors?.join("\n") ||
-                payload.api_error_status ||
-                "Claude 返回了错误结果",
-            });
-          }
-        }
+        payload = JSON.parse(line) as ClaudeCliPayload;
       } catch {
         // Ignore non-JSON lines; Claude stream-json may emit incidental text in some environments.
+        return;
+      }
+
+      const nextSessionId = payload.session_id;
+      if (nextSessionId && !emitEvent({ type: "session", sessionId: nextSessionId })) return;
+
+      if (payload.type === "system" && payload.subtype === "status") {
+        const status = payload.status === "requesting" ? "running" : "checking";
+        emitEvent({ type: "status", status });
+        return;
+      }
+
+      if (payload.type === "stream_event") {
+        const eventType = payload.event?.type;
+        const eventIndex = typeof payload.event?.index === "number" ? payload.event.index : -1;
+        if (eventType === "content_block_start" && payload.event?.content_block?.type === "tool_use" && eventIndex >= 0) {
+          toolUseBlocks.set(eventIndex, {
+            name: payload.event.content_block.name || "Tool",
+            rawInput: payload.event.content_block.input,
+            partialJson: "",
+          });
+          return;
+        }
+        if (eventType === "content_block_delta") {
+          if (payload.event?.delta?.type === "input_json_delta" && eventIndex >= 0) {
+            const currentTool = toolUseBlocks.get(eventIndex);
+            if (currentTool) {
+              currentTool.partialJson += payload.event.delta.partial_json || "";
+            }
+            return;
+          }
+          const text = payload.event?.delta?.text;
+          if (typeof text === "string" && text.length > 0) {
+            emitEvent({ type: "delta", text });
+          }
+          return;
+        }
+        if (eventType === "content_block_stop" && eventIndex >= 0) {
+          const currentTool = toolUseBlocks.get(eventIndex);
+          if (currentTool) {
+            const parsedInput = parseToolInput(currentTool.rawInput, currentTool.partialJson);
+            emitEvent({
+              type: "tool_call",
+              toolName: currentTool.name,
+              summary: summarizeToolCall(currentTool.name, parsedInput),
+              input: parsedInput,
+              index: eventIndex,
+            });
+            toolUseBlocks.delete(eventIndex);
+          }
+        }
+        return;
+      }
+
+      if (payload.type === "assistant") {
+        // Assistant messages can include intermediate reasoning/process text.
+        // Only the terminal result.result is allowed to become the final protocol output.
+        return;
+      }
+
+      if (payload.type === "result") {
+        terminalResultReceived = true;
+        if (payload.subtype === "success") {
+          if (typeof payload.result !== "string" || !payload.result.trim()) {
+            emittedFatalError = true;
+            emitEvent({
+              type: "error",
+              message: "Claude CLI 成功结束，但没有返回 result.result，无法提取最终任务结果。",
+            });
+            return;
+          }
+          if (!emitEvent({ type: "message", content: payload.result })) return;
+          emitEvent({ type: "status", status: "completed" });
+        } else {
+          emittedFatalError = true;
+          emitEvent({
+            type: "error",
+            message:
+              payload.result ||
+              payload.errors?.join("\n") ||
+              payload.api_error_status ||
+              "Claude 返回了错误结果",
+          });
+        }
       }
     };
 
@@ -376,30 +404,34 @@ export async function streamClaudeCli(options: ClaudeStreamOptions) {
 
     child.on("error", (error) => {
       emittedFatalError = true;
-      options.onEvent({
+      if (!emitEvent({
         type: "error",
         message: error.message || "Claude CLI 启动失败",
-      });
-      options.onEvent({ type: "done" });
-      resolve();
+      })) return;
+      if (emitEvent({ type: "done" })) {
+        resolveOnce();
+      }
     });
 
     child.on("close", (code) => {
       options.signal?.removeEventListener("abort", abort);
+      if (callbackError) return;
       if (aborted) return;
       if (stdoutBuffer.trim()) {
         consumeLine(stdoutBuffer.trim());
       }
+      if (callbackError) return;
 
       if (code !== 0 && !emittedFatalError) {
-        options.onEvent({
+        if (!emitEvent({
           type: "error",
           message: stderrBuffer.trim() || "Claude CLI 异常退出",
-        });
+        })) return;
       }
 
-      options.onEvent({ type: "done" });
-      resolve();
+      if (emitEvent({ type: "done" })) {
+        resolveOnce();
+      }
     });
   });
 }

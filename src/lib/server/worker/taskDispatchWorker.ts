@@ -17,6 +17,7 @@ import {
 import {
   claimQueuedRuntimeJobs,
   getRuntimeJobByRequestId,
+  isRuntimeJobLeaseHeld,
   releaseExpiredRuntimeJobLeases,
   renewRuntimeJobLease,
   updateRuntimeJobExecution,
@@ -66,6 +67,8 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
     });
     appendRuntimeDaemonLog(`开始执行任务 ${job.id}`);
     let renewTimer: NodeJS.Timeout | null = null;
+    let leaseLostMessage: string | null = null;
+    const abortController = new AbortController();
     try {
       const conversationId = job.conversationId ?? job.payload.goal.conversationId;
       const conversationWorkspaceDir = conversationId
@@ -87,7 +90,9 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
             leaseMs: LEASE_RENEW_DURATION_MS,
           });
           if (!renewResult.renewed) {
-            appendRuntimeDaemonLog(`任务 ${job.id} 续租失败：lease 已被其他 owner 占用或任务已不在 running 状态`);
+            leaseLostMessage = `任务 ${job.id} 续租失败：lease 已被其他 owner 占用或任务已不在 running 状态`;
+            appendRuntimeDaemonLog(leaseLostMessage);
+            abortController.abort();
             return;
           }
           const now = new Date().toISOString();
@@ -114,7 +119,11 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         taskWorkspaceDir,
         resumeContext: job.payload.resumeContext,
         initialTrajectory: job.trajectory,
+        signal: abortController.signal,
       });
+      if (abortController.signal.aborted) {
+        throw new Error(leaseLostMessage || `任务 ${job.id} 已因 lease 失效中断`);
+      }
 
       const latestProgress = getGoalTelemetryProgress(job.requestId ?? "");
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
@@ -124,6 +133,10 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
           )
         : job.trajectory;
       const latestBlocker = latestProgress?.resultPayload?.blocker ?? null;
+      if (!isRuntimeJobLeaseHeld(job.id, leaseOwner)) {
+        appendRuntimeDaemonLog(`任务 ${job.id} 已失去 lease，跳过结果写回以避免覆盖其他 worker`);
+        continue;
+      }
       if (conversationId) {
         writeTaskRunSnapshot({
           conversationId,
@@ -181,6 +194,10 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "后台任务执行失败";
+      if (abortController.signal.aborted && !isRuntimeJobLeaseHeld(job.id, leaseOwner)) {
+        appendRuntimeDaemonLog(`任务 ${job.id} 已因 lease 失效中断，跳过失败状态写回: ${message}`);
+        continue;
+      }
       const failedJob = job.requestId ? getRuntimeJobByRequestId(job.requestId) : null;
       const latestProgress = job.requestId ? getGoalTelemetryProgress(job.requestId) : failedJob?.progress ?? null;
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];

@@ -3,7 +3,32 @@
 import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { ExecutionShell } from "@/components/task/ExecutionShell";
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { useGoalStore } from "@/stores/goalStore";
+import type { Goal, Task } from "@/types/kiki";
+import { useEffect, useMemo, useState } from "react";
+
+function safeDecodeRouteParam(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function findTaskForRoute(goals: Goal[], goalId: string, taskId: string): { goal: Goal; task: Task } | null {
+  const goal = goals.find((item) => item.id === goalId);
+  const task = goal?.subGoals.flatMap((subGoal) => subGoal.tasks).find((item) => item.id === taskId);
+  if (goal && task) return { goal, task };
+
+  for (const candidateGoal of goals) {
+    const candidateTask = candidateGoal.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((item) => item.id === taskId);
+    if (candidateTask) return { goal: candidateGoal, task: candidateTask };
+  }
+  return null;
+}
 
 export default function TaskDetailPage({
   params,
@@ -13,11 +38,47 @@ export default function TaskDetailPage({
   searchParams?: { view?: string; instanceId?: string };
 }) {
   const goals = useGoalStore((state) => state.goals);
-  const goal = goals.find((item) => item.id === params.goalId);
-  const task = goal?.subGoals.flatMap((subGoal) => subGoal.tasks).find((item) => item.id === params.taskId);
+  const replaceGoals = useGoalStore((state) => state.replaceGoals);
+  const goalId = safeDecodeRouteParam(params.goalId);
+  const taskId = safeDecodeRouteParam(params.taskId);
+  const routeKey = `${goalId}:${taskId}`;
+  const [remoteLookup, setRemoteLookup] = useState<{ key: string; loading: boolean; loaded: boolean } | null>(null);
+  const routeMatch = useMemo(() => findTaskForRoute(goals, goalId, taskId), [goals, goalId, taskId]);
+  const goal = routeMatch?.goal;
+  const task = routeMatch?.task;
   const view = searchParams?.view ?? "list";
 
+  useEffect(() => {
+    if (routeMatch) return;
+    if (remoteLookup?.key === routeKey && (remoteLookup.loading || remoteLookup.loaded)) return;
+
+    let cancelled = false;
+    setRemoteLookup({ key: routeKey, loading: true, loaded: false });
+    fetchRuntimeStateSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) replaceGoals(snapshot.goals);
+      })
+      .catch(() => {
+        // Keep the page resilient even when the local runtime snapshot is temporarily unavailable.
+      })
+      .finally(() => {
+        if (!cancelled) setRemoteLookup({ key: routeKey, loading: false, loaded: true });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [remoteLookup, replaceGoals, routeKey, routeMatch]);
+
   if (!goal || !task) {
+    const isLookingUpRemote = remoteLookup?.key !== routeKey || remoteLookup.loading || !remoteLookup?.loaded;
+    if (isLookingUpRemote) {
+      return (
+        <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">
+          正在加载任务...
+        </div>
+      );
+    }
     return (
       <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">
         未找到任务。

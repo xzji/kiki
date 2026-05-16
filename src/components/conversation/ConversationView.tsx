@@ -19,6 +19,7 @@ import {
 } from "@/lib/goalWorkflow";
 import { openSettings } from "@/lib/settings";
 import { parseSlashCommand } from "@/lib/slashCommands";
+import { taskDetailPath } from "@/lib/routes";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -70,6 +71,11 @@ function shouldResumePlanningFromMessage(message: string) {
   );
 }
 
+function buildAutoConversationTitle(message: string) {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  return normalized.slice(0, 24) || "新会话";
+}
+
 function goalPlanMessageContent() {
   return `目标规划草案已生成。点击下方卡片或右上角「目标规划」查看详情并确认启动。`;
 }
@@ -101,6 +107,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const setClaudeSessionId = useConversationStore((state) => state.setClaudeSessionId);
   const setConversationStatus = useConversationStore((state) => state.setConversationStatus);
   const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
+  const renameConversation = useConversationStore((state) => state.renameConversation);
   const goals = useGoalStore((state) => state.goals);
   const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
@@ -514,6 +521,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
     };
     streamAbortRef.current = controller;
     activeAssistantMessageIdRef.current = assistantId;
+    if (!conversation.goalId && conversation.title === "新会话" && conversation.messages.length === 0) {
+      renameConversation(conversation.id, buildAutoConversationTitle(text));
+    }
     appendMessage(conversation.id, userMessage);
     appendMessage(conversation.id, {
       id: assistantId,
@@ -813,7 +823,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   <ChevronsRight className="h-4 w-4" />
                 </button>
                 <Link
-                  href={`/goals/${taskInfo.goal.id}/tasks/${taskInfo.task.id}`}
+                  href={taskDetailPath(taskInfo.goal.id, taskInfo.task.id)}
                   aria-label="全屏查看任务信息"
                   className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
                 >

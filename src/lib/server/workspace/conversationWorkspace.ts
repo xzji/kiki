@@ -145,6 +145,21 @@ export function writeTaskPromptFile(input: {
   return filePath;
 }
 
+export function writeTaskMarkdownLogFile(input: {
+  conversationId: string;
+  taskId: string;
+  instanceId: string;
+  fileName: string;
+  content: string;
+}) {
+  const taskWorkspaceDir = ensureTaskWorkspace(input);
+  const logsDir = ensureDir(path.join(taskWorkspaceDir, "logs"));
+  const safeFileName = sanitizeWorkspaceSegment(input.fileName.replace(/\.md$/i, ""));
+  const filePath = path.join(logsDir, `${safeFileName}.md`);
+  writeTextFileAtomic(filePath, input.content.endsWith("\n") ? input.content : `${input.content}\n`);
+  return filePath;
+}
+
 export function writeTaskRunSnapshot(input: {
   conversationId: string;
   taskId: string;

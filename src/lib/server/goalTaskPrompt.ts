@@ -186,6 +186,13 @@ ${buildStepZeroPrompt(isResume)}
 
 总原则：无论正常完成、等待用户还是存在缺口，主产出都必须放在 task_result.blocks 中；summary / final_message / artifacts 只能辅助说明，不能替代主产出。
 
+最终回复硬性格式：
+1. 只能输出一个完整 JSON 对象。
+2. 不要输出 Markdown 代码块。
+3. 不要在 JSON 前后输出任何自然语言解释、执行过程、思考过程或附加说明。
+4. 可以在 workspace 内写文件作为副本，但最终回复仍必须把完整 JSON 输出到消息中，不能只返回文件路径或只写入文件。
+5. 如果需要用户确认，仍必须按“输出模板 B”输出完整 JSON，并设置 awaiting_user=true。
+
 目标：${goal.title}
 目标摘要：${goal.summary || "无"}
 子目标：${subGoal.title}
@@ -216,9 +223,12 @@ ${resumeBlock}
 5. 如果缺少用户才能提供的关键输入（例如出发城市、账号信息、个人偏好、预算上限、目标选择等），必须立即停止产出最终完成态交付物：
    - awaiting_user 必须为 true。
    - interaction_requirement.question 必须一次性列出本轮所有已知缺失项，不能只问第一个。
-   - interaction_requirement.options 必须给出恰好 3 个可直接点击的候选项，而且必须与问题本身直接对应，优先给“可直接回答问题”的具体值，而不是泛化动作。
-     例如：问“偏好的住宿区域和酒店类型”时，应给“海滩区 + 度假酒店 / 市中心 + 高性价比酒店 / 度假区 + 一站式酒店”，不要写“补充具体信息 / 补充约束或偏好”。
-     只有在系统完全无法从任务上下文判断候选维度时，才允许使用动作型兜底项。UI 会自动补 1 个“自己填写”。
+   - interaction_requirement.options 必须给出恰好 3 个可直接点击的候选项，而且必须与问题本身直接对应。
+   - 候选项必须是“答案”，不是“动作”：禁止写“补充具体信息 / 补充约束或偏好 / 说明暂时无法提供 / 填写其他信息”。
+   - 候选项之间要互斥，并覆盖常见主流分支；每项必须自带区分参数（时长、价格、适用场景、条件等），控制在 8-25 字。
+     例如：问“偏好的住宿区域和酒店类型”时，应给“海滩区+度假酒店（放松） / 市中心+四星酒店（便利） / 度假区+五星酒店（省心）”。
+     例如：问“选哪种越南签证”时，应给“电子签 e-Visa（90天） / 落地签（需邀请函） / 贴纸签（使馆办理）”。
+   - UI 会自动补 1 个“都不是，我自己描述”，你不要把这个兜底项放进 interaction_requirement.options。
    - task_result.status 必须为 pending_user 或 blocked，blocks 只呈现“需要补充的信息”和“为什么需要”，不要输出基于猜测的方案。
    - deliverable_check.matched 必须为 false，missing_deliverables 必须包含本轮全部缺失用户输入。
    - artifacts 必须为空数组；如果 awaiting_user=true，顶层 suggested_actions 默认也应为空数组，除非确有必要给出补充行动建议。
@@ -294,7 +304,13 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
 }
 
 输出模板 B（等待用户，适用于执行前提不足）：
-说明：当 awaiting_user=true 时，interaction_requirement.options 必须恰好给 3 个候选项，并且这 3 个候选项必须能直接回答当前问题。优先给具体答案，不要给泛化动作。只有完全无法判断候选维度时，才使用“补充具体信息”“补充约束/偏好”“说明暂时无法提供”兜底。UI 会自动补 1 个“自己填写”。
+说明：当 awaiting_user=true 时，interaction_requirement.options 必须恰好给 3 个候选项。候选项生成模板如下：
+1. 每个候选项必须是待确认问题的具体答案，不是“补充信息/提供偏好/说明暂时无法提供”这类动作。
+2. 候选项之间应互斥，覆盖 2-3 个主流答案。
+3. 每项自带关键参数（时长 / 价格 / 适用场景 / 条件），让用户不点开也能判断。
+4. 每项 8-25 字，口语化，不要写“方案 A / 选项一”。
+5. UI 会自动追加“都不是，我自己描述”，interaction_requirement.options 只输出前 3 个具体答案。
+提交前自检：如果 options 中仍有“补充 XX / 提供 XX / 填写其他信息”等元操作描述，必须重写后再输出。
 {
   "summary": "需要用户补充关键信息后才能继续",
   "final_message": "请用户补充本轮全部缺失信息，并说明为什么这些信息会影响主交付物。",

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
 import {
-  readGoalsSnapshot,
-  readRuntimeEnvironmentsSnapshot,
-  readScheduleEventsSnapshot,
+  readGoalsSnapshotMeta,
+  readRuntimeEnvironmentsSnapshotMeta,
+  readScheduleEventsSnapshotMeta,
 } from "@/lib/server/runtime/stateSnapshot";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { initialGoals } from "@/mocks/goals";
@@ -12,9 +12,24 @@ import { initialScheduleEvents } from "@/mocks/schedule";
 export const runtime = "nodejs";
 
 export async function GET() {
+  const goals = readGoalsSnapshotMeta(initialGoals);
+  const runtimeEnvironments = readRuntimeEnvironmentsSnapshotMeta(INITIAL_RUNTIME_ENVIRONMENTS);
+  const scheduleEvents = readScheduleEventsSnapshotMeta(initialScheduleEvents);
   return NextResponse.json({
-    goals: readGoalsSnapshot(initialGoals),
-    runtimeEnvironments: readRuntimeEnvironmentsSnapshot(INITIAL_RUNTIME_ENVIRONMENTS),
-    scheduleEvents: readScheduleEventsSnapshot(initialScheduleEvents),
+    goals: goals.value,
+    runtimeEnvironments: runtimeEnvironments.value,
+    scheduleEvents: scheduleEvents.value,
+    meta: {
+      revisions: {
+        goals: goals.revision,
+        runtimeEnvironments: runtimeEnvironments.revision,
+        scheduleEvents: scheduleEvents.revision,
+      },
+      updatedAt: {
+        goals: goals.updatedAt,
+        runtimeEnvironments: runtimeEnvironments.updatedAt,
+        scheduleEvents: scheduleEvents.updatedAt,
+      },
+    },
   });
 }

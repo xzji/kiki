@@ -8,11 +8,11 @@ import { DraftReviewView } from "@/components/execution/DraftReviewView";
 import { FlashcardView } from "@/components/execution/FlashcardView";
 import { ListeningQAView } from "@/components/execution/ListeningQAView";
 import { ReadingDigestView } from "@/components/execution/ReadingDigestView";
-import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
+import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
-import { runTaskExecutionAction } from "@/lib/taskExecution";
+import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import { useGoalStore } from "@/stores/goalStore";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, InteractionSubmission, Task, TaskInstance } from "@/types/kiki";
@@ -87,7 +87,6 @@ export function ExecutionResultBody(props: {
   const { task, instance } = props;
   const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
   const completeTaskInstance = useGoalStore((state) => state.completeTaskInstance);
-  const stopTaskInstanceRun = useGoalStore((state) => state.stopTaskInstanceRun);
   const [refreshTick, setRefreshTick] = useState(0);
   const currentKind = task.resultViewKind ?? task.executionKind;
   const displayStatus =
@@ -250,10 +249,16 @@ export function ExecutionResultBody(props: {
         <div className="mt-4">
           <AwaitingUserResumePanel task={task} instance={instance} onRunning={() => setRefreshTick((value) => value + 1)} />
         </div>
+      ) : instance.result?.interactionSubmission ? (
+        <div className="mt-4">
+          <SubmittedInteractionPanel instance={instance} />
+        </div>
       ) : null}
     </div>
   ) : instance.awaitingUser ? (
     <AwaitingUserResumePanel task={task} instance={instance} onRunning={() => setRefreshTick((value) => value + 1)} />
+  ) : instance.result?.interactionSubmission ? (
+    <SubmittedInteractionPanel instance={instance} />
   ) : null;
   const timelineBlock = (
     <details className="rounded-xl border border-[#E5E7EB] bg-white" open={instance.notification?.detailPolicy.showTimelineByDefault || instance.status === "in_progress"}>
@@ -271,6 +276,7 @@ export function ExecutionResultBody(props: {
     </details>
   );
   const resultFirst = instance.status === "completed" || instance.status === "awaiting_user";
+  const canStop = canStopTaskInstance(instance);
 
   return (
     <div className="space-y-6">
@@ -292,19 +298,27 @@ export function ExecutionResultBody(props: {
               <button
                 type="button"
                 onClick={() => {
-                  void runTaskExecutionAction(task.id, instance.status === "paused" ? "resume" : "start").catch((error) => {
+                  void runTaskExecutionAction(task.id, instance.status === "paused" ? "resume" : "rerun", {
+                    instanceId: instance.id,
+                  }).catch((error) => {
                     window.alert(error instanceof Error ? error.message : "任务执行失败");
                   });
                 }}
                 className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
               >
-                重试
+                {instance.status === "paused" ? "继续执行本次" : "重试本次"}
               </button>
             ) : null}
-            {instance.status === "in_progress" ? (
+            {canStop ? (
               <button
                 type="button"
-                onClick={() => stopTaskInstanceRun(task.id, instance.id)}
+                onClick={() => {
+                  void runTaskExecutionAction(task.id, "pause", {
+                    instanceId: instance.id,
+                  }).catch((error) => {
+                    window.alert(error instanceof Error ? error.message : "任务停止失败");
+                  });
+                }}
                 className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
               >
                 停止

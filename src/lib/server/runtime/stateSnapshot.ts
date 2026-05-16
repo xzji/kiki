@@ -5,12 +5,72 @@ import type { RuntimeEnvironment } from "@/types/runtime";
 
 type SnapshotKey = "goals" | "conversations" | "runtimeEnvironments" | "scheduleEvents";
 
+export type SnapshotMeta = {
+  revision: number;
+  updatedAt: string;
+};
+
+type SnapshotEnvelope<T> = SnapshotMeta & {
+  value: T;
+};
+
+export type SnapshotWriteResult = SnapshotMeta & {
+  ok: boolean;
+  conflict?: boolean;
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
 
-function upsertSnapshot<T>(key: SnapshotKey, value: T) {
+function isSnapshotEnvelope(value: unknown): value is SnapshotEnvelope<unknown> {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "value" in value &&
+      typeof (value as { revision?: unknown }).revision === "number" &&
+      typeof (value as { updatedAt?: unknown }).updatedAt === "string",
+  );
+}
+
+function readSnapshotWithMeta<T>(key: SnapshotKey, fallback: T): SnapshotEnvelope<T> {
   const db = getDatabase();
+  const row = db
+    .prepare(`SELECT value_json, updated_at FROM runtime_state_snapshots WHERE key = ? LIMIT 1`)
+    .get(key) as { value_json: string; updated_at: string } | undefined;
+  if (!row) return { value: fallback, revision: 0, updatedAt: "" };
+  try {
+    const parsed = JSON.parse(row.value_json) as unknown;
+    if (isSnapshotEnvelope(parsed)) {
+      return {
+        value: parsed.value as T,
+        revision: parsed.revision,
+        updatedAt: parsed.updatedAt,
+      };
+    }
+    return { value: parsed as T, revision: 0, updatedAt: row.updated_at };
+  } catch {
+    return { value: fallback, revision: 0, updatedAt: row.updated_at };
+  }
+}
+
+function upsertSnapshot<T>(key: SnapshotKey, value: T, expectedRevision?: number): SnapshotWriteResult {
+  const db = getDatabase();
+  const current = readSnapshotWithMeta<T>(key, value);
+  if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+    return {
+      ok: false,
+      conflict: true,
+      revision: current.revision,
+      updatedAt: current.updatedAt,
+    };
+  }
+  const updatedAt = nowIso();
+  const next: SnapshotEnvelope<T> = {
+    value,
+    revision: current.revision + 1,
+    updatedAt,
+  };
   db.prepare(
     `
       INSERT INTO runtime_state_snapshots (key, value_json, updated_at)
@@ -19,42 +79,42 @@ function upsertSnapshot<T>(key: SnapshotKey, value: T) {
         value_json = excluded.value_json,
         updated_at = excluded.updated_at
     `,
-  ).run(key, JSON.stringify(value), nowIso());
+  ).run(key, JSON.stringify(next), updatedAt);
+  return { ok: true, revision: next.revision, updatedAt };
 }
 
-function readSnapshot<T>(key: SnapshotKey, fallback: T): T {
-  const db = getDatabase();
-  const row = db
-    .prepare(`SELECT value_json FROM runtime_state_snapshots WHERE key = ? LIMIT 1`)
-    .get(key) as { value_json: string } | undefined;
-  if (!row) return fallback;
-  try {
-    return JSON.parse(row.value_json) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-export function upsertGoalsSnapshot(goals: Goal[]) {
-  upsertSnapshot("goals", goals);
+export function upsertGoalsSnapshot(goals: Goal[], expectedRevision?: number) {
+  return upsertSnapshot("goals", goals, expectedRevision);
 }
 
 export function readGoalsSnapshot(fallback: Goal[]) {
-  return readSnapshot("goals", fallback);
+  return readSnapshotWithMeta("goals", fallback).value;
 }
 
-export function upsertRuntimeEnvironmentsSnapshot(environments: RuntimeEnvironment[]) {
-  upsertSnapshot("runtimeEnvironments", environments);
+export function readGoalsSnapshotMeta(fallback: Goal[]) {
+  return readSnapshotWithMeta("goals", fallback);
+}
+
+export function upsertRuntimeEnvironmentsSnapshot(environments: RuntimeEnvironment[], expectedRevision?: number) {
+  return upsertSnapshot("runtimeEnvironments", environments, expectedRevision);
 }
 
 export function readRuntimeEnvironmentsSnapshot(fallback: RuntimeEnvironment[]) {
-  return readSnapshot("runtimeEnvironments", fallback);
+  return readSnapshotWithMeta("runtimeEnvironments", fallback).value;
 }
 
-export function upsertScheduleEventsSnapshot(events: AgentEvent[]) {
-  upsertSnapshot("scheduleEvents", events);
+export function readRuntimeEnvironmentsSnapshotMeta(fallback: RuntimeEnvironment[]) {
+  return readSnapshotWithMeta("runtimeEnvironments", fallback);
+}
+
+export function upsertScheduleEventsSnapshot(events: AgentEvent[], expectedRevision?: number) {
+  return upsertSnapshot("scheduleEvents", events, expectedRevision);
 }
 
 export function readScheduleEventsSnapshot(fallback: AgentEvent[]) {
-  return readSnapshot("scheduleEvents", fallback);
+  return readSnapshotWithMeta("scheduleEvents", fallback).value;
+}
+
+export function readScheduleEventsSnapshotMeta(fallback: AgentEvent[]) {
+  return readSnapshotWithMeta("scheduleEvents", fallback);
 }

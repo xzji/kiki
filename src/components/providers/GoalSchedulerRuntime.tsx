@@ -391,6 +391,7 @@ function runGoalSchedulerCycle() {
     }
 
     void (async () => {
+      let requestId: string | undefined;
       try {
         const run = await startTaskRun({
           goal: latestGoal,
@@ -399,6 +400,7 @@ function runGoalSchedulerCycle() {
           instance: latestInstance,
           runtimeEnv,
         });
+        requestId = run.requestId;
         useGoalStore.getState().startTaskInstanceRun({
           taskId: effectiveTask.id,
           instanceId: latestInstance.id,
@@ -429,8 +431,17 @@ function runGoalSchedulerCycle() {
           trajectory: result.trajectory,
           waitingReason: result.waitingReason,
         });
-      } catch {
-        useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");
+      } catch (error) {
+        if (requestId) {
+          useGoalStore.getState().failTaskInstanceRun({
+            taskId: effectiveTask.id,
+            instanceId: latestInstance.id,
+            requestId,
+            errorMessage: error instanceof Error ? error.message : "任务执行失败",
+          });
+        } else {
+          useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");
+        }
       }
     })();
   }

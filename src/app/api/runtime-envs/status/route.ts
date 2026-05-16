@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     runtimeKind,
     workingDirectory,
     cliPath,
-    permissionMode: "confirm",
+    permissionMode: "execute",
   });
 
   return NextResponse.json(result, {

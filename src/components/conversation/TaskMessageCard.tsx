@@ -1,7 +1,8 @@
 "use client";
 
 import { buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
-import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
+import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
+import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import type { Task, TaskInstance } from "@/types/kiki";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
@@ -29,6 +30,10 @@ function awaitingStatusLabel(instance: TaskInstance) {
   return "待确认";
 }
 
+function hasSubmittedInteraction(instance: TaskInstance) {
+  return Boolean(instance.result?.interactionSubmission && !instance.awaitingUser);
+}
+
 /**
  * 会话消息里的任务卡片。
  * - 展示任务结果摘要
@@ -43,6 +48,7 @@ export function TaskMessageCard({
   instance: TaskInstance;
   onOpen: () => void;
 }) {
+  const submittedInteraction = hasSubmittedInteraction(instance);
   const statusLabel =
     instance.awaitingUser
       ? awaitingStatusLabel(instance)
@@ -56,20 +62,23 @@ export function TaskMessageCard({
             ? "已暂停"
             : "待处理";
   const badgeLabel =
-    instance.notification?.badge === "need_confirm"
-      ? "需要确认"
-      : instance.notification?.badge === "need_answer"
-        ? "需要作答"
-        : null;
+    submittedInteraction
+      ? null
+      : instance.notification?.badge === "need_confirm"
+        ? "需要确认"
+        : instance.notification?.badge === "need_answer"
+          ? "需要作答"
+          : null;
   const summaryText =
-    stripNotificationPrefix(instance.notification?.snippet) ||
+    (submittedInteraction ? undefined : stripNotificationPrefix(instance.notification?.snippet)) ||
     instance.result?.summary ||
     instance.awaitingUser?.reason ||
     instance.intro;
+  const canStop = canStopTaskInstance(instance);
   return (
     <div className="mt-3 w-full rounded-xl border border-[#E5E7EB] bg-white p-5 text-left">
-      <button type="button" onClick={onOpen} className="block w-full text-left hover:opacity-90">
-        <div className="min-w-0">
+      <div className="flex items-start gap-3">
+        <button type="button" onClick={onOpen} className="block min-w-0 flex-1 text-left hover:opacity-90">
           <div className="text-[15px] font-semibold text-[#1F2328]">
             {buildInstanceCardTitle(task, instance)}
           </div>
@@ -87,11 +96,30 @@ export function TaskMessageCard({
           <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">
             {summaryText}
           </div>
-        </div>
-      </button>
+        </button>
+        {canStop ? (
+          <button
+            type="button"
+            onClick={() => {
+              void runTaskExecutionAction(task.id, "pause", {
+                instanceId: instance.id,
+              }).catch((error) => {
+                window.alert(error instanceof Error ? error.message : "任务停止失败");
+              });
+            }}
+            className="shrink-0 rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"
+          >
+            停止执行
+          </button>
+        ) : null}
+      </div>
       {instance.awaitingUser ? (
         <div className="mt-4">
           <AwaitingUserResumePanel task={task} instance={instance} />
+        </div>
+      ) : instance.result?.interactionSubmission ? (
+        <div className="mt-4">
+          <SubmittedInteractionPanel instance={instance} />
         </div>
       ) : null}
     </div>

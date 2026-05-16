@@ -14,7 +14,7 @@ export type GoalTaskStepEventType =
   | "resume_replanning_detected"
   | "readiness_semantic_judge";
 
-export type GoalProgressStatus = "running" | "completed" | "failed";
+export type GoalProgressStatus = "running" | "completed" | "failed" | "cancelled";
 
 export type GoalServerProgress = {
   requestId: string;

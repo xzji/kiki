@@ -1,0 +1,188 @@
+{
+  "requestId": "goal-task-1778911143607-remokz",
+  "scope": "goal_task_execute",
+  "status": "running",
+  "phase": "executing",
+  "message": "已收到用户反馈，等待 Agent 继续执行",
+  "startedAt": "2026-05-16T05:59:09.703Z",
+  "updatedAt": "2026-05-16T08:36:24.270Z",
+  "goalId": "goal-1778605437965-越南胡志明市5天游玩规划",
+  "taskId": "goal-1778605437965-越南胡志明市5天游玩规划-goal-越南胡志明市5天游玩规划-sg-4-task-3",
+  "taskInstanceId": "goal-1778605437965-越南胡志明市5天游玩规划-goal-越南胡志明市5天游玩规划-sg-4-task-3-05-16-run-1778911143604-8bi3by",
+  "resultPayload": {
+    "awaitingUser": false,
+    "blocker": {
+      "executionId": "goal-task-1778911143607-remokz",
+      "taskId": "goal-1778605437965-越南胡志明市5天游玩规划-goal-越南胡志明市5天游玩规划-sg-4-task-3",
+      "instanceId": "goal-1778605437965-越南胡志明市5天游玩规划-goal-越南胡志明市5天游玩规划-sg-4-task-3-05-16-run-1778911143604-8bi3by",
+      "blockedStepIndex": 5,
+      "resumeToken": "resume-1778920404077-3rkuwuz9",
+      "interactionRequirement": {
+        "type": "provide_context",
+        "timing": "after_agent_output",
+        "reason": "Agent 已产出候选方案/分析内容，需要你确认选择后继续后续任务。",
+        "question": "确认行程安排",
+        "options": [
+          "采用推荐方案（更稳妥）",
+          "经济优先（少花钱）",
+          "性价比优先（均衡）"
+        ],
+        "suggestedActions": [
+          "采用推荐方案（更稳妥）",
+          "经济优先（少花钱）",
+          "性价比优先（均衡）",
+          "都不是，我自己描述"
+        ],
+        "shouldNotifyUser": true
+      },
+      "resumeStrategy": "rerun_with_feedback",
+      "status": "resolved",
+      "createdAt": "2026-05-16T08:33:24.077Z",
+      "decision": "approved",
+      "feedback": "用户确认选择：体验优先方案（更舒适）",
+      "resolvedAt": "2026-05-16T08:36:24.263Z"
+    },
+    "trajectory": [
+      {
+        "id": "trajectory-1778911149768-0-t7vp1p",
+        "startedAt": "2026-05-16T05:59:09.768Z",
+        "type": "system",
+        "status": "running",
+        "title": "开始第 1 次执行",
+        "thought": "任务：5天详细行程规划",
+        "index": 0
+      },
+      {
+        "id": "trajectory-1778912116607-1-yratxl",
+        "startedAt": "2026-05-16T06:15:16.607Z",
+        "type": "tool_call",
+        "status": "running",
+        "title": "查找项目内容：**/*",
+        "toolCall": {
+          "name": "Glob",
+          "input": {
+            "pattern": "**/*"
+          },
+          "summary": "查找项目内容：**/*"
+        },
+        "index": 1
+      },
+      {
+        "id": "trajectory-1778912124656-2-86l6yk",
+        "startedAt": "2026-05-16T06:15:24.656Z",
+        "type": "tool_call",
+        "status": "running",
+        "title": "读取文件 /Users/bytedance/Documents/trae/long_h...5-16-run-1778911143604-8bi3by/prompt.md",
+        "toolCall": {
+          "name": "Read",
+          "input": {
+            "file_path": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1778603791643/tasks/goal-1778605437965-_5_-goal-_5_-sg-4-task-3/goal-1778605437965-_5_-goal-_5_-sg-4-task-3-05-16-run-1778911143604-8bi3by/prompt.md"
+          },
+          "summary": "读取文件 /Users/bytedance/Documents/trae/long_h...5-16-run-1778911143604-8bi3by/prompt.md"
+        },
+        "index": 2
+      },
+      {
+        "id": "trajectory-1778920403997-3-c7smcw",
+        "startedAt": "2026-05-16T08:33:23.997Z",
+        "type": "assistant",
+        "status": "completed",
+        "title": "Agent 已返回最终消息",
+        "thought": "我需要先检查依赖任务提供的景点调研和美食推荐信息。根据执行前提自检，协作模式为 agent_with_user_confirmation，用户介入时机为 after_agent_output，符合规则C。我应先产出完整行程方案，再请求用户确认。基于目标摘要中已明确的\"双人5天胡志明市深度游，人均预算3000元\"及胡志明市核心景点和美食常识，我可以产出主交付物。",
+        "endedAt": "2026-05-16T08:33:23.997Z",
+        "index": 3
+      },
+      {
+        "id": "trajectory-1778920404037-4-d2b2lw",
+        "startedAt": "2026-05-16T08:33:24.037Z",
+        "type": "approval",
+        "status": "awaiting_user",
+        "title": "识别到用户确认节点",
+        "thought": "Agent 返回了非 JSON 格式的确认卡片内容，系统已兜底转换为 awaiting_user，等待用户确认。",
+        "index": 4
+      },
+      {
+        "id": "trajectory-1778920404060-5-xohlqc",
+        "startedAt": "2026-05-16T08:33:24.060Z",
+        "type": "approval",
+        "status": "awaiting_user",
+        "title": "需要你补充关键信息后才能继续执行。",
+        "thought": "Agent 已产出候选方案/分析内容，需要你确认选择后继续后续任务。",
+        "endedAt": "2026-05-16T08:33:24.060Z",
+        "index": 5
+      },
+      {
+        "id": "resume-1778920584264-6-9v7tbp",
+        "index": 6,
+        "type": "approval",
+        "status": "completed",
+        "title": "用户已确认，任务继续完成",
+        "thought": "用户确认选择：体验优先方案（更舒适）",
+        "startedAt": "2026-05-16T08:36:24.264Z",
+        "endedAt": "2026-05-16T08:36:24.264Z"
+      }
+    ],
+    "interactionRequirement": {
+      "type": "none",
+      "timing": "not_required",
+      "reason": "",
+      "shouldNotifyUser": false
+    },
+    "interactionSubmission": {
+      "type": "provide_context",
+      "status": "submitted",
+      "action": "提交信息并继续",
+      "approved": true,
+      "feedback": "用户确认选择：体验优先方案（更舒适）",
+      "fields": {
+        "用户确认选择": "体验优先方案（更舒适）"
+      },
+      "submittedAt": "2026-05-16T08:36:24.264Z"
+    },
+    "structuredOutput": {
+      "interactionSubmission": {
+        "type": "provide_context",
+        "status": "submitted",
+        "action": "提交信息并继续",
+        "approved": true,
+        "feedback": "用户确认选择：体验优先方案（更舒适）",
+        "fields": {
+          "用户确认选择": "体验优先方案（更舒适）"
+        },
+        "submittedAt": "2026-05-16T08:36:24.264Z"
+      }
+    },
+    "taskResult": {
+      "schemaVersion": 1,
+      "taskId": "goal-1778605437965-越南胡志明市5天游玩规划-goal-越南胡志明市5天游玩规划-sg-4-task-3",
+      "instanceId": "goal-1778605437965-越南胡志明市5天游玩规划-goal-越南胡志明市5天游玩规划-sg-4-task-3-05-16-run-1778911143604-8bi3by",
+      "title": "已收到用户提交",
+      "status": "draft",
+      "blocks": [
+        {
+          "kind": "key_value",
+          "entries": [
+            {
+              "label": "提交状态",
+              "value": "已提交补充信息",
+              "emphasis": true
+            },
+            {
+              "label": "提交内容",
+              "value": "用户确认选择：体验优先方案（更舒适）"
+            },
+            {
+              "label": "提交时间",
+              "value": "2026/5/16 16:36:24"
+            }
+          ]
+        }
+      ],
+      "meta": {
+        "producedAt": "2026-05-16T08:36:24.270Z",
+        "presentation": "summary_card",
+        "primaryFormat": "structured_blocks"
+      }
+    }
+  }
+}

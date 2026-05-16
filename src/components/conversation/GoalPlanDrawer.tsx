@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { GoalPlanBreadcrumb, GoalPlanContent } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
+import { goalDetailPath, taskDetailPath } from "@/lib/routes";
 import type { Task } from "@/types/kiki";
 import { useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
@@ -63,7 +64,7 @@ export function GoalPlanDrawer({
   if (!visible || !goal) return null;
 
   const fullscreenHref =
-    activeTask != null ? `/goals/${goal.id}/tasks/${activeTask.id}` : `/goals/${goal.id}`;
+    activeTask != null ? taskDetailPath(goal.id, activeTask.id) : goalDetailPath(goal.id);
 
   return (
     <>

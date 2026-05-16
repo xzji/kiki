@@ -306,6 +306,11 @@ export function updateRuntimeJobExecution(
   return next;
 }
 
+export function isRuntimeJobLeaseHeld(jobId: string, leaseOwner: string) {
+  const job = getRuntimeJob(jobId);
+  return Boolean(job && job.status === "running" && job.leaseOwner === leaseOwner);
+}
+
 export function getRuntimeJob(jobId: string) {
   const db = getDatabase();
   const row = db.prepare(`SELECT * FROM runtime_jobs WHERE id = ? LIMIT 1`).get(jobId) as RuntimeJobRow | undefined;
@@ -370,6 +375,47 @@ export function cancelRuntimeJobsByConversationId(conversationId: string) {
     )
     .run(now, now, conversationId);
   return result.changes;
+}
+
+export function cancelRuntimeJobByTaskRun(input: { requestId?: string; taskInstanceId?: string }) {
+  const db = getDatabase();
+  const now = nowIso();
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (input.requestId) {
+    conditions.push("request_id = ?");
+    params.push(input.requestId);
+  }
+  if (input.taskInstanceId) {
+    conditions.push("task_instance_id = ?");
+    params.push(input.taskInstanceId);
+  }
+  if (!conditions.length) return null;
+  const row = db
+    .prepare(
+      `
+        SELECT * FROM runtime_jobs
+        WHERE (${conditions.join(" OR ")})
+          AND status IN ('queued', 'running', 'awaiting_user')
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+    )
+    .get(...params) as RuntimeJobRow | undefined;
+  if (!row) return null;
+  db.prepare(
+    `
+      UPDATE runtime_jobs
+      SET status = 'cancelled',
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          finished_at = COALESCE(finished_at, ?),
+          updated_at = ?,
+          last_error = ?
+      WHERE id = ?
+    `,
+  ).run(now, now, "用户手动停止任务执行", row.id);
+  return getRuntimeJob(row.id);
 }
 
 export function releaseRuntimeJobLeasesByConversationId(conversationId: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { resumeTaskRun } from "@/lib/api/taskRuns";
 import { useGoalStore } from "@/stores/goalStore";
@@ -32,16 +32,6 @@ function titleFor(instance: TaskInstance) {
   return "等待你确认";
 }
 
-function placeholderFor(instance: TaskInstance, missingItems: ReadinessItem[]) {
-  if (missingItems.length === 1) return `请输入${missingItems[0].label}`;
-  if (missingItems.length > 1) return `请补充：${missingItems.map((item) => item.label).join("、")}`;
-  const type = instance.awaitingUser?.interactionRequirement?.type;
-  if (type === "answer") return "请输入你的答案，KiKi 会基于答案继续执行";
-  if (type === "provide_context") return "补充必要背景、约束、偏好或资料链接";
-  if (type === "perform_offline_action") return "说明你已完成的线下动作或执行结果";
-  return "可选：补充确认意见或修改建议";
-}
-
 function primaryLabelFor(instance: TaskInstance) {
   const type = instance.awaitingUser?.interactionRequirement?.type;
   if (type === "answer") return "提交答案并继续";
@@ -50,12 +40,71 @@ function primaryLabelFor(instance: TaskInstance) {
   return "确认并继续";
 }
 
+function submittedStatusLabel(status: string) {
+  if (status === "confirmed") return "已确认";
+  if (status === "rejected") return "已要求修改";
+  if (status === "completed") return "已完成";
+  return "已提交";
+}
+
+function formatSubmittedAt(value: string) {
+  try {
+    return new Date(value).toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function submittedDetails(instance: TaskInstance) {
+  const submission = instance.result?.interactionSubmission;
+  if (!submission) return [];
+  const fieldEntries = Object.entries(submission.fields ?? {})
+    .filter(([, value]) => value.trim())
+    .map(([label, value]) => `${label}：${value}`);
+  if (fieldEntries.length) return fieldEntries;
+  return [submission.feedback || submission.action].filter(Boolean);
+}
+
 function defaultOptionsFor(instance: TaskInstance) {
   const type = instance.awaitingUser?.interactionRequirement?.type;
-  if (type === "answer") return ["提交我的答案", "需要重新出题", "先看提示"];
-  if (type === "provide_context") return ["补充缺失信息", "补充约束或偏好", "说明暂时无法提供"];
+  if (type === "answer") return ["主流答案（稳妥）", "高频例外（需说明）", "不确定（让 KiKi 判断）"];
+  if (type === "provide_context") return ["主流稳妥方案（风险低）", "高性价比方案（均衡）", "体验优先方案（更舒适）"];
   if (type === "perform_offline_action") return ["我已完成", "还没完成", "需要 KiKi 调整任务"];
-  return ["确认继续", "需要修改", "补充更多信息"];
+  return ["采用推荐方案（稳妥）", "换成保守方案（风险低）", "换成体验优先方案"];
+}
+
+export function SubmittedInteractionPanel({ instance }: { instance: TaskInstance }) {
+  const submission = instance.result?.interactionSubmission;
+  if (!submission || instance.awaitingUser) return null;
+  const details = submittedDetails(instance);
+  return (
+    <div className="rounded-xl border border-[#B7E4C7] bg-[#F0FFF4] p-4 text-[13px] leading-6 text-[#1F5132]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{submittedStatusLabel(submission.status)}</span>
+        <span className="rounded-full bg-white px-2 py-0.5 text-[12px] text-[#2F7D4A]">
+          {formatSubmittedAt(submission.submittedAt)}
+        </span>
+      </div>
+      {details.length ? (
+        <div className="mt-2 rounded-lg bg-white/75 px-3 py-2 text-[#1F2328]">
+          <div className="text-[12px] text-[#57606A]">已提交的信息</div>
+          <div className="mt-1 space-y-1">
+            {details.map((detail) => (
+              <div key={detail}>{detail}</div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {instance.status === "in_progress" ? (
+        <div className="mt-2 text-[12px] text-[#2F7D4A]">Agent 已收到，正在继续执行。</div>
+      ) : null}
+    </div>
+  );
 }
 
 function dedupeKeepOrder(values: string[]) {
@@ -70,12 +119,23 @@ function dedupeKeepOrder(values: string[]) {
   return result;
 }
 
-const GENERIC_CONTEXT_OPTIONS = new Set(["补充具体信息", "补充缺失信息", "补充约束或偏好", "说明暂时无法提供", "填写其他信息"]);
+const GENERIC_CONTEXT_OPTIONS = new Set([
+  "补充具体信息",
+  "补充缺失信息",
+  "补充约束或偏好",
+  "说明暂时无法提供",
+  "填写其他信息",
+  "补充更多信息",
+  "需要更多信息后再决定",
+  "需要更多时间考虑",
+]);
 
 function normalizeSpecificOptions(values: string[]) {
-  const options = dedupeKeepOrder(values).filter((item) => item.length >= 2 && item.length <= 24);
+  const options = dedupeKeepOrder(values)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2);
   const specificOptions = options.filter((item) => !GENERIC_CONTEXT_OPTIONS.has(item));
-  return (specificOptions.length ? specificOptions : options).slice(0, 3);
+  return specificOptions.slice(0, 3);
 }
 
 function pickThreeOptions(values: string[]) {
@@ -87,18 +147,7 @@ function optionTextForSubmit(option: string, instance: TaskInstance, item?: Read
   const type = instance.awaitingUser?.interactionRequirement?.type;
   if (type === "confirm" && option === "确认继续") return "我确认当前结果，可以继续。";
   if (type === "confirm" && option === "需要修改") return "当前结果需要修改，请根据我的补充意见继续。";
-  if (type === "confirm" && option === "补充更多信息") return "我需要补充更多信息，请结合补充内容继续。";
   return option;
-}
-
-function mergeFieldFeedback(current: string, item: ReadinessItem, value: string) {
-  const nextLine = `${item.label}：${value}`;
-  const lines = current
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith(`${item.label}：`));
-  return [...lines, nextLine].join("\n");
 }
 
 function extractFeedbackFields(feedback: string) {
@@ -109,11 +158,6 @@ function extractFeedbackFields(feedback: string) {
       .filter((match): match is RegExpMatchArray => Boolean(match?.[1] && match[2]))
       .map((match) => [match[1].trim(), match[2].trim()]),
   );
-}
-
-function hasFeedbackForMissingItem(feedback: string, fields: Record<string, string>, item: ReadinessItem) {
-  if (fields[item.label]?.trim()) return true;
-  return feedback.includes(item.label) && feedback.length > item.label.length + 2;
 }
 
 function isTaskReadiness(value: unknown): value is TaskReadiness {
@@ -144,8 +188,8 @@ function defaultOptionsForMissingItem(item: ReadinessItem) {
   if (/住宿区域|酒店区域|住哪/.test(text)) return ["海滩区", "市中心", "度假区/珍珠岛"];
   if (/酒店类型|酒店档次|酒店偏好|酒店星级|房型/.test(text)) return ["高性价比经济型", "舒适型四星", "度假型五星/海景"];
   if (/城市|出发地|目的地/.test(text)) return ["上海", "广州", "北京"];
-  if (/日期|时间/.test(text)) return ["补充出发日期", "补充返回日期", "补充完整日期范围"];
-  if (/预算|费用|价格/.test(text)) return ["控制预算", "舒适优先", "高性价比优先"];
+  if (/日期|时间/.test(text)) return ["周末短途（2-3天）", "工作日错峰（更便宜）", "节假日出行（需早订）"];
+  if (/预算|费用|价格/.test(text)) return ["经济优先（少花钱）", "性价比优先（均衡）", "舒适优先（体验好）"];
   return [];
 }
 
@@ -159,11 +203,14 @@ export function AwaitingUserResumePanel({
   onRunning?: () => void;
 }) {
   const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
-  const [feedback, setFeedback] = useState("");
+  const [selectedOption, setSelectedOption] = useState("");
+  const [selectedItemOptions, setSelectedItemOptions] = useState<Record<string, string>>({});
+  const [customText, setCustomText] = useState("");
+  const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [customMode, setCustomMode] = useState(false);
+  const [customItemModes, setCustomItemModes] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<"approve" | "revise" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const blocker = instance.awaitingUser?.blocker ?? instance.blocker;
   const requirement = instance.awaitingUser?.interactionRequirement;
   const readiness = readinessFromInstance(instance);
@@ -177,39 +224,80 @@ export function AwaitingUserResumePanel({
   }, [instance, missingItems.length, requirement?.options]);
 
   const suggestedOptions = useMemo(() => {
-    const raw = instance.awaitingUser?.suggestedActions ?? [];
+    const raw = [
+      ...(requirement?.options ?? []),
+      ...(instance.awaitingUser?.suggestedActions ?? []),
+    ];
     return pickThreeOptions(raw);
-  }, [instance.awaitingUser?.suggestedActions]);
+  }, [instance.awaitingUser?.suggestedActions, requirement?.options]);
 
   const optionsForMissingItem = (item: ReadinessItem) => {
-    if (item.options?.length) return pickThreeOptions(item.options);
+    const itemOptions = item.options?.length ? pickThreeOptions(item.options) : [];
+    if (itemOptions.length) return itemOptions;
     if (suggestedOptions.length) return suggestedOptions;
     return pickThreeOptions(defaultOptionsForMissingItem(item));
   };
 
   const chooseOption = (option: string, item?: ReadinessItem) => {
-    setCustomMode(false);
     setError(null);
-    setFeedback((current) => (item ? mergeFieldFeedback(current, item, option) : optionTextForSubmit(option, instance)));
+    if (item) {
+      setSelectedItemOptions((current) => ({ ...current, [item.id]: option }));
+      setCustomItemModes((current) => ({ ...current, [item.id]: false }));
+      return;
+    }
+    setSelectedOption(option);
+    setCustomMode(false);
   };
 
   const chooseCustom = (item?: ReadinessItem) => {
-    setCustomMode(true);
-    setFeedback((current) => (item ? mergeFieldFeedback(current, item, "") : ""));
     setError(null);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    if (item) {
+      setCustomItemModes((current) => ({ ...current, [item.id]: true }));
+      return;
+    }
+    setCustomMode(true);
+  };
+
+  const updateCustomValue = (value: string, item?: ReadinessItem) => {
+    setError(null);
+    if (item) {
+      setCustomItemModes((current) => ({ ...current, [item.id]: true }));
+      setCustomFields((current) => ({ ...current, [item.id]: value }));
+      return;
+    }
+    setCustomMode(true);
+    setCustomText(value);
+  };
+
+  const feedbackValueForItem = (item: ReadinessItem) => {
+    if (customItemModes[item.id]) return customFields[item.id]?.trim() ?? "";
+    return selectedItemOptions[item.id]?.trim() ?? "";
+  };
+
+  const buildFeedback = () => {
+    if (missingItems.length > 0) {
+      return missingItems
+        .map((item) => {
+          const value = feedbackValueForItem(item);
+          return value ? `${item.label}：${value}` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (customMode) return customText.trim();
+    return selectedOption ? optionTextForSubmit(selectedOption, instance).trim() : "";
   };
 
   const submit = async (approved: boolean) => {
     if (!blocker) return;
-    const normalizedFeedback = feedback.trim();
+    const normalizedFeedback = buildFeedback();
     if ((type === "answer" || type === "provide_context" || customMode) && !normalizedFeedback) {
       setError("请先选择一个选项，或填写你要补充的信息。");
       return;
     }
     const feedbackFields = extractFeedbackFields(normalizedFeedback);
-    if (missingItems.length > 1) {
-      const unresolvedItems = missingItems.filter((item) => !hasFeedbackForMissingItem(normalizedFeedback, feedbackFields, item));
+    if (missingItems.length > 0) {
+      const unresolvedItems = missingItems.filter((item) => !feedbackValueForItem(item));
       if (unresolvedItems.length) {
         setError(`请在本次提交中补全：${unresolvedItems.map((item) => item.label).join("、")}。`);
         return;
@@ -234,8 +322,12 @@ export function AwaitingUserResumePanel({
         trajectory: state.trajectory,
         waitingReason: state.waitingReason,
       });
-      setFeedback("");
+      setSelectedOption("");
+      setSelectedItemOptions({});
+      setCustomText("");
+      setCustomFields({});
       setCustomMode(false);
+      setCustomItemModes({});
       if (state.progress?.status === "running") onRunning?.();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "任务恢复失败");
@@ -263,37 +355,45 @@ export function AwaitingUserResumePanel({
           {missingItems.map((item) => {
             const itemOptions = optionsForMissingItem(item);
             return (
-              <div key={item.id} className="rounded-lg border border-[#E5D7A8] bg-white/60 p-3">
+              <div key={item.id} className="rounded-lg bg-white/60 px-3 py-3">
                 <div className="text-[12px] font-medium text-[#8A6D3B]">请选择{item.label}</div>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 space-y-2">
                   {itemOptions.map((option) => {
-                    const selected = feedback.split("\n").includes(optionTextForSubmit(option, instance, item)) && !customMode;
+                    const selected = selectedItemOptions[item.id] === option && !customItemModes[item.id];
                     return (
                       <button
                         key={`${item.id}-${option}`}
                         type="button"
                         onClick={() => chooseOption(option, item)}
-                        className={
-                          selected
-                            ? "rounded-full border border-[#8A6D3B] bg-[#8A6D3B] px-3 py-1 text-[12px] text-white"
-                            : "rounded-full border border-[#E5D7A8] bg-white px-3 py-1 text-[12px] text-[#6E5A16] hover:border-[#8A6D3B]"
-                        }
+                        className="flex w-full items-center gap-2 py-1 text-left text-[13px] text-[#1F2328] hover:text-[#8A6D3B]"
                       >
-                        {option}
+                        <span
+                          className={
+                            selected
+                              ? "h-2 w-2 rounded-full bg-[#8A6D3B]"
+                              : "h-2 w-2 rounded-full bg-[#D8C995]"
+                          }
+                        />
+                        <span className={selected ? "font-medium" : ""}>{option}</span>
                       </button>
                     );
                   })}
-                  <button
-                    type="button"
-                    onClick={() => chooseCustom(item)}
-                    className={
-                      customMode && feedback.startsWith(`${item.label}：`)
-                        ? "rounded-full border border-[#8A6D3B] bg-[#8A6D3B] px-3 py-1 text-[12px] text-white"
-                        : "rounded-full border border-dashed border-[#E5D7A8] bg-white px-3 py-1 text-[12px] text-[#6E5A16] hover:border-[#8A6D3B]"
-                    }
-                  >
-                    都不是，自己填写
-                  </button>
+                  <div className="flex items-center gap-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => chooseCustom(item)}
+                      className="shrink-0 text-left text-[13px] text-[#6E5A16] hover:text-[#8A6D3B]"
+                    >
+                      都不是，我自己描述
+                    </button>
+                    <input
+                      value={customFields[item.id] ?? ""}
+                      onFocus={() => chooseCustom(item)}
+                      onChange={(event) => updateCustomValue(event.target.value, item)}
+                      placeholder={`输入${item.label}`}
+                      className="min-w-0 flex-1 border-b border-[#E5D7A8] bg-transparent px-1 py-1 text-[13px] text-[#1F2328] outline-none placeholder:text-[#B7A66A] focus:border-[#8A6D3B]"
+                    />
+                  </div>
                 </div>
               </div>
             );
@@ -301,48 +401,48 @@ export function AwaitingUserResumePanel({
         </div>
       ) : (
         <div className="mt-3">
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-2 space-y-2">
             {options.map((option) => {
-              const selected = feedback === optionTextForSubmit(option, instance) && !customMode;
+              const selected = selectedOption === option && !customMode;
               return (
                 <button
                   key={option}
                   type="button"
                   onClick={() => chooseOption(option)}
-                  className={
-                    selected
-                      ? "rounded-full border border-[#8A6D3B] bg-[#8A6D3B] px-3 py-1 text-[12px] text-white"
-                      : "rounded-full border border-[#E5D7A8] bg-white px-3 py-1 text-[12px] text-[#6E5A16] hover:border-[#8A6D3B]"
-                  }
+                  className="flex w-full items-center gap-2 py-1 text-left text-[13px] text-[#1F2328] hover:text-[#8A6D3B]"
                 >
-                  {option}
+                  <span
+                    className={
+                      selected
+                        ? "h-2 w-2 rounded-full bg-[#8A6D3B]"
+                        : "h-2 w-2 rounded-full bg-[#D8C995]"
+                    }
+                  />
+                  <span className={selected ? "font-medium" : ""}>{option}</span>
                 </button>
               );
             })}
-            <button
-              type="button"
-              onClick={() => chooseCustom()}
-              className={
-                customMode
-                  ? "rounded-full border border-[#8A6D3B] bg-[#8A6D3B] px-3 py-1 text-[12px] text-white"
-                  : "rounded-full border border-dashed border-[#E5D7A8] bg-white px-3 py-1 text-[12px] text-[#6E5A16] hover:border-[#8A6D3B]"
-              }
-            >
-              都不是，自己填写
-            </button>
+            <div className="flex items-center gap-2 py-1">
+              <button
+                type="button"
+                onClick={() => chooseCustom()}
+                className="shrink-0 text-left text-[13px] text-[#6E5A16] hover:text-[#8A6D3B]"
+              >
+                都不是，我自己描述
+              </button>
+              <input
+                value={customMode && missingItems.length === 0 ? customText : ""}
+                onFocus={() => chooseCustom()}
+                onChange={(event) => updateCustomValue(event.target.value)}
+                placeholder="请输入你的选择"
+                className="min-w-0 flex-1 border-b border-[#E5D7A8] bg-transparent px-1 py-1 text-[13px] text-[#1F2328] outline-none placeholder:text-[#B7A66A] focus:border-[#8A6D3B]"
+              />
+            </div>
           </div>
         </div>
       )}
       {blocker ? (
         <div className="mt-4 space-y-3">
-          <textarea
-            ref={textareaRef}
-            value={feedback}
-            onChange={(event) => setFeedback(event.target.value)}
-            rows={type === "answer" || type === "provide_context" ? 4 : 3}
-            placeholder={placeholderFor(instance, missingItems)}
-            className="w-full resize-none rounded-lg border border-[#E5D7A8] bg-white px-3 py-2 text-[13px] leading-6 text-[#1F2328] outline-none focus:border-[#8A6D3B]"
-          />
           {error ? <div className="text-[12px] text-[#B42318]">{error}</div> : null}
           <div className="flex flex-wrap gap-2">
             <button

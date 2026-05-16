@@ -1,0 +1,14 @@
+[
+  {
+    "role": "user",
+    "content": "/goal 托福备考110",
+    "createdAt": "2026-05-16T12:18:08.321Z",
+    "kind": "text"
+  },
+  {
+    "role": "kiki",
+    "content": "正在生成首轮澄清问题...",
+    "createdAt": "2026-05-16T12:18:08.321Z",
+    "kind": "text"
+  }
+]

@@ -6,10 +6,6 @@ import { persist } from "zustand/middleware";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
-import {
-  applyTaskInstanceTransition,
-  normalizeTaskInstanceExecution,
-} from "@/stores/taskInstanceStateMachine";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
@@ -31,7 +27,7 @@ import type {
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
-const MOCK_BASELINE_RESET_VERSION = 2;
+const MOCK_BASELINE_RESET_VERSION = 1;
 
 function finalizeGoal(goal: Goal): Goal {
   const tasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
@@ -387,6 +383,8 @@ function normalizeNotificationFromProgress(
   progress: GoalServerProgress | null,
   instance: TaskInstance,
 ): TaskInstanceNotificationState | undefined {
+  const interactionSubmission = progress?.resultPayload?.interactionSubmission;
+  if (interactionSubmission && progress.resultPayload?.awaitingUser !== true) return undefined;
   const rawDecision = progress?.resultPayload?.notificationDecision;
   if (!isNotificationDecision(rawDecision)) return instance.notification;
   const deliveryState =
@@ -405,10 +403,22 @@ function normalizeNotificationFromProgress(
 }
 
 function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
-  const lifecycle = normalizeTaskInstanceExecution(instance);
+  const status = instance.execution?.status ?? instance.status;
+  const phase =
+    instance.execution?.phase ??
+    (status === "completed"
+      ? "completed"
+      : status === "awaiting_user"
+        ? "awaiting_user"
+        : status === "in_progress"
+          ? "running"
+          : status === "error"
+            ? "failed"
+            : status === "paused"
+              ? "failed"
+              : "queued");
   return {
     ...instance,
-    status: lifecycle.status,
     payload:
       instance.payload ??
       ({
@@ -420,7 +430,10 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
       ...instance.runner,
     },
     execution: {
-      ...lifecycle.execution,
+      phase,
+      status,
+      lastUpdatedAt: instance.execution?.lastUpdatedAt ?? instance.createdAt,
+      ...instance.execution,
     },
     timeline:
       instance.timeline ??
@@ -429,10 +442,10 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
           id: `${instance.id}-queued`,
           title: "任务已创建",
           type: "phase",
-          status: lifecycle.status === "pending" ? "running" : "completed",
+          status: status === "pending" ? "running" : "completed",
           detail: instance.intro,
           startedAt: instance.createdAt,
-          finishedAt: lifecycle.status === "pending" ? undefined : instance.createdAt,
+          finishedAt: status === "pending" ? undefined : instance.createdAt,
         },
       ],
   };
@@ -505,6 +518,12 @@ type GoalStore = {
     logs?: GoalServerLogEntry[];
     trajectory?: ExecutionTrajectoryStep[];
     waitingReason?: string;
+  }) => void;
+  failTaskInstanceRun: (input: {
+    taskId: string;
+    instanceId: string;
+    requestId?: string;
+    errorMessage: string;
   }) => void;
   retryTaskInstanceRun: (taskId: string, instanceId: string) => void;
   stopTaskInstanceRun: (taskId: string, instanceId: string) => void;
@@ -713,8 +732,14 @@ export const useGoalStore = create<GoalStore>()(
         const dateLabel = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(
           date.getDate(),
         ).padStart(2, "0")}`;
-        if (found.task.instances.some((instance) => instance.dateLabel === dateLabel)) return null;
-        const nextInstance = createGeneratedInstance(found.task, createdAt);
+        const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+        const baseInstance = createGeneratedInstance(found.task, createdAt);
+        const nextInstance = {
+          ...baseInstance,
+          id: `${baseInstance.id}-run-${date.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+          dateLabel: `${dateLabel} ${timeLabel}`,
+          intro: `用户手动发起执行“${found.task.title.replace(/^任务\d+：/, "")}”。`,
+        };
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
             ...task,
@@ -992,7 +1017,7 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
-      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs, trajectory, waitingReason }) => {
+      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs, trajectory }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => {
             const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
@@ -1013,6 +1038,8 @@ export const useGoalStore = create<GoalStore>()(
                     ? progress.resultPayload?.awaitingUser
                       ? "awaiting_user"
                       : "completed"
+                    : progress?.status === "cancelled"
+                      ? "paused"
                     : progress?.status === "failed"
                       ? "error"
                       : "in_progress";
@@ -1048,12 +1075,13 @@ export const useGoalStore = create<GoalStore>()(
                             ? "awaiting_user"
                             : nextStatus === "error"
                               ? "failed"
+                              : nextStatus === "paused"
+                                ? "cancelled"
                               : "running",
                       status: nextStatus,
                       startedAt: instance.execution?.startedAt ?? progress?.startedAt ?? instance.createdAt,
                       finishedAt: progress?.finishedAt,
                       lastUpdatedAt: progress?.updatedAt ?? nowIso(),
-                      waitingReason: nextStatus === "in_progress" ? waitingReason : undefined,
                       errorCategory:
                         nextStatus === "error"
                           ? ((progress?.resultPayload?.errorCategory as TaskRunErrorCategory | undefined) ?? "unknown")
@@ -1097,6 +1125,41 @@ export const useGoalStore = create<GoalStore>()(
               }),
             };
           }),
+        }));
+      },
+      failTaskInstanceRun: ({ taskId, instanceId, requestId, errorMessage }) => {
+        set((state) => ({
+          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
+            ...task,
+            instances: task.instances.map((instance) =>
+              instance.id === instanceId
+                ? normalizeInstance(
+                    {
+                      ...instance,
+                      status: "error",
+                      execution: {
+                        phase: "failed",
+                        status: "error",
+                        startedAt: instance.execution?.startedAt,
+                        finishedAt: nowIso(),
+                        lastUpdatedAt: nowIso(),
+                        errorCategory: "unknown",
+                        errorMessage,
+                      },
+                      result: {
+                        ...instance.result,
+                        summary: errorMessage,
+                        structuredOutput: {
+                          ...(instance.result?.structuredOutput ?? {}),
+                          requestId,
+                        },
+                      },
+                    },
+                    task,
+                  )
+                : instance,
+            ),
+          })),
         }));
       },
       retryTaskInstanceRun: (taskId, instanceId) => {

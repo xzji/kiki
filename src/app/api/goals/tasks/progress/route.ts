@@ -66,19 +66,42 @@ export async function GET(request: NextRequest) {
     taskInstanceId ? getTaskTelemetryProgress(taskInstanceId) : null,
     runtimeJob?.progress,
   ]);
+  const now = new Date().toISOString();
+  const cancelledProgress =
+    runtimeJob?.status === "cancelled"
+      ? ({
+          requestId: runtimeJob.requestId ?? requestId ?? `cancel-${runtimeJob.id}`,
+          scope: "goal_task_execute",
+          status: "cancelled",
+          phase: "executing",
+          message: "用户已手动停止任务执行。",
+          startedAt: runtimeJob.startedAt ?? now,
+          updatedAt: runtimeJob.updatedAt ?? now,
+          finishedAt: runtimeJob.finishedAt ?? now,
+          error: runtimeJob.lastError || "用户手动停止任务执行",
+          goalId: runtimeJob.goalId,
+          taskId: runtimeJob.taskId,
+          taskInstanceId: runtimeJob.taskInstanceId,
+          resultPayload: {
+            errorCategory: "aborted",
+            errorMessage: runtimeJob.lastError || "用户手动停止任务执行",
+          },
+        } satisfies GoalServerProgress)
+      : null;
   const telemetryLogs = taskInstanceId ? getTaskTelemetryLogs(taskInstanceId) : [];
   const logs = telemetryLogs.length > 0 ? telemetryLogs : runtimeJob?.logs ?? [];
   const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
     ? progress.resultPayload.trajectory
     : [];
   const trajectory = progressTrajectory.length > 0 ? progressTrajectory : runtimeJob?.trajectory ?? [];
-  const waitingReason = buildWaitingReason({ runtimeJob, progress });
-  if (!progress && (!logs || logs.length === 0)) {
+  const effectiveProgress = cancelledProgress ?? progress;
+  const waitingReason = buildWaitingReason({ runtimeJob, progress: effectiveProgress });
+  if (!effectiveProgress && (!logs || logs.length === 0)) {
     return NextResponse.json({ progress: null, logs: [], trajectory: [], waitingReason }, { status: 404 });
   }
 
   return NextResponse.json({
-    progress,
+    progress: effectiveProgress,
     logs,
     trajectory,
     waitingReason,

@@ -81,8 +81,8 @@ export type TaskExecutionPhase =
   | "preparing"
   | "running"
   | "awaiting_user"
-  | "paused"
   | "completed"
+  | "paused"
   | "retrying"
   | "failed"
   | "cancelled";
@@ -124,6 +124,19 @@ export type GoalWorkflow = {
   confirmedAt?: string;
 };
 
+export type GoalPlanningRecoveryAction = "retry_collect" | "retry_plan" | "resume_plan";
+
+export type GoalPlanningRunState = {
+  status: "failed";
+  phase: GoalWorkflowPhase;
+  action: GoalPlanningRecoveryAction;
+  goalText: string;
+  errorMessage: string;
+  failedAt: string;
+  updatedAt: string;
+  lastUserMessage?: string;
+};
+
 export type GoalInfoCollectionStatus =
   | "awaiting_user"
   | "processing"
@@ -149,19 +162,6 @@ export type GoalInfoCollection = {
   updatedAt: string;
   summary?: CollectedInfoSummary;
   assistantMessage?: string;
-};
-
-export type GoalPlanningRecoveryAction = "retry_collect" | "retry_plan";
-
-export type GoalPlanningRunState = {
-  status: "failed";
-  phase: GoalWorkflowPhase;
-  action: GoalPlanningRecoveryAction;
-  goalText: string;
-  errorMessage: string;
-  failedAt: string;
-  updatedAt: string;
-  lastUserMessage?: string;
 };
 
 export type GoalAnalysis = {
@@ -228,7 +228,6 @@ export type TaskInstanceRunnerState = {
 export type TaskInstanceExecutionState = {
   phase: TaskExecutionPhase;
   status: TaskInstanceStatus;
-  workspacePath?: string;
   startedAt?: string;
   finishedAt?: string;
   lastUpdatedAt?: string;

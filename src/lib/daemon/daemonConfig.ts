@@ -22,7 +22,7 @@ const DEFAULT_CONFIG: RuntimeDaemonConfig = {
   name: "KiKi Local Runtime",
   cliPath: "claude",
   workingDirectory: process.cwd(),
-  permissionMode: "confirm",
+  permissionMode: "execute",
   autoStart: false,
   authorizedDirectories: [process.cwd()],
   schedulerIntervalMs: 60_000,

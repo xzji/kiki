@@ -1,6 +1,7 @@
 "use client";
 
 import type { ResultBlock, ResultCell, TaskResult } from "@/types/taskResult";
+import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 
 const PRESENTATION_LABEL: Record<NonNullable<TaskResult["meta"]["presentation"]>, string> = {
   summary_card: "摘要卡片",
@@ -35,7 +36,7 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
     case "paragraph":
       return <p className="whitespace-pre-wrap text-[14px] leading-7 text-[#374151]">{block.text}</p>;
     case "markdown":
-      return <div className="whitespace-pre-wrap text-[14px] leading-7 text-[#374151]">{block.content}</div>;
+      return <MarkdownRenderer content={block.content} className="text-[14px] leading-7" />;
     case "list":
       return block.ordered ? (
         <ol className="list-decimal space-y-1 pl-5 text-[14px] leading-7 text-[#374151]">

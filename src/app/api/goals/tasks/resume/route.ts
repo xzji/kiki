@@ -306,6 +306,22 @@ function buildProgress(input: {
   } satisfies GoalServerProgress;
 }
 
+function buildResumeContext(input: { approved: boolean; feedback: string }) {
+  const lines = [
+    `用户对上一次阻塞点的决定：${input.approved ? "确认继续" : "拒绝当前方案/要求修改"}`,
+    `用户反馈：${input.feedback}`,
+  ];
+  if (input.approved) {
+    lines.push(
+      "用户已确认上一轮候选/草案，请不要再次要求用户确认同一内容。",
+      "请基于已确认内容生成最终交付物，以完整 task_result.blocks 输出可直接展示给用户的最终方案卡片。",
+    );
+  } else {
+    lines.push("请根据用户反馈修订上一轮候选/草案，并输出更新后的完整方案。");
+  }
+  return lines.join("\n");
+}
+
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
   if (!body.taskInstanceId || !body.resumeToken) {
@@ -328,6 +344,16 @@ export async function POST(request: NextRequest) {
       });
     }
     return NextResponse.json({ reason: "当前任务没有等待恢复的阻塞点" }, { status: 404 });
+  }
+  if (job.blocker.status === "resolved") {
+    return NextResponse.json({
+      resumed: true,
+      completed: job.status === "completed",
+      alreadyResumed: true,
+      progress: job.progress,
+      logs: job.logs,
+      trajectory: job.trajectory,
+    });
   }
   if (job.blocker.resumeToken !== body.resumeToken) {
     return NextResponse.json({ reason: "恢复令牌不匹配，请刷新后重试" }, { status: 409 });
@@ -434,7 +460,7 @@ export async function POST(request: NextRequest) {
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
     });
-    return NextResponse.json({ resumed: true, completed: true, progress: nextProgress, trajectory: nextTrajectory });
+    return NextResponse.json({ resumed: true, completed: true, progress: nextProgress, logs: job.logs, trajectory: nextTrajectory });
   }
 
   const feedback = body.feedback?.trim() || (body.approved ? "用户已确认，请继续执行。" : "用户未确认当前方案，请根据反馈修改后继续执行。");
@@ -480,7 +506,7 @@ export async function POST(request: NextRequest) {
     resultPayload,
     status: "running",
     phase: "executing",
-    message: "已收到用户反馈，等待 Agent 继续执行",
+    message: body.approved ? "已收到用户确认，等待 Agent 生成最终方案" : "已收到用户反馈，等待 Agent 继续执行",
   });
   const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
     taskId: job.payload.task.id,
@@ -505,10 +531,7 @@ export async function POST(request: NextRequest) {
     payload: {
       ...job.payload,
       taskWorkspaceDir,
-      resumeContext: [
-        `用户对上一次阻塞点的决定：${body.approved ? "确认继续" : "拒绝当前方案/要求修改"}`,
-        `用户反馈：${feedback}`,
-      ].join("\n"),
+      resumeContext: buildResumeContext({ approved: body.approved, feedback }),
     },
     progress: nextProgress,
     trajectory: nextTrajectory,
@@ -519,5 +542,5 @@ export async function POST(request: NextRequest) {
     leaseExpiresAt: undefined,
   });
 
-  return NextResponse.json({ resumed: true, completed: false, progress: nextProgress, trajectory: nextTrajectory });
+  return NextResponse.json({ resumed: true, completed: false, progress: nextProgress, logs: job.logs, trajectory: nextTrajectory });
 }

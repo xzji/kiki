@@ -3,6 +3,7 @@
 import { Ellipsis, LayoutList } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { cn } from "@/lib/utils";
@@ -140,8 +141,8 @@ export function ConversationMessageItem({
             ) : null}
           </div>
         </div>
-        <div className="max-w-3xl whitespace-pre-wrap text-sm leading-6 text-[#374151]">
-          {isKikiLoading ? <LoadingDots /> : message.content}
+        <div className="max-w-3xl">
+          {isKikiLoading ? <LoadingDots /> : <MarkdownRenderer content={message.content} />}
         </div>
 
         {message.kind === "task_card" && taskInfo ? (

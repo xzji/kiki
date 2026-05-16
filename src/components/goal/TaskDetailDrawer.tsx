@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 
 import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
+import { taskDetailPath } from "@/lib/routes";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
@@ -76,7 +77,7 @@ export function TaskDetailDrawer() {
             <ChevronsRight className="h-4 w-4" />
           </button>
           <Link
-            href={`/goals/${goal.id}/tasks/${task.id}`}
+            href={taskDetailPath(goal.id, task.id)}
             aria-label="展开为全屏"
             onClick={close}
             className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"

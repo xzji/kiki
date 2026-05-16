@@ -109,6 +109,8 @@ function normalizeNotificationFromProgress(
   progress: GoalServerProgress | null,
   instance: TaskInstance,
 ): TaskInstanceNotificationState | undefined {
+  const interactionSubmission = progress?.resultPayload?.interactionSubmission;
+  if (interactionSubmission && progress.resultPayload?.awaitingUser !== true) return undefined;
   const rawDecision = progress?.resultPayload?.notificationDecision;
   if (!isNotificationDecision(rawDecision)) return instance.notification;
   const previous = instance.notification;
@@ -340,6 +342,8 @@ export function syncGoalInstanceFromProgress(
                 ? input.progress.resultPayload?.awaitingUser
                   ? "awaiting_user"
                   : "completed"
+                : input.progress?.status === "cancelled"
+                  ? "paused"
                 : input.progress?.status === "failed"
                   ? "error"
                   : "in_progress";
@@ -350,6 +354,8 @@ export function syncGoalInstanceFromProgress(
                   ? "awaiting_user"
                   : nextStatus === "error"
                     ? "failed"
+                    : nextStatus === "paused"
+                      ? "cancelled"
                     : "running";
             const nextKind =
               (input.progress?.resultPayload?.resultViewKind as TaskResultViewKind | undefined) ??

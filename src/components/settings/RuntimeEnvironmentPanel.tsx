@@ -150,7 +150,7 @@ export function RuntimeEnvironmentPanel() {
                 name: activeLocalEnvironment?.name || "KiKi Local Runtime",
                 workingDirectory: activeLocalEnvironment?.workingDirectory || "",
                 cliPath: activeLocalEnvironment?.cliPath || "claude",
-                permissionMode: activeLocalEnvironment?.permissionMode || "confirm",
+                permissionMode: activeLocalEnvironment?.permissionMode || "execute",
               },
             }
           : { enabled: false },

@@ -91,6 +91,35 @@ export async function fetchTaskRunProgress(input: {
   return getTaskRunProgress(input);
 }
 
+export async function cancelTaskRun(input: {
+  requestId?: string;
+  taskInstanceId: string;
+}) {
+  const response = await fetch("/api/goals/tasks/cancel", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json()) as {
+    reason?: string;
+    progress?: GoalServerProgress | null;
+    logs?: GoalServerLogEntry[];
+    trajectory?: ExecutionTrajectoryStep[];
+    waitingReason?: string;
+  };
+  if (!response.ok) {
+    throw new Error(data.reason || "任务停止失败");
+  }
+  return {
+    progress: data.progress ?? null,
+    logs: data.logs ?? [],
+    trajectory: data.trajectory ?? [],
+    waitingReason: data.waitingReason,
+  };
+}
+
 export async function resumeTaskRun(input: {
   taskInstanceId: string;
   resumeToken: string;

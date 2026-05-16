@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { TaskAgentPromptDrawer } from "@/components/goal/TaskAgentPromptDrawer";
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
-import { AwaitingUserResumePanel } from "@/components/task/AwaitingUserResumePanel";
+import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
-import { runTaskExecutionAction } from "@/lib/taskExecution";
+import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
 import { formatToolOperationText, summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { cn } from "@/lib/utils";
@@ -72,6 +72,34 @@ function isVisibleExecutionStep(step: TaskExecutionStep) {
     !step.title.trim().startsWith("[debug]") &&
     !step.detail?.trim().startsWith("[debug]")
   );
+}
+
+function isAssistantProcessStep(step: TaskExecutionStep) {
+  return step.type === "assistant" && !step.toolName && step.title === "Agent 过程输出（非最终结果）";
+}
+
+function appendAssistantProcessText(previous: string, next: string) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return /[。！？.!?]\s*$/.test(previous) ? `${previous}\n${next}` : `${previous}${next}`;
+}
+
+function mergeAssistantProcessSteps(steps: TaskExecutionStep[]) {
+  const merged: TaskExecutionStep[] = [];
+  for (const step of steps) {
+    const previous = merged.at(-1);
+    if (previous && isAssistantProcessStep(previous) && isAssistantProcessStep(step)) {
+      merged[merged.length - 1] = {
+        ...previous,
+        status: step.status,
+        detail: appendAssistantProcessText(previous.detail?.trim() ?? "", step.detail?.trim() ?? ""),
+        finishedAt: step.finishedAt ?? previous.finishedAt,
+      };
+      continue;
+    }
+    merged.push(step);
+  }
+  return merged;
 }
 
 function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined): TaskExecutionStep[] | undefined {
@@ -161,7 +189,7 @@ export function TaskDetailBody({
             : taskState === "paused"
               ? "已暂停"
               : "待开始";
-  const executionAction = getExecutionAction(task, taskState);
+  const executionAction = getExecutionAction();
   const cleanTitle = task.title.replace(/^任务\d+：/, "");
 
   const sortedInstances = useMemo(
@@ -575,6 +603,7 @@ function InstanceCard({
     instance.status === "error" ||
     Boolean(instance.timeline?.length || instance.trajectory?.length || instance.result);
   const resultLine = isArchivedExecutionInstance(instance) ? getInstanceResultLine(task, instance) : "";
+  const canStop = canStopTaskInstance(instance);
   const executionSteps = applyWaitingReasonToSteps(
     trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
     instance.execution?.waitingReason,
@@ -616,11 +645,43 @@ function InstanceCard({
                 <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-6 text-[#1F2328]">
                   {resultLine}
                 </div>
+                {instance.status === "error" ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void runTaskExecutionAction(task.id, "rerun", {
+                        instanceId: instance.id,
+                      }).catch((error) => {
+                        window.alert(error instanceof Error ? error.message : "任务执行失败");
+                      });
+                    }}
+                    className="shrink-0 rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+                  >
+                    重试本次
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
           {canExpand ? (
-            <div className="flex shrink-0 items-center gap-1 text-[12px] text-[#6B7280]">
+            <div className="flex shrink-0 items-center gap-2 text-[12px] text-[#6B7280]">
+              {canStop ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void runTaskExecutionAction(task.id, "pause", {
+                      instanceId: instance.id,
+                    }).catch((error) => {
+                      window.alert(error instanceof Error ? error.message : "任务停止失败");
+                    });
+                  }}
+                  className="rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"
+                >
+                  停止
+                </button>
+              ) : null}
               <span>{expanded ? "收起详情" : "展开详情"}</span>
               {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </div>
@@ -631,6 +692,40 @@ function InstanceCard({
       {expanded ? (
         <div className="border-t border-[#E5E7EB] bg-[#FAFAFB] px-4 py-4">
           <div className="space-y-4">
+            {canStop ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void runTaskExecutionAction(task.id, "pause", {
+                      instanceId: instance.id,
+                    }).catch((error) => {
+                      window.alert(error instanceof Error ? error.message : "任务停止失败");
+                    });
+                  }}
+                  className="rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"
+                >
+                  停止执行
+                </button>
+              </div>
+            ) : null}
+            {instance.status === "paused" ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void runTaskExecutionAction(task.id, "resume", {
+                      instanceId: instance.id,
+                    }).catch((error) => {
+                      window.alert(error instanceof Error ? error.message : "任务执行失败");
+                    });
+                  }}
+                  className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+                >
+                  继续执行本次
+                </button>
+              </div>
+            ) : null}
             <div className="min-w-0">
               <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] font-medium text-[#6B7280]">
                 <span>执行过程</span>
@@ -711,6 +806,8 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
       ) : null}
       {instance.awaitingUser ? (
         <AwaitingUserResumePanel task={task} instance={instance} />
+      ) : instance.result?.interactionSubmission ? (
+        <SubmittedInteractionPanel instance={instance} />
       ) : null}
     </div>
   );
@@ -718,7 +815,7 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
 
 function ExecutionMessageStream({ steps }: { steps: TaskExecutionStep[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const visibleSteps = useMemo(() => steps.filter(isVisibleExecutionStep), [steps]);
+  const visibleSteps = useMemo(() => mergeAssistantProcessSteps(steps.filter(isVisibleExecutionStep)), [steps]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -831,8 +928,9 @@ function getInstanceResultLine(task: Task, instance: TaskInstance) {
       "任务执行失败，但未返回具体失败原因。"
     );
   }
+  const submittedInteraction = Boolean(instance.result?.interactionSubmission && !instance.awaitingUser);
   const directResult =
-    instance.notification?.resultSummary.headline ??
+    (submittedInteraction ? undefined : instance.notification?.resultSummary.headline) ??
     instance.result?.summary ??
     instance.result?.finalMessage ??
     (instance.payload.kind === "generic_result" ? instance.payload.summary ?? instance.payload.details : undefined);
@@ -891,19 +989,8 @@ function getTaskDisplayState(task: Task) {
   return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
 }
 
-function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisplayState>) {
-  if (taskState === "completed") return { label: "重新执行", action: "rerun" as const };
-  if (taskState === "awaiting_user") return null;
-  if (taskState === "error") return { label: "重试", action: "start" as const };
-  const latest = [...task.instances]
-    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-    .find((instance) => instance.status !== "completed");
-  if (latest?.status === "error") return { label: "重试", action: "start" as const };
-  if (taskState === "in_progress") return { label: "停止", action: "pause" as const };
-  if (taskState === "paused") return { label: "继续执行", action: "resume" as const };
-  if (!latest) return { label: "执行", action: "start" as const };
-  if (latest.status === "pending") return { label: "执行", action: "start" as const };
-  return null;
+function getExecutionAction() {
+  return { label: "发起执行", action: "start" as const };
 }
 
 function taskStatusClassName(state: ReturnType<typeof getTaskDisplayState>) {

@@ -18,6 +18,7 @@ export type TaskInstanceTransition =
   | { type: "control"; action: "start" | "pause" | "resume"; now: string }
   | { type: "complete"; now: string }
   | { type: "run_started"; now: string }
+  | { type: "run_failed"; requestId?: string; errorMessage?: string; now: string }
   | { type: "progress_synced"; progress: GoalServerProgress; waitingReason?: string; now: string }
   | { type: "retry_requested"; now: string }
   | { type: "stopped"; now: string };
@@ -46,14 +47,14 @@ export function getTaskInstancePhase(status: TaskInstanceStatus): TaskExecutionP
 
 export function normalizeTaskInstanceExecution(instance: TaskInstance): TransitionPatch {
   const status = instance.execution?.status ?? instance.status;
-  const phase = instance.execution?.phase ?? getTaskInstancePhase(status);
+  const phase = normalizePhase(status, instance.execution?.phase);
   return {
     status,
     execution: {
+      ...instance.execution,
       phase,
       status,
-      lastUpdatedAt: instance.createdAt,
-      ...instance.execution,
+      lastUpdatedAt: instance.execution?.lastUpdatedAt ?? instance.createdAt,
     },
   };
 }
@@ -75,6 +76,13 @@ export function applyTaskInstanceTransition(
         }),
       };
     case "control": {
+      if (
+        transition.action === "pause" &&
+        instance.status !== "in_progress" &&
+        instance.status !== "awaiting_user"
+      ) {
+        return null;
+      }
       const status = transition.action === "pause" ? "paused" : "in_progress";
       return {
         status,
@@ -107,6 +115,28 @@ export function applyTaskInstanceTransition(
           clearFinishedAt: true,
           clearWaitingReason: true,
           clearError: true,
+        }),
+      };
+    case "run_failed":
+      if (
+        transition.requestId &&
+        instance.runner?.requestId &&
+        transition.requestId !== instance.runner.requestId
+      ) {
+        return null;
+      }
+      if (instance.status !== "in_progress" && instance.status !== "awaiting_user") {
+        return null;
+      }
+      return {
+        status: "error",
+        execution: buildExecution(instance, "error", {
+          startedAt: instance.execution?.startedAt ?? instance.createdAt,
+          finishedAt: transition.now,
+          lastUpdatedAt: transition.now,
+          errorCategory: "unknown",
+          errorMessage: transition.errorMessage ?? "任务执行失败",
+          clearWaitingReason: true,
         }),
       };
     case "progress_synced":
@@ -149,12 +179,17 @@ function buildProgressPatch(
   ) {
     return null;
   }
+  if (instance.status !== "in_progress" && instance.status !== "awaiting_user") {
+    return null;
+  }
 
   const status: TaskInstanceStatus =
     progress.status === "completed"
       ? progress.resultPayload?.awaitingUser
         ? "awaiting_user"
         : "completed"
+      : progress.status === "cancelled"
+        ? "paused"
       : progress.status === "failed"
         ? "error"
         : "in_progress";
@@ -195,4 +230,10 @@ function buildExecution(
     errorCategory: options.clearError ? undefined : options.errorCategory ?? previous?.errorCategory,
     errorMessage: options.clearError ? undefined : options.errorMessage ?? previous?.errorMessage,
   };
+}
+
+function normalizePhase(status: TaskInstanceStatus, phase?: TaskExecutionPhase): TaskExecutionPhase {
+  if (status === "pending" && phase === "retrying") return phase;
+  if (status === "paused" && phase === "cancelled") return phase;
+  return getTaskInstancePhase(status);
 }

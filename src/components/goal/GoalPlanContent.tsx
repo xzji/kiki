@@ -11,6 +11,7 @@ import { SubGoalBlock } from "@/components/goal/SubGoalBlock";
 import { SubGoalCreateDrawer } from "@/components/goal/SubGoalCreateDrawer";
 import { cn } from "@/lib/utils";
 import { BASE_DATE, formatDateInput } from "@/lib/date";
+import { goalDetailPath, taskDetailPath } from "@/lib/routes";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import type { Goal, GoalWorkflowPhase, Task, TaskInstanceStatus } from "@/types/kiki";
@@ -39,7 +40,7 @@ export function GoalPlanBreadcrumb({
   ) : disableLinks ? (
     <span className="font-medium">{goalTitle}</span>
   ) : (
-    <Link href={`/goals/${goalId}`} className="font-medium hover:text-[#111]">
+    <Link href={goalDetailPath(goalId)} className="font-medium hover:text-[#111]">
       {goalTitle}
     </Link>
   );
@@ -51,7 +52,7 @@ export function GoalPlanBreadcrumb({
   ) : disableLinks ? (
     <span>目标规划</span>
   ) : (
-    <Link href={`/goals/${goalId}`} className="hover:text-[#111]">
+    <Link href={goalDetailPath(goalId)} className="hover:text-[#111]">
       目标规划
     </Link>
   );
@@ -136,7 +137,7 @@ export function GoalPlanContent({
       onOpenTask(task);
       return;
     }
-    router.push(`/goals/${goal.id}/tasks/${task.id}`);
+    router.push(taskDetailPath(goal.id, task.id));
   };
 
   return (
