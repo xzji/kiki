@@ -1,7 +1,6 @@
 import { createGeneratedInstance } from "@/mocks/goals";
-import { createQueuedRuntimeJob, getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
-import { addGeneratedInstanceToGoalsSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
+import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import type { Goal, Task, TaskInstanceStatus } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -62,17 +61,6 @@ function isTaskDue(task: Task, now: Date) {
   return now.getTime() >= due.getTime();
 }
 
-function dependenciesMet(goal: Goal, task: Task) {
-  if (!task.dependencies?.length) return true;
-  const taskMap = new Map(goal.subGoals.flatMap((subGoal) => subGoal.tasks).map((item) => [item.id, item]));
-  return task.dependencies.every((dependencyId) => {
-    const dependency = taskMap.get(dependencyId);
-    if (!dependency) return false;
-    if (dependency.progress >= 100) return true;
-    return dependency.instances[0]?.status === "completed";
-  });
-}
-
 function computePriorityScore(task: Task) {
   const priority = task.priority ?? "medium";
   const taskTypeScore = task.taskType === "one_shot" ? 30 : task.taskType === "monitoring" ? 20 : 10;
@@ -92,8 +80,8 @@ function getReadyTasks(goals: Goal[]) {
     }
     for (const subGoal of goal.subGoals) {
       for (const task of subGoal.tasks) {
+        if (task.autoRunDisabled) continue;
         if (task.progress >= 100 && task.taskType === "one_shot") continue;
-        if (!dependenciesMet(goal, task)) continue;
         const runtimeStatus = toTaskRuntimeStatus(task);
         if (runtimeStatus !== "pending" && runtimeStatus !== "completed") continue;
         if (!isTaskDue(task, now)) continue;
@@ -137,20 +125,23 @@ export function runGoalSchedulerEngine(input: {
       skipped += 1;
       return;
     }
-
-    createQueuedRuntimeJob(
-      {
-        goal: item.goal,
-        subGoal: latestSubGoal,
-        task: item.task,
-        instance,
-        runtimeEnv,
-      },
-      { requestId: `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
-    );
-    const nextGoals = addGeneratedInstanceToGoalsSnapshot(readGoalsSnapshot(input.goals), item.task.id, nowIso);
-    upsertGoalsSnapshot(nextGoals);
-    createdJobs += 1;
+    const result = startTaskAttempt({
+      goal: item.goal,
+      subGoal: latestSubGoal,
+      task: item.task,
+      instance,
+      runtimeEnv,
+      triggerSource: "scheduler",
+      requestId: `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+    if (result.outcome === "queued") {
+      createdJobs += 1;
+      return;
+    }
+    if (result.outcome === "awaiting_user" || result.outcome === "already_running" || result.outcome === "blocked_config") {
+      skipped += 1;
+      return;
+    }
   });
 
   return { createdJobs, skipped } satisfies SchedulerResult;

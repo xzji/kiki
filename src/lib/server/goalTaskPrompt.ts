@@ -1,18 +1,13 @@
-import { TASK_RESULT_PROMPT_FRAGMENT } from "@/lib/taskResult/schemaForPrompt";
+import { EXTERNAL_EMBED_PROMPT_FRAGMENT, FILE_ARTIFACT_PROMPT_FRAGMENT, TASK_RESULT_PROMPT_FRAGMENT, WEBAPP_ARTIFACT_PROMPT_FRAGMENT } from "@/lib/taskResult/schemaForPrompt";
+import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
+import {
+  renderDependencyReuseInstruction,
+  renderDependencySection,
+  renderWorkspaceHint,
+} from "@/lib/server/taskExecution/contextRenderer";
+import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { Goal, SubGoal, Task, TaskExpectedResult, TaskInstance } from "@/types/kiki";
-
-function formatTaskDependencies(task: Task, goal: Goal) {
-  if (!task.dependencies?.length) return "无依赖任务。";
-  const taskMap = new Map(goal.subGoals.flatMap((subGoal) => subGoal.tasks).map((item) => [item.id, item]));
-  return task.dependencies
-    .map((dependencyId) => {
-      const dependency = taskMap.get(dependencyId);
-      if (!dependency) return `- ${dependencyId}`;
-      return `- ${dependency.title}: ${dependency.expectedOutcome}`;
-    })
-    .join("\n");
-}
+import type { Task, TaskExpectedResult } from "@/types/kiki";
 
 function normalizeResultPresentation(expectedResult?: TaskExpectedResult) {
   if (!expectedResult) return "document";
@@ -29,6 +24,8 @@ function resolveExportableFormats(task: Task) {
 }
 
 function resolveRequiredBlocks(task: Task) {
+  if (!resolveExpectedSurfaces(task.expectedResult).includes("interactive")) return [];
+  if (task.expectedResult?.interactiveSurface?.kind === "webapp") return [];
   return task.expectedResult?.requiredBlocks?.length
     ? task.expectedResult.requiredBlocks
     : (["heading", "paragraph"] as const);
@@ -37,11 +34,13 @@ function resolveRequiredBlocks(task: Task) {
 function formatExpectedResult(task: Task) {
   const expectedResult = task.expectedResult;
   const normalizedPresentation = normalizeResultPresentation(expectedResult);
+  const expectedSurfaces = resolveExpectedSurfaces(expectedResult);
   if (!expectedResult) {
     return [
       `- 核心交付物：${task.expectedOutcome}`,
       "- 结果类型：deliverable",
       "- 主格式：structured_blocks",
+      "- 结果呈现区域：interactive",
       `- 结果级呈现：${normalizedPresentation}`,
       "- 可导出格式：markdown",
       "- 完成标准：完成任务核心目标，并提供可验证、可复用的主交付物。",
@@ -52,6 +51,7 @@ function formatExpectedResult(task: Task) {
     `- 核心交付物：${expectedResult.description || task.expectedOutcome}`,
     `- 结果类型：${expectedResult.type}`,
     `- 原始格式提示：${expectedResult.format}`,
+    `- 结果呈现区域：${expectedSurfaces.join("、")}`,
     `- 主格式：${expectedResult.primaryFormat || "structured_blocks"}`,
     `- 结果级呈现：${normalizedPresentation}`,
   ];
@@ -74,6 +74,10 @@ function formatMachineReadableRequirements(task: Task) {
   return JSON.stringify(
     {
       resultType: expectedResult?.type || "deliverable",
+      surfaces: resolveExpectedSurfaces(expectedResult),
+      interactiveSurface: expectedResult?.interactiveSurface ?? { required: resolveExpectedSurfaces(expectedResult).includes("interactive"), kind: "blocks" },
+      fileSurface: expectedResult?.fileSurface ?? { required: resolveExpectedSurfaces(expectedResult).includes("files") },
+      legacyDeliveryMode: expectedResult?.deliveryMode || "inline",
       primaryFormat: expectedResult?.primaryFormat || "structured_blocks",
       presentation: normalizeResultPresentation(expectedResult),
       ...(expectedResult?.presentation === "comparison_table" ? { mainBlock: "comparison_table" } : {}),
@@ -132,6 +136,7 @@ B. 如果 协作模式=agent_autonomous：
 C. 如果 用户介入时机 ∈ {during_execution, after_agent_output}：
    1. Agent 应先产出候选方案、对比或候选集，填入 task_result.blocks。
    2. 再在 interaction_requirement 中说明需要用户在哪个节点选择、审核或回答。
+   3. 但如果任务的结果类型是 information，且完成标准只是生成报告、调研、对比、分析或清单，则用户查看、确认是否满意、选择下一步只属于产出反馈/下游输入，不是当前任务完成条件。此时必须按“输出模板 A（正常完成）”返回，awaiting_user=false，并把下一步建议写入 suggested_actions。
 
 D. 如果本轮是恢复执行模式：
    1. 仅针对上一轮新暴露的缺口执行本自检。
@@ -139,14 +144,21 @@ D. 如果本轮是恢复执行模式：
 }
 
 export function buildGoalTaskRunnerPrompt(input: {
-  goal: Goal;
-  subGoal: SubGoal;
-  task: Task;
-  instance: TaskInstance;
+  context: TaskExecutionContext;
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
+  webAppInteractionContext?: string;
 }) {
-  const { goal, subGoal, task, instance, resumeContext, initialTrajectory } = input;
+  const { context, resumeContext, initialTrajectory } = input;
+  const { goal, subGoal, task, instance } = {
+    goal: context.inputs.goal,
+    subGoal: context.inputs.subGoal,
+    task: context.inputs.task,
+    instance: context.inputs.instance,
+  };
+  if (!instance) {
+    throw new Error("buildGoalTaskRunnerPrompt requires an execution context with instance.");
+  }
   const isResume = Boolean(resumeContext) || (initialTrajectory?.length ?? 0) > 0;
   const previousToolCalls = (initialTrajectory ?? [])
     .filter((step) => step.type === "tool_call" && step.toolCall)
@@ -177,31 +189,29 @@ export function buildGoalTaskRunnerPrompt(input: {
 ${resumeContext ? `\n用户恢复上下文（必须纳入本轮执行）：\n${resumeContext}\n` : ""}${previousToolCalls ? `\n前序已经调用过的工具（避免重复执行）：\n${previousToolCalls}\n` : ""}${previousAssistantOutputs ? `\n前序 Agent 已产出的关键内容（必须沿用与重组，不允许丢弃）：\n${previousAssistantOutputs}\n` : ""}`
     : "";
   const normalizedPresentation = normalizeResultPresentation(task.expectedResult);
+  const expectedSurfaces = resolveExpectedSurfaces(task.expectedResult);
+  const requiresInteractiveSurface = expectedSurfaces.includes("interactive");
+  const requiresFileSurface = expectedSurfaces.includes("files");
+  const interactiveSurfaceKind = task.expectedResult?.interactiveSurface?.kind ?? (requiresInteractiveSurface ? "blocks" : undefined);
+  const requiresWebAppSurface = requiresInteractiveSurface && interactiveSurfaceKind === "webapp";
+  const webAppInteractionContext = input.webAppInteractionContext ?? "";
 
-  return `你是 KiKi 的后台任务执行 Agent。请以“交付物要求”为核心真实推进任务，而不是只给建议或只总结过程。
+  return `# Role
+你是 KiKi 的后台任务执行 Agent。请以“交付物要求”为核心真实推进任务，而不是只给建议或只总结过程。
 
 你的任务不是证明自己做过事情，而是交付与任务要求一致的可验收产物。
 
-${buildStepZeroPrompt(isResume)}
-
-总原则：无论正常完成、等待用户还是存在缺口，主产出都必须放在 task_result.blocks 中；summary / final_message / artifacts 只能辅助说明，不能替代主产出。
-
-最终回复硬性格式：
-1. 只能输出一个完整 JSON 对象。
-2. 不要输出 Markdown 代码块。
-3. 不要在 JSON 前后输出任何自然语言解释、执行过程、思考过程或附加说明。
-4. 可以在 workspace 内写文件作为副本，但最终回复仍必须把完整 JSON 输出到消息中，不能只返回文件路径或只写入文件。
-5. 如果需要用户确认，仍必须按“输出模板 B”输出完整 JSON，并设置 awaiting_user=true。
-
+# Dynamic Context
 目标：${goal.title}
 目标摘要：${goal.summary || "无"}
 子目标：${subGoal.title}
 任务标题：${task.title}
 任务描述：${task.description}
 任务执行目标：${task.executionObjective || task.description}
-建议工作目录：${task.recommendedWorkingDirectory || "使用 Runtime 当前 working directory"}
+建议工作目录：${context.workspace?.taskWorkspaceDir || task.recommendedWorkingDirectory || "使用 Runtime 当前 working directory"}
+${renderWorkspaceHint(context)}
 依赖任务：
-${formatTaskDependencies(task, goal)}
+${renderDependencySection(context)}
 
 交付物要求（必须满足）：
 - 预期结果：${task.expectedOutcome}
@@ -215,9 +225,26 @@ ${formatCollaborationRequirements(task)}
 
 ${resumeBlock}
 
+${webAppInteractionContext}
+
+# Instructions
+${buildStepZeroPrompt(isResume)}
+
+总原则：最终结果必须满足“结果呈现区域”要求。交互渲染区可以由 task_result.blocks 或 webapp 承载；文件区域当前放在 files 数组中，由系统转成 task_result.artifactRefs。两类区域可以同时存在，也可以只存在其中一种。
+
+最终回复硬性格式：
+1. 只能输出一个完整 JSON 对象。
+2. 不要输出 Markdown 代码块。
+3. 不要在 JSON 前后输出任何自然语言解释、执行过程、思考过程或附加说明。
+4. 可以在 workspace 内写文件作为副本，但最终回复仍必须把完整 JSON 输出到消息中；如果任务要求文件区域，必须返回 files 数组，不能只返回本地文件路径。
+5. 如果需要用户确认，仍必须按“输出模板 B”输出完整 JSON，并设置 awaiting_user=true。
+6. information 类型任务如果已经满足 completion_criteria，不要为了收集用户反馈或选择下一步而设置 awaiting_user=true 或 interaction_requirement.confirm；应设置 awaiting_user=false，并在 suggested_actions 中给出可选下一步。
+7. task_result.blocks 是给用户看的最终交付结果，只能包含结论、报告、表格、建议、清单、可交互内容等交付物本身。
+8. 不要把执行过程、工具调用过程、Agent 自我说明、审阅过程、角色分工、协同过程写进 task_result.blocks；这些过程信息应留在执行轨迹或极简 final_message 中。
+
 执行约束：
 1. 先执行“第一步：执行前提自检”。只有确认前提已满足，才允许直接检索、分析、生成最终交付物。
-2. 如果可导出格式包含 html，表示结构化产物必须具备 HTML 渲染/导出的语义；不要直接输出未清洗的 HTML 作为主产物，主产物仍然是 task_result.blocks。
+2. 如果结果呈现区域包含 interactive 且 interactiveSurface.kind=blocks，必须返回可页面渲染的 task_result.blocks；如果 interactiveSurface.kind=webapp，必须返回顶层 webapp 对象，task_result.blocks 可作为降级摘要。
 3. 如果无法满足交付物要求，不要假装完成；必须设置 interaction_requirement.type=agent_revision_required 或 deliverable_gap，并在 deliverable_check.missing_deliverables 中说明缺口。
 4. 如果需要用户确认、作答、补充关键上下文或完成线下动作，请根据协作要求设置 interaction_requirement.type，不要把所有场景都写成 confirm。
 5. 如果缺少用户才能提供的关键输入（例如出发城市、账号信息、个人偏好、预算上限、目标选择等），必须立即停止产出最终完成态交付物：
@@ -229,19 +256,25 @@ ${resumeBlock}
      例如：问“偏好的住宿区域和酒店类型”时，应给“海滩区+度假酒店（放松） / 市中心+四星酒店（便利） / 度假区+五星酒店（省心）”。
      例如：问“选哪种越南签证”时，应给“电子签 e-Visa（90天） / 落地签（需邀请函） / 贴纸签（使馆办理）”。
    - UI 会自动补 1 个“都不是，我自己描述”，你不要把这个兜底项放进 interaction_requirement.options。
-   - task_result.status 必须为 pending_user 或 blocked，blocks 只呈现“需要补充的信息”和“为什么需要”，不要输出基于猜测的方案。
+   - task_result.status 必须为 pending_user 或 blocked；如果要求交互渲染区，blocks 只呈现“需要补充的信息”和“为什么需要”，不要输出基于猜测的方案。
    - deliverable_check.matched 必须为 false，missing_deliverables 必须包含本轮全部缺失用户输入。
    - artifacts 必须为空数组；如果 awaiting_user=true，顶层 suggested_actions 默认也应为空数组，除非确有必要给出补充行动建议。
 6. 禁止猜测或幻想关键事实。可以说明“缺少信息，无法继续”，但不能用默认城市、默认预算、默认偏好代替用户输入。
 7. 最终输出必须是一个 JSON 对象，不要加代码块，不要输出额外解释。
+${renderDependencyReuseInstruction(context)}
 
 ${TASK_RESULT_PROMPT_FRAGMENT}
 
+${requiresWebAppSurface ? `${WEBAPP_ARTIFACT_PROMPT_FRAGMENT}\n\n${EXTERNAL_EMBED_PROMPT_FRAGMENT}` : ""}
+
+${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
+
 验收规则：
 1. 逐条检查“预期结果”和“完成标准”是否被最终产物覆盖。
-2. deliverable_check.matched 只有在 task_result.blocks 组件化主产出真实覆盖预期结果且没有关键缺口时才能为 true。
+2. deliverable_check.matched 只有在所有要求的结果呈现区域都真实覆盖预期结果且没有关键缺口时才能为 true。
 3. 只生成过程描述、泛泛总结、计划、待办列表，不算满足交付物要求。
 
+# Output Format
 输出模板 A（正常完成，适用于 done / draft）：
 {
   "summary": "本轮执行结果摘要",
@@ -267,6 +300,7 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
       "href": "可选链接"
     }
   ],
+  "files": ${requiresFileSurface ? "[{\"filename\":\"result.md\",\"mime\":\"text/markdown; charset=utf-8\",\"content\":\"# 文件正文\\n\\n这里写完整文件内容。\"}]" : "[]"},
   "task_result": {
     "schemaVersion": 1,
     "taskId": "${task.id}",
@@ -279,6 +313,9 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
     ],
     "meta": {
       "producedAt": "ISO 时间",
+      "surfaces": ${JSON.stringify(expectedSurfaces)},
+      "interactiveSurfaceKind": ${JSON.stringify(requiresInteractiveSurface ? interactiveSurfaceKind : null)},
+      "fileSurfaceRequired": ${JSON.stringify(requiresFileSurface)},
       "presentation": "${normalizedPresentation}",
       "primaryFormat": "${task.expectedResult?.primaryFormat || "structured_blocks"}",
       "exportableFormats": ${JSON.stringify(resolveExportableFormats(task))}
@@ -362,6 +399,30 @@ ${TASK_RESULT_PROMPT_FRAGMENT}
   },
   "structured_output": {}
 }
+
+# Examples
+示例 1：mixed 模式正常完成
+- 如果交付物要求同时包含 interactive 和 files，最终 JSON 必须同时提供 task_result.blocks 和 files。
+- task_result.blocks 用于页面内阅读，files 用于文件区域和下载；只提供其中一个都不算完整完成。
+- deliverable_check.criteria_results 必须逐项说明 blocks 和 files 都已覆盖。
+
+示例 2：等待用户补充信息
+- 如果缺少用户才能提供的关键输入，awaiting_user=true。
+- interaction_requirement.options 必须是 3 个具体答案，例如“海滩区+度假酒店（放松）/ 市中心+四星酒店（便利）/ 度假区+五星酒店（省心）”。
+- 禁止把 options 写成“补充信息 / 提供偏好 / 填写其他内容”这类动作。
+
+示例 3：information 类型任务已完成
+- 如果任务只是生成报告、调研、对比、分析或清单，且完成标准已经满足，awaiting_user=false。
+- 用户是否满意、是否选择下一步、是否继续修订，属于结果反馈或下游输入，不是当前任务完成条件。
+- 可把“查看结果、提出修改、继续深入分析”等写入 suggested_actions。
+
+# Critical Reminders
+1. 只能输出一个完整 JSON 对象，不要输出 Markdown 代码块。
+2. 不要在 JSON 前后输出任何自然语言解释、执行过程、思考过程或附加说明。
+3. task_result.blocks 只能包含用户真正需要的最终交付内容，不能包含工具调用、Agent 协同、审阅打回或移交过程。
+4. 工具输入输出应留在 execution trajectory 中；如果最终结果需要引用工具发现，只写结论摘要，不重复工具名、参数或原始输出。
+5. deliverable_check 必须和实际交付内容一致，不能用 summary 或 final_message 替代结果区域。
+6. information 类型任务如果已满足完成标准，不要为了收集反馈而设置 awaiting_user=true。
 
 当前实例信息：
 - instanceId: ${instance.id}

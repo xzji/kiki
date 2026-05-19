@@ -118,7 +118,7 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         conversationWorkspaceDir,
         taskWorkspaceDir,
         resumeContext: job.payload.resumeContext,
-        initialTrajectory: job.trajectory,
+        initialTrajectory: job.payload.resumeContext ? job.trajectory : [],
         signal: abortController.signal,
       });
       if (abortController.signal.aborted) {
@@ -127,10 +127,13 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
 
       const latestProgress = getGoalTelemetryProgress(job.requestId ?? "");
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
-      const latestTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
-        ? job.trajectory.concat(latestProgress.resultPayload.trajectory as typeof job.trajectory).filter((step, index, all) =>
-            all.findIndex((item) => item.id === step.id) === index,
-          )
+      const runTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
+        ? (latestProgress.resultPayload.trajectory as typeof job.trajectory)
+        : null;
+      const latestTrajectory = runTrajectory
+        ? (job.payload.resumeContext
+            ? job.trajectory.concat(runTrajectory).filter((step, index, all) => all.findIndex((item) => item.id === step.id) === index)
+            : runTrajectory)
         : job.trajectory;
       const latestBlocker = latestProgress?.resultPayload?.blocker ?? null;
       if (!isRuntimeJobLeaseHeld(job.id, leaseOwner)) {
@@ -201,10 +204,13 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
       const failedJob = job.requestId ? getRuntimeJobByRequestId(job.requestId) : null;
       const latestProgress = job.requestId ? getGoalTelemetryProgress(job.requestId) : failedJob?.progress ?? null;
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
-      const latestTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
-        ? job.trajectory.concat(latestProgress.resultPayload.trajectory as typeof job.trajectory).filter((step, index, all) =>
-            all.findIndex((item) => item.id === step.id) === index,
-          )
+      const runTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
+        ? (latestProgress.resultPayload.trajectory as typeof job.trajectory)
+        : null;
+      const latestTrajectory = runTrajectory
+        ? (job.payload.resumeContext
+            ? job.trajectory.concat(runTrajectory).filter((step, index, all) => all.findIndex((item) => item.id === step.id) === index)
+            : runTrajectory)
         : job.trajectory;
       const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
         taskId: job.payload.task.id,

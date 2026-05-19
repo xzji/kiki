@@ -1,6 +1,7 @@
 "use client";
 
-import { cancelTaskRun, startTaskRun, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import { cancelGoalInstance, GoalCommandError } from "@/lib/api/goal-commands";
+import { startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
@@ -18,9 +19,9 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     const target = resolveTargetInstance(location.task, "pause", options?.instanceId);
     if (!target) throw new Error("未找到可停止的任务实例。");
     if (!canStopTaskInstance(target)) throw new Error("当前任务实例不在执行中。");
-    await cancelTaskRun({
-      requestId: target.runner?.requestId,
-      taskInstanceId: target.id,
+    await cancelGoalInstance({
+      instanceId: target.id,
+      reason: "用户暂停任务执行",
     });
     useGoalStore.getState().stopTaskInstanceRun(taskId, target.id);
     return;
@@ -67,22 +68,44 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       runtimeEnv,
     });
 
-    useGoalStore.getState().startTaskInstanceRun({
-      taskId: current.task.id,
-      instanceId: targetInstance.id,
-      requestId: run.requestId,
-      runtimeEnvId: runtimeEnv.id,
-      permissionMode: runtimeEnv.permissionMode,
-      workingDirectory: run.workspacePath,
-    });
+    if (run.outcome === "awaiting_user") {
+      useGoalStore.getState().syncTaskInstanceRun({
+        taskId: current.task.id,
+        instanceId: run.taskInstanceId,
+        progress: run.progress,
+        logs: [],
+        trajectory: [],
+        waitingReason: run.waitingReason,
+      });
+      return;
+    }
 
+    if (run.requestId) {
+      useGoalStore.getState().startTaskInstanceRun({
+        taskId: current.task.id,
+        instanceId: run.taskInstanceId,
+        requestId: run.requestId,
+        runtimeEnvId: runtimeEnv.id,
+        permissionMode: runtimeEnv.permissionMode,
+        workingDirectory: run.workspacePath,
+      });
+    }
+
+    if (run.outcome === "already_running") {
+      return;
+    }
+
+    const requestId = run.requestId;
+    if (!requestId) {
+      throw new Error("任务执行启动失败：缺少 requestId");
+    }
     void waitForTaskRunCompletion({
-      requestId: run.requestId,
-      taskInstanceId: targetInstance.id,
+      requestId,
+      taskInstanceId: run.taskInstanceId,
       onProgress: (payload) => {
         useGoalStore.getState().syncTaskInstanceRun({
           taskId: current.task.id,
-          instanceId: targetInstance!.id,
+          instanceId: run.taskInstanceId,
           progress: payload.progress,
           logs: payload.logs,
           trajectory: payload.trajectory,
@@ -93,7 +116,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       .then((result) => {
         useGoalStore.getState().syncTaskInstanceRun({
           taskId: current.task.id,
-          instanceId: targetInstance!.id,
+          instanceId: run.taskInstanceId,
           progress: result.progress,
           logs: result.logs,
           trajectory: result.trajectory,
@@ -103,14 +126,37 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       .catch((error) => {
         useGoalStore.getState().failTaskInstanceRun({
           taskId: current.task.id,
-          instanceId: targetInstance!.id,
-          requestId: run.requestId,
+          instanceId: run.taskInstanceId,
+          requestId,
           errorMessage: error instanceof Error ? error.message : "任务执行失败",
         });
         console.error("手动执行任务失败", error);
       });
   } catch (error) {
-    useGoalStore.getState().markInstanceStatus(current.task.id, targetInstance.id, "error");
+    const errorMessage = error instanceof Error ? error.message : "任务执行失败";
+    if (error instanceof TaskRunApiError && error.status >= 400 && error.status < 500) {
+      try {
+        await cancelGoalInstance({
+          instanceId: targetInstance.id,
+          reason: errorMessage,
+        });
+        useGoalStore.getState().stopTaskInstanceRun(current.task.id, targetInstance.id);
+      } catch (commandError) {
+        if (!(commandError instanceof GoalCommandError && commandError.status === 409)) {
+          useGoalStore.getState().failTaskInstanceRun({
+            taskId: current.task.id,
+            instanceId: targetInstance.id,
+            errorMessage,
+          });
+        }
+      }
+    } else {
+      useGoalStore.getState().failTaskInstanceRun({
+        taskId: current.task.id,
+        instanceId: targetInstance.id,
+        errorMessage,
+      });
+    }
     throw error;
   }
 }

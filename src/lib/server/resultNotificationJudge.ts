@@ -91,6 +91,15 @@ function hasImportantSignal(result: JudgeTaskResultInput["result"]) {
   return /异常|风险|阻塞|失败|紧急|机会|alert|risk|blocked|urgent|error/.test(text);
 }
 
+function taskRequiresUserConfirmationToComplete(task: Task) {
+  if (task.expectedResult?.type === "decision" || task.expectedResult?.type === "confirmation") return true;
+  const criteria = task.expectedResult?.completionCriteria ?? "";
+  if (/用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(criteria)) {
+    return true;
+  }
+  return task.requiresConfirmation === true && task.expectedResult?.type !== "information";
+}
+
 function baseDecision(
   input: JudgeTaskResultInput,
   overrides: Omit<TaskResultNotificationDecision, "title" | "createdAt"> & {
@@ -307,11 +316,7 @@ export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotifica
     return actionRequiredDecision(input, input.result.awaitingReason || "任务需要你参与后才能继续。");
   }
 
-  if (
-    input.task.requiresConfirmation ||
-    input.task.expectedResult?.type === "confirmation" ||
-    input.task.expectedResult?.type === "decision"
-  ) {
+  if (taskRequiresUserConfirmationToComplete(input.task)) {
     return actionRequiredDecision(input, "任务已完成，建议你确认结果后继续推进。");
   }
 

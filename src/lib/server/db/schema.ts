@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 3;
+export const KIKI_DB_SCHEMA_VERSION = 8;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -45,6 +45,69 @@ CREATE TABLE IF NOT EXISTS runtime_state_snapshots (
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS artifacts (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  task_id TEXT,
+  instance_id TEXT,
+  runtime_job_id TEXT,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  summary TEXT,
+  storage_rel_path TEXT,
+  mime TEXT,
+  size INTEGER,
+  url TEXT,
+  embed_url TEXT,
+  provider TEXT,
+  inline_content TEXT,
+  manifest_json TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_conversation
+  ON artifacts(conversation_id);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_instance
+  ON artifacts(instance_id);
+
+CREATE TABLE IF NOT EXISTS artifact_interaction_state (
+  artifact_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  task_id TEXT,
+  instance_id TEXT,
+  state_json TEXT NOT NULL,
+  events_json TEXT,
+  updated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_interaction_conversation_updated
+  ON artifact_interaction_state(conversation_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS goal_event_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  goal_id TEXT NOT NULL,
+  task_id TEXT,
+  instance_id TEXT,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  produced_by TEXT NOT NULL,
+  idempotency_key TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_goal_event_log_goal
+  ON goal_event_log(goal_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_goal_event_log_instance
+  ON goal_event_log(instance_id, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_event_log_idem
+  ON goal_event_log(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 `;
 
 export const KIKI_DB_MIGRATIONS: Array<{
@@ -61,6 +124,106 @@ export const KIKI_DB_MIGRATIONS: Array<{
     version: 3,
     sql: `
       ALTER TABLE runtime_jobs ADD COLUMN blocker_json TEXT;
+    `,
+  },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE IF NOT EXISTS artifacts (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        task_id TEXT,
+        instance_id TEXT,
+        runtime_job_id TEXT,
+        kind TEXT NOT NULL,
+        label TEXT NOT NULL,
+        summary TEXT,
+        storage_rel_path TEXT,
+        mime TEXT,
+        size INTEGER,
+        url TEXT,
+        inline_content TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_artifacts_conversation
+        ON artifacts(conversation_id);
+
+      CREATE INDEX IF NOT EXISTS idx_artifacts_instance
+        ON artifacts(instance_id);
+    `,
+  },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE artifacts ADD COLUMN manifest_json TEXT;
+
+      CREATE TABLE IF NOT EXISTS artifact_interaction_state (
+        artifact_id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        task_id TEXT,
+        instance_id TEXT,
+        state_json TEXT NOT NULL,
+        events_json TEXT,
+        updated_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_artifact_interaction_conversation_updated
+        ON artifact_interaction_state(conversation_id, updated_at);
+    `,
+  },
+  {
+    version: 6,
+    sql: `
+      ALTER TABLE artifacts ADD COLUMN embed_url TEXT;
+      ALTER TABLE artifacts ADD COLUMN provider TEXT;
+    `,
+  },
+  {
+    version: 7,
+    sql: `
+      CREATE TABLE IF NOT EXISTS goal_event_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        goal_id TEXT NOT NULL,
+        task_id TEXT,
+        instance_id TEXT,
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        produced_by TEXT NOT NULL,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_goal_event_log_goal
+        ON goal_event_log(goal_id, id);
+
+      CREATE INDEX IF NOT EXISTS idx_goal_event_log_instance
+        ON goal_event_log(instance_id, id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_event_log_idem
+        ON goal_event_log(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+    `,
+  },
+  {
+    version: 8,
+    sql: `
+      DELETE FROM goal_event_log
+      WHERE idempotency_key IS NOT NULL
+        AND id NOT IN (
+          SELECT MIN(id)
+          FROM goal_event_log
+          WHERE idempotency_key IS NOT NULL
+          GROUP BY idempotency_key
+        );
+
+      DROP INDEX IF EXISTS idx_goal_event_log_idem;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_event_log_idem
+        ON goal_event_log(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
     `,
   },
 ];

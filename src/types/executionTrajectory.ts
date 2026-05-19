@@ -1,3 +1,5 @@
+import type { AgentRole } from "@/types/agentOrchestration";
+
 export type ExecutionTrajectoryStepType =
   | "system"
   | "assistant"
@@ -32,9 +34,15 @@ export type ExecutionTrajectoryStep = {
   type: ExecutionTrajectoryStepType;
   status: ExecutionTrajectoryStepStatus;
   title: string;
+  agentRole?: AgentRole;
   thought?: string;
   toolCall?: ExecutionTrajectoryToolCall;
   toolResult?: ExecutionTrajectoryToolResult;
+  handoff?: {
+    fromRole?: AgentRole;
+    toRole?: AgentRole;
+    summary: string;
+  };
   startedAt: string;
   endedAt?: string;
 };

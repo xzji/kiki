@@ -276,6 +276,31 @@ function nonInteractiveRequirement() {
   } satisfies InteractionRequirement;
 }
 
+function taskRequiresUserConfirmationToComplete(task: NonNullable<ReturnType<typeof getRuntimeJobByTaskInstanceId>>["payload"]["task"]) {
+  const expectedType = task.expectedResult?.type;
+  if (expectedType === "decision" || expectedType === "confirmation") return true;
+  const criteria = task.expectedResult?.completionCriteria ?? "";
+  if (/用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(criteria)) {
+    return true;
+  }
+  return task.collaboration?.completionOwner === "user" && task.expectedResult?.type !== "information";
+}
+
+function isInformationFeedbackOnlyBlocker(input: {
+  task: NonNullable<ReturnType<typeof getRuntimeJobByTaskInstanceId>>["payload"]["task"];
+  blocker: ExecutionBlocker;
+  basePayload: unknown;
+}) {
+  const taskResult = isRecord(input.basePayload) && isRecord(input.basePayload.taskResult) ? input.basePayload.taskResult : undefined;
+  return (
+    input.task.expectedResult?.type === "information" &&
+    input.blocker.interactionRequirement.type === "confirm" &&
+    input.blocker.interactionRequirement.timing === "after_agent_output" &&
+    taskResult?.status === "done" &&
+    !taskRequiresUserConfirmationToComplete(input.task)
+  );
+}
+
 function buildProgress(input: {
   job: NonNullable<ReturnType<typeof getRuntimeJobByTaskInstanceId>>;
   progress: GoalServerProgress | null;
@@ -384,12 +409,79 @@ export async function POST(request: NextRequest) {
     ...job.trajectory,
     createTrajectoryStep({
       index: job.trajectory.length,
-      status: body.approved ? "completed" : "running",
-      title: body.approved ? "用户已确认，任务继续完成" : "用户要求 KiKi 修改后继续执行",
+      status: "running",
+      title: body.approved ? "已提交补充信息，KiKi 继续执行中" : "已提交修改意见，KiKi 继续执行中",
       thought: body.feedback?.trim() || job.blocker.interactionRequirement.reason,
     }),
   ];
   const basePayload = job.result ?? job.progress?.resultPayload ?? {};
+
+  if (isInformationFeedbackOnlyBlocker({ task: job.payload.task, blocker: job.blocker, basePayload })) {
+    const feedback = body.feedback?.trim() || (body.approved ? "用户已确认当前报告。" : "用户提出了反馈。");
+    const feedbackFields = parseFeedbackFields(feedback);
+    Object.entries(body.fields ?? {}).forEach(([label, value]) => feedbackFields.set(label, value));
+    const interactionSubmission = buildInteractionSubmission({
+      blocker: job.blocker,
+      body,
+      feedback,
+      feedbackFields,
+    });
+    const structuredOutput = {
+      ...(isRecord(basePayload) && isRecord(basePayload.structuredOutput) ? basePayload.structuredOutput : {}),
+      interactionSubmission,
+      followUpFeedback: {
+        feedback,
+        fields: mapToRecord(feedbackFields),
+      },
+    };
+    const resultPayload = {
+      ...basePayload,
+      awaitingUser: false,
+      awaitingReason: undefined,
+      blocker: resolvedBlocker,
+      trajectory: nextTrajectory,
+      interactionRequirement: nonInteractiveRequirement(),
+      interactionSubmission,
+      structuredOutput,
+    };
+    const nextProgress = buildProgress({
+      job,
+      progress: job.progress,
+      resultPayload,
+      status: "completed",
+      phase: "completed",
+      message: "已记录用户反馈，任务保持完成",
+    });
+    const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
+      taskId: job.payload.task.id,
+      instanceId: job.payload.instance.id,
+      progress: nextProgress,
+      logs: job.logs,
+      trajectory: nextTrajectory,
+    });
+    upsertGoalsSnapshot(nextGoals);
+    if (conversationId) {
+      writeTaskRunSnapshot({
+        conversationId,
+        taskId: job.payload.task.id,
+        instanceId: job.payload.instance.id,
+        progress: nextProgress,
+        trajectory: nextTrajectory,
+        result: resultPayload,
+      });
+    }
+    updateRuntimeJobExecution(job.id, {
+      status: "completed",
+      progress: nextProgress,
+      trajectory: nextTrajectory,
+      blocker: resolvedBlocker,
+      result: resultPayload,
+      finishedAt: nowIso(),
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+    });
+    return NextResponse.json({ resumed: true, completed: true, progress: nextProgress, logs: job.logs, trajectory: nextTrajectory });
+  }
 
   if (body.approved && job.blocker.resumeStrategy === "complete_on_approve") {
     const feedback = body.feedback?.trim() || "用户已确认，可以继续。";

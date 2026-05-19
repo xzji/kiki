@@ -1,8 +1,18 @@
 import { appendGoalLog, beginGoalTelemetry, failGoalTelemetry, finishGoalTelemetry, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
 import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
+import { resolveExecutionContext } from "@/lib/server/taskExecution/contextResolver";
+import { renderDependencySection } from "@/lib/server/taskExecution/contextRenderer";
+import { readinessFromContext } from "@/lib/server/taskExecution/readinessAdapter";
+import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
+import { runMultiAgentOrchestration } from "@/lib/server/agentOrchestration/MultiAgentOrchestrator";
+import { selectAgentCollaborationStrategy } from "@/lib/server/agentOrchestration/strategy";
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
+import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
+import { normalizeFileWriteSpecs } from "@/lib/server/taskRunner/FileWriteRunner";
+import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
+import { writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
 import {
   buildUserConfirmationOptionsRepairPrompt,
   buildUserConfirmationOptionsPrompt,
@@ -22,7 +32,9 @@ import {
 import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
 import { validateTaskResultLocally } from "@/lib/taskResult/localValidation";
 import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";
+import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
+import type { AgentRunPlan } from "@/types/agentOrchestration";
 import type {
   Goal,
   InteractionRequirement,
@@ -52,6 +64,7 @@ type RunGoalTaskInput = {
   taskWorkspaceDir?: string;
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
+  executionContext?: TaskExecutionContext;
   signal?: AbortSignal;
 };
 
@@ -85,6 +98,21 @@ type ParsedTaskRunnerResult = {
   structuredOutput: Record<string, unknown> | null;
 };
 
+type WebAppSpec = {
+  title: string;
+  description?: string;
+  html: string;
+  initialState?: Record<string, unknown>;
+  networkPolicy?: "offline" | "internet";
+};
+
+type ExternalEmbedSpec = {
+  title: string;
+  description?: string;
+  url: string;
+  provider?: "youtube" | "generic";
+};
+
 type TaskRunAttemptResult = ParsedTaskRunnerResult & {
   trajectory: ExecutionTrajectoryStep[];
   rawOutput: string;
@@ -101,6 +129,24 @@ function normalizeStringList(value: unknown) {
 
 function uniqueStrings(items: Array<string | undefined>) {
   return Array.from(new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))));
+}
+
+const FINAL_PROTOCOL_JSON_KEYS = [
+  "summary",
+  "final_message",
+  "interaction_requirement",
+  "task_result",
+  "deliverable_check",
+  "structured_output",
+];
+
+function looksLikeFinalProtocolJsonFragment(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const matchedProtocolKeyCount = FINAL_PROTOCOL_JSON_KEYS.filter((key) => trimmed.includes(`"${key}"`)).length;
+  if (matchedProtocolKeyCount < 2) return false;
+  const jsonKeyMatches = trimmed.match(/"[^"]+"\s*:/g) ?? [];
+  return trimmed.startsWith("{") || jsonKeyMatches.length >= 4;
 }
 
 function classifyTaskRunError(error: unknown): TaskRunErrorCategory {
@@ -178,7 +224,14 @@ async function judgeMissingFieldsWithClaude(
 }
 
 async function buildTaskReadinessCheckWithJudge(input: RunGoalTaskInput): Promise<TaskReadinessCheck> {
-  const baseReadiness = buildTaskReadinessCheck(input);
+  const dependencyContextText = input.executionContext ? renderDependencySection(input.executionContext) : "";
+  const baseReadiness = buildTaskReadinessCheck({
+    ...input,
+    instance: {
+      ...input.instance,
+      intro: [input.instance.intro, dependencyContextText].filter(Boolean).join("\n"),
+    },
+  });
   const feedback = extractUserFeedback(input);
   const ruleMissing = baseReadiness.items.filter(
     (item) => item.status === "missing_user" && item.source === "user",
@@ -233,21 +286,28 @@ async function buildTaskReadinessCheckWithJudge(input: RunGoalTaskInput): Promis
 
 function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): TaskResult {
   const missingLabels = readiness.missingUserInfo.map((item) => item.label);
+  const hasUserMissing = readiness.missingUserInfo.some((item) => item.source === "user");
   return {
     schemaVersion: 1,
     taskId: input.task.id,
     instanceId: input.instance.id,
-    title: "需要补充信息后继续",
+    title: hasUserMissing ? "需要补充信息后继续" : "执行前置条件未满足",
     status: "pending_user",
     blocks: [
-      { kind: "callout", tone: "warn", text: "当前任务缺少用户才能提供的必要信息，KiKi 已暂停执行，没有生成基于猜测的方案。" },
-      { kind: "heading", level: 2, text: "缺失的必要信息" },
+      {
+        kind: "callout",
+        tone: "warn",
+        text: hasUserMissing
+          ? "当前任务缺少用户才能提供的必要信息，KiKi 已暂停执行，没有生成基于猜测的方案。"
+          : "当前任务的执行前置条件尚未满足，KiKi 已暂停执行，等待上游任务或配置问题处理完成。",
+      },
+      { kind: "heading", level: 2, text: hasUserMissing ? "缺失的必要信息" : "未满足的前置条件" },
       { kind: "list", ordered: false, items: missingLabels },
       {
         kind: "key_value",
         entries: readiness.items.map((item) => ({
           label: item.label,
-          value: `${item.status === "missing_user" ? "缺失，需用户提供" : item.status === "agent_retrievable" ? "Agent 可自行获取" : "已具备"}：${item.reason}`,
+          value: `${item.status === "missing_user" && item.source === "user" ? "缺失，需用户提供" : item.status === "agent_retrievable" ? "Agent 可自行获取" : "前置条件未满足"}：${item.reason}`,
           emphasis: item.status === "missing_user",
         })),
       },
@@ -260,16 +320,22 @@ function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: Tas
 
 async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): Promise<ParsedTaskRunnerResult> {
   const firstMissing = readiness.missingUserInfo[0];
+  const hasUserMissing = readiness.missingUserInfo.some((item) => item.source === "user");
   const question =
-    readiness.missingUserInfo.length === 1
+    !hasUserMissing
+      ? readiness.summary
+      : readiness.missingUserInfo.length === 1
       ? `请补充${firstMissing.label}，KiKi 才能继续执行「${input.task.title.replace(/^任务\d+：/, "")}」。`
       : `请补充以下必要信息：${readiness.missingUserInfo.map((item) => item.label).join("、")}。`;
-  const readinessWithOptions = await generateOptionsForReadinessItems(input, readiness, question);
+  const shouldGenerateOptions = readiness.missingUserInfo.some((item) => item.source === "user");
+  const readinessWithOptions = shouldGenerateOptions
+    ? await generateOptionsForReadinessItems(input, readiness, question)
+    : readiness;
   const options = readinessWithOptions.missingUserInfo.length === 1 ? readinessWithOptions.missingUserInfo[0].options ?? [] : [];
   const suggestedActions = options;
   const taskResult = buildReadinessBlockedTaskResult(input, readinessWithOptions);
   const interactionRequirement: InteractionRequirement = {
-    type: "provide_context",
+    type: hasUserMissing ? "provide_context" : "deliverable_gap",
     timing: "before_execution",
     reason: readiness.summary,
     question,
@@ -279,7 +345,7 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
   };
   const deliverableCheck = buildFallbackDeliverableCheck(input, readiness.summary);
   return {
-    summary: "需要你补充关键信息后才能继续执行。",
+    summary: hasUserMissing ? "需要你补充关键信息后才能继续执行。" : "任务执行前置条件未满足。",
     finalMessage: readiness.summary,
     resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
     awaitingUser: true,
@@ -397,6 +463,26 @@ function normalizeInteractionRequirement(
   };
 }
 
+function taskRequiresUserConfirmationToComplete(task: Task) {
+  const expectedType = task.expectedResult?.type;
+  if (expectedType === "decision" || expectedType === "confirmation") return true;
+  const criteria = task.expectedResult?.completionCriteria ?? "";
+  if (/用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(criteria)) {
+    return true;
+  }
+  return task.collaboration?.completionOwner === "user" && task.expectedResult?.type !== "information";
+}
+
+function isNonBlockingInformationFeedback(input: RunGoalTaskInput, requirement: InteractionRequirement, taskResult: TaskResult | null) {
+  return (
+    input.task.expectedResult?.type === "information" &&
+    requirement.type === "confirm" &&
+    requirement.timing === "after_agent_output" &&
+    taskResult?.status === "done" &&
+    !taskRequiresUserConfirmationToComplete(input.task)
+  );
+}
+
 function textForUserInputDetection(result: ParsedTaskRunnerResult) {
   return [
     result.summary,
@@ -462,6 +548,83 @@ function buildOptionGenerationContext(input: RunGoalTaskInput, options: {
     })),
     resumeContext: input.resumeContext,
     seedOptions: normalizeConfirmationOptionLabels(options.seedOptions ?? []),
+  };
+}
+
+function isTaskReadinessInfoItem(value: unknown): value is TaskReadinessInfoItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<TaskReadinessInfoItem>;
+  return (
+    typeof item.id === "string" &&
+    typeof item.label === "string" &&
+    typeof item.description === "string" &&
+    (item.source === "user" || item.source === "agent" || item.source === "system") &&
+    (item.status === "available" ||
+      item.status === "missing_user" ||
+      item.status === "agent_retrievable" ||
+      item.status === "not_required") &&
+    typeof item.reason === "string"
+  );
+}
+
+function isTaskReadinessCheck(value: unknown): value is TaskReadinessCheck {
+  if (!value || typeof value !== "object") return false;
+  const readiness = value as Partial<TaskReadinessCheck>;
+  return (
+    (readiness.status === "ready" || readiness.status === "blocked") &&
+    typeof readiness.generatedAt === "string" &&
+    typeof readiness.summary === "string" &&
+    Array.isArray(readiness.items) &&
+    readiness.items.every(isTaskReadinessInfoItem) &&
+    Array.isArray(readiness.missingUserInfo) &&
+    readiness.missingUserInfo.every(isTaskReadinessInfoItem) &&
+    Array.isArray(readiness.agentRetrievableInfo) &&
+    readiness.agentRetrievableInfo.every(isTaskReadinessInfoItem) &&
+    Array.isArray(readiness.availableInfo) &&
+    readiness.availableInfo.every(isTaskReadinessInfoItem)
+  );
+}
+
+function isActionLikeConfirmationOption(option: string) {
+  return /^(确认继续|需要修改|重新执行任务|调整任务完成标准|让\s*KiKi\s*修改后继续|提交答案并继续|提交信息并继续|我已完成，继续执行|确认并继续)$/.test(option.trim());
+}
+
+function normalizeFieldAnswerOptions(values: string[]) {
+  return normalizeConfirmationOptionLabels(values.filter((option) => !isActionLikeConfirmationOption(option)));
+}
+
+function asksForDestinationCities(text: string) {
+  return /(游览|目的地|城市组合|选定城市|计划.*城市|哪些城市)/.test(text);
+}
+
+function optionsLookLikeDepartureCities(options: string[]) {
+  return options.length > 0 && options.every((option) => /出发|出发地|从.+飞|航班/.test(option));
+}
+
+function chooseReadinessOptions(input: {
+  item: TaskReadinessInfoItem;
+  question: string;
+  seedOptions: string[];
+  generatedOptions: string[];
+}) {
+  const itemTextValues = new Set([input.item.label, input.item.description, input.item.reason].map((value) => value.trim()).filter(Boolean));
+  const seedOptions = normalizeFieldAnswerOptions(input.seedOptions.filter((option) => !itemTextValues.has(option.trim())));
+  if (seedOptions.length > 0) return seedOptions;
+
+  const contextText = [input.question, input.item.label, input.item.description, input.item.reason].filter(Boolean).join("\n");
+  if (asksForDestinationCities(contextText) && optionsLookLikeDepartureCities(input.generatedOptions)) return [];
+  return input.generatedOptions;
+}
+
+function refreshReadinessCollections(items: TaskReadinessInfoItem[], generatedAt: string, summary: string): TaskReadinessCheck {
+  return {
+    status: items.some((item) => item.status === "missing_user" && item.source === "user") ? "blocked" : "ready",
+    generatedAt,
+    summary,
+    items,
+    missingUserInfo: items.filter((item) => item.status === "missing_user" && item.source === "user"),
+    agentRetrievableInfo: items.filter((item) => item.status === "agent_retrievable"),
+    availableInfo: items.filter((item) => item.status === "available"),
   };
 }
 
@@ -541,24 +704,28 @@ function generatedOptionMetaForItem(result: UserConfirmationOptionsResult | null
   return result?.items.find((entry) => entry.id === item.id) ?? result?.items.find((entry) => entry.label === item.label);
 }
 
-function applyGeneratedOptionsToReadiness(readiness: TaskReadinessCheck, result: UserConfirmationOptionsResult | null): TaskReadinessCheck {
+function applyGeneratedOptionsToReadiness(
+  readiness: TaskReadinessCheck,
+  result: UserConfirmationOptionsResult | null,
+  optionsContext: { question: string; seedOptions?: string[] },
+): TaskReadinessCheck {
   const items = readiness.items.map((item) => {
     if (item.status !== "missing_user" || item.source !== "user") return item;
     const generatedMeta = generatedOptionMetaForItem(result, item);
+    const generatedOptions = generatedOptionsForItem(result, item);
     return {
       ...item,
-      options: generatedOptionsForItem(result, item),
+      options: chooseReadinessOptions({
+        item,
+        question: optionsContext.question,
+        seedOptions: readiness.missingUserInfo.length === 1 ? optionsContext.seedOptions ?? [] : [],
+        generatedOptions,
+      }),
       optionQuestion: generatedMeta?.question,
       inputPlaceholder: generatedMeta?.inputPlaceholder,
     };
   });
-  return {
-    ...readiness,
-    items,
-    missingUserInfo: items.filter((item) => item.status === "missing_user" && item.source === "user"),
-    agentRetrievableInfo: items.filter((item) => item.status === "agent_retrievable"),
-    availableInfo: items.filter((item) => item.status === "available"),
-  };
+  return refreshReadinessCollections(items, readiness.generatedAt, readiness.summary);
 }
 
 async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readiness: TaskReadinessCheck, question: string, seedOptions: string[] = []) {
@@ -570,7 +737,28 @@ async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readine
       seedOptions,
     }),
   );
-  return applyGeneratedOptionsToReadiness(readiness, result);
+  return applyGeneratedOptionsToReadiness(readiness, result, { question, seedOptions });
+}
+
+function applyInteractionOptionsToSingleMissingReadiness(
+  readiness: TaskReadinessCheck | null,
+  rawOptions: string[],
+  question: string,
+): TaskReadinessCheck | null {
+  if (!readiness) return null;
+  const options = normalizeFieldAnswerOptions(rawOptions);
+  if (!options.length || readiness.missingUserInfo.length !== 1) return readiness;
+  const missingId = readiness.missingUserInfo[0].id;
+  const items = readiness.items.map((item) =>
+    item.id === missingId
+      ? {
+          ...item,
+          options,
+          optionQuestion: question,
+        }
+      : item,
+  );
+  return refreshReadinessCollections(items, readiness.generatedAt, readiness.summary);
 }
 
 function normalizeBlockerLabel(value: string, index: number) {
@@ -689,12 +877,14 @@ function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: Parsed
   if (!looksLikeMissingUserContext(result)) return result;
   const question = result.interactionRequirement.question || result.awaitingReason || "请补充完成任务所需的关键信息。";
   const reason = result.awaitingReason || result.interactionRequirement.reason || question;
-  const readiness =
-    result.structuredOutput?.taskReadiness ??
-    buildReadinessFromUserBlockers(result.deliverableCheck?.missingDeliverables?.length ? result.deliverableCheck.missingDeliverables : [question], reason);
   const rawOptions = result.interactionRequirement.options?.length
     ? normalizeConfirmationOptionLabels(result.interactionRequirement.options)
     : [];
+  const existingReadiness = isTaskReadinessCheck(result.structuredOutput?.taskReadiness) ? result.structuredOutput.taskReadiness : null;
+  const baseReadiness =
+    existingReadiness ??
+    buildReadinessFromUserBlockers(result.deliverableCheck?.missingDeliverables?.length ? result.deliverableCheck.missingDeliverables : [question], reason);
+  const readiness = applyInteractionOptionsToSingleMissingReadiness(baseReadiness, rawOptions, question);
   const options = rawOptions;
   const suggestedActions = uniqueStrings([...(options ?? []), ...(result.suggestedActions ?? [])]).slice(0, 5);
   const deliverableCheck = result.deliverableCheck ?? buildFallbackDeliverableCheck(input, reason);
@@ -748,30 +938,93 @@ function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKin
     suggested_actions?: string[];
     interaction_requirement?: unknown;
     artifacts?: Array<{ label?: string; kind?: TaskRunArtifact["kind"]; content?: string; href?: string }>;
+    files?: unknown;
+    webapp?: unknown;
+    external_embed?: unknown;
     task_result?: unknown;
     taskResult?: unknown;
     deliverable_check?: unknown;
     structured_output?: Record<string, unknown> | null;
   };
-  const taskResult = normalizeTaskResult(parsed.task_result ?? parsed.taskResult, {
+  const parsedFiles = normalizeFileWriteSpecs(parsed.files);
+  const parsedWebApp = normalizeWebAppSpec(parsed.webapp);
+  const parsedExternalEmbed = normalizeExternalEmbedSpec(parsed.external_embed);
+  const normalizedTaskResult = normalizeTaskResult(parsed.task_result ?? parsed.taskResult, {
     taskId: input.task.id,
     instanceId: input.instance.id,
     title: input.task.expectedOutcome || input.task.title,
   });
+  const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
+  const expectsWebApp = input.task.expectedResult?.interactiveSurface?.kind === "webapp" || Boolean(parsedWebApp) || Boolean(parsedExternalEmbed);
+  const taskResult =
+    normalizedTaskResult ||
+    (expectedSurfaces.includes("interactive") && expectsWebApp && (parsedWebApp || parsedExternalEmbed)
+      ? {
+          schemaVersion: 1 as const,
+          taskId: input.task.id,
+          instanceId: input.instance.id,
+          title: parsedWebApp?.title || parsedExternalEmbed?.title || input.task.expectedOutcome || input.task.title,
+          status: "done" as const,
+          blocks: [],
+          meta: {
+            producedAt: new Date().toISOString(),
+            surfaces: ["interactive" as const],
+            interactiveSurfaceKind: "webapp" as const,
+            primaryFormat: "html" as const,
+            exportableFormats: input.task.expectedResult?.exportableFormats,
+          },
+        }
+      : null) ||
+    (expectedSurfaces.includes("files") && parsedFiles.length > 0
+      ? {
+          schemaVersion: 1 as const,
+          taskId: input.task.id,
+          instanceId: input.instance.id,
+          title: input.task.expectedOutcome || input.task.title,
+          status: "done" as const,
+          blocks: [],
+          meta: {
+            producedAt: new Date().toISOString(),
+            surfaces: ["files" as const],
+            fileSurfaceRequired: true,
+            primaryFormat: input.task.expectedResult?.primaryFormat,
+            exportableFormats: input.task.expectedResult?.exportableFormats,
+          },
+        }
+      : null);
   const legacyFromBlocks = taskResult ? deriveLegacyTaskResult(taskResult) : null;
-  const suggestedActions = Array.isArray(parsed.suggested_actions)
+  let suggestedActions = Array.isArray(parsed.suggested_actions)
     ? parsed.suggested_actions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : undefined;
   const legacyInteractionType = parsed.awaiting_user ? "confirm" : "none";
-  const interactionRequirement = normalizeInteractionRequirement(parsed.interaction_requirement, {
+  let interactionRequirement = normalizeInteractionRequirement(parsed.interaction_requirement, {
     type: legacyInteractionType,
     reason: parsed.awaiting_reason?.trim() || "",
     suggestedActions,
     shouldNotifyUser: parsed.awaiting_user,
   });
+  const isFeedbackOnly = isNonBlockingInformationFeedback(input, interactionRequirement, taskResult);
+  if (isFeedbackOnly) {
+    suggestedActions = uniqueStrings([
+      ...(suggestedActions ?? []),
+      ...(interactionRequirement.options ?? []),
+      ...(interactionRequirement.suggestedActions ?? []),
+    ]);
+    interactionRequirement = {
+      type: "none",
+      timing: "not_required",
+      reason: "",
+      question: "",
+      options: [],
+      suggestedActions,
+      shouldNotifyUser: false,
+    };
+  }
   const awaitingUser =
+    !isFeedbackOnly &&
     Boolean(parsed.awaiting_user) ||
-    (interactionRequirement.type !== "none" &&
+    (!isFeedbackOnly &&
+      interactionRequirement.type !== "none" &&
       interactionRequirement.type !== "deliverable_gap" &&
       interactionRequirement.type !== "agent_revision_required");
   return {
@@ -800,6 +1053,15 @@ function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKin
     structuredOutput: {
       ...(parsed.structured_output ?? {}),
       ...(taskResult ? { taskResult } : {}),
+      ...(isFeedbackOnly
+        ? {
+            followUpSuggestion: {
+              reason: parsed.awaiting_reason?.trim() || normalizeInteractionRequirement(parsed.interaction_requirement).reason,
+              question: normalizeInteractionRequirement(parsed.interaction_requirement).question,
+              options: normalizeInteractionRequirement(parsed.interaction_requirement).options ?? [],
+            },
+          }
+        : {}),
     },
   };
 }
@@ -815,6 +1077,58 @@ function tryParseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallback
       result: null,
       error: error instanceof Error ? error.message : "任务结果解析失败",
     };
+  }
+}
+
+function extractFileWriteSpecs(raw: string) {
+  try {
+    const parsed = JSON.parse(extractJsonObject(raw)) as { files?: unknown };
+    return normalizeFileWriteSpecs(parsed.files);
+  } catch {
+    return [];
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeWebAppSpec(value: unknown): WebAppSpec | null {
+  if (!isPlainRecord(value)) return null;
+  const title = typeof value.title === "string" && value.title.trim() ? value.title.trim() : "可执行小应用";
+  const description = typeof value.description === "string" && value.description.trim() ? value.description.trim() : undefined;
+  const html = typeof value.html === "string" ? value.html.trim() : "";
+  if (!html) return null;
+  const initialState = isPlainRecord(value.initialState) ? value.initialState : undefined;
+  const networkPolicy = value.networkPolicy === "internet" ? "internet" : "offline";
+  return { title, description, html, initialState, networkPolicy };
+}
+
+function normalizeExternalEmbedSpec(value: unknown): ExternalEmbedSpec | null {
+  if (!isPlainRecord(value)) return null;
+  const title = typeof value.title === "string" && value.title.trim() ? value.title.trim() : "外部嵌入";
+  const description = typeof value.description === "string" && value.description.trim() ? value.description.trim() : undefined;
+  const url = typeof value.url === "string" ? value.url.trim() : "";
+  if (!url) return null;
+  const provider = value.provider === "youtube" ? "youtube" : value.provider === "generic" ? "generic" : undefined;
+  return { title, description, url, provider };
+}
+
+function extractWebAppSpec(raw: string) {
+  try {
+    const parsed = JSON.parse(extractJsonObject(raw)) as { webapp?: unknown };
+    return normalizeWebAppSpec(parsed.webapp);
+  } catch {
+    return null;
+  }
+}
+
+function extractExternalEmbedSpec(raw: string) {
+  try {
+    const parsed = JSON.parse(extractJsonObject(raw)) as { external_embed?: unknown };
+    return normalizeExternalEmbedSpec(parsed.external_embed);
+  } catch {
+    return null;
   }
 }
 
@@ -1007,6 +1321,35 @@ function progressPayloadWithTrajectory(trajectory: ExecutionTrajectoryStep[], re
   };
 }
 
+function attachAgentRunPlan<T extends ParsedTaskRunnerResult>(result: T, agentRunPlan: AgentRunPlan | null): T {
+  if (!agentRunPlan) return result;
+  const qualityIssues = agentRunPlan.review?.issues.map((issue) => issue.message) ?? [];
+  return {
+    ...result,
+    taskResult: result.taskResult
+      ? {
+          ...result.taskResult,
+          meta: {
+            ...result.taskResult.meta,
+            agentRunPlan,
+            qualityReview: agentRunPlan.review
+              ? {
+                  passed: agentRunPlan.review.passed,
+                  issues: qualityIssues,
+                  reviewerRole: "reviewer",
+                }
+              : undefined,
+          },
+        }
+      : result.taskResult,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      agentRunPlan,
+      ...(agentRunPlan.review ? { qualityReview: agentRunPlan.review } : {}),
+    },
+  };
+}
+
 async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
   let finalMessage = "";
   await streamClaudeCli({
@@ -1119,7 +1462,7 @@ function applyAcceptedDeliverableCheck(input: RunGoalTaskInput, result: ParsedTa
     deliverableCheck: {
       matched: true,
       confidence: report.confidence,
-      deliveredArtifacts: result.deliverableCheck?.deliveredArtifacts?.length ? result.deliverableCheck.deliveredArtifacts : ["task_result.blocks"],
+      deliveredArtifacts: result.deliverableCheck?.deliveredArtifacts?.length ? result.deliverableCheck.deliveredArtifacts : resolveExpectedSurfaces(input.task.expectedResult),
       missingDeliverables: [],
       criteriaResults,
       gapReason: "",
@@ -1451,7 +1794,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   let assistantProcessFlushCount = 0;
   let lastStatus: "checking" | "running" | "completed" | null = null;
   const trajectory: ExecutionTrajectoryStep[] = [...(input.initialTrajectory ?? [])];
-  const isResumeRun = Boolean(input.resumeContext) || (input.initialTrajectory?.length ?? 0) > 0;
+  const isResumeRun = Boolean(input.resumeContext);
   const previousToolSignatures = new Set(
     (input.initialTrajectory ?? [])
       .filter((step) => step.type === "tool_call" && step.toolCall)
@@ -1459,6 +1802,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   );
   let resumeNewToolCallCount = 0;
   let resumeDuplicateToolCallCount = 0;
+  let agentRunPlan: AgentRunPlan | null = null;
   const appendTrajectory = (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => {
     trajectory.push(createTrajectoryStep({ ...step, index: trajectory.length }));
     persistTrajectorySnapshot(input.requestId, trajectory);
@@ -1467,6 +1811,11 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   const flushAssistantProcessOutput = (status: ExecutionTrajectoryStep["status"]) => {
     const thought = pendingAssistantProcessOutput.trim();
     if (!thought) return;
+    if (looksLikeFinalProtocolJsonFragment(thought)) {
+      pendingAssistantProcessOutput = "";
+      lastAssistantProcessFlushAt = Date.now();
+      return;
+    }
     appendTrajectory({
       type: "assistant",
       status,
@@ -1549,110 +1898,144 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
-  await streamClaudeCli({
-    message: buildGoalTaskRunnerPrompt({ ...input, initialTrajectory: input.initialTrajectory }),
-    workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
-    cliPath: input.runtimeEnv.cliPath,
-    permissionMode: input.runtimeEnv.permissionMode,
-    claudeSessionId: undefined,
-    signal: input.signal,
-    onEvent: (event) => {
-      if (event.type === "delta" && event.text.trim()) {
-        pendingAssistantProcessOutput += event.text;
-        if (
-          Date.now() - lastAssistantProcessFlushAt > 3000 &&
-          assistantProcessFlushCount < 5 &&
-          shouldFlushAssistantProcessOutput()
-        ) {
-          flushAssistantProcessOutput("running");
-        }
-      }
-      if (event.type === "message") {
-        finalMessage = event.content;
-      }
-      if (event.type === "status") {
-        if (event.status === lastStatus) return;
-        lastStatus = event.status;
-        updateGoalTelemetry({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
-          phase: event.status === "completed" ? "reviewing" : "executing",
-          message:
-            event.status === "completed"
-              ? "Agent 已生成最终结果"
-              : event.status === "checking"
-                ? "正在准备执行环境"
-                : "Agent 已开始调用工具",
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
-          attemptCount: input.attemptCount,
-          resultPayload: progressPayloadWithTrajectory(trajectory),
-        });
-      }
-      if (event.type === "tool_call") {
-        if (isResumeRun) {
-          const signature = `${event.toolName}::${JSON.stringify(event.input ?? null)}`;
-          if (previousToolSignatures.has(signature)) {
-            resumeDuplicateToolCallCount += 1;
-            appendGoalLog({
-              requestId: input.requestId,
-              scope: "goal_task_execute",
-              level: "warn",
-              phase: "executing",
-              message: `恢复执行中检测到重复工具调用：${event.toolName}`,
-              details: event.summary,
-              eventType: "resume_duplicate_tool_call",
-              toolName: event.toolName,
-              status: "running",
-              goalId: input.goal.id,
-              taskId: input.task.id,
-              taskInstanceId: input.instance.id,
-            });
-          } else {
-            resumeNewToolCallCount += 1;
-            previousToolSignatures.add(signature);
+  const webAppInteractionContext = buildWebAppInteractionContext({ conversationId: input.goal.conversationId });
+  const executionContext =
+    input.executionContext ??
+    resolveExecutionContext({
+      conversationId: input.goal.conversationId ?? "",
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      requestId: input.requestId,
+    });
+  const agentStrategy = selectAgentCollaborationStrategy({ task: input.task, isResumeRun });
+  if (agentStrategy !== "single_agent") {
+    appendTrajectory({
+      type: "system",
+      status: "running",
+      title: `启用多角色协同：${agentStrategy}`,
+      thought: "KiKi 将按角色顺序执行、审阅并合成最终结果。",
+    });
+    const orchestration = await runMultiAgentOrchestration({
+      ...input,
+      context: executionContext,
+      isResumeRun,
+      appendTrajectory,
+    });
+    finalMessage = orchestration.rawOutput;
+    agentRunPlan = orchestration.agentRunPlan;
+  } else {
+    await streamClaudeCli({
+      message: buildGoalTaskRunnerPrompt({
+        context: executionContext,
+        resumeContext: input.resumeContext,
+        initialTrajectory: input.initialTrajectory,
+        webAppInteractionContext,
+      }),
+      workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
+      cliPath: input.runtimeEnv.cliPath,
+      permissionMode: input.runtimeEnv.permissionMode,
+      claudeSessionId: undefined,
+      signal: input.signal,
+      onEvent: (event) => {
+        if (event.type === "delta" && event.text.trim()) {
+          pendingAssistantProcessOutput += event.text;
+          if (
+            Date.now() - lastAssistantProcessFlushAt > 3000 &&
+            assistantProcessFlushCount < 5 &&
+            shouldFlushAssistantProcessOutput()
+          ) {
+            flushAssistantProcessOutput("running");
           }
         }
-        appendTrajectory({
-          type: "tool_call",
-          status: "running",
-          title: event.summary,
-          toolCall: {
-            name: event.toolName,
-            input: event.input,
-            summary: event.summary,
-          },
-        });
-        appendGoalLog({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
-          level: "info",
-          phase: "executing",
-          message: event.summary,
-          eventType: "tool_call_started",
-          toolName: event.toolName,
-          status: "running",
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
-        });
-      }
-      if (event.type === "error") {
-        appendTrajectory({
-          type: "error",
-          status: "failed",
-          title: event.message,
-          toolResult: {
-            ok: false,
-            error: event.message,
-          },
-          endedAt: new Date().toISOString(),
-        });
-        throw new Error(event.message);
-      }
-    },
-  });
+        if (event.type === "message") {
+          finalMessage = event.content;
+        }
+        if (event.type === "status") {
+          if (event.status === lastStatus) return;
+          lastStatus = event.status;
+          updateGoalTelemetry({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            phase: event.status === "completed" ? "reviewing" : "executing",
+            message:
+              event.status === "completed"
+                ? "Agent 已生成最终结果"
+                : event.status === "checking"
+                  ? "正在准备执行环境"
+                  : "Agent 已开始调用工具",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+            attemptCount: input.attemptCount,
+            resultPayload: progressPayloadWithTrajectory(trajectory),
+          });
+        }
+        if (event.type === "tool_call") {
+          if (isResumeRun) {
+            const signature = `${event.toolName}::${JSON.stringify(event.input ?? null)}`;
+            if (previousToolSignatures.has(signature)) {
+              resumeDuplicateToolCallCount += 1;
+              appendGoalLog({
+                requestId: input.requestId,
+                scope: "goal_task_execute",
+                level: "warn",
+                phase: "executing",
+                message: `恢复执行中检测到重复工具调用：${event.toolName}`,
+                details: event.summary,
+                eventType: "resume_duplicate_tool_call",
+                toolName: event.toolName,
+                status: "running",
+                goalId: input.goal.id,
+                taskId: input.task.id,
+                taskInstanceId: input.instance.id,
+              });
+            } else {
+              resumeNewToolCallCount += 1;
+              previousToolSignatures.add(signature);
+            }
+          }
+          appendTrajectory({
+            type: "tool_call",
+            status: "running",
+            title: event.summary,
+            toolCall: {
+              name: event.toolName,
+              input: event.input,
+              summary: event.summary,
+            },
+          });
+          appendGoalLog({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            level: "info",
+            phase: "executing",
+            message: event.summary,
+            eventType: "tool_call_started",
+            toolName: event.toolName,
+            status: "running",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+          });
+        }
+        if (event.type === "error") {
+          appendTrajectory({
+            type: "error",
+            status: "failed",
+            title: event.message,
+            toolResult: {
+              ok: false,
+              error: event.message,
+            },
+            endedAt: new Date().toISOString(),
+          });
+          throw new Error(event.message);
+        }
+      },
+    });
+  }
 
   flushAssistantProcessOutput("completed");
   if (!finalMessage.trim()) {
@@ -1722,13 +2105,175 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   });
 
   const parsed = tryParseTaskRunnerResult(input, finalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
-  const result = await completeWithAcceptance(input, {
+  let result = await completeWithAcceptance(input, {
     rawOutput: finalMessage,
     parsedResult: parsed.result,
     parseError: parsed.error,
     trajectory,
     appendTrajectory,
   });
+  result = attachAgentRunPlan(result, agentRunPlan);
+  const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
+  const webapp = extractWebAppSpec(finalMessage);
+  const externalEmbed = extractExternalEmbedSpec(finalMessage);
+  const files = extractFileWriteSpecs(finalMessage);
+  if (expectedSurfaces.includes("interactive") && webapp && result.taskResult) {
+    const conversationId = input.goal.conversationId ?? `goal-${input.goal.id}`;
+    appendTrajectory({
+      type: "system",
+      status: "running",
+      title: "正在写入可执行小应用",
+      thought: webapp.title,
+    });
+    const artifact = persistWebAppArtifact({
+      conversationId,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      runtimeJobId: `job-${input.instance.id}`,
+      title: webapp.title,
+      description: webapp.description || result.summary,
+      html: webapp.html,
+      initialState: webapp.initialState,
+      networkPolicy: webapp.networkPolicy,
+    });
+    const artifactRef = toArtifactRef(artifact);
+    result.taskResult = {
+      ...result.taskResult,
+      artifactRefs: [...(result.taskResult.artifactRefs ?? []), artifactRef],
+      meta: {
+        ...result.taskResult.meta,
+        surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "interactive" as const])),
+        interactiveSurfaceKind: "webapp",
+      },
+    };
+    result.structuredOutput = {
+      ...(result.structuredOutput ?? {}),
+      artifactRefs: result.taskResult.artifactRefs,
+    };
+    appendTrajectory({
+      type: "system",
+      status: "completed",
+      title: "已生成可执行小应用",
+      thought: webapp.title,
+      endedAt: new Date().toISOString(),
+    });
+  } else if (expectedSurfaces.includes("interactive") && externalEmbed && result.taskResult) {
+    const conversationId = input.goal.conversationId ?? `goal-${input.goal.id}`;
+    appendTrajectory({
+      type: "system",
+      status: "running",
+      title: "正在写入外部嵌入",
+      thought: externalEmbed.title,
+    });
+    const artifact = persistExternalEmbedArtifact({
+      conversationId,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      runtimeJobId: `job-${input.instance.id}`,
+      label: externalEmbed.title,
+      summary: externalEmbed.description || result.summary,
+      url: externalEmbed.url,
+    });
+    const artifactRef = toArtifactRef(artifact);
+    result.taskResult = {
+      ...result.taskResult,
+      artifactRefs: [...(result.taskResult.artifactRefs ?? []), artifactRef],
+      meta: {
+        ...result.taskResult.meta,
+        surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "interactive" as const])),
+        interactiveSurfaceKind: "webapp",
+      },
+    };
+    result.structuredOutput = {
+      ...(result.structuredOutput ?? {}),
+      artifactRefs: result.taskResult.artifactRefs,
+    };
+    appendTrajectory({
+      type: "system",
+      status: "completed",
+      title: "已生成外部嵌入",
+      thought: externalEmbed.title,
+      endedAt: new Date().toISOString(),
+    });
+  } else if (webapp) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "warn",
+      phase: "reviewing",
+      message: "Agent 返回了 webapp，但当前任务未声明交互渲染区，已忽略小应用落盘",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+  } else if (externalEmbed) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "warn",
+      phase: "reviewing",
+      message: "Agent 返回了 external_embed，但当前任务未声明交互渲染区，已忽略外部嵌入落盘",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+  }
+  if (expectedSurfaces.includes("files") && result.taskResult) {
+    if (files.length > 0) {
+      const conversationId = input.goal.conversationId ?? `goal-${input.goal.id}`;
+      appendTrajectory({
+        type: "system",
+        status: "running",
+        title: "正在写入文件产物",
+        thought: files.map((file) => file.filename).join("、"),
+      });
+      const artifactRefs = files.map((file) => {
+        const artifact = persistFileArtifact({
+          conversationId,
+          taskId: input.task.id,
+          instanceId: input.instance.id,
+          runtimeJobId: `job-${input.instance.id}`,
+          label: file.filename,
+          summary: result.summary,
+          filename: file.filename,
+          mime: file.mime,
+          bytes: file.content,
+        });
+        return toArtifactRef(artifact);
+      });
+      result.taskResult = {
+        ...result.taskResult,
+        artifactRefs: [...(result.taskResult.artifactRefs ?? []), ...artifactRefs],
+      };
+      result.structuredOutput = {
+        ...(result.structuredOutput ?? {}),
+        artifactRefs: result.taskResult.artifactRefs,
+      };
+      result.taskResult.meta = {
+        ...result.taskResult.meta,
+        surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "files" as const])),
+        fileSurfaceRequired: true,
+      };
+      appendTrajectory({
+        type: "system",
+        status: "completed",
+        title: "已生成文件产物",
+        thought: `已生成 ${artifactRefs.length} 个文件产物。`,
+        endedAt: new Date().toISOString(),
+      });
+    }
+  } else if (files.length > 0) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "warn",
+      phase: "reviewing",
+      message: "Agent 返回了 files，但当前任务未声明文件区域，已忽略文件落盘",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+  }
   appendTrajectory({
     type: result.awaitingUser ? "approval" : "result",
     status: result.awaitingUser ? "awaiting_user" : "completed",
@@ -1763,7 +2308,20 @@ export async function runGoalTask(input: RunGoalTaskInput) {
     attemptCount: 1,
   });
 
-  const readiness = await buildTaskReadinessCheckWithJudge(input);
+  const executionContext = resolveExecutionContext({
+    conversationId: input.goal.conversationId ?? "",
+    goal: input.goal,
+    subGoal: input.subGoal,
+    task: input.task,
+    instance: input.instance,
+    requestId: input.requestId,
+  });
+  const enhancedInput = { ...input, executionContext };
+  const contextReadiness = readinessFromContext(executionContext);
+  const readiness =
+    executionContext.readiness.state === "blocked"
+      ? contextReadiness
+      : await buildTaskReadinessCheckWithJudge(enhancedInput);
   if (readiness.status === "blocked") {
     const trajectory = [
       createTrajectoryStep({
@@ -1783,8 +2341,8 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         endedAt: new Date().toISOString(),
       }),
     ];
-    const blockedResult = await buildReadinessBlockedResult(input, readiness);
-    const blocker = createExecutionBlocker(input, blockedResult, trajectory);
+    const blockedResult = await buildReadinessBlockedResult(enhancedInput, readiness);
+    const blocker = createExecutionBlocker(enhancedInput, blockedResult, trajectory);
     const result = {
       ...blockedResult,
       blocker,
@@ -1861,11 +2419,23 @@ export async function runGoalTask(input: RunGoalTaskInput) {
     return;
   }
 
+  writeTaskPromptFile({
+    conversationId: executionContext.identity.conversationId,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    content: buildGoalTaskRunnerPrompt({
+      context: executionContext,
+      resumeContext: input.resumeContext,
+      initialTrajectory: input.initialTrajectory,
+      webAppInteractionContext: buildWebAppInteractionContext({ conversationId: executionContext.identity.conversationId }),
+    }),
+  });
+
   let attemptCount = 1;
   const maxAttempts = 2;
   while (attemptCount <= maxAttempts) {
     try {
-      const result = await executeOnce({ ...input, attemptCount });
+      const result = await executeOnce({ ...enhancedInput, attemptCount });
       const notificationDecision = judgeTaskResult({
         goal: input.goal,
         subGoal: input.subGoal,

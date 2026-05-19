@@ -13,9 +13,14 @@ import type {
   TaskExecutionStep,
   TaskInstance,
 } from "@/types/kiki";
+import type { AgentRunPlan } from "@/types/agentOrchestration";
 import type { TaskResult } from "@/types/taskResult";
 
 export const INITIAL_NOW = "2026-04-26T10:00:00+08:00";
+const ARTIFACT_DEMO_ID = "artifact-demo-1778950506965";
+const WEBAPP_DEMO_ID = "artifact-demo-webapp-1778950506965";
+const INTERNET_WEBAPP_DEMO_ID = "artifact-demo-internet-webapp-1778950506965";
+const YOUTUBE_EMBED_DEMO_ID = "artifact-demo-youtube-1778950506965";
 
 function payloadFor(kind: ExecutionKind): ExecutionPayload {
   switch (kind) {
@@ -233,6 +238,8 @@ function expectedResultFor(kind: ExecutionKind, expectedOutcome: string, descrip
     format: /表|对比|矩阵/.test(expectedOutcome) ? "table" : "markdown",
     presentation: /表|对比|矩阵/.test(expectedOutcome) ? "visual_report" : "document",
     primaryFormat: "structured_blocks",
+    surfaces: ["interactive"],
+    interactiveSurface: { required: true, kind: "blocks" },
     exportableFormats: /表|对比|矩阵/.test(expectedOutcome) ? ["html", "markdown"] : ["markdown"],
     requiredBlocks: inferRequiredBlocks(kind, expectedOutcome, description),
     completionCriteria: `围绕任务目标「${expectedOutcome}」输出完整、可展示、可复用的结果。`,
@@ -277,6 +284,8 @@ function buildCompletedGenericTaskResult(task: Task, intro: string, createdAt: s
     blocks,
     meta: {
       producedAt: createdAt,
+      surfaces: ["interactive"],
+      interactiveSurfaceKind: "blocks",
       presentation: task.expectedResult?.presentation,
       primaryFormat: task.expectedResult?.primaryFormat,
       exportableFormats: task.expectedResult?.exportableFormats,
@@ -380,6 +389,584 @@ function instance(
   };
 }
 
+function interactiveOnlyDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:03:00+08:00";
+  const intro = "双区域 Demo：这张卡片只有交互渲染区，用 blocks 展示结果，不包含文件区域。";
+  return {
+    id: "inst-surface-demo-interactive",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 交互",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看结构化 blocks 展示。" },
+    createdAt,
+    runner: { attemptCount: 1, lastAttemptAt: createdAt },
+    execution: { phase: "completed", status: "completed", startedAt: createdAt, finishedAt: createdAt, lastUpdatedAt: createdAt },
+    timeline: buildInitialTimeline("task-toefl-listening", createdAt, "completed", intro),
+    result: {
+      summary: "仅交互渲染区 Demo 已生成。",
+      finalMessage: intro,
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-interactive",
+        title: "交互渲染区 Only Demo",
+        status: "done",
+        blocks: [
+          { kind: "heading", text: "交互渲染区 Only", level: 2 },
+          { kind: "paragraph", text: "这个结果只需要页面内展示，所以没有文件区域。" },
+          { kind: "comparison_table", columns: ["区域", "是否存在"], rows: [{ 区域: "交互渲染区", 是否存在: "是" }, { 区域: "文件区域", 是否存在: "否" }] },
+        ],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["interactive"],
+          interactiveSurfaceKind: "blocks",
+          presentation: "visual_report",
+          primaryFormat: "structured_blocks",
+          exportableFormats: ["html", "markdown"],
+        },
+      },
+    },
+  };
+}
+
+function fileOnlyDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:04:00+08:00";
+  const intro = "双区域 Demo：这张卡片只有文件区域，用来验证 file-only 任务不需要强制生成 blocks。";
+  return {
+    id: "inst-surface-demo-file",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 文件",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看文件产物卡片。" },
+    createdAt,
+    runner: { attemptCount: 1, lastAttemptAt: createdAt },
+    execution: { phase: "completed", status: "completed", startedAt: createdAt, finishedAt: createdAt, lastUpdatedAt: createdAt },
+    timeline: buildInitialTimeline("task-toefl-listening", createdAt, "completed", intro),
+    result: {
+      summary: "仅文件区域 Demo 已生成。",
+      finalMessage: intro,
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-file",
+        title: "文件区域 Only Demo",
+        status: "done",
+        blocks: [],
+        artifactRefs: [
+          {
+            id: ARTIFACT_DEMO_ID,
+            kind: "file",
+            label: "surface-file-only-demo.md",
+            summary: "文件区域 only 的 Markdown 样例",
+            mime: "text/markdown; charset=utf-8",
+            size: 221,
+            previewUrl: `/api/artifacts/${ARTIFACT_DEMO_ID}`,
+          },
+        ],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["files"],
+          fileSurfaceRequired: true,
+          presentation: "document",
+          primaryFormat: "text",
+          exportableFormats: ["text"],
+        },
+      },
+    },
+  };
+}
+
+function mixedSurfaceDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:05:00+08:00";
+  const intro = "双区域 Demo：这张卡片同时包含交互渲染区和文件区域。";
+  return {
+    id: "inst-surface-demo-mixed",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 混合",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看 blocks 和文件产物卡片。" },
+    createdAt,
+    runner: {
+      attemptCount: 1,
+      lastAttemptAt: createdAt,
+    },
+    execution: {
+      phase: "completed",
+      status: "completed",
+      startedAt: createdAt,
+      finishedAt: createdAt,
+      lastUpdatedAt: createdAt,
+    },
+    timeline: buildInitialTimeline("task-toefl-listening", createdAt, "completed", intro),
+    result: {
+      summary: "双区域 Demo 已生成。",
+      finalMessage: intro,
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-mixed",
+        title: "交互渲染区 + 文件区域 Demo",
+        status: "done",
+        blocks: [
+          { kind: "heading", text: "双区域结果呈现", level: 2 },
+          { kind: "paragraph", text: "页面内先展示核心摘要和结论，同时在文件区域提供完整 Markdown 报告。" },
+          { kind: "callout", tone: "success", text: "这验证了 blocks 与文件产物可以同时存在，且互不替代。" },
+        ],
+        artifactRefs: [
+          {
+            id: ARTIFACT_DEMO_ID,
+            kind: "file",
+            label: "artifact-demo-report.md",
+            summary: "Artifact 功能验证样例",
+            mime: "text/markdown; charset=utf-8",
+            size: 221,
+            previewUrl: `/api/artifacts/${ARTIFACT_DEMO_ID}`,
+          },
+        ],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["interactive", "files"],
+          interactiveSurfaceKind: "blocks",
+          fileSurfaceRequired: true,
+          presentation: "document",
+          primaryFormat: "markdown",
+          exportableFormats: ["markdown"],
+        },
+      },
+    },
+  };
+}
+
+function webAppDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:06:00+08:00";
+  const intro = "可执行小应用 Demo：这张卡片会在交互渲染区运行一个预算计算器，并通过受控通信保存输入状态。";
+  return {
+    id: "inst-surface-demo-webapp",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 小应用",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看 sandbox iframe 小应用。" },
+    createdAt,
+    runner: { attemptCount: 1, lastAttemptAt: createdAt },
+    execution: { phase: "completed", status: "completed", startedAt: createdAt, finishedAt: createdAt, lastUpdatedAt: createdAt },
+    timeline: buildInitialTimeline("task-toefl-listening", createdAt, "completed", intro),
+    result: {
+      summary: "可执行小应用 Demo 已生成。",
+      finalMessage: intro,
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-webapp",
+        title: "可执行小应用 Demo",
+        status: "done",
+        blocks: [
+          { kind: "callout", tone: "info", text: "如果小应用加载失败，这里作为降级摘要展示。" },
+        ],
+        artifactRefs: [
+          {
+            id: WEBAPP_DEMO_ID,
+            kind: "webapp",
+            label: "预算计算器",
+            summary: "输入预算与每月上限后自动计算建议，并保存状态。",
+            previewUrl: `/api/artifacts/${WEBAPP_DEMO_ID}/preview`,
+            surfaceKind: "webapp",
+          },
+        ],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["interactive"],
+          interactiveSurfaceKind: "webapp",
+          presentation: "dashboard",
+          primaryFormat: "html",
+          exportableFormats: ["html"],
+        },
+      },
+    },
+  };
+}
+
+function externalEmbedDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:07:00+08:00";
+  const intro = "外部嵌入 Demo：这张卡片在交互渲染区嵌入 YouTube，默认点击后加载，避免打开页面就请求第三方。";
+  const youtubeUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const embedUrl = "https://www.youtube.com/embed/dQw4w9WgXcQ";
+  return {
+    id: "inst-surface-demo-youtube",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 外部嵌入",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看受控外部 iframe 嵌入。" },
+    createdAt,
+    runner: { attemptCount: 1, lastAttemptAt: createdAt },
+    execution: { phase: "completed", status: "completed", startedAt: createdAt, finishedAt: createdAt, lastUpdatedAt: createdAt },
+    timeline: buildInitialTimeline("task-toefl-listening", createdAt, "completed", intro),
+    result: {
+      summary: "外部嵌入 Demo 已生成。",
+      finalMessage: intro,
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-youtube",
+        title: "YouTube 外部嵌入 Demo",
+        status: "done",
+        blocks: [{ kind: "callout", tone: "info", text: "如果目标网站禁止 iframe 嵌入，可以使用新窗口打开作为降级。" }],
+        artifactRefs: [{
+          id: YOUTUBE_EMBED_DEMO_ID,
+          kind: "external_embed",
+          label: "YouTube 官方播放器",
+          summary: "第三方外部内容，点击后加载。",
+          url: youtubeUrl,
+          embedUrl,
+          previewUrl: embedUrl,
+          provider: "youtube",
+          allowFullScreen: true,
+          surfaceKind: "external_embed",
+        }],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["interactive"],
+          interactiveSurfaceKind: "webapp",
+          presentation: "dashboard",
+          primaryFormat: "html",
+          exportableFormats: ["html"],
+        },
+      },
+    },
+  };
+}
+
+function internetWebAppDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:08:00+08:00";
+  const intro = "联网小应用 Demo：这张卡片通过 KikiBridge.fetchInternet 读取公网文本，同时仍禁止直接访问 KiKi 内部 API。";
+  return {
+    id: "inst-surface-demo-internet-webapp",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 联网小应用",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看受控联网小应用。" },
+    createdAt,
+    runner: { attemptCount: 1, lastAttemptAt: createdAt },
+    execution: { phase: "completed", status: "completed", startedAt: createdAt, finishedAt: createdAt, lastUpdatedAt: createdAt },
+    timeline: buildInitialTimeline("task-toefl-listening", createdAt, "completed", intro),
+    result: {
+      summary: "联网小应用 Demo 已生成。",
+      finalMessage: intro,
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-internet-webapp",
+        title: "联网小应用 Demo",
+        status: "done",
+        blocks: [{ kind: "callout", tone: "info", text: "公网数据通过受控代理读取，iframe 仍不能读取 KiKi 页面状态。" }],
+        artifactRefs: [{
+          id: INTERNET_WEBAPP_DEMO_ID,
+          kind: "webapp",
+          label: "联网资料卡",
+          summary: "通过受控代理读取 example.com 文本。",
+          previewUrl: `/api/artifacts/${INTERNET_WEBAPP_DEMO_ID}/preview`,
+          surfaceKind: "webapp",
+        }],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["interactive"],
+          interactiveSurfaceKind: "webapp",
+          presentation: "dashboard",
+          primaryFormat: "html",
+          exportableFormats: ["html"],
+        },
+      },
+    },
+  };
+}
+
+function multiAgentDemoInstance(): TaskInstance {
+  const createdAt = "2026-04-26T11:09:00+08:00";
+  const intro = "多 Agent Demo：Coordinator、Executor、Reviewer、Presenter 协同生成 mixed 结果，并展示审阅打回后的复查效果。";
+  const agentRunPlan: AgentRunPlan = {
+    schemaVersion: 1,
+    mode: "role_collaboration",
+    strategy: "quality_review",
+    finalRole: "synthesizer",
+    roles: [
+      {
+        id: "mock-multi-agent-coordinator",
+        role: "coordinator",
+        title: "Coordinator 明确任务要求",
+        objective: "明确 mixed 结果必须同时包含交互摘要和 Markdown 文件。",
+        inputSummary: "生成托福听力复盘报告，并提供文件产物。",
+        outputSummary: "确认成功标准：摘要卡片、错题原因、下一步练习建议、Markdown 文件。",
+        status: "completed",
+        startedAt: "2026-04-26T11:09:00+08:00",
+        finishedAt: "2026-04-26T11:09:18+08:00",
+      },
+      {
+        id: "mock-multi-agent-executor",
+        role: "executor",
+        title: "Executor 生成候选产物",
+        objective: "生成结构化 blocks 和文件内容。",
+        inputSummary: "基于 Coordinator 的完成标准生成候选结果。",
+        outputSummary: "生成了听力复盘摘要和 Markdown 报告草稿，但第一轮漏写文件引用。",
+        status: "completed",
+        startedAt: "2026-04-26T11:09:18+08:00",
+        finishedAt: "2026-04-26T11:09:56+08:00",
+        filesTouched: ["toefl-listening-review.md"],
+      },
+      {
+        id: "mock-multi-agent-reviewer",
+        role: "reviewer",
+        title: "Reviewer 审阅候选产物",
+        objective: "检查 mixed 模式下 blocks 和 files 是否齐全。",
+        inputSummary: "审阅 Executor 第一轮候选结果。",
+        outputSummary: "发现 blocks 已满足，但 files/artifactRefs 缺失，要求补齐文件区域。",
+        status: "completed",
+        startedAt: "2026-04-26T11:09:56+08:00",
+        finishedAt: "2026-04-26T11:10:08+08:00",
+      },
+      {
+        id: "mock-multi-agent-executor-attempt-2",
+        role: "executor",
+        title: "Executor 生成候选产物（第 2 轮）",
+        objective: "按 Reviewer 意见补齐文件区域。",
+        inputSummary: "补齐 Markdown 文件产物和 artifact 引用。",
+        outputSummary: "补充 toefl-listening-review.md，并保持摘要卡片与文件内容一致。",
+        status: "completed",
+        startedAt: "2026-04-26T11:10:08+08:00",
+        finishedAt: "2026-04-26T11:10:28+08:00",
+        filesTouched: ["toefl-listening-review.md"],
+      },
+      {
+        id: "mock-multi-agent-reviewer-attempt-2",
+        role: "reviewer",
+        title: "Reviewer 审阅候选产物（第 2 轮）",
+        objective: "复查补齐后的 mixed 结果。",
+        inputSummary: "复查 blocks、artifactRefs 和文件摘要一致性。",
+        outputSummary: "blocks 与文件区域均满足要求，允许呈现最终结果。",
+        status: "completed",
+        startedAt: "2026-04-26T11:10:28+08:00",
+        finishedAt: "2026-04-26T11:10:39+08:00",
+      },
+      {
+        id: "mock-multi-agent-synthesizer",
+        role: "synthesizer",
+        title: "Presenter 呈现最终结果",
+        objective: "呈现最终 KiKi 结果 JSON。",
+        inputSummary: "吸收前序角色输出和复查结论。",
+        outputSummary: "输出包含 blocks 和文件产物的最终结果。",
+        status: "completed",
+        startedAt: "2026-04-26T11:10:39+08:00",
+        finishedAt: "2026-04-26T11:10:56+08:00",
+      },
+    ],
+    handoffs: [
+      {
+        fromRole: "coordinator",
+        toRole: "executor",
+        summary: "任务必须同时产出页面摘要和可下载 Markdown 文件，Reviewer 需要检查 mixed 模式完整性。",
+        claims: [{ text: "mixed 模式要求 blocks 与文件区域同时存在。", confidence: "high" }],
+        decisions: ["使用交互摘要卡片 + Markdown 文件的双区域结果。"],
+        openQuestions: [],
+        risks: ["文件区域容易被遗漏。"],
+        createdAt: "2026-04-26T11:09:18+08:00",
+      },
+      {
+        fromRole: "executor",
+        toRole: "reviewer",
+        summary: "已生成摘要 blocks 和报告内容草稿，请检查是否满足 mixed 结果要求。",
+        claims: [{ text: "摘要 blocks 已覆盖正确率、错因和下一步练习。", confidence: "medium" }],
+        decisions: ["先交付候选摘要，再由 Reviewer 检查文件区域。"],
+        openQuestions: [],
+        risks: ["第一轮可能没有完整 artifactRefs。"],
+        filesTouched: ["toefl-listening-review.md"],
+        createdAt: "2026-04-26T11:09:56+08:00",
+      },
+      {
+        fromRole: "reviewer",
+        toRole: "synthesizer",
+        summary: "复查通过：blocks 和文件区域均已补齐，可以呈现最终结果。",
+        claims: [{ text: "artifactRefs 中存在 Markdown 文件产物。", confidence: "high" }],
+        decisions: ["允许 Presenter 呈现最终结果。"],
+        openQuestions: [],
+        risks: [],
+        artifactRefs: [ARTIFACT_DEMO_ID],
+        createdAt: "2026-04-26T11:10:39+08:00",
+      },
+    ],
+    review: {
+      passed: true,
+      severity: "info",
+      decisionReason: "第二轮复查确认 mixed 结果完整，交互摘要和文件产物一致。",
+      issues: [
+        {
+          id: "missing-file-surface-first-pass",
+          severity: "warning",
+          message: "第一轮候选结果缺少文件区域，已由 Executor 第二轮补齐。",
+          expected: "mixed 结果同时包含 blocks 和 artifactRefs。",
+          actual: "第一轮只有 blocks，第二轮已补齐 artifactRefs。",
+          suggestedFix: "保留 Reviewer 打回记录，后续默认检查文件区域。",
+        },
+      ],
+    },
+  };
+  const timeline: TaskExecutionStep[] = [
+    {
+      id: "mock-ma-start",
+      title: "启用多角色协同：quality_review",
+      type: "phase",
+      status: "completed",
+      detail: "KiKi 将按角色顺序执行、审阅并呈现最终结果。",
+      startedAt: "2026-04-26T11:09:00+08:00",
+      finishedAt: "2026-04-26T11:09:00+08:00",
+    },
+    {
+      id: "mock-ma-coordinator",
+      title: "Coordinator 明确任务要求",
+      type: "system",
+      status: "completed",
+      agentRole: "coordinator",
+      detail: "确认 mixed 结果必须同时包含交互摘要和 Markdown 文件。",
+      startedAt: "2026-04-26T11:09:00+08:00",
+      finishedAt: "2026-04-26T11:09:18+08:00",
+    },
+    {
+      id: "mock-ma-handoff-1",
+      title: "coordinator 已移交给 executor",
+      type: "phase",
+      status: "completed",
+      agentRole: "coordinator",
+      detail: "任务要求已明确，进入候选产物生成。",
+      handoff: {
+        fromRole: "coordinator",
+        toRole: "executor",
+        summary: "必须同时产出页面摘要和可下载 Markdown 文件。",
+      },
+      startedAt: "2026-04-26T11:09:18+08:00",
+      finishedAt: "2026-04-26T11:09:18+08:00",
+    },
+    {
+      id: "mock-ma-executor",
+      title: "Executor 生成候选产物",
+      type: "assistant",
+      status: "completed",
+      agentRole: "executor",
+      detail: "生成摘要 blocks 和 Markdown 草稿，但第一轮漏了文件区域引用。",
+      toolName: "Write",
+      startedAt: "2026-04-26T11:09:18+08:00",
+      finishedAt: "2026-04-26T11:09:56+08:00",
+    },
+    {
+      id: "mock-ma-reviewer",
+      title: "Reviewer 审阅候选产物",
+      type: "assistant",
+      status: "completed",
+      agentRole: "reviewer",
+      detail: "发现 blocking 问题：mixed 模式需要文件区域，但第一轮缺少 artifactRefs。",
+      startedAt: "2026-04-26T11:09:56+08:00",
+      finishedAt: "2026-04-26T11:10:08+08:00",
+    },
+    {
+      id: "mock-ma-executor-2",
+      title: "Executor 生成候选产物（第 2 轮）",
+      type: "assistant",
+      status: "completed",
+      agentRole: "executor",
+      detail: "补齐 Markdown 文件产物，并保持文件内容与摘要卡片一致。",
+      startedAt: "2026-04-26T11:10:08+08:00",
+      finishedAt: "2026-04-26T11:10:28+08:00",
+    },
+    {
+      id: "mock-ma-reviewer-2",
+      title: "Reviewer 审阅候选产物（第 2 轮）",
+      type: "assistant",
+      status: "completed",
+      agentRole: "reviewer",
+      detail: "复查通过：blocks 和文件区域均满足要求。",
+      startedAt: "2026-04-26T11:10:28+08:00",
+      finishedAt: "2026-04-26T11:10:39+08:00",
+    },
+    {
+      id: "mock-ma-synthesizer",
+      title: "Presenter 呈现最终结果",
+      type: "result",
+      status: "completed",
+      agentRole: "synthesizer",
+      detail: "输出最终结果：交互摘要 + Markdown 文件产物。",
+      startedAt: "2026-04-26T11:10:39+08:00",
+      finishedAt: "2026-04-26T11:10:56+08:00",
+    },
+  ];
+  return {
+    id: "inst-surface-demo-multi-agent",
+    taskId: "task-toefl-listening",
+    dateLabel: "Surface Demo · 多 Agent",
+    status: "completed",
+    intro,
+    payload: { kind: "generic_result", summary: intro, details: "查看多角色协同摘要和执行链路。" },
+    createdAt,
+    runner: { attemptCount: 1, lastAttemptAt: createdAt },
+    execution: { phase: "completed", status: "completed", startedAt: createdAt, finishedAt: "2026-04-26T11:10:56+08:00", lastUpdatedAt: "2026-04-26T11:10:56+08:00" },
+    timeline,
+    result: {
+      summary: "多 Agent mixed 结果 Demo 已生成。",
+      finalMessage: intro,
+      structuredOutput: { agentRunPlan },
+      taskResult: {
+        schemaVersion: 1,
+        taskId: "task-toefl-listening",
+        instanceId: "inst-surface-demo-multi-agent",
+        title: "多 Agent 托福听力复盘 Demo",
+        status: "done",
+        blocks: [
+          { kind: "heading", text: "听力复盘结论", level: 2 },
+          { kind: "paragraph", text: "本轮复盘显示，主要失分来自讲座结构预判不足、转折信号词捕捉偏慢，以及细节题中对例证功能的判断不稳定。下一轮练习应优先强化听前结构预判和听中标记能力。" },
+          { kind: "callout", tone: "success", text: "下一轮重点：每天完成 1 篇讲座精听，标出转折、例证、结论三类信号，并复盘错题对应的原文句。" },
+          {
+            kind: "comparison_table",
+            columns: ["问题类型", "典型表现", "练习建议"],
+            rows: [
+              { 问题类型: "主旨题", 典型表现: "开头背景听懂，但未及时抓住教授真正要展开的主题。", 练习建议: "听前先预测学科场景，开头 30 秒记录主题变化词。" },
+              { 问题类型: "细节题", 典型表现: "能听到事实点，但容易忽略该细节服务于解释、反驳还是举例。", 练习建议: "复听时给每个例子标注功能：说明、对比、例外或结论支撑。" },
+              { 问题类型: "态度题", 典型表现: "对语气变化和转折词反应偏慢，导致判断倾向不稳定。", 练习建议: "集中整理 however、actually、surprisingly 等信号词后的观点变化。" },
+              { 问题类型: "结构题", 典型表现: "段落之间关系记录不足，回看笔记时无法还原讲座层级。", 练习建议: "使用“主题-例证-结论”三列笔记模板训练结构感。" },
+            ],
+          },
+        ],
+        artifactRefs: [
+          {
+            id: ARTIFACT_DEMO_ID,
+            kind: "file",
+            label: "toefl-listening-review.md",
+            summary: "多 Agent 协同生成的托福听力复盘报告",
+            mime: "text/markdown; charset=utf-8",
+            size: 221,
+            previewUrl: `/api/artifacts/${ARTIFACT_DEMO_ID}`,
+          },
+        ],
+        meta: {
+          producedAt: createdAt,
+          surfaces: ["interactive", "files"],
+          interactiveSurfaceKind: "blocks",
+          fileSurfaceRequired: true,
+          presentation: "visual_report",
+          primaryFormat: "markdown",
+          exportableFormats: ["markdown"],
+          agentRunPlan,
+          qualityReview: {
+            passed: true,
+            issues: agentRunPlan.review?.issues.map((issue) => issue.message) ?? [],
+            reviewerRole: "reviewer",
+          },
+        },
+      },
+    },
+  };
+}
+
 function task(data: Omit<Task, "instances"> & { instances?: TaskInstance[] }): Task {
   const nextTask: Task = {
     ...data,
@@ -452,6 +1039,13 @@ export const initialGoals: Goal[] = [
             progress: 48,
             executionKind: "listening_qa",
             instances: [
+              multiAgentDemoInstance(),
+              internetWebAppDemoInstance(),
+              externalEmbedDemoInstance(),
+              webAppDemoInstance(),
+              mixedSurfaceDemoInstance(),
+              fileOnlyDemoInstance(),
+              interactiveOnlyDemoInstance(),
               instance("inst-listen-0426", "task-toefl-listening", "04-26", "2026-04-26T11:00:00+08:00", "昨天听力题目，你已经答对了 9 道题（共 10 题），正确率为 90%。今天我把难度提高了一点，重点看天文类材料。", "listening_qa", "awaiting_user"),
               instance("inst-listen-0425", "task-toefl-listening", "04-25", "2026-04-25T11:00:00+08:00", "昨天的校园场景题你做得比较稳，今天尝试跨到 lecture 场景。", "listening_qa", "completed"),
               instance("inst-listen-0424", "task-toefl-listening", "04-24", "2026-04-24T11:00:00+08:00", "这组题里需要重点抓教授给出的转折提示词，我帮你把错题整理在最后了。", "listening_qa", "completed"),

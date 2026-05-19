@@ -3,6 +3,7 @@ import { appendRuntimeDaemonLog, readRuntimeDaemonState, writeRuntimeDaemonState
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { readGoalsSnapshot, readRuntimeEnvironmentsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { runGoalSchedulerEngine } from "@/lib/server/worker/goalSchedulerEngine";
+import { runGoalDaemonSideEffects } from "@/lib/server/worker/goalNotificationWorker";
 import { runRecoveryWorker } from "@/lib/server/worker/recoveryWorker";
 import { runTaskDispatchWorker } from "@/lib/server/worker/taskDispatchWorker";
 import { initialGoals } from "@/mocks/goals";
@@ -42,6 +43,7 @@ export async function runRuntimeDaemonLoop() {
       runtimeEnv,
       config,
     });
+    const sideEffectsResult = runGoalDaemonSideEffects(readGoalsSnapshot(goals));
 
     await runTaskDispatchWorker(config.deviceId);
     writeRuntimeDaemonState({
@@ -51,7 +53,7 @@ export async function runRuntimeDaemonLoop() {
       updatedAt: new Date().toISOString(),
     });
     appendRuntimeDaemonLog(
-      `本轮调度结束，新增队列任务 ${schedulerResult.createdJobs} 个，跳过 ${schedulerResult.skipped} 个`,
+      `本轮调度结束，新增队列任务 ${schedulerResult.createdJobs} 个，跳过 ${schedulerResult.skipped} 个，派生日程 ${sideEffectsResult.schedule.synthesized} 个，投递通知 ${sideEffectsResult.notifications.delivered} 个，暂停超时 ${sideEffectsResult.watchdog.paused} 个`,
     );
     await sleep(config.schedulerIntervalMs);
   }

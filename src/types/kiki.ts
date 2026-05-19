@@ -1,3 +1,4 @@
+import type { AgentRole } from "@/types/agentOrchestration";
 import type { TaskResult } from "@/types/taskResult";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
@@ -186,10 +187,25 @@ export type TaskExecutionMode = "standard" | "interactive" | "monitoring" | "eve
 
 export type TaskExecutionCycle = "once" | "recurring";
 
+export type ResultSurfaceKind = "interactive" | "files";
+export type InteractiveSurfaceKind = "blocks" | "iframe" | "webapp" | "dashboard" | "form" | "table";
+export type FileArtifactKind = "markdown" | "text" | "csv" | "json" | "zip" | "html";
+
 export type TaskExpectedResult = {
   type: "information" | "deliverable" | "decision" | "action" | "confirmation";
   description: string;
   format: "json" | "markdown" | "table" | "text" | "code" | "other";
+  surfaces?: ResultSurfaceKind[];
+  interactiveSurface?: {
+    required?: boolean;
+    kind?: InteractiveSurfaceKind;
+  };
+  fileSurface?: {
+    required?: boolean;
+    acceptedKinds?: FileArtifactKind[];
+    minCount?: number;
+  };
+  deliveryMode?: "inline" | "file";
   presentation?: "summary_card" | "visual_report" | "comparison_table" | "checklist" | "timeline" | "document" | "dashboard" | "handoff_package";
   primaryFormat?: "structured_blocks" | "json" | "markdown" | "html" | "text" | "code";
   exportableFormats?: Array<"html" | "markdown" | "json" | "text">;
@@ -202,8 +218,14 @@ export type TaskExecutionStep = {
   title: string;
   type: "phase" | "tool" | "assistant" | "system" | "retry" | "result";
   status: "pending" | "running" | "completed" | "failed" | "awaiting_user";
+  agentRole?: AgentRole;
   detail?: string;
   toolName?: string;
+  handoff?: {
+    fromRole?: AgentRole;
+    toRole?: AgentRole;
+    summary: string;
+  };
   startedAt: string;
   finishedAt?: string;
 };
@@ -486,6 +508,10 @@ export type ConversationMessage =
         subGoalId: string;
         taskId: string;
         instanceId: string;
+      };
+      taskSnapshot?: {
+        task: Task;
+        instance: TaskInstance;
       };
     };
 

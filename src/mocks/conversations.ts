@@ -43,6 +43,10 @@ export function buildConversationsFromGoals(goals: Goal[]): Conversation[] {
               taskId: task.id,
               instanceId: instance.id,
             },
+            taskSnapshot: {
+              task,
+              instance,
+            },
           });
         }
       }

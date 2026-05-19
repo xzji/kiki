@@ -1,4 +1,5 @@
 import type { Task } from "@/types/kiki";
+import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
 import type { LocalValidationIssue, LocalValidationReport } from "@/types/taskAcceptance";
 import type { ResultBlock, TaskResult } from "@/types/taskResult";
 
@@ -78,6 +79,46 @@ function hasReusableText(result?: ParsedResultLike | null) {
   );
 }
 
+function hasArtifactRefs(result?: ParsedResultLike | null) {
+  return Boolean(result?.taskResult?.artifactRefs?.length);
+}
+
+function hasWebAppArtifactRef(result?: ParsedResultLike | null) {
+  return Boolean(result?.taskResult?.artifactRefs?.some((ref) => ref.kind === "webapp" || ref.kind === "external_embed"));
+}
+
+function hasParsedFiles(rawOutput?: string) {
+  if (!rawOutput) return false;
+  try {
+    const parsed = JSON.parse(rawOutput.match(/\{[\s\S]*\}/)?.[0] ?? rawOutput) as { files?: unknown };
+    return Array.isArray(parsed.files) && parsed.files.length > 0;
+  } catch {
+    return /"files"\s*:\s*\[[\s\S]*?\]/.test(rawOutput);
+  }
+}
+
+function hasParsedWebApp(rawOutput?: string) {
+  if (!rawOutput) return false;
+  try {
+    const parsed = JSON.parse(rawOutput.match(/\{[\s\S]*\}/)?.[0] ?? rawOutput) as { webapp?: unknown };
+    const webapp = parsed.webapp as Record<string, unknown> | undefined;
+    return Boolean(webapp && typeof webapp === "object" && typeof webapp.html === "string" && webapp.html.trim());
+  } catch {
+    return /"webapp"\s*:\s*\{[\s\S]*?"html"\s*:\s*"/.test(rawOutput);
+  }
+}
+
+function hasParsedExternalEmbed(rawOutput?: string) {
+  if (!rawOutput) return false;
+  try {
+    const parsed = JSON.parse(rawOutput.match(/\{[\s\S]*\}/)?.[0] ?? rawOutput) as { external_embed?: unknown };
+    const externalEmbed = parsed.external_embed as Record<string, unknown> | undefined;
+    return Boolean(externalEmbed && typeof externalEmbed === "object" && typeof externalEmbed.url === "string" && externalEmbed.url.trim());
+  } catch {
+    return /"external_embed"\s*:\s*\{[\s\S]*?"url"\s*:\s*"/.test(rawOutput);
+  }
+}
+
 function validateBlockSchema(block: ResultBlock): string | null {
   switch (block.kind) {
     case "heading":
@@ -108,7 +149,7 @@ function validateBlockSchema(block: ResultBlock): string | null {
 function inferRepairMode(issues: LocalValidationIssue[]): LocalValidationReport["repairMode"] {
   if (issues.some((item) => item.code === "json_parse_failed")) return "format_repair";
   if (issues.some((item) => item.code === "blocked_state_invalid")) return "state_repair";
-  if (issues.some((item) => item.code === "artifact_only" || item.code === "empty_blocks" || item.code === "missing_required_blocks")) {
+  if (issues.some((item) => item.code === "artifact_only" || item.code === "empty_blocks" || item.code === "missing_required_blocks" || item.code === "missing_interactive_surface" || item.code === "missing_file_surface")) {
     return "presentation_repair";
   }
   if (issues.some((item) => item.code === "missing_task_result" || item.code === "invalid_block_schema" || item.code === "deliverable_check_invalid")) {
@@ -118,12 +159,18 @@ function inferRepairMode(issues: LocalValidationIssue[]): LocalValidationReport[
 }
 
 function requiredBlocks(task: Task): ResultBlock["kind"][] {
+  if (!resolveExpectedSurfaces(task.expectedResult).includes("interactive")) return [];
+  if (task.expectedResult?.interactiveSurface?.kind === "webapp") return [];
   return task.expectedResult?.requiredBlocks ?? [];
 }
 
 export function validateTaskResultLocally(input: ValidateTaskResultInput): LocalValidationReport {
   const result = input.parsedResult;
   const issues: LocalValidationIssue[] = [];
+  const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
+  const expectsInteractive = expectedSurfaces.includes("interactive");
+  const expectsFiles = expectedSurfaces.includes("files");
+  const expectedInteractiveKind = input.task.expectedResult?.interactiveSurface?.kind ?? result?.taskResult?.meta.interactiveSurfaceKind ?? "blocks";
 
   if (input.parseError) {
     issues.push(issue({
@@ -135,30 +182,45 @@ export function validateTaskResultLocally(input: ValidateTaskResultInput): Local
     }));
   }
 
-  if (!result?.taskResult) {
+  if (!result?.taskResult && expectsInteractive) {
     issues.push(issue({
       code: "missing_task_result",
       severity: "critical",
       message: "结果缺少 task_result。",
-      repairHint: "根据已有 summary、final_message 或 artifacts 生成完整 task_result。",
+      repairHint: "根据已有 summary、final_message 或 artifacts 生成交互渲染区 task_result。",
     }));
   }
 
   const blocks = result?.taskResult?.blocks ?? [];
-  if (result?.taskResult && blocks.length === 0 && !result.awaitingUser) {
+  const hasInteractiveSurface =
+    expectedInteractiveKind === "webapp"
+      ? hasWebAppArtifactRef(result) || hasParsedWebApp(input.rawOutput) || hasParsedExternalEmbed(input.rawOutput)
+      : blocks.length > 0;
+  const hasFileSurface = hasArtifactRefs(result) || hasParsedFiles(input.rawOutput);
+
+  if (expectsInteractive && !hasInteractiveSurface && !result?.awaitingUser) {
     issues.push(issue({
-      code: "empty_blocks",
+      code: "missing_interactive_surface",
       severity: "critical",
-      message: "task_result.blocks 为空，无法展示主产出。",
-      repairHint: "把已有内容整理为可展示 blocks。",
+      message: expectedInteractiveKind === "webapp" ? "任务要求可执行小应用或外部嵌入，但没有返回 webapp.html 或 external_embed.url。" : "任务要求交互渲染区，但 task_result.blocks 为空。",
+      repairHint: expectedInteractiveKind === "webapp" ? "返回 webapp.html 或 external_embed.url，并设置 task_result.meta.interactiveSurfaceKind 为 webapp。" : "把已有内容整理为可页面展示的 task_result.blocks。",
     }));
   }
 
-  if (!result?.taskResult && hasReusableText(result)) {
+  if (expectsFiles && !hasFileSurface && !result?.awaitingUser) {
+    issues.push(issue({
+      code: "missing_file_surface",
+      severity: "critical",
+      message: "任务要求文件区域，但没有返回 files 或 artifactRefs。",
+      repairHint: "按任务要求生成 files 数组，字段为 filename、mime、content。",
+    }));
+  }
+
+  if (!result?.taskResult && hasReusableText(result) && expectsInteractive) {
     issues.push(issue({
       code: "artifact_only",
       severity: "critical",
-      message: "结果只有 artifact、summary 或 final_message，没有组件化主产出。",
+      message: "结果只有 artifact、summary 或 final_message，没有交互渲染区。",
       repairHint: "把已有产出转换为 task_result.blocks。",
     }));
   }

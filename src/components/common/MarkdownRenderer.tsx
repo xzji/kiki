@@ -86,7 +86,7 @@ function parseMarkdown(markdown: string): MarkdownBlock[] {
     if (heading) {
       blocks.push({
         kind: "heading",
-        level: heading[1].length as MarkdownBlock & { kind: "heading" }["level"],
+        level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6,
         text: heading[2].trim(),
       });
       index += 1;

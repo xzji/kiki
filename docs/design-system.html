@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KiKi Design System</title>
+<style>
+:root{
+  --bg:#f5f6f8;--surface:#fff;--surface-muted:#f6f8fa;--info-bg:#f4f8ff;
+  --text1:#1f2328;--text2:#374151;--text3:#6b7280;--text4:#8c9198;
+  --border:#e5e7eb;--border2:#d0d7de;--focus:#d0d7de;
+  --brand:#1f2328;--brand-h:#374151;
+  --danger:#b42318;--danger-b:#fecaca;
+  --warn-bg:#fff3cd;--warn-t:#8a6d3b;
+  --link:#0d47a1;
+  --shadow:0 6px 18px rgba(15,23,42,.04);
+  --radius-xl:12px;--radius-lg:8px;--radius-md:6px;--radius-full:9999px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text1);font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro","PingFang SC","Microsoft YaHei",system-ui,sans-serif;line-height:1.7}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:.88em;background:var(--surface-muted);border:1px solid var(--border);border-radius:5px;padding:.1em .35em}
+
+.shell{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;border-right:1px solid var(--border);background:rgba(255,255,255,.88);backdrop-filter:blur(14px);padding:24px 16px}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--brand);color:#fff;font-weight:700;font-size:16px}
+.brand-title{font-size:15px;font-weight:700;line-height:1.2}
+.brand-sub{color:var(--text4);font-size:12px}
+.toc-label{color:var(--text4);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:18px 0 6px}
+.toc a{display:block;border-radius:8px;color:var(--text3);font-size:13px;line-height:1.35;padding:6px 8px;text-decoration:none}
+.toc a:hover{background:var(--surface-muted);color:var(--text1)}
+.toc a.l2{padding-left:16px}
+.toc a.l3{padding-left:28px;font-size:12px}
+
+.content{min-width:0;padding:40px 48px 80px}
+.doc{max-width:960px;margin:0 auto}
+
+.hero{border:1px solid var(--border);border-radius:20px;background:linear-gradient(135deg,#fff 0%,#f9fbff 100%);box-shadow:var(--shadow);padding:32px;margin-bottom:28px}
+.hero-kicker{display:inline-flex;align-items:center;border:1px solid var(--border2);border-radius:var(--radius-full);color:var(--text4);font-size:12px;padding:3px 10px;margin-bottom:10px;background:#fff}
+.hero h1{font-size:34px;letter-spacing:-.03em;margin-bottom:8px}
+.hero p{max-width:720px;color:var(--text3)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{display:inline-flex;align-items:center;border-radius:var(--radius-full);background:var(--surface-muted);border:1px solid var(--border);color:var(--text3);font-size:12px;padding:3px 10px}
+
+h1,h2,h3{scroll-margin-top:20px}
+h1{font-size:28px;line-height:1.2;margin:40px 0 14px;padding-bottom:12px;border-bottom:1px solid var(--border);letter-spacing:-.02em}
+h2{margin:32px 0 10px;font-size:20px;line-height:1.3;letter-spacing:-.01em}
+h3{margin:22px 0 8px;font-size:15px;line-height:1.4}
+p{color:var(--text2);margin:8px 0}
+ul{margin:8px 0 14px;padding-left:20px;color:var(--text2)}
+li{margin:3px 0}
+
+.section{margin-bottom:36px}
+.card{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:20px;box-shadow:var(--shadow)}
+
+.swatch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.swatch{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);padding:12px 14px}
+.swatch-dot{width:36px;height:36px;border-radius:var(--radius-lg);border:1px solid var(--border);flex-shrink:0}
+.swatch-info{min-width:0}
+.swatch-name{font-size:12px;font-weight:600;color:var(--text1)}
+.swatch-hex{font-size:11px;color:var(--text4);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.swatch-usage{font-size:11px;color:var(--text3);margin-top:2px}
+
+.type-sample{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:20px;margin-bottom:12px}
+.type-row{display:flex;align-items:baseline;gap:16px;padding:10px 0;border-bottom:1px solid var(--border)}
+.type-row:last-child{border-bottom:0}
+.type-label{width:140px;flex-shrink:0;font-size:11px;color:var(--text4);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.type-render{min-width:0}
+
+.radius-row{display:flex;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--border)}
+.radius-row:last-child{border-bottom:0}
+.radius-box{width:48px;height:48px;background:var(--surface-muted);border:1px solid var(--border2);flex-shrink:0}
+.radius-label{width:100px;flex-shrink:0;font-size:12px;color:var(--text4);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.radius-val{font-size:12px;color:var(--text3)}
+
+.spacing-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}
+.spacing-row:last-child{border-bottom:0}
+.spacing-bar{height:16px;background:var(--info-bg);border:1px solid var(--border);border-radius:3px}
+.spacing-label{width:80px;flex-shrink:0;font-size:12px;color:var(--text4);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.spacing-val{font-size:12px;color:var(--text3);width:40px}
+
+.btn-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+.btn{display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;font-family:inherit;font-size:12px;padding:6px 12px;transition:all .15s}
+.btn-primary{background:var(--brand);color:#fff;border-radius:var(--radius-lg)}
+.btn-primary:hover{background:var(--brand-h)}
+.btn-secondary{background:var(--surface);color:var(--text1);border:1px solid var(--border2);border-radius:var(--radius-lg)}
+.btn-secondary:hover{background:var(--surface-muted)}
+.btn-danger{background:var(--surface);color:var(--danger);border:1px solid var(--danger-b);border-radius:var(--radius-md)}
+.btn-danger:hover{border-color:var(--danger)}
+
+.input-demo{width:100%;border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px 12px;font-size:14px;font-family:inherit;outline:none;transition:border .15s;color:var(--text1)}
+.input-demo:focus{border-color:var(--text1)}
+.textarea-demo{width:100%;min-height:80px;border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px 12px;font-size:14px;font-family:inherit;outline:none;transition:border .15s;color:var(--text1);resize:vertical}
+.textarea-demo:focus{border-color:var(--text1)}
+
+.task-card{width:100%;cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:20px;text-align:left;transition:all .15s}
+.task-card:hover{border-color:var(--border2);box-shadow:0 2px 8px rgba(15,23,42,.06)}
+.task-card:focus{outline:none;box-shadow:0 0 0 2px var(--focus)}
+.task-title{font-size:15px;font-weight:600;color:var(--text1)}
+.task-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px;font-size:12px;color:var(--text4)}
+.task-meta .sep{color:var(--border2)}
+.badge-warn{display:inline-flex;align-items:center;border-radius:var(--radius-full);background:var(--warn-bg);color:var(--warn-t);font-size:12px;padding:2px 8px}
+.task-summary{margin-top:8px;font-size:13px;line-height:1.6;color:var(--text2)}
+
+.file-card{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:16px;box-shadow:var(--shadow)}
+.file-card-top{display:flex;align-items:flex-start;gap:12px}
+.file-icon{margin-top:2px;border-radius:var(--radius-lg);background:var(--info-bg);padding:8px;color:var(--link);display:flex;align-items:center;justify-content:center}
+.file-name{font-size:14px;font-weight:500;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:12px;color:var(--text4)}
+.file-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+
+.status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.status-item{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);padding:12px;text-align:center}
+.status-dot{width:10px;height:10px;border-radius:50%;margin:0 auto 6px}
+.status-label{font-size:12px;color:var(--text1);font-weight:500}
+.status-desc{font-size:11px;color:var(--text4);margin-top:2px}
+
+.collapsible{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);margin-bottom:8px;overflow:hidden}
+.collapsible-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;user-select:none;font-size:14px;font-weight:600;color:var(--text1);transition:background .12s}
+.collapsible-header:hover{background:var(--surface-muted)}
+.collapsible-arrow{transition:transform .2s;font-size:12px;color:var(--text4)}
+.collapsible.open .collapsible-arrow{transform:rotate(90deg)}
+.collapsible-body{max-height:0;overflow:hidden;transition:max-height .3s ease}
+.collapsible.open .collapsible-body{max-height:2000px}
+.collapsible-inner{padding:0 18px 18px}
+
+.checklist{list-style:none;padding:0}
+.checklist li{display:flex;align-items:flex-start;gap:8px;padding:6px 0;font-size:13px;color:var(--text2)}
+.check-box{width:16px;height:16px;border:1.5px solid var(--border2);border-radius:4px;flex-shrink:0;margin-top:2px;cursor:pointer;display:grid;place-items:center;transition:all .12s}
+.check-box.checked{background:var(--brand);border-color:var(--brand)}
+.check-box.checked::after{content:"✓";color:#fff;font-size:10px;font-weight:700}
+
+.layout-diagram{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:20px;margin:12px 0}
+.layout-row{display:flex;gap:8px;height:200px}
+.layout-sidebar{width:56px;background:var(--surface-muted);border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;flex-direction:column;align-items:center;padding-top:12px;gap:8px;flex-shrink:0}
+.layout-sidebar-dot{width:24px;height:24px;border-radius:6px;background:var(--border)}
+.layout-main{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.layout-main-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;height:28px;flex-shrink:0}
+.layout-assistant{width:80px;background:var(--info-bg);border:1px solid var(--border);border-radius:var(--radius-lg);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text4)}
+.layout-labels{display:flex;gap:8px;margin-top:8px}
+.layout-label{font-size:11px;color:var(--text4);text-align:center}
+.layout-label:first-child{width:56px}
+.layout-label:nth-child(2){flex:1}
+.layout-label:last-child{width:80px}
+
+pre{overflow:auto;border:1px solid var(--border);border-radius:var(--radius-lg);background:#0f172a;color:#e5e7eb;padding:14px;margin:10px 0;font-size:13px;line-height:1.6}
+pre code{background:transparent;border:0;padding:0;color:inherit;font-size:13px}
+
+.table-wrap{overflow:auto;margin:10px 0 18px;border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;min-width:500px;font-size:13px}
+th,td{border-bottom:1px solid var(--border);padding:10px 12px;text-align:left;vertical-align:top}
+th{background:var(--surface-muted);color:var(--text1);font-weight:600;white-space:nowrap}
+td{color:var(--text2)}
+tr:last-child td{border-bottom:0}
+
+.footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--border);color:var(--text4);font-size:12px}
+
+@media(max-width:960px){
+  .shell{display:block}
+  .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--border)}
+  .content{padding:20px 16px 48px}
+  .hero{padding:20px}
+  .hero h1{font-size:26px}
+  .swatch-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+}
+@media print{
+  .shell{display:block}
+  .sidebar{display:none}
+  .content{padding:0}
+  .card,.swatch,.type-sample,.layout-diagram,.collapsible,.table-wrap{box-shadow:none;break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-mark">K</div>
+    <div>
+      <div class="brand-title">KiKi Design System</div>
+      <div class="brand-sub">UI 设计与开发指南</div>
+    </div>
+  </div>
+  <div class="toc-label">目录</div>
+  <nav class="toc" id="toc"></nav>
+</aside>
+
+<main class="content">
+<article class="doc">
+
+<section class="hero">
+  <div class="hero-kicker">Design System · 可视化阅读版</div>
+  <h1 style="border:0;margin:0 0 8px;padding:0">KiKi Design System</h1>
+  <p>从当前项目 UI 与代码实现沉淀出的视觉语言、组件模式、交互约定和安全边界，用于指导未来新 UI 设计。</p>
+  <div class="chips">
+    <span class="chip">Tailwind CSS</span>
+    <span class="chip">任务卡片</span>
+    <span class="chip">双区域结果呈现</span>
+    <span class="chip">Sandbox WebApp</span>
+  </div>
+</section>
+
+<!-- ==================== 1. 设计定位 ==================== -->
+<div class="section">
+<h1 id="s1">1. 设计定位</h1>
+<p>KiKi 是一个面向长耗时任务、目标规划、多形态产物和本地运行环境的智能工作台。UI 需要同时支持：</p>
+<ul>
+  <li>快速输入与命令触发。</li>
+  <li>长任务的状态可见、过程可追踪、随时可停止。</li>
+  <li>任务结果的双区域呈现：交互渲染区与文件区域并列。</li>
+  <li>会话、目标、任务、产物之间的上下文跳转。</li>
+  <li>安全隔离的可执行小应用、外部嵌入与文件产物。</li>
+</ul>
+<p>设计气质应保持「轻量、克制、可操作、低干扰」。默认不要做重装饰，不要把界面做成强品牌视觉；优先让状态、动作和结果清晰。</p>
+</div>
+
+<!-- ==================== 2. 设计原则 ==================== -->
+<div class="section">
+<h1 id="s2">2. 设计原则</h1>
+
+<div class="collapsible open">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">2.1 极简直观 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>页面信息密度可以高，但视觉层级必须清楚。</li>
+      <li>默认使用白色卡片、浅灰背景、细边框和少量强调色。</li>
+      <li>避免大面积渐变、复杂阴影和装饰性插画。</li>
+      <li>操作入口应贴近用户当前上下文，不让用户跨区域寻找动作。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">2.2 状态优先 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>长耗时任务的状态必须始终可见。</li>
+      <li><code>进行中</code>、<code>等待用户</code>、<code>已暂停</code>、<code>已完成</code>、<code>失败/未通过验收</code> 等状态要用统一文案和统一徽标表达。</li>
+      <li>所有运行中任务都应提供明确的停止或暂停入口。</li>
+      <li>用户需要确认、作答、补充上下文时，卡片必须显式标记。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">2.3 结果可操作 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>结果不是纯文本，应优先组织成可扫读、可跳转、可预览、可下载、可交互的结构。</li>
+      <li>交互渲染区用于动态表单、webapp、结构化 blocks。</li>
+      <li>文件区域用于报告、附件、导出文件、外链资源。</li>
+      <li>文件产物是结果的附加项，不应替代交互渲染区。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">2.4 安全隔离 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>内部 <code>webapp</code> 小应用必须运行在受限 iframe 中。</li>
+      <li>第三方视频或页面使用独立外部嵌入模式，不与内部 webapp 混用。</li>
+      <li>联网小应用必须通过受控代理访问互联网，不直接开放宿主能力。</li>
+    </ul>
+  </div></div>
+</div>
+</div>
+
+<!-- ==================== 3. 技术基础 ==================== -->
+<div class="section">
+<h1 id="s3">3. 技术基础</h1>
+<div class="card">
+  <table style="min-width:auto">
+    <tr><th>技术</th><th>说明</th></tr>
+    <tr><td>Tailwind CSS</td><td>原子类直接写在组件中</td></tr>
+    <tr><td><code>cn()</code></td><td>条件类名合并，来源 <code>src/lib/utils.ts</code></td></tr>
+    <tr><td>全局样式</td><td>集中在 <code>src/app/globals.css</code></td></tr>
+    <tr><td>Tailwind 配置</td><td><code>tailwind.config.ts</code></td></tr>
+    <tr><td>图标</td><td><code>lucide-react</code></td></tr>
+    <tr><td>字体</td><td>本地 Geist，回退系统无衬线字体</td></tr>
+  </table>
+</div>
+<p>当前没有集中式基础组件库，也没有使用 shadcn、MUI、Ant Design 或 CSS-in-JS。未来新增 UI 应优先复用现有组件模式，逐步抽象基础组件。</p>
+</div>
+
+<!-- ==================== 4. 视觉 Token ==================== -->
+<div class="section">
+<h1 id="s4">4. 视觉 Token</h1>
+
+<h2 id="s4-1">4.1 全局颜色</h2>
+<p>推荐将现有颜色归并为以下语义 token：</p>
+
+<h3>背景色</h3>
+<div class="swatch-grid">
+  <div class="swatch"><div class="swatch-dot" style="background:#F5F6F8"></div><div class="swatch-info"><div class="swatch-name">background.app</div><div class="swatch-hex">#F5F6F8</div><div class="swatch-usage">应用整体背景</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#FFFFFF;border-color:#d0d7de"></div><div class="swatch-info"><div class="swatch-name">background.surface</div><div class="swatch-hex">#FFFFFF</div><div class="swatch-usage">卡片、抽屉、弹窗、输入区</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#F6F8FA"></div><div class="swatch-info"><div class="swatch-name">background.subtle</div><div class="swatch-hex">#F6F8FA</div><div class="swatch-usage">hover、浅色区块、次级按钮 hover</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#F4F8FF"></div><div class="swatch-info"><div class="swatch-name">background.info</div><div class="swatch-hex">#F4F8FF</div><div class="swatch-usage">文件图标底、信息提示</div></div></div>
+</div>
+
+<h3>文字色</h3>
+<div class="swatch-grid">
+  <div class="swatch"><div class="swatch-dot" style="background:#1F2328"></div><div class="swatch-info"><div class="swatch-name">text.primary</div><div class="swatch-hex">#1F2328</div><div class="swatch-usage">标题、主要正文</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#374151"></div><div class="swatch-info"><div class="swatch-name">text.body</div><div class="swatch-hex">#374151</div><div class="swatch-usage">正文摘要</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#6B7280"></div><div class="swatch-info"><div class="swatch-name">text.secondary</div><div class="swatch-hex">#6B7280</div><div class="swatch-usage">辅助说明</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#8C9198"></div><div class="swatch-info"><div class="swatch-name">text.muted</div><div class="swatch-hex">#8C9198</div><div class="swatch-usage">元信息、时间、类型</div></div></div>
+</div>
+
+<h3>边框与功能色</h3>
+<div class="swatch-grid">
+  <div class="swatch"><div class="swatch-dot" style="background:#E5E7EB"></div><div class="swatch-info"><div class="swatch-name">border.default</div><div class="swatch-hex">#E5E7EB</div><div class="swatch-usage">默认边框</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#D0D7DE"></div><div class="swatch-info"><div class="swatch-name">border.strong</div><div class="swatch-hex">#D0D7DE</div><div class="swatch-usage">hover 边框、分隔符</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#D0D7DE"></div><div class="swatch-info"><div class="swatch-name">focus.ring</div><div class="swatch-hex">#D0D7DE</div><div class="swatch-usage">焦点环</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#1F2328"></div><div class="swatch-info"><div class="swatch-name">brand.dark</div><div class="swatch-hex">#1F2328</div><div class="swatch-usage">主按钮背景</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#374151"></div><div class="swatch-info"><div class="swatch-name">brand.hover</div><div class="swatch-hex">#374151</div><div class="swatch-usage">主按钮 hover</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#B42318"></div><div class="swatch-info"><div class="swatch-name">danger.text</div><div class="swatch-hex">#B42318</div><div class="swatch-usage">停止、删除、错误动作</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#FECACA"></div><div class="swatch-info"><div class="swatch-name">danger.border</div><div class="swatch-hex">#FECACA</div><div class="swatch-usage">危险动作边框</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#FFF3CD"></div><div class="swatch-info"><div class="swatch-name">warning.bg</div><div class="swatch-hex">#FFF3CD</div><div class="swatch-usage">需要确认/作答徽标背景</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#8A6D3B"></div><div class="swatch-info"><div class="swatch-name">warning.text</div><div class="swatch-hex">#8A6D3B</div><div class="swatch-usage">warning 徽标文字</div></div></div>
+  <div class="swatch"><div class="swatch-dot" style="background:#0D47A1"></div><div class="swatch-info"><div class="swatch-name">link.blue</div><div class="swatch-hex">#0D47A1</div><div class="swatch-usage">文件、外链、信息类强调</div></div></div>
+</div>
+
+<div style="margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-left:4px solid var(--link);border-radius:12px;background:var(--info-bg)">
+  <p style="margin:0;color:var(--text2)"><strong>使用建议：</strong>新 UI 禁止随意新增相近灰色，应优先从上表选择。状态色必须语义化。如果需要新增颜色，先判断是否是领域 token。</p>
+</div>
+
+<h2 id="s4-2">4.2 字体</h2>
+<div class="type-sample">
+  <div class="type-row">
+    <div class="type-label">text-xl / text-2xl</div>
+    <div class="type-render"><span style="font-size:24px;font-weight:600;color:var(--text1)">页面标题</span></div>
+  </div>
+  <div class="type-row">
+    <div class="type-label">text-[15px]<br>font-semibold</div>
+    <div class="type-render"><span style="font-size:15px;font-weight:600;color:var(--text1)">卡片标题 · 任务执行结果</span></div>
+  </div>
+  <div class="type-row">
+    <div class="type-label">text-sm / text-[13px]</div>
+    <div class="type-render"><span style="font-size:13px;color:var(--text2)">常规正文与摘要内容，支持可读的长文本展示。</span></div>
+  </div>
+  <div class="type-row">
+    <div class="type-label">text-[12px]</div>
+    <div class="type-render"><span style="font-size:12px;color:var(--text4)">元信息 · 状态 · 时间 · 类型 · Chip</span></div>
+  </div>
+</div>
+
+<h2 id="s4-3">4.3 圆角</h2>
+<div class="type-sample">
+  <div class="radius-row">
+    <div class="radius-box" style="border-radius:12px"></div>
+    <div class="radius-label">rounded-xl</div>
+    <div class="radius-val">12px · 大卡片、任务卡片、文件卡片</div>
+  </div>
+  <div class="radius-row">
+    <div class="radius-box" style="border-radius:8px"></div>
+    <div class="radius-label">rounded-lg</div>
+    <div class="radius-val">8px · 输入框、次级按钮、图标底</div>
+  </div>
+  <div class="radius-row">
+    <div class="radius-box" style="border-radius:6px"></div>
+    <div class="radius-label">rounded-md</div>
+    <div class="radius-val">6px · 小按钮、危险按钮</div>
+  </div>
+  <div class="radius-row">
+    <div class="radius-box" style="border-radius:9999px"></div>
+    <div class="radius-label">rounded-full</div>
+    <div class="radius-val">9999px · 状态徽标、Chip</div>
+  </div>
+</div>
+
+<h2 id="s4-4">4.4 间距</h2>
+<div class="type-sample">
+  <div class="spacing-row">
+    <div class="spacing-label">p-4 / p-5</div>
+    <div class="spacing-bar" style="width:80px"></div>
+    <div class="spacing-val">16/20px</div>
+    <span style="font-size:12px;color:var(--text3)">卡片内边距</span>
+  </div>
+  <div class="spacing-row">
+    <div class="spacing-label">mt-3 / gap-3</div>
+    <div class="spacing-bar" style="width:48px"></div>
+    <div class="spacing-val">12px</div>
+    <span style="font-size:12px;color:var(--text3)">卡片之间</span>
+  </div>
+  <div class="spacing-row">
+    <div class="spacing-label">mt-1</div>
+    <div class="spacing-bar" style="width:16px"></div>
+    <div class="spacing-val">4px</div>
+    <span style="font-size:12px;color:var(--text3)">标题与元信息</span>
+  </div>
+  <div class="spacing-row">
+    <div class="spacing-label">mt-2</div>
+    <div class="spacing-bar" style="width:32px"></div>
+    <div class="spacing-val">8px</div>
+    <span style="font-size:12px;color:var(--text3)">元信息与摘要</span>
+  </div>
+  <div class="spacing-row">
+    <div class="spacing-label">mt-3 / mt-4</div>
+    <div class="spacing-bar" style="width:48px"></div>
+    <div class="spacing-val">12/16px</div>
+    <span style="font-size:12px;color:var(--text3)">操作区与内容</span>
+  </div>
+  <div class="spacing-row">
+    <div class="spacing-label">gap-1.5 / gap-2</div>
+    <div class="spacing-bar" style="width:24px"></div>
+    <div class="spacing-val">6/8px</div>
+    <span style="font-size:12px;color:var(--text3)">图标与文字</span>
+  </div>
+</div>
+
+<h2 id="s4-5">4.5 边框与阴影</h2>
+<div class="card" style="margin-bottom:10px">
+  <p><strong>默认卡片：</strong>白底 + 细边框，无阴影</p>
+  <div style="border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:16px;margin-top:8px">
+    <span style="font-size:13px;color:var(--text2)">rounded-xl border border-[#E5E7EB] bg-white</span>
+  </div>
+</div>
+<div class="card" style="margin-bottom:10px">
+  <p><strong>Hover 态：</strong>边框变深 + 极轻阴影</p>
+  <div style="border:1px solid var(--border2);border-radius:var(--radius-xl);background:var(--surface);padding:16px;box-shadow:0 2px 8px rgba(15,23,42,.06);margin-top:8px">
+    <span style="font-size:13px;color:var(--text2)">hover:border-[#D0D7DE] hover:shadow-sm</span>
+  </div>
+</div>
+<div class="card">
+  <p><strong>文件卡片：</strong>极轻阴影</p>
+  <div style="border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);padding:16px;box-shadow:0 6px 18px rgba(15,23,42,.03);margin-top:8px">
+    <span style="font-size:13px;color:var(--text2)">shadow-[0_6px_18px_rgba(15,23,42,0.03)]</span>
+  </div>
+</div>
+</div>
+
+<!-- ==================== 5. 布局系统 ==================== -->
+<div class="section">
+<h1 id="s5">5. 布局系统</h1>
+
+<h2 id="s5-1">5.1 应用壳层</h2>
+<p>核心布局由 <code>AppShell</code> 承载：</p>
+<div class="layout-diagram">
+  <div class="layout-row">
+    <div class="layout-sidebar">
+      <div class="layout-sidebar-dot"></div>
+      <div class="layout-sidebar-dot"></div>
+      <div class="layout-sidebar-dot"></div>
+      <div class="layout-sidebar-dot"></div>
+    </div>
+    <div class="layout-main">
+      <div class="layout-main-card" style="width:60%"></div>
+      <div class="layout-main-card" style="width:80%"></div>
+      <div class="layout-main-card" style="width:45%"></div>
+    </div>
+    <div class="layout-assistant">助手</div>
+  </div>
+  <div class="layout-labels">
+    <div class="layout-label">Sidebar<br>56/260px</div>
+    <div class="layout-label">主内容区（自适应宽度）</div>
+    <div class="layout-label">Assistant<br>挤压式</div>
+  </div>
+</div>
+
+<h2 id="s5-2">5.2 双侧栏协同</h2>
+<div class="card">
+  <table style="min-width:auto">
+    <tr><th>区域</th><th>行为</th></tr>
+    <tr><td>左导航</td><td>展开/收起，全局 store 管理</td></tr>
+    <tr><td>右助手</td><td>打开时挤压主内容</td></tr>
+    <tr><td>任务抽屉</td><td>覆盖主内容，可临时收起左侧栏</td></tr>
+    <tr><td>全屏结果页</td><td>复用结果主体结构，减少抽屉空间限制</td></tr>
+  </table>
+</div>
+</div>
+
+<!-- ==================== 6. 组件模式 ==================== -->
+<div class="section">
+<h1 id="s6">6. 组件模式</h1>
+
+<h2 id="s6-1">6.1 按钮</h2>
+<p>主要按钮：</p>
+<div class="btn-row">
+  <button class="btn btn-primary">预览</button>
+  <button class="btn btn-primary">下载</button>
+  <button class="btn btn-primary">执行任务</button>
+</div>
+<pre><code>className="inline-flex items-center gap-1.5 rounded-lg bg-[#1F2328] px-3 py-1.5 text-[12px] text-white hover:bg-[#374151]"</code></pre>
+
+<p>次级按钮：</p>
+<div class="btn-row">
+  <button class="btn btn-secondary">预览</button>
+  <button class="btn btn-secondary">取消</button>
+  <button class="btn btn-secondary">编辑</button>
+</div>
+<pre><code>className="inline-flex items-center gap-1.5 rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] text-[#1F2328] hover:bg-[#F6F8FA]"</code></pre>
+
+<p>危险按钮：</p>
+<div class="btn-row">
+  <button class="btn btn-danger">停止执行</button>
+  <button class="btn btn-danger">删除</button>
+</div>
+<pre><code>className="rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"</code></pre>
+
+<h2 id="s6-2">6.2 输入框</h2>
+<div style="max-width:400px;margin:12px 0">
+  <input class="input-demo" type="text" placeholder="标准输入框 .input">
+</div>
+<div style="max-width:400px;margin:12px 0">
+  <textarea class="textarea-demo" placeholder="多行输入框 .textarea"></textarea>
+</div>
+<pre><code>.input  { @apply w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111] }
+.textarea { @apply min-h-24 w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111] }</code></pre>
+
+<h2 id="s6-3">6.3 卡片</h2>
+<p>任务消息卡片是当前最重要的卡片范式：</p>
+<div style="max-width:520px;margin:12px 0">
+  <div class="task-card" tabindex="0">
+    <div class="task-title">阅读摘要 · 第 3 章</div>
+    <div class="task-meta">
+      <span>阅读摘要</span>
+      <span class="sep">/</span>
+      <span>已完成</span>
+    </div>
+    <div class="task-summary">已完成第 3 章核心观点的摘要提取，包含 5 个关键论点和 3 个数据支撑。</div>
+  </div>
+</div>
+<pre><code>className="w-full cursor-pointer rounded-xl border border-[#E5E7EB] bg-white p-5 text-left transition hover:border-[#D0D7DE] hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"</code></pre>
+
+<h2 id="s6-4">6.4 状态徽标与 Chip</h2>
+<div class="status-grid">
+  <div class="status-item">
+    <div class="status-dot" style="background:#22C55E"></div>
+    <div class="status-label">已完成</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#3B82F6"></div>
+    <div class="status-label">进行中</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#F59E0B"></div>
+    <div class="status-label">待确认</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#F97316"></div>
+    <div class="status-label">待作答</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#A855F7"></div>
+    <div class="status-label">待补充</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#8C9198"></div>
+    <div class="status-label">已暂停</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#EF4444"></div>
+    <div class="status-label">未通过验收</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:#6B7280"></div>
+    <div class="status-label">待线下完成</div>
+  </div>
+</div>
+
+<p style="margin-top:16px">需要用户介入的徽标使用 warning 背景：</p>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+  <span class="badge-warn">需要确认</span>
+  <span class="badge-warn">需要作答</span>
+  <span class="badge-warn">待补充</span>
+</div>
+<pre><code>className="rounded-full bg-[#FFF3CD] px-2 py-0.5 text-[12px] text-[#8A6D3B]"</code></pre>
+
+<h2 id="s6-5">6.5 弹窗与抽屉</h2>
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">弹窗规范 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>用于删除确认、设置、轻量表单。</li>
+      <li>默认白底、细边框、圆角、弱阴影。</li>
+      <li>文案必须明确后果。</li>
+    </ul>
+  </div></div>
+</div>
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">抽屉规范 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>用于任务详情、任务结果、目标计划。</li>
+      <li>右侧覆盖式为默认。</li>
+      <li>顶部包含标题、上下文路径、关闭按钮，必要时提供全屏入口。</li>
+      <li>中部滚动，底部操作固定或跟随内容。</li>
+    </ul>
+  </div></div>
+</div>
+
+<h2 id="s6-6">6.6 列表行</h2>
+<div style="max-width:520px;margin:12px 0">
+  <div style="border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--surface);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--surface-muted)'" onmouseout="this.style.background=''">
+      <div style="width:8px;height:8px;border-radius:50%;background:#22C55E;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500;color:var(--text1)">阅读摘要 · 第 1 章</div>
+        <div style="font-size:12px;color:var(--text4)">阅读摘要 · 已完成</div>
+      </div>
+      <div style="font-size:12px;color:var(--text4);opacity:0;transition:opacity .12s" class="hover-show">编辑 →</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--surface-muted)';this.querySelector('.hover-show').style.opacity='1'" onmouseout="this.style.background='';this.querySelector('.hover-show').style.opacity='0'">
+      <div style="width:8px;height:8px;border-radius:50%;background:#3B82F6;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500;color:var(--text1)">听力问答 · L3</div>
+        <div style="font-size:12px;color:var(--text4)">听力问答 · 进行中</div>
+      </div>
+      <div style="font-size:12px;color:var(--text4);opacity:0;transition:opacity .12s" class="hover-show">停止 →</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--surface-muted)';this.querySelector('.hover-show').style.opacity='1'" onmouseout="this.style.background='';this.querySelector('.hover-show').style.opacity='0'">
+      <div style="width:8px;height:8px;border-radius:50%;background:#F59E0B;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500;color:var(--text1)">确认执行 · 发送邮件</div>
+        <div style="font-size:12px;color:var(--text4)">确认执行 · 待确认 <span class="badge-warn" style="margin-left:4px">需要确认</span></div>
+      </div>
+      <div style="font-size:12px;color:var(--text4);opacity:0;transition:opacity .12s" class="hover-show">继续 →</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ==================== 7. 核心产品模式 ==================== -->
+<div class="section">
+<h1 id="s7">7. 核心产品模式</h1>
+
+<h2 id="s7-1">7.1 命令模式</h2>
+<p><code>/goal</code> 是当前重要输入范式：</p>
+<div style="max-width:480px;margin:12px 0">
+  <div style="border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);padding:10px 14px;display:flex;align-items:center;gap:8px">
+    <span style="display:inline-flex;align-items:center;border-radius:var(--radius-full);background:var(--surface-muted);border:1px solid var(--border2);font-size:12px;padding:2px 8px;color:var(--text1);font-weight:500">/goal</span>
+    <span style="font-size:13px;color:var(--text4)">描述你的目标…</span>
+  </div>
+  <div style="border:1px solid var(--border);border-top:0;border-radius:0 0 var(--radius-lg) var(--radius-lg);background:var(--surface);padding:6px">
+    <div style="padding:6px 10px;border-radius:6px;font-size:13px;color:var(--text1);background:var(--info-bg);cursor:pointer">🎯 <strong>/goal</strong> — 设定一个目标，KiKi 帮你拆解与执行</div>
+  </div>
+</div>
+
+<h2 id="s7-2">7.2 任务卡片</h2>
+<div style="max-width:520px;margin:12px 0">
+  <div class="task-card" tabindex="0">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div class="task-title">记忆闪卡 · 单元 5</div>
+        <div class="task-meta">
+          <span>记忆闪卡</span>
+          <span class="sep">/</span>
+          <span>进行中</span>
+          <span class="badge-warn" style="margin-left:4px">需要作答</span>
+        </div>
+        <div class="task-summary">已完成闪卡生成，等待你确认记忆要点是否准确。</div>
+      </div>
+      <button class="btn btn-danger" onclick="event.stopPropagation()">停止执行</button>
+    </div>
+  </div>
+</div>
+
+<h2 id="s7-3">7.3 产物呈现</h2>
+<p>文件卡片：</p>
+<div style="max-width:420px;margin:12px 0">
+  <div class="file-card">
+    <div class="file-card-top">
+      <div class="file-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div class="file-name">旅行行程报告.md</div>
+        <div class="file-meta"><span>text/markdown</span><span style="color:var(--border2)">/</span><span>2.4 KB</span></div>
+        <div style="margin-top:6px;font-size:13px;line-height:1.5;color:var(--text3)">包含 5 天胡志明市行程安排与预算</div>
+      </div>
+    </div>
+    <div class="file-actions">
+      <button class="btn btn-secondary">↗ 预览</button>
+      <button class="btn btn-primary">⬇ 下载</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ==================== 8. 交互规范 ==================== -->
+<div class="section">
+<h1 id="s8">8. 交互规范</h1>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">8.1 可点击区域 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>卡片类入口应整卡可点。</li>
+      <li>行类入口应整行可点。</li>
+      <li>内部操作按钮要阻止父级点击。</li>
+      <li>可点击元素必须有 hover 态。</li>
+      <li>重要卡片应有 focus ring。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">8.2 Hover 显隐操作 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>默认隐藏低频操作，hover 时显示。</li>
+      <li>高频动作可常驻。</li>
+      <li>不要让用户必须 hover 才能发现关键动作，例如停止任务。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">8.3 键盘访问 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li><code>Enter</code> 和 <code>Space</code> 打开卡片或行详情。</li>
+      <li><code>ESC</code> 关闭侧栏、抽屉、菜单。</li>
+      <li>Slash command 菜单支持方向键。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">8.4 加载与错误 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>短加载可用轻量文字或 skeleton。</li>
+      <li>iframe 或外部嵌入必须显示加载提示。</li>
+      <li>错误应可恢复，提供重试、打开设置、查看日志等动作。</li>
+      <li>不要只显示红色错误文本，应说明用户下一步可以做什么。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">8.5 停止与取消 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>运行中卡片显示停止入口。</li>
+      <li>任务详情或结果抽屉显示停止入口。</li>
+      <li>停止动作反馈成功或失败。</li>
+    </ul>
+  </div></div>
+</div>
+</div>
+
+<!-- ==================== 9. 安全与嵌入规范 ==================== -->
+<div class="section">
+<h1 id="s9">9. 安全与嵌入规范</h1>
+<div class="card">
+  <table style="min-width:auto">
+    <tr><th>类型</th><th>sandbox</th><th>联网</th><th>说明</th></tr>
+    <tr><td>内部 WebApp</td><td><code>allow-scripts</code> 严禁 <code>allow-same-origin</code></td><td>默认禁止</td><td>不能访问宿主 DOM/Cookie/API</td></tr>
+    <tr><td>联网 WebApp</td><td>同上</td><td>仅通过 <code>KikiBridge.fetchInternet()</code></td><td>代理阻断 localhost/内网/非 HTTPS</td></tr>
+    <tr><td>外部嵌入</td><td>独立组件</td><td>按需</td><td>显示来源 host，提供新窗口兜底</td></tr>
+  </table>
+</div>
+</div>
+
+<!-- ==================== 10. 页面类型指南 ==================== -->
+<div class="section">
+<h1 id="s10">10. 页面类型指南</h1>
+<div class="card">
+  <table style="min-width:auto">
+    <tr><th>页面</th><th>核心结构</th><th>设计要点</th></tr>
+    <tr><td>会话页</td><td>标题 + 消息流 + 任务卡片 + 输入框 + 结果抽屉</td><td>任务结果入口稳定可见；taskSnapshot 兜底</td></tr>
+    <tr><td>目标任务页</td><td>目标上下文 + 子目标块 + 任务列表行 + 详情抽屉</td><td>状态点统一；行点击与操作不冲突</td></tr>
+    <tr><td>收件箱</td><td>消息卡片 + 未读红点 + 展开详情 + 跳转</td><td>需要作答/确认高亮；复杂内容跳转抽屉</td></tr>
+    <tr><td>日程页</td><td>时间网格 + 事件块 + 全天栏</td><td>保留领域 token；基础色/边框/字体一致</td></tr>
+  </table>
+</div>
+</div>
+
+<!-- ==================== 11. 代码组织建议 ==================== -->
+<div class="section">
+<h1 id="s11">11. 代码组织建议</h1>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">11.1 第一阶段：冻结规范 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <ul>
+      <li>保留当前 Tailwind 写法。</li>
+      <li>新 UI 按本文档选择颜色、字号、圆角、间距。</li>
+      <li>禁止无理由新增灰阶、阴影和圆角体系。</li>
+    </ul>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">11.2 第二阶段：抽基础组件 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <p>优先抽象：Button · IconButton · Input · Textarea · Badge · Card · Drawer · Dialog · Menu · StatusDot</p>
+    <p>组件应支持：variant · size · disabled · className · children</p>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">11.3 第三阶段：Token 化 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <p>将常用色值迁移到 CSS variables + tailwind.config.ts theme extension。</p>
+    <pre><code>surface · surfaceMuted · border · borderHover
+textPrimary · textSecondary · textMuted
+focusRing · danger · warning · info</code></pre>
+  </div></div>
+</div>
+
+<div class="collapsible">
+  <div class="collapsible-header" onclick="toggleCollapsible(this)">11.4 第四阶段：沉淀示例页 <span class="collapsible-arrow">▶</span></div>
+  <div class="collapsible-body"><div class="collapsible-inner">
+    <p>建议新增内部设计样例页或 Storybook 替代方案：按钮状态 · 表单状态 · 卡片状态 · 任务状态 · 抽屉与弹窗 · 产物渲染 · WebApp sandbox 示例</p>
+  </div></div>
+</div>
+</div>
+
+<!-- ==================== 12. 新 UI 设计检查清单 ==================== -->
+<div class="section">
+<h1 id="s12">12. 新 UI 设计检查清单</h1>
+<p>设计新 UI 前，逐项检查：</p>
+<ul class="checklist" id="checklist">
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>是否使用了现有背景、文字、边框颜色？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>是否避免了无必要强阴影和强装饰？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>是否有清晰的状态表达？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>长任务是否提供停止入口？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>卡片或列表行是否整块可点击？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>hover、focus、disabled 状态是否完整？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>是否支持键盘访问和 ESC 关闭？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>任务结果是否区分交互渲染区和文件区域？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>文件产物是否可预览或下载？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>webapp 是否遵守 sandbox 与联网代理限制？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>外部嵌入是否使用独立模式并提供兜底打开？</li>
+  <li><div class="check-box" onclick="toggleCheck(this)"></div>新增样式是否可复用，是否值得抽象为组件或 token？</li>
+</ul>
+</div>
+
+<!-- ==================== 13. 关键源码参考 ==================== -->
+<div class="section">
+<h1 id="s13">13. 关键源码参考</h1>
+<div class="card">
+  <table style="min-width:auto">
+    <tr><th>类型</th><th>文件</th></tr>
+    <tr><td>全局样式</td><td><code>src/app/globals.css</code></td></tr>
+    <tr><td>Tailwind 配置</td><td><code>tailwind.config.ts</code></td></tr>
+    <tr><td>字体与根布局</td><td><code>src/app/layout.tsx</code></td></tr>
+    <tr><td>类名合并工具</td><td><code>src/lib/utils.ts</code></td></tr>
+    <tr><td>应用壳层</td><td><code>src/components/layout/AppShell.tsx</code></td></tr>
+    <tr><td>左侧导航</td><td><code>src/components/layout/Sidebar.tsx</code></td></tr>
+    <tr><td>助手输入</td><td><code>src/components/layout/AssistantComposer.tsx</code></td></tr>
+    <tr><td>助手侧栏</td><td><code>src/components/layout/AssistantSidebar.tsx</code></td></tr>
+    <tr><td>会话页</td><td><code>src/components/conversation/ConversationView.tsx</code></td></tr>
+    <tr><td>任务消息卡片</td><td><code>src/components/conversation/TaskMessageCard.tsx</code></td></tr>
+    <tr><td>任务列表行</td><td><code>src/components/goal/TaskRow.tsx</code></td></tr>
+    <tr><td>任务结果抽屉</td><td><code>src/components/task/TaskResultDrawer.tsx</code></td></tr>
+    <tr><td>结构化结果块</td><td><code>src/components/execution/BlockRenderer.tsx</code></td></tr>
+    <tr><td>产物渲染</td><td><code>src/components/execution/ArtifactRenderer.tsx</code></td></tr>
+    <tr><td>文件卡片</td><td><code>src/components/execution/FileCard.tsx</code></td></tr>
+    <tr><td>内部 WebApp</td><td><code>src/components/execution/SandboxedWebAppSurface.tsx</code></td></tr>
+    <tr><td>外部嵌入</td><td><code>src/components/execution/ExternalEmbedSurface.tsx</code></td></tr>
+    <tr><td>日程颜色 token</td><td><code>src/components/schedule/colorTokens.ts</code></td></tr>
+  </table>
+</div>
+</div>
+
+<div class="footer">本文档由 <code>docs/design-system.md</code> 生成，适合直接在浏览器中阅读或打印。</div>
+
+</article>
+</main>
+</div>
+
+<script>
+function toggleCollapsible(header){
+  header.parentElement.classList.toggle('open')
+}
+
+function toggleCheck(el){
+  el.classList.toggle('checked')
+}
+
+document.querySelectorAll('.hover-show').forEach(el=>{
+  const row=el.parentElement
+  row.addEventListener('mouseenter',()=>el.style.opacity='1')
+  row.addEventListener('mouseleave',()=>el.style.opacity='0')
+})
+
+const headings=document.querySelectorAll('h1[id],h2[id],h3[id]')
+const toc=document.getElementById('toc')
+headings.forEach(h=>{
+  const a=document.createElement('a')
+  a.href='#'+h.id
+  a.textContent=h.textContent.replace(/\s*▶\s*/,'')
+  if(h.tagName==='H1') a.className='l1'
+  else if(h.tagName==='H2') a.className='l2'
+  else a.className='l3'
+  toc.appendChild(a)
+})
+</script>
+</body>
+</html>

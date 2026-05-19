@@ -11,9 +11,12 @@ import { ReadingDigestView } from "@/components/execution/ReadingDigestView";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
+import { getTaskDependencyViews } from "@/lib/taskDependencies";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
-import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
+import { runTaskExecutionAction } from "@/lib/taskExecution";
+import { hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import { useGoalStore } from "@/stores/goalStore";
+import type { AgentRunPlan } from "@/types/agentOrchestration";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, InteractionSubmission, Task, TaskInstance } from "@/types/kiki";
 
@@ -47,8 +50,10 @@ function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined)
             ? "result" as const
             : "phase" as const,
     status: step.status,
+    agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
   }));
@@ -78,10 +83,57 @@ function applyWaitingReasonToSteps(steps: NonNullable<Task["instances"][number][
   });
 }
 
+function isAgentRunPlan(value: unknown): value is AgentRunPlan {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<AgentRunPlan>;
+  return candidate.schemaVersion === 1 && candidate.mode === "role_collaboration" && Array.isArray(candidate.roles);
+}
+
+function getAgentRunPlan(instance: TaskInstance) {
+  const metaPlan = instance.result?.taskResult?.meta?.agentRunPlan;
+  if (isAgentRunPlan(metaPlan)) return metaPlan;
+  const structuredPlan = instance.result?.structuredOutput?.agentRunPlan;
+  if (isAgentRunPlan(structuredPlan)) return structuredPlan;
+  return undefined;
+}
+
+function formatInteractionTime(value: string | undefined) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function getSubmittedInteractionText(submission: InteractionSubmission | undefined) {
+  if (!submission) return undefined;
+  const fieldLines = Object.entries(submission.fields ?? {})
+    .filter(([, value]) => value.trim())
+    .map(([label, value]) => `${label}：${value}`);
+  if (fieldLines.length) return fieldLines.join("\n");
+  return submission.feedback || submission.action;
+}
+
+function hasGenericDeliverableContent(instance: TaskInstance) {
+  const taskResult = instance.result?.taskResult;
+  if (!taskResult) return false;
+  return (
+    Boolean(taskResult.blocks?.length) ||
+    Boolean(taskResult.artifactRefs?.length)
+  );
+}
+
 function shouldDeferConcreteResultUntilUserInput(instance: TaskInstance) {
   const requirement = instance.awaitingUser?.interactionRequirement ?? instance.result?.interactionRequirement;
   if (!instance.awaitingUser || !requirement) return false;
-  if (requirement.type === "confirm" && requirement.timing === "after_agent_output") return false;
+  if (hasOptionalResultFeedback(instance)) return false;
+  if (requirement.type === "confirm" && requirement.timing === "after_agent_output") {
+    return instance.result?.taskResult?.status === "done";
+  }
   return (
     requirement.type === "answer" ||
     requirement.type === "provide_context" ||
@@ -98,14 +150,15 @@ export function ExecutionResultBody(props: {
   instance: TaskInstance;
   mode?: "shell" | "result";
 }) {
-  const { task, instance } = props;
+  const { goal, task, instance } = props;
   const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
   const completeTaskInstance = useGoalStore((state) => state.completeTaskInstance);
   const [refreshTick, setRefreshTick] = useState(0);
   const currentKind = task.resultViewKind ?? task.executionKind;
+  const optionalFeedbackResult = hasOptionalResultFeedback(instance);
   const displayStatus =
-    instance.status === "completed"
-      ? "已完成"
+    optionalFeedbackResult || instance.status === "completed"
+      ? "已结束"
       : instance.status === "awaiting_user"
         ? awaitingUserStatusLabel(instance)
         : instance.status === "in_progress"
@@ -159,9 +212,11 @@ export function ExecutionResultBody(props: {
     (currentKind === "draft_review" && instance.payload.kind === "draft_review");
   const shouldRenderGenericDeliverable =
     (currentKind === "generic_result" || instance.payload.kind === "generic_result" || !instance.payload) &&
-    Boolean(instance.result?.taskResult);
+    hasGenericDeliverableContent(instance);
+  const agentRunPlan = getAgentRunPlan(instance);
   const shouldRenderConcreteDeliverable =
     (hasBuiltInDeliverable || shouldRenderGenericDeliverable) && !shouldDeferConcreteResultUntilUserInput(instance);
+  const dependencyViews = getTaskDependencyViews(goal, task);
   const resultBlock = shouldRenderConcreteDeliverable ? (
     <div>
       <div className="mb-3 text-[13px] font-medium text-[#1F2328]">产出物</div>
@@ -260,38 +315,40 @@ export function ExecutionResultBody(props: {
           notification={instance.notification}
         />
       ) : null}
-      {instance.awaitingUser ? (
-        <div className="mt-4">
-          <AwaitingUserResumePanel task={task} instance={instance} onRunning={() => setRefreshTick((value) => value + 1)} />
-        </div>
-      ) : instance.result?.interactionSubmission ? (
-        <div className="mt-4">
-          <SubmittedInteractionPanel instance={instance} />
-        </div>
-      ) : null}
     </div>
-  ) : instance.awaitingUser ? (
+  ) : null;
+  const interactionTurn = instance.awaitingUser && !optionalFeedbackResult ? (
     <AwaitingUserResumePanel task={task} instance={instance} onRunning={() => setRefreshTick((value) => value + 1)} />
   ) : instance.result?.interactionSubmission ? (
     <SubmittedInteractionPanel instance={instance} />
-  ) : null;
-  const timelineBlock = (
-    <details className="rounded-xl border border-[#E5E7EB] bg-white" open={instance.notification?.detailPolicy.showTimelineByDefault || instance.status === "in_progress"}>
-      <summary className="cursor-pointer px-4 py-3 text-[13px] font-medium text-[#1F2328]">
-        执行链路
-      </summary>
-      <div className="border-t border-[#E5E7EB] p-4">
-        <TaskExecutionTimeline
-          steps={applyWaitingReasonToSteps(
-            trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
-            instance.execution?.waitingReason,
-          )}
-        />
-      </div>
-    </details>
+  ) : undefined;
+  const userSubmissionText = getSubmittedInteractionText(instance.result?.interactionSubmission);
+  const interactionTime = formatInteractionTime(
+    instance.result?.interactionSubmission?.submittedAt ?? instance.execution?.lastUpdatedAt,
   );
-  const resultFirst = instance.status === "completed" || instance.status === "awaiting_user";
-  const canStop = canStopTaskInstance(instance);
+  const timelineBlock = (
+    <section>
+      <div className="mb-4">
+        <div className="text-[15px] font-bold text-[#1F2328]">执行过程</div>
+        <div className="mt-0.5 text-[12px] text-[#8C9198]">
+          {agentRunPlan?.mode === "role_collaboration"
+            ? `${agentRunPlan.strategy} · 多 Agent 协同`
+            : "single_agent · KiKi"}
+        </div>
+      </div>
+      <TaskExecutionTimeline
+        steps={applyWaitingReasonToSteps(
+          trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
+          instance.execution?.waitingReason,
+        )}
+        agentRunPlan={agentRunPlan}
+        interactionTurn={interactionTurn}
+        userSubmissionText={userSubmissionText}
+        interactionTime={interactionTime}
+      />
+    </section>
+  );
+  const resultFirst = instance.status === "completed" || instance.status === "awaiting_user" || optionalFeedbackResult;
 
   return (
     <div className="space-y-6">
@@ -324,27 +381,35 @@ export function ExecutionResultBody(props: {
                 {instance.status === "paused" ? "继续执行本次" : "重试本次"}
               </button>
             ) : null}
-            {canStop ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void runTaskExecutionAction(task.id, "pause", {
-                    instanceId: instance.id,
-                  }).catch((error) => {
-                    window.alert(error instanceof Error ? error.message : "任务停止失败");
-                  });
-                }}
-                className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
-              >
-                停止
-              </button>
-            ) : null}
           </div>
         </div>
         <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3">
           <div className="text-[12px] text-[#8C9198]">预期产出</div>
           <div className="mt-1 text-[13px] leading-6 text-[#1F2328]">{task.expectedOutcome}</div>
         </div>
+        {dependencyViews.length ? (
+          <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3">
+            <div className="text-[12px] text-[#8C9198]">依赖任务</div>
+            <div className="mt-2 space-y-2">
+              {dependencyViews.map((dependency) => (
+                <div key={dependency.id} className="flex flex-wrap items-center gap-2 text-[13px] leading-6">
+                  <span className="font-medium text-[#1F2328]">{dependency.title}</span>
+                  <span
+                    className={
+                      dependency.missing
+                        ? "rounded-md bg-[#FDECEC] px-2 py-0.5 text-[11px] text-[#B42318]"
+                        : dependency.satisfied
+                          ? "rounded-md bg-[#E8F5E9] px-2 py-0.5 text-[11px] text-[#25663A]"
+                          : "rounded-md bg-[#F5F6F8] px-2 py-0.5 text-[11px] text-[#6B7280]"
+                    }
+                  >
+                    {dependency.statusLabel}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3 text-[12px] text-[#6B7280]">
           {instance.execution?.lastUpdatedAt ? `最近更新：${new Date(instance.execution.lastUpdatedAt).toLocaleString("zh-CN")}` : "等待调度器同步执行状态"}
         </div>

@@ -1,3 +1,4 @@
+import type { ArtifactKind, ArtifactRef } from "@/types/artifact";
 import type { ResultBlock, ResultCell, TaskResult, TaskResultExportFormat, TaskResultPrimaryFormat, TaskResultPresentation, TaskResultStatus } from "@/types/taskResult";
 
 type NormalizeInput = {
@@ -10,6 +11,7 @@ const ALLOWED_STATUSES: TaskResultStatus[] = ["draft", "pending_user", "done", "
 const ALLOWED_PRESENTATIONS: TaskResultPresentation[] = ["summary_card", "visual_report", "comparison_table", "checklist", "timeline", "document", "dashboard", "handoff_package"];
 const ALLOWED_PRIMARY_FORMATS: TaskResultPrimaryFormat[] = ["structured_blocks", "json", "markdown", "html", "text", "code"];
 const ALLOWED_EXPORT_FORMATS: TaskResultExportFormat[] = ["html", "markdown", "json", "text"];
+const ALLOWED_ARTIFACT_KINDS: ArtifactKind[] = ["text_block", "file", "external_link", "webapp", "external_embed"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -149,6 +151,35 @@ function normalizeBlock(value: unknown): ResultBlock | null {
   }
 }
 
+function normalizeArtifactRefs(value: unknown): ArtifactRef[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const refs = value
+    .filter(isRecord)
+    .map((item): ArtifactRef | null => {
+      const id = asString(item.id);
+      const label = asString(item.label);
+      const kind = normalizeEnum(item.kind, ALLOWED_ARTIFACT_KINDS);
+      if (!id || !label || !kind) return null;
+      const ref: ArtifactRef = {
+        id,
+        kind,
+        label,
+        summary: asString(item.summary) || undefined,
+        mime: asString(item.mime) || undefined,
+        size: typeof item.size === "number" ? item.size : undefined,
+        previewUrl: asString(item.previewUrl) || undefined,
+        provider: item.provider === "youtube" ? "youtube" : item.provider === "generic" ? "generic" : undefined,
+        embedUrl: asString(item.embedUrl) || undefined,
+        url: asString(item.url) || undefined,
+        allowFullScreen: typeof item.allowFullScreen === "boolean" ? item.allowFullScreen : undefined,
+        surfaceKind: item.surfaceKind === "webapp" || item.surfaceKind === "external_embed" ? item.surfaceKind : undefined,
+      };
+      return ref;
+    })
+    .filter((item): item is ArtifactRef => Boolean(item));
+  return refs.length ? refs : undefined;
+}
+
 export function normalizeTaskResult(value: unknown, fallback: NormalizeInput): TaskResult | null {
   if (!isRecord(value)) return null;
   const blocks: ResultBlock[] = Array.isArray(value.blocks)
@@ -156,7 +187,8 @@ export function normalizeTaskResult(value: unknown, fallback: NormalizeInput): T
         .map(normalizeBlock)
         .filter((block): block is ResultBlock => Boolean(block))
     : [];
-  if (!blocks.length) return null;
+  const artifactRefs = normalizeArtifactRefs(value.artifactRefs);
+  if (!blocks.length && !artifactRefs?.length) return null;
   const status = ALLOWED_STATUSES.includes(value.status as TaskResultStatus)
     ? (value.status as TaskResultStatus)
     : "done";
@@ -168,8 +200,12 @@ export function normalizeTaskResult(value: unknown, fallback: NormalizeInput): T
     title: asString(value.title) || fallback.title,
     status,
     blocks,
+    artifactRefs,
     meta: {
       producedAt: asString(meta.producedAt) || new Date().toISOString(),
+      surfaces: normalizeEnumArray(meta.surfaces, ["interactive", "files"]),
+      interactiveSurfaceKind: normalizeEnum(meta.interactiveSurfaceKind, ["blocks", "iframe", "webapp", "dashboard", "form", "table"]),
+      fileSurfaceRequired: typeof meta.fileSurfaceRequired === "boolean" ? meta.fileSurfaceRequired : undefined,
       presentation: normalizeEnum(meta.presentation, ALLOWED_PRESENTATIONS),
       primaryFormat: normalizeEnum(meta.primaryFormat, ALLOWED_PRIMARY_FORMATS),
       exportableFormats: normalizeEnumArray(meta.exportableFormats, ALLOWED_EXPORT_FORMATS),

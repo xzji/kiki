@@ -1,19 +1,23 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { TaskAgentPromptDrawer } from "@/components/goal/TaskAgentPromptDrawer";
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
+import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
+import { getTaskDependencyViews } from "@/lib/taskDependencies";
 import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
-import { formatToolOperationText, summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
+import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
+import { hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { Goal, Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
+import type { AgentRunPlan } from "@/types/agentOrchestration";
+import type { Goal, InteractionSubmission, Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
   daily_repeat: "每日重复",
@@ -54,9 +58,9 @@ const SECTION_COPY = {
     empty: "暂无执行中的任务卡片",
   },
   completed: {
-    title: "已完成",
+    title: "已结束",
     description: "可展开查看完整执行信息流与最终结果。",
-    empty: "暂无已完成任务卡片",
+    empty: "暂无已结束任务卡片",
   },
 } as const;
 
@@ -66,17 +70,10 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function isVisibleExecutionStep(step: TaskExecutionStep) {
-  return (
-    step.toolName !== "debug.stream_event" &&
-    !step.title.trim().startsWith("[debug]") &&
-    !step.detail?.trim().startsWith("[debug]")
-  );
-}
-
 function shouldDeferConcreteResultUntilUserInput(instance: TaskInstance) {
   const requirement = instance.awaitingUser?.interactionRequirement ?? instance.result?.interactionRequirement;
   if (!instance.awaitingUser || !requirement) return false;
+  if (hasOptionalResultFeedback(instance)) return false;
   if (requirement.type === "confirm" && requirement.timing === "after_agent_output") return false;
   return (
     requirement.type === "answer" ||
@@ -86,34 +83,6 @@ function shouldDeferConcreteResultUntilUserInput(instance: TaskInstance) {
     requirement.timing === "during_execution" ||
     requirement.timing === "core_task_step"
   );
-}
-
-function isAssistantProcessStep(step: TaskExecutionStep) {
-  return step.type === "assistant" && !step.toolName && step.title === "Agent 过程输出（非最终结果）";
-}
-
-function appendAssistantProcessText(previous: string, next: string) {
-  if (!previous) return next;
-  if (!next) return previous;
-  return /[。！？.!?]\s*$/.test(previous) ? `${previous}\n${next}` : `${previous}${next}`;
-}
-
-function mergeAssistantProcessSteps(steps: TaskExecutionStep[]) {
-  const merged: TaskExecutionStep[] = [];
-  for (const step of steps) {
-    const previous = merged.at(-1);
-    if (previous && isAssistantProcessStep(previous) && isAssistantProcessStep(step)) {
-      merged[merged.length - 1] = {
-        ...previous,
-        status: step.status,
-        detail: appendAssistantProcessText(previous.detail?.trim() ?? "", step.detail?.trim() ?? ""),
-        finishedAt: step.finishedAt ?? previous.finishedAt,
-      };
-      continue;
-    }
-    merged.push(step);
-  }
-  return merged;
 }
 
 function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined): TaskExecutionStep[] | undefined {
@@ -130,11 +99,48 @@ function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined)
             ? "result"
             : "phase",
     status: step.status,
+    agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
   }));
+}
+
+function isAgentRunPlan(value: unknown): value is AgentRunPlan {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<AgentRunPlan>;
+  return candidate.schemaVersion === 1 && Array.isArray(candidate.roles);
+}
+
+function getAgentRunPlan(instance: TaskInstance) {
+  const metaPlan = instance.result?.taskResult?.meta?.agentRunPlan;
+  if (isAgentRunPlan(metaPlan)) return metaPlan;
+  const structuredPlan = instance.result?.structuredOutput?.agentRunPlan;
+  if (isAgentRunPlan(structuredPlan)) return structuredPlan;
+  return undefined;
+}
+
+function formatInteractionTime(value: string | undefined) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function getSubmittedInteractionText(submission: InteractionSubmission | undefined) {
+  if (!submission) return undefined;
+  const fieldLines = Object.entries(submission.fields ?? {})
+    .filter(([, value]) => value.trim())
+    .map(([label, value]) => `${label}：${value}`);
+  if (fieldLines.length) return fieldLines.join("\n");
+  return submission.feedback || submission.action;
 }
 
 function applyWaitingReasonToSteps(steps: TaskExecutionStep[], waitingReason: string | undefined) {
@@ -180,6 +186,7 @@ export function TaskDetailBody({
   });
   const deleteTask = useGoalStore((state) => state.deleteTask);
   const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
+  const dependencyViews = useMemo(() => getTaskDependencyViews(goal, task), [goal, task]);
   const promptContext = useMemo(() => {
     for (const subGoal of goal.subGoals) {
       if (subGoal.tasks.some((item) => item.id === task.id)) {
@@ -193,7 +200,7 @@ export function TaskDetailBody({
   const taskState = getTaskDisplayState(task);
   const statusLabel =
     taskState === "completed"
-      ? "已完成"
+      ? "已结束"
       : taskState === "awaiting_user"
         ? awaitingTaskStatusLabel(task)
         : taskState === "in_progress"
@@ -386,6 +393,33 @@ export function TaskDetailBody({
               <MetaLabel>执行方式</MetaLabel>
               <MetaValue>{EXECUTION_LABEL[task.resultViewKind ?? task.executionKind]}</MetaValue>
 
+              {dependencyViews.length ? (
+                <>
+                  <MetaLabel>依赖任务</MetaLabel>
+                  <MetaValue>
+                    <div className="space-y-1">
+                      {dependencyViews.map((dependency) => (
+                        <div key={dependency.id} className="flex flex-wrap items-center gap-2">
+                          <span>{dependency.title}</span>
+                          <span
+                            className={cn(
+                              "rounded-md px-2 py-0.5 text-[11px]",
+                              dependency.missing
+                                ? "bg-[#FDECEC] text-[#B42318]"
+                                : dependency.satisfied
+                                  ? "bg-[#E8F5E9] text-[#25663A]"
+                                  : "bg-[#F5F6F8] text-[#6B7280]",
+                            )}
+                          >
+                            {dependency.statusLabel}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </MetaValue>
+                </>
+              ) : null}
+
               {task.deadline ? (
                 <>
                   <MetaLabel>截止时间</MetaLabel>
@@ -556,49 +590,6 @@ function formatDeliverablePresentation(task: Task) {
   return `${presentationLabel}（${primaryFormat}${exportFormats}）`;
 }
 
-function formatDuration(ms: number) {
-  if (!Number.isFinite(ms) || ms <= 0) return "0秒";
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}小时${minutes}分${seconds}秒`;
-  if (minutes > 0) return `${minutes}分${seconds}秒`;
-  return `${seconds}秒`;
-}
-
-function calculateCumulativeExecutionMs(steps: TaskExecutionStep[]) {
-  const now = Date.now();
-  const ranges = steps
-    .map((step) => {
-      const start = new Date(step.startedAt).getTime();
-      const end = new Date(step.finishedAt ?? now).getTime();
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
-      return { start, end };
-    })
-    .filter((item): item is { start: number; end: number } => Boolean(item))
-    .sort((left, right) => left.start - right.start);
-
-  if (ranges.length === 0) return 0;
-
-  let total = 0;
-  let currentStart = ranges[0].start;
-  let currentEnd = ranges[0].end;
-
-  for (let index = 1; index < ranges.length; index += 1) {
-    const next = ranges[index];
-    if (next.start <= currentEnd) {
-      currentEnd = Math.max(currentEnd, next.end);
-      continue;
-    }
-    total += currentEnd - currentStart;
-    currentStart = next.start;
-    currentEnd = next.end;
-  }
-
-  return total + (currentEnd - currentStart);
-}
-
 function InstanceCard({
   task,
   instance,
@@ -617,12 +608,12 @@ function InstanceCard({
     instance.status === "error" ||
     Boolean(instance.timeline?.length || instance.trajectory?.length || instance.result);
   const resultLine = isArchivedExecutionInstance(instance) ? getInstanceResultLine(task, instance) : "";
-  const canStop = canStopTaskInstance(instance);
+  const canStop = !hasOptionalResultFeedback(instance) && canStopTaskInstance(instance);
   const executionSteps = applyWaitingReasonToSteps(
     trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
     instance.execution?.waitingReason,
   );
-  const executionDuration = formatDuration(calculateCumulativeExecutionMs(executionSteps));
+  const agentRunPlan = getAgentRunPlan(instance);
 
   return (
     <div className="overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white">
@@ -741,13 +732,31 @@ function InstanceCard({
               </div>
             ) : null}
             <div className="min-w-0">
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] font-medium text-[#6B7280]">
-                <span>执行过程</span>
-                <span className="text-[#8C9198]">累计执行时长 {executionDuration}</span>
+              <div className="mb-4">
+                <div className="text-[15px] font-bold text-[#1F2328]">执行过程</div>
+                <div className="mt-0.5 text-[12px] text-[#8C9198]">
+                  {agentRunPlan?.mode === "role_collaboration"
+                    ? `${agentRunPlan.strategy} · 多 Agent 协同`
+                    : "single_agent · KiKi"}
+                </div>
               </div>
-              <ExecutionMessageStream steps={executionSteps} />
+              <TaskExecutionTimeline
+                steps={executionSteps}
+                agentRunPlan={agentRunPlan}
+                interactionTurn={
+                  instance.awaitingUser && !hasOptionalResultFeedback(instance) ? (
+                    <AwaitingUserResumePanel task={task} instance={instance} />
+                  ) : instance.result?.interactionSubmission ? (
+                    <SubmittedInteractionPanel instance={instance} />
+                  ) : undefined
+                }
+                userSubmissionText={getSubmittedInteractionText(instance.result?.interactionSubmission)}
+                interactionTime={formatInteractionTime(
+                  instance.result?.interactionSubmission?.submittedAt ?? instance.execution?.lastUpdatedAt,
+                )}
+              />
             </div>
-            {instance.status === "completed" || instance.status === "awaiting_user" || instance.status === "error" ? (
+            {instance.status === "completed" || instance.status === "error" ? (
               <div className="min-w-0">
                 <div className="mb-2 text-[12px] font-medium text-[#6B7280]">
                   {instance.status === "error" ? "执行结果 / 失败原因" : "执行结果"}
@@ -764,11 +773,7 @@ function InstanceCard({
 
 function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskInstance }) {
   if (shouldDeferConcreteResultUntilUserInput(instance)) {
-    return (
-      <div className="space-y-3">
-        <AwaitingUserResumePanel task={task} instance={instance} />
-      </div>
-    );
+    return null;
   }
 
   const resultLine = getInstanceResultLine(task, instance);
@@ -826,79 +831,6 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
       {task.resultViewKind !== "generic_result" || instance.payload.kind !== "generic_result" ? (
         <PayloadSummaryCard lines={extraPayloadLines} />
       ) : null}
-      {instance.awaitingUser ? (
-        <AwaitingUserResumePanel task={task} instance={instance} />
-      ) : instance.result?.interactionSubmission ? (
-        <SubmittedInteractionPanel instance={instance} />
-      ) : null}
-    </div>
-  );
-}
-
-function ExecutionMessageStream({ steps }: { steps: TaskExecutionStep[] }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const visibleSteps = useMemo(() => mergeAssistantProcessSteps(steps.filter(isVisibleExecutionStep)), [steps]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    container.scrollTop = container.scrollHeight;
-  }, [visibleSteps]);
-
-  if (visibleSteps.length === 0) {
-    return (
-      <div className="rounded-2xl bg-[#F7F7F8] px-4 py-6 text-sm text-[#8C9198]">
-        暂无执行消息。
-      </div>
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      className="max-h-[420px] space-y-2 overflow-y-auto rounded-2xl bg-[#F7F7F8] p-3"
-    >
-      {visibleSteps.map((step) => (
-        <ExecutionFeedItem key={step.id} step={step} />
-      ))}
-    </div>
-  );
-}
-
-function ExecutionFeedItem({ step }: { step: TaskExecutionStep }) {
-  const timestamp = new Date(step.startedAt).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-  const message =
-    step.type === "tool" || step.toolName
-      ? formatToolOperationText(step.title, step.detail?.trim())
-      : step.detail?.trim() || step.title;
-  if (step.type === "tool" || step.toolName) {
-    return (
-      <div className="rounded-full bg-[#EAEAEA] px-3 py-2 text-[12px] leading-5 text-[#5B6168]">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white text-[10px] text-[#8C9198]">
-            {toolGlyph(step)}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{message}</span>
-          <span className="shrink-0 text-[11px] text-[#9AA0A6]">{timestamp}</span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="px-1 py-1">
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#9AA0A6]">
-        <span className={cn("rounded-md px-2 py-0.5", streamStatusClassName(step.status))}>
-          {streamStatusLabel(step.status)}
-        </span>
-        <span>{timestamp}</span>
-      </div>
-      <div className="mt-1 whitespace-pre-wrap text-[14px] leading-7 text-[#3B4046]">{message}</div>
     </div>
   );
 }
@@ -964,33 +896,6 @@ function getInstanceResultLine(task: Task, instance: TaskInstance) {
   return "";
 }
 
-function streamStatusClassName(status: TaskExecutionStep["status"]) {
-  if (status === "completed") return "bg-[#E8F5E9] text-[#25663A]";
-  if (status === "running") return "bg-[#DDE1E7] text-[#1F2328]";
-  if (status === "awaiting_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
-  if (status === "failed") return "bg-[#FDECEC] text-[#B42318]";
-  return "bg-[#F5F6F8] text-[#8C9198]";
-}
-
-function streamStatusLabel(status: TaskExecutionStep["status"]) {
-  if (status === "completed") return "已完成";
-  if (status === "running") return "进行中";
-  if (status === "awaiting_user") return "待确认";
-  if (status === "failed") return "失败";
-  return "排队中";
-}
-
-function toolGlyph(step: TaskExecutionStep) {
-  if (step.status === "failed") return "!";
-  const toolName = step.toolName?.toLowerCase() || "";
-  if (toolName.includes("web")) return "W";
-  if (toolName.includes("search") || toolName.includes("grep") || toolName.includes("glob")) return "Q";
-  if (toolName.includes("read")) return "R";
-  if (toolName.includes("write") || toolName.includes("edit") || toolName.includes("patch")) return "E";
-  if (toolName.includes("command") || toolName.includes("bash")) return "C";
-  return "·";
-}
-
 function MetaLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-[12px] leading-6 text-[#8C9198]">{children}</div>;
 }
@@ -1002,6 +907,7 @@ function MetaValue({ children }: { children: React.ReactNode }) {
 function getTaskDisplayState(task: Task) {
   const latest = task.instances[0];
   const latestStatus = latest?.status;
+  if (latest && hasOptionalResultFeedback(latest)) return "completed" as const;
   if (latestStatus === "awaiting_user" || latest?.awaitingUser) return "awaiting_user" as const;
   if (latestStatus === "completed" || task.progress >= 100) return "completed" as const;
   if (latestStatus === "paused") return "paused" as const;
@@ -1035,7 +941,8 @@ function instanceStatusClassName(status: Task["instances"][number]["status"]) {
 
 function instanceStatusLabel(instance: Task["instances"][number]) {
   const status = instance.status;
-  if (status === "completed") return "已完成";
+  if (hasOptionalResultFeedback(instance)) return "已结束";
+  if (status === "completed") return "已结束";
   if (status === "in_progress") return "进行中";
   if (status === "error") return "执行失败";
   if (status === "paused") return "已暂停";

@@ -12,6 +12,8 @@ import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
+import { submitTaskResultFeedback, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import { buildTaskQuoteContent } from "@/lib/taskFeedback";
 import {
   continueGoalWorkflowAfterInfo,
   hasRecoverableGoalPlanCheckpoint,
@@ -26,7 +28,8 @@ import { taskDetailPath } from "@/lib/routes";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
-import type { ConversationMessage } from "@/types/kiki";
+import type { ConversationMessage, Goal } from "@/types/kiki";
+import type { QuotedConversationMessageContext } from "@/types/runtime";
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -101,6 +104,39 @@ function appendTerminalNotice(content: string, notice: string, emptyContent: str
   return `${content}\n\n${notice}`;
 }
 
+function resolveTaskCardInfo(message: ConversationMessage | null, goals: Goal[]) {
+  if (!message || message.kind !== "task_card") return null;
+  const goal = goals.find((item) => item.id === message.taskRef.goalId) ?? null;
+  const subGoal = goal?.subGoals.find((item) => item.id === message.taskRef.subGoalId) ?? null;
+  const storeTask = subGoal?.tasks.find((item) => item.id === message.taskRef.taskId) ?? null;
+  const task = storeTask ?? message.taskSnapshot?.task ?? null;
+  const instance =
+    storeTask?.instances.find((item) => item.id === message.taskRef.instanceId) ??
+    message.taskSnapshot?.instance ??
+    null;
+  if (!goal || !task || !instance) return null;
+  return { goal, subGoal, task, instance, message };
+}
+
+function buildQuotedMessageContext(message: ConversationMessage, goals: Goal[]): QuotedConversationMessageContext {
+  if (message.kind === "task_card") {
+    const taskInfo = resolveTaskCardInfo(message, goals);
+    return {
+      roleLabel: "KiKi",
+      content: taskInfo ? buildTaskQuoteContent(taskInfo.task, taskInfo.instance) : message.content,
+      messageId: message.id,
+      messageKind: message.kind,
+      taskRef: message.taskRef,
+    };
+  }
+  return {
+    roleLabel: message.role === "user" ? "你" : "KiKi",
+    content: message.content,
+    messageId: message.id,
+    messageKind: message.kind,
+  };
+}
+
 /**
  * 会话视图：
  * - 顶部栏：会话标题 + 右上角「目标规划」按钮（仅绑定目标时显示）
@@ -121,6 +157,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const goals = useGoalStore((state) => state.goals);
+  const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
   const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
   const contextGoal = useMemo(
@@ -194,22 +231,10 @@ export function ConversationView({ conversationId }: { conversationId: string })
     if (hasActiveController) return;
 
     const streamingMessages = conversation.messages.filter((message) => message.status === "streaming");
-    const lastStreamingKikiMessage = [...streamingMessages]
-      .reverse()
-      .find((message) => message.role === "kiki");
-
     streamingMessages.forEach((message) => {
       updateMessage(conversation.id, message.id, (current) => ({
         ...current,
         status: "done",
-        content:
-          current.id === lastStreamingKikiMessage?.id
-            ? appendTerminalNotice(
-                current.content,
-                "（已停止，未检测到正在运行的任务）",
-                "已停止，未检测到正在运行的任务。",
-              )
-            : current.content,
       }));
     });
     setConversationStatus(conversation.id, "idle");
@@ -263,39 +288,139 @@ export function ConversationView({ conversationId }: { conversationId: string })
     );
   }
 
-  const taskInfo = (() => {
-    if (!taskInfoMessage || taskInfoMessage.kind !== "task_card") return null;
-    const goal = goals.find((item) => item.id === taskInfoMessage.taskRef.goalId);
-    if (!goal) return null;
-    const task =
-      goal.subGoals
-        .flatMap((subGoal) => subGoal.tasks)
-        .find((item) => item.id === taskInfoMessage.taskRef.taskId) ?? null;
-    if (!task) return null;
-    return { goal, task };
-  })();
-
-  const resultInfo = (() => {
-    if (!resultMessage || resultMessage.kind !== "task_card") return null;
-    const goal = goals.find((item) => item.id === resultMessage.taskRef.goalId);
-    if (!goal) return null;
-    const task =
-      goal.subGoals
-        .flatMap((subGoal) => subGoal.tasks)
-        .find((item) => item.id === resultMessage.taskRef.taskId) ?? null;
-    if (!task) return null;
-    const instance = task.instances.find((item) => item.id === resultMessage.taskRef.instanceId) ?? null;
-    if (!instance) return null;
-    return { goal, task, instance, message: resultMessage };
-  })();
+  const taskInfo = resolveTaskCardInfo(taskInfoMessage, goals);
+  const resultInfo = resolveTaskCardInfo(resultMessage, goals);
   const streamErrorUi = classifyConversationError(streamError);
+  const appendActiveGoalProgress = (
+    controller: AbortController,
+    assistantId: string,
+    progress: { message: string },
+  ) => {
+    if (
+      controller.signal.aborted ||
+      streamAbortRef.current !== controller ||
+      activeAssistantMessageIdRef.current !== assistantId
+    ) {
+      return;
+    }
+    updateMessage(conversation.id, assistantId, (message) => {
+      if (message.status !== "streaming" || controller.signal.aborted) return message;
+      return {
+        ...message,
+        content: appendGoalProgressMessage(message.content, progress.message),
+      };
+    });
+  };
+
+  const onTaskOptionalFeedback = async (sourceMessage: ConversationMessage, text: string) => {
+    if (sourceMessage.kind !== "task_card") return;
+    const now = new Date().toISOString();
+    const userId = `msg-user-feedback-${Date.now()}`;
+    appendMessage(conversation.id, {
+      id: userId,
+      kind: "text",
+      role: "user",
+      content: text,
+      createdAt: now,
+      source: "user",
+      status: "done",
+    });
+    setConversationStatus(conversation.id, "streaming");
+    setStreamError(null);
+
+    try {
+      const feedback = await submitTaskResultFeedback({
+        conversationId: conversation.id,
+        message: text,
+        sourceMessageId: userId,
+        feedbackId: `feedback-${userId}`,
+        taskRef: sourceMessage.taskRef,
+        runtimeEnv: activeRuntimeEnv ?? undefined,
+      });
+      if (feedback.assistantMessage) {
+        appendMessage(conversation.id, {
+          id: `msg-kiki-feedback-${Date.now()}`,
+          kind: "text",
+          role: "kiki",
+          content: feedback.assistantMessage,
+          createdAt: new Date().toISOString(),
+          status: "done",
+          source: "kiki",
+        });
+      }
+      if (feedback.progress && feedback.taskInstanceId) {
+        syncTaskInstanceRun({
+          taskId: sourceMessage.taskRef.taskId,
+          instanceId: feedback.taskInstanceId,
+          progress: feedback.progress,
+          logs: feedback.logs,
+          trajectory: feedback.trajectory,
+        });
+      }
+      if (feedback.decision === "rerun" && feedback.taskCardMessage?.taskRef) {
+        const taskCardId = `msg-task-feedback-${feedback.taskCardMessage.taskRef.instanceId}`;
+        if (!conversation.messages.some((message) => message.id === taskCardId)) {
+          appendMessage(conversation.id, {
+            id: taskCardId,
+            kind: "task_card",
+            role: "kiki",
+            content: feedback.taskCardMessage.content || "已根据你的反馈重新执行任务。",
+            createdAt: new Date().toISOString(),
+            unread: true,
+            status: "done",
+            source: "system",
+            taskRef: feedback.taskCardMessage.taskRef,
+            taskSnapshot: feedback.taskCardMessage.taskSnapshot,
+          });
+        }
+        if (feedback.progress?.requestId && feedback.taskInstanceId) {
+          void waitForTaskRunCompletion({
+            requestId: feedback.progress.requestId,
+            taskInstanceId: feedback.taskInstanceId,
+            onProgress: (payload) => {
+              syncTaskInstanceRun({
+                taskId: feedback.taskCardMessage!.taskRef.taskId,
+                instanceId: feedback.taskInstanceId!,
+                progress: payload.progress,
+                logs: payload.logs,
+                trajectory: payload.trajectory,
+                waitingReason: payload.waitingReason,
+              });
+            },
+          }).then((result) => {
+            syncTaskInstanceRun({
+              taskId: feedback.taskCardMessage!.taskRef.taskId,
+              instanceId: feedback.taskInstanceId!,
+              progress: result.progress,
+              logs: result.logs,
+              trajectory: result.trajectory,
+              waitingReason: result.waitingReason,
+            });
+          }).catch((error) => {
+            setStreamError(error instanceof Error ? error.message : "反馈修订任务跟进失败");
+          });
+        }
+      }
+      setConversationStatus(conversation.id, "idle");
+    } catch (error) {
+      const message = getErrorMessage(error, "任务反馈处理失败");
+      setStreamError(message);
+      appendMessage(conversation.id, {
+        id: `msg-kiki-feedback-error-${Date.now()}`,
+        kind: "text",
+        role: "kiki",
+        content: message,
+        createdAt: new Date().toISOString(),
+        status: "error",
+        source: "kiki",
+      });
+      setConversationStatus(conversation.id, "error");
+    }
+  };
 
   const onSend = async (
     text: string,
-    quoted?: {
-      roleLabel: string;
-      content: string;
-    } | null,
+    quoted?: QuotedConversationMessageContext | null,
   ) => {
     const parsedCommand = parseSlashCommand(text);
     const canResumePlanning =
@@ -342,10 +467,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
 
       try {
         const progressHandler = (progress: { message: string }) => {
-          updateMessage(conversation.id, assistantId, (message) => ({
-            ...message,
-            content: appendGoalProgressMessage(message.content, progress.message),
-          }));
+          appendActiveGoalProgress(controller, assistantId, progress);
         };
         const result = hasLocalPlanningFailure
           ? await resumeGoalWorkflowFromRecovery({
@@ -460,10 +582,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           conversationId: conversation.id,
           signal: controller.signal,
           onProgress: (progress) => {
-            updateMessage(conversation.id, assistantId, (message) => ({
-              ...message,
-              content: appendGoalProgressMessage(message.content, progress.message),
-            }));
+            appendActiveGoalProgress(controller, assistantId, progress);
           },
         });
         if (result.kind === "collecting_info") {
@@ -563,10 +682,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           conversationId: conversation.id,
           signal: controller.signal,
           onProgress: (progress) => {
-            updateMessage(conversation.id, assistantId, (message) => ({
-              ...message,
-              content: appendGoalProgressMessage(message.content, progress.message),
-            }));
+            appendActiveGoalProgress(controller, assistantId, progress);
           },
         });
         const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
@@ -598,6 +714,152 @@ export function ConversationView({ conversationId }: { conversationId: string })
         setHasLocalActiveStream(false);
       }
       setQuotedMessage(null);
+      return;
+    }
+
+    const quotedTaskInfo =
+      quoted?.taskRef && quoted.messageKind === "task_card"
+        ? resolveTaskCardInfo(quotedMessage, goals)
+        : null;
+    if (quotedTaskInfo) {
+      const now = new Date().toISOString();
+      const userId = `msg-user-${Date.now()}`;
+      const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const userMessage: ConversationMessage = {
+        id: userId,
+        kind: "text",
+        role: "user",
+        content: text,
+        createdAt: now,
+        source: "user",
+        status: "done",
+      };
+      appendMessage(conversation.id, userMessage);
+      appendMessage(conversation.id, {
+        id: assistantId,
+        kind: "text",
+        role: "kiki",
+        content:
+          quotedTaskInfo.instance.status === "completed" || quotedTaskInfo.instance.result?.taskResult
+            ? "正在理解你对任务结果的反馈..."
+            : "这条任务还没有完成，我先检查当前状态...",
+        createdAt: now,
+        status: "streaming",
+        source: "kiki",
+      });
+      setConversationStatus(conversation.id, "streaming");
+      setStreamError(null);
+      try {
+        if (quotedTaskInfo.instance.status === "awaiting_user" || quotedTaskInfo.instance.awaitingUser) {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: "这个任务正在等待你补充或确认信息。请先在任务卡片里完成当前等待项，再引用最终结果反馈。",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          setQuotedMessage(null);
+          return;
+        }
+        if (quotedTaskInfo.instance.status === "in_progress") {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: "这个任务还在执行中。我已看到你的反馈，但建议等当前结果完成后再引用结果让我判断是否需要重做。",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          setQuotedMessage(null);
+          return;
+        }
+        if (quotedTaskInfo.instance.status === "error" || quotedTaskInfo.instance.status === "paused") {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: "这个任务当前没有可反馈的完成结果。你可以先重试或恢复任务，等产出完成后再引用结果反馈。",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          setQuotedMessage(null);
+          return;
+        }
+        const feedbackTaskRef = quotedTaskInfo.message.taskRef;
+        const feedback = await submitTaskResultFeedback({
+          conversationId: conversation.id,
+          message: text,
+          sourceMessageId: userId,
+          feedbackId: `feedback-${userId}`,
+          taskRef: feedbackTaskRef,
+          runtimeEnv: activeRuntimeEnv ?? undefined,
+        });
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: feedback.assistantMessage,
+          status: "done",
+        }));
+        if (feedback.progress && feedback.taskInstanceId) {
+          syncTaskInstanceRun({
+            taskId: feedbackTaskRef.taskId,
+            instanceId: feedback.taskInstanceId,
+            progress: feedback.progress,
+            logs: feedback.logs,
+            trajectory: feedback.trajectory,
+          });
+        }
+        if (feedback.decision === "rerun" && feedback.taskCardMessage?.taskRef) {
+          const taskCardId = `msg-task-feedback-${feedback.taskCardMessage.taskRef.instanceId}`;
+          if (!conversation.messages.some((message) => message.id === taskCardId)) {
+            appendMessage(conversation.id, {
+              id: taskCardId,
+              kind: "task_card",
+              role: "kiki",
+              content: feedback.taskCardMessage.content || "已根据你的反馈重新执行任务。",
+              createdAt: new Date().toISOString(),
+              unread: true,
+              status: "done",
+              source: "system",
+              taskRef: feedback.taskCardMessage.taskRef,
+              taskSnapshot: feedback.taskCardMessage.taskSnapshot,
+            });
+          }
+          if (feedback.progress?.requestId && feedback.taskInstanceId) {
+            void waitForTaskRunCompletion({
+              requestId: feedback.progress.requestId,
+              taskInstanceId: feedback.taskInstanceId,
+              onProgress: (payload) => {
+                syncTaskInstanceRun({
+                  taskId: feedback.taskCardMessage!.taskRef.taskId,
+                  instanceId: feedback.taskInstanceId!,
+                  progress: payload.progress,
+                  logs: payload.logs,
+                  trajectory: payload.trajectory,
+                  waitingReason: payload.waitingReason,
+                });
+              },
+            }).then((result) => {
+              syncTaskInstanceRun({
+                taskId: feedback.taskCardMessage!.taskRef.taskId,
+                instanceId: feedback.taskInstanceId!,
+                progress: result.progress,
+                logs: result.logs,
+                trajectory: result.trajectory,
+                waitingReason: result.waitingReason,
+              });
+            }).catch((error) => {
+              setStreamError(error instanceof Error ? error.message : "反馈修订任务跟进失败");
+            });
+          }
+        }
+        setConversationStatus(conversation.id, "idle");
+      } catch (error) {
+        const message = getErrorMessage(error, "任务反馈处理失败");
+        setStreamError(message);
+        updateMessage(conversation.id, assistantId, (current) => ({
+          ...current,
+          content: message,
+          status: "error",
+        }));
+        setConversationStatus(conversation.id, "error");
+      } finally {
+        setQuotedMessage(null);
+      }
       return;
     }
 
@@ -827,6 +1089,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                       setPlanFocus(null);
                       setPlanOpen(true);
                     }}
+                    onTaskOptionalFeedback={onTaskOptionalFeedback}
                     onDelete={(messageId) => {
                       deleteMessage(conversation.id, messageId);
                       if (quotedMessage?.id === messageId) {
@@ -875,10 +1138,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             onStop={hasLocalActiveStream ? stopGeneration : undefined}
             quotedMessage={
               quotedMessage
-                ? {
-                    roleLabel: quotedMessage.role === "user" ? "你" : "KiKi",
-                    content: quotedMessage.content,
-                  }
+                ? buildQuotedMessageContext(quotedMessage, goals)
                 : null
             }
             onClearQuote={() => setQuotedMessage(null)}

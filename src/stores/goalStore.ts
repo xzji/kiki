@@ -27,7 +27,17 @@ import type {
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
-const MOCK_BASELINE_RESET_VERSION = 1;
+const MOCK_BASELINE_RESET_VERSION = 9;
+
+function mergeGoalsById(...groups: Goal[][]) {
+  const merged = new Map<string, Goal>();
+  for (const group of groups) {
+    for (const goal of group) {
+      if (!merged.has(goal.id)) merged.set(goal.id, goal);
+    }
+  }
+  return Array.from(merged.values());
+}
 
 function finalizeGoal(goal: Goal): Goal {
   const tasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
@@ -361,8 +371,10 @@ function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] |
             ? "result"
             : "phase",
     status: step.status,
+    agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
   }));
@@ -527,6 +539,7 @@ type GoalStore = {
   }) => void;
   retryTaskInstanceRun: (taskId: string, instanceId: string) => void;
   stopTaskInstanceRun: (taskId: string, instanceId: string) => void;
+  resolveTaskInstanceAwaitingUser: (taskId: string, instanceId: string, submission: InteractionSubmission) => void;
   markTaskNotificationDelivered: (input: {
     taskId: string;
     instanceId: string;
@@ -1211,6 +1224,41 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
+      resolveTaskInstanceAwaitingUser: (taskId, instanceId, submission) => {
+        set((state) => ({
+          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
+            ...task,
+            instances: task.instances.map((instance) =>
+              instance.id === instanceId
+                ? normalizeInstance(
+                    {
+                      ...instance,
+                      status: "in_progress",
+                      awaitingUser: undefined,
+                      blocker: undefined,
+                      result: {
+                        ...instance.result,
+                        interactionSubmission: submission,
+                        structuredOutput: {
+                          ...(instance.result?.structuredOutput ?? {}),
+                          interactionSubmission: submission,
+                        },
+                      },
+                      execution: {
+                        ...instance.execution,
+                        phase: "running",
+                        status: "in_progress",
+                        startedAt: instance.execution?.startedAt ?? instance.createdAt,
+                        lastUpdatedAt: nowIso(),
+                      },
+                    },
+                    task,
+                  )
+                : instance,
+            ),
+          })),
+        }));
+      },
       markTaskNotificationDelivered: ({ taskId, instanceId, inboxItemId, conversationMessageId }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
@@ -1286,16 +1334,20 @@ export const useGoalStore = create<GoalStore>()(
     {
       name: "kiki.goals",
       version: MOCK_BASELINE_RESET_VERSION,
-      migrate: () => ({
-        goals: initialGoals.map((goal) => normalizeGoal(goal)),
-      }),
+      migrate: (persisted) => {
+        const next = persisted as Partial<GoalStore> | undefined;
+        const persistedGoals = Array.isArray(next?.goals) ? next.goals : [];
+        return {
+          goals: mergeGoalsById(persistedGoals, initialGoals).map((goal) => normalizeGoal(goal)),
+        };
+      },
       partialize: (state) => ({ goals: state.goals }),
       merge: (persisted, current) => {
         const next = persisted as Partial<GoalStore>;
         return {
           ...current,
           ...next,
-          goals: (next.goals ?? current.goals).map((goal) => normalizeGoal(goal)),
+          goals: mergeGoalsById(next.goals ?? current.goals, initialGoals).map((goal) => normalizeGoal(goal)),
         };
       },
     },

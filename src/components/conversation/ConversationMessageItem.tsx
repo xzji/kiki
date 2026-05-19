@@ -23,6 +23,7 @@ export function ConversationMessageItem({
   onOpenResult,
   onOpenTaskInfo,
   onOpenGoalPlan,
+  onTaskOptionalFeedback,
   onDelete,
 }: {
   message: ConversationMessage;
@@ -30,6 +31,7 @@ export function ConversationMessageItem({
   onOpenResult?: (message: ConversationMessage) => void;
   onOpenTaskInfo?: (message: ConversationMessage) => void;
   onOpenGoalPlan?: (goalId: string) => void;
+  onTaskOptionalFeedback?: (message: ConversationMessage, feedback: string) => Promise<void> | void;
   onDelete: (messageId: string) => void;
 }) {
   const goals = useGoalStore((state) => state.goals);
@@ -39,13 +41,21 @@ export function ConversationMessageItem({
   const taskInfo = useMemo(() => {
     if (message.kind !== "task_card") return null;
     const goal = goals.find((g) => g.id === message.taskRef.goalId);
-    if (!goal) return null;
+    if (!goal) {
+      return message.taskSnapshot ? { goal: null, subGoal: null, ...message.taskSnapshot } : null;
+    }
     const subGoal = goal.subGoals.find((sg) => sg.id === message.taskRef.subGoalId);
-    if (!subGoal) return null;
+    if (!subGoal) {
+      return message.taskSnapshot ? { goal, subGoal: null, ...message.taskSnapshot } : null;
+    }
     const task = subGoal.tasks.find((t) => t.id === message.taskRef.taskId);
-    if (!task) return null;
+    if (!task) {
+      return message.taskSnapshot ? { goal, subGoal, ...message.taskSnapshot } : null;
+    }
     const instance = task.instances.find((i) => i.id === message.taskRef.instanceId);
-    if (!instance) return null;
+    if (!instance) {
+      return message.taskSnapshot ? { goal, subGoal, task: message.taskSnapshot.task, instance: message.taskSnapshot.instance } : null;
+    }
     return { goal, subGoal, task, instance };
   }, [goals, message]);
 
@@ -150,6 +160,11 @@ export function ConversationMessageItem({
             task={taskInfo.task}
             instance={taskInfo.instance}
             onOpen={() => onOpenResult?.(message)}
+            onOptionalFeedbackSelect={
+              message.kind === "task_card" && onTaskOptionalFeedback
+                ? (feedback) => onTaskOptionalFeedback(message, feedback)
+                : undefined
+            }
           />
         ) : null}
 

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "worker": "tsx scripts/start-worker.ts",
-    "daemon": "tsx src/bin/kiki-runtime-daemon.ts"
+    "daemon": "tsx src/bin/kiki-runtime-daemon.ts",
+    "reconcile:goal-events": "tsx scripts/reconcile-goal-event-log.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.5",

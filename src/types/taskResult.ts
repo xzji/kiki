@@ -1,3 +1,7 @@
+import type { AgentRunPlan } from "@/types/agentOrchestration";
+import type { ArtifactRef } from "@/types/artifact";
+import type { InteractiveSurfaceKind, ResultSurfaceKind } from "@/types/kiki";
+
 export type TaskResultStatus = "draft" | "pending_user" | "done" | "blocked" | "failed";
 export type TaskResultPresentation = "summary_card" | "visual_report" | "comparison_table" | "checklist" | "timeline" | "document" | "dashboard" | "handoff_package";
 export type TaskResultPrimaryFormat = "structured_blocks" | "json" | "markdown" | "html" | "text" | "code";
@@ -85,11 +89,21 @@ export type TaskResult = {
   title: string;
   status: TaskResultStatus;
   blocks: ResultBlock[];
+  artifactRefs?: ArtifactRef[];
   meta: {
     producedAt: string;
+    surfaces?: ResultSurfaceKind[];
+    interactiveSurfaceKind?: InteractiveSurfaceKind;
+    fileSurfaceRequired?: boolean;
     presentation?: TaskResultPresentation;
     primaryFormat?: TaskResultPrimaryFormat;
     exportableFormats?: TaskResultExportFormat[];
+    agentRunPlan?: AgentRunPlan;
+    qualityReview?: {
+      passed: boolean;
+      issues: string[];
+      reviewerRole: "reviewer";
+    };
     durationMs?: number;
     tokensUsed?: number;
   };

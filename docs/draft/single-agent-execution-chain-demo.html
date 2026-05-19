@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>单 Agent 执行链路 UI Demo</title>
+<style>
+:root{
+  --bg:#f5f6f8;
+  --surface:#fff;
+  --surface-muted:#f6f8fa;
+  --text1:#1f2328;
+  --text2:#374151;
+  --text3:#6b7280;
+  --text4:#8c9198;
+  --border:#e5e7eb;
+  --border2:#d0d7de;
+  --ok-bg:#e8f5e9;
+  --ok-t:#25663a;
+  --warn-bg:#fff3cd;
+  --warn-t:#8a6d3b;
+  --radius-lg:8px;
+  --radius-md:6px;
+  --radius-full:9999px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg);
+  color:var(--text1);
+  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  line-height:1.65;
+}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:.88em;background:var(--surface-muted);border:1px solid var(--border);border-radius:5px;padding:.1em .35em}
+.page{max-width:1120px;margin:0 auto;padding:28px 24px 72px}
+.hero{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:24px;
+  padding:10px 0 22px;
+  border-bottom:1px solid var(--border);
+}
+.hero-kicker{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid var(--border2);
+  border-radius:var(--radius-full);
+  color:var(--text4);
+  font-size:12px;
+  padding:3px 10px;
+  margin-bottom:10px;
+  background:#fff;
+}
+.hero h1{font-size:28px;letter-spacing:-.03em;line-height:1.2}
+.hero p{max-width:760px;margin-top:10px;color:var(--text3);font-size:14px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:28px;align-items:start;margin-top:22px}
+.chain-head{margin-bottom:18px}
+.chain-title{font-size:15px;font-weight:700;color:var(--text1)}
+.chain-sub{font-size:12px;color:var(--text4);margin-top:2px}
+.chain{position:relative;padding-left:0}
+.message{
+  position:relative;
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr);
+  gap:12px;
+  margin-bottom:20px;
+}
+.avatar{
+  display:grid;
+  place-items:center;
+  width:42px;
+  height:42px;
+  border-radius:50%;
+  border:1px solid var(--border);
+  background:#fff;
+  color:#64748b;
+  font-size:13px;
+  font-weight:700;
+}
+.message-main{min-width:0;padding-top:2px}
+.message-meta{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  margin-bottom:7px;
+}
+.agent-name{font-size:13px;font-weight:700;color:var(--text1)}
+.time{
+  font-size:12px;
+  color:var(--text4);
+  opacity:0;
+  transition:opacity .12s ease;
+}
+.message:hover .time{opacity:1}
+.bubble{
+  max-width:820px;
+  background:transparent;
+  padding:2px 0;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.steps{font-size:13px;color:var(--text2)}
+.steps-summary{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  cursor:pointer;
+  list-style:none;
+  user-select:none;
+  color:var(--text4);
+  font-size:12px;
+}
+.steps-summary::-webkit-details-marker{display:none}
+.steps-summary-meta{font-weight:400;color:var(--text3)}
+.steps-summary-toggle{
+  display:inline-block;
+  width:7px;
+  height:7px;
+  border-right:1.5px solid currentColor;
+  border-bottom:1.5px solid currentColor;
+  color:var(--text4);
+  opacity:0;
+  transform:rotate(-45deg);
+  transition:opacity .12s ease, transform .12s ease;
+}
+.message:hover .steps-summary-toggle,
+.steps-summary:focus-visible .steps-summary-toggle{opacity:1}
+.steps[open] .steps-summary-toggle{transform:rotate(45deg)}
+.steps-list{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  margin-top:12px;
+  padding-left:14px;
+  border-left:1px dashed var(--border);
+}
+.step{display:flex;flex-direction:column;gap:6px}
+.step-head{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--text4);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.step-thought{font-size:13px;color:var(--text2)}
+.step-tool{
+  display:inline-flex;
+  align-items:flex-start;
+  gap:6px;
+  width:fit-content;
+  max-width:100%;
+  font-size:12px;
+  color:var(--text2);
+  background:#eef0f3;
+  border-radius:var(--radius-full);
+  padding:4px 8px;
+}
+.step-tool-name{
+  flex:0 0 auto;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  font-size:12px;
+  font-weight:700;
+  color:var(--text1);
+}
+.step-tool-sep{color:var(--text4);margin:0 1px}
+.step-tool-detail{color:var(--text2);min-width:0;word-break:break-word}
+.section{font-size:13px;color:var(--text2)}
+.response-inline{display:flex;align-items:center;gap:8px}
+.response-inline p{margin:0}
+.verdict{
+  display:inline-flex;
+  align-items:center;
+  border-radius:var(--radius-full);
+  font-size:11px;
+  line-height:1;
+  padding:3px 8px;
+  font-weight:600;
+}
+.verdict-ok{background:var(--ok-bg);color:var(--ok-t)}
+.verdict-warn{background:var(--warn-bg);color:var(--warn-t)}
+.result-block{
+  margin-top:24px;
+  border-top:1px solid var(--border);
+  padding-top:18px;
+}
+.result-title{font-size:15px;font-weight:700;margin-bottom:10px}
+.result-content{font-size:13px;color:var(--text2);display:grid;gap:8px}
+.result-line{display:flex;gap:8px}
+.result-mark{color:var(--text4)}
+.side{position:sticky;top:24px;display:grid;gap:18px}
+.note{border-top:1px solid var(--border);padding-top:14px}
+.note:first-child{border-top:0;padding-top:0}
+.note-title{font-size:13px;font-weight:700;color:var(--text1)}
+.note-text{margin-top:6px;font-size:12px;color:var(--text3)}
+.data-map{display:grid;gap:8px;margin-top:10px}
+.data-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:7px;font-size:12px;color:var(--text3)}
+.data-row:last-child{border-bottom:0;padding-bottom:0}
+.data-row strong{color:var(--text1);font-weight:600}
+@media(max-width:920px){
+  .page{padding:20px 14px 48px}
+  .hero{display:block}
+  .layout{grid-template-columns:1fr;gap:20px}
+  .side{position:static}
+  .message{grid-template-columns:34px minmax(0,1fr)}
+  .avatar{width:34px;height:34px;font-size:12px}
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="hero">
+    <div>
+      <div class="hero-kicker">KiKi UI Demo · Single Agent Execution Chain</div>
+      <h1>单 Agent 执行链路 · 过程折叠视图</h1>
+      <p>单 Agent 不展示角色移交，只保留一个执行者的过程循环：默认展示最终响应，hover 后出现时间和过程箭头；展开后按时序查看 thought 与 tool_use 的穿插。</p>
+    </div>
+  </section>
+
+  <div class="layout">
+    <section>
+      <div class="chain-head">
+        <div class="chain-title">执行过程</div>
+        <div class="chain-sub">single_agent · KiKi</div>
+      </div>
+
+      <div class="chain">
+        <article class="message">
+          <div class="avatar">K</div>
+          <div class="message-main">
+            <div class="message-meta">
+              <span class="agent-name">KiKi</span>
+              <span class="time">14:22:10</span>
+            </div>
+            <div class="bubble">
+              <details class="steps">
+                <summary class="steps-summary">
+                  <span class="steps-summary-meta">过程(5)</span>
+                  <span class="steps-summary-toggle"></span>
+                </summary>
+                <div class="steps-list">
+                  <div class="step">
+                    <div class="step-head">Step 1</div>
+                    <div class="step-thought">先判断用户要的是信息调研任务，不需要多角色审阅；核心目标是快速形成可读结论，并在结果中保留关键依据。</div>
+                  </div>
+                  <div class="step">
+                    <div class="step-head">Step 2</div>
+                    <div class="step-thought">需要补充最新资料，优先检索权威来源和近期数据，避免只凭已有知识生成结论。</div>
+                    <div class="step-tool">
+                      <span class="step-tool-name">web_search</span>
+                      <span class="step-tool-sep">·</span>
+                      <span class="step-tool-detail">搜索最近 12 个月行业动态和公开统计。</span>
+                    </div>
+                  </div>
+                  <div class="step">
+                    <div class="step-head">Step 3</div>
+                    <div class="step-thought">检索结果里有重复信息，需要筛掉低质量来源，并提取能支撑结论的三类事实：趋势、风险、机会。</div>
+                    <div class="step-tool">
+                      <span class="step-tool-name">read_sources</span>
+                      <span class="step-tool-sep">·</span>
+                      <span class="step-tool-detail">读取 4 个来源，保留 3 条可引用依据。</span>
+                    </div>
+                  </div>
+                  <div class="step">
+                    <div class="step-head">Step 4</div>
+                    <div class="step-thought">开始组织输出结构：先给一句话结论，再展开判断依据，最后给用户可执行建议。</div>
+                  </div>
+                  <div class="step">
+                    <div class="step-head">Step 5</div>
+                    <div class="step-thought">检查结果是否满足信息任务的闭环要求：结论明确、依据可追溯、建议可执行，完成后直接结束任务。</div>
+                    <div class="step-tool">
+                      <span class="step-tool-name">validate_result</span>
+                      <span class="step-tool-sep">·</span>
+                      <span class="step-tool-detail">确认无缺失字段，标记为可交付。</span>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <div class="section response-inline">
+                <span class="verdict verdict-ok">完成</span>
+                <p>信息调研已完成：当前趋势明确，但建议优先关注确定性更高的细分机会，并持续跟踪政策与数据变化。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <section class="result-block">
+        <div class="result-title">最终结果区</div>
+        <div class="result-content">
+          <div class="result-line"><span class="result-mark">1</span><span>一句话结论：机会存在，但需要筛选高确定性方向。</span></div>
+          <div class="result-line"><span class="result-mark">2</span><span>核心依据：近期数据改善、需求结构分化、政策扰动仍在。</span></div>
+          <div class="result-line"><span class="result-mark">3</span><span>建议动作：先做小范围验证，再决定是否扩展投入。</span></div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="side">
+      <div class="note">
+        <div class="note-title">设计原则</div>
+        <div class="note-text">单 Agent 页面不需要 handoff，也不需要角色状态标签。用户默认只看响应，必要时展开过程查看思考和工具调用。</div>
+      </div>
+      <div class="note">
+        <div class="note-title">交互规则</div>
+        <div class="note-text">时间和箭头默认隐藏，hover 当前消息时出现。过程箭头紧跟 <code>过程(n)</code>，展开时旋转为向下。</div>
+      </div>
+      <div class="note">
+        <div class="note-title">数据映射</div>
+        <div class="data-map">
+          <div class="data-row"><strong>agent</strong><span>头像 / 名称</span></div>
+          <div class="data-row"><strong>steps[].thought</strong><span>思考行</span></div>
+          <div class="data-row"><strong>steps[].toolCall</strong><span>工具胶囊</span></div>
+          <div class="data-row"><strong>response</strong><span>响应内容</span></div>
+          <div class="data-row"><strong>result</strong><span>最终结果区</span></div>
+        </div>
+      </div>
+      <div class="note">
+        <div class="note-title">落地边界</div>
+        <div class="note-text">该页面只用于单 Agent 链路 demo。确认后再抽象成统一的执行过程组件，与多 Agent 链路共用基础样式。</div>
+      </div>
+    </aside>
+  </div>
+</main>
+</body>
+</html>

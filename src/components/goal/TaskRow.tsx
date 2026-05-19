@@ -18,7 +18,7 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
   const Icon = taskState === "completed" ? CircleDot : taskState === "in_progress" || taskState === "awaiting_user" ? Dot : Circle;
   const statusLabel =
     taskState === "completed"
-      ? "已完成"
+      ? "已结束"
       : taskState === "awaiting_user"
         ? awaitingStatusLabel(task)
         : taskState === "in_progress"

@@ -10,7 +10,7 @@ const STATUS_TEXT: Record<TaskInstance["status"], string> = {
   pending: "待处理",
   in_progress: "进行中",
   awaiting_user: "等待你确认",
-  completed: "已完成",
+  completed: "已结束",
   paused: "已暂停",
   error: "执行失败",
 };

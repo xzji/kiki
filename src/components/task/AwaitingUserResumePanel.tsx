@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { resumeTaskRun } from "@/lib/api/taskRuns";
+import { respondGoalInstance } from "@/lib/api/goal-commands";
 import { useGoalStore } from "@/stores/goalStore";
 import type { Task, TaskInstance } from "@/types/kiki";
 
@@ -77,15 +77,15 @@ export function SubmittedInteractionPanel({ instance }: { instance: TaskInstance
   if (!submission || instance.awaitingUser) return null;
   const details = submittedDetails(instance);
   return (
-    <div className="rounded-xl border border-[#B7E4C7] bg-[#F0FFF4] p-4 text-[13px] leading-6 text-[#1F5132]">
+    <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{submittedStatusLabel(submission.status)}</span>
-        <span className="rounded-full bg-white px-2 py-0.5 text-[12px] text-[#2F7D4A]">
+        <span className="font-medium text-[#1F2328]">{submittedStatusLabel(submission.status)}</span>
+        <span className="text-[12px] text-[#8C9198]">
           {formatSubmittedAt(submission.submittedAt)}
         </span>
       </div>
       {details.length ? (
-        <div className="mt-2 rounded-lg bg-white/75 px-3 py-2 text-[#1F2328]">
+        <div className="mt-2 text-[#1F2328]">
           <div className="text-[12px] text-[#57606A]">已提交的信息</div>
           <div className="mt-1 space-y-1">
             {details.map((detail) => (
@@ -95,7 +95,7 @@ export function SubmittedInteractionPanel({ instance }: { instance: TaskInstance
         </div>
       ) : null}
       {instance.status === "in_progress" ? (
-        <div className="mt-2 text-[12px] text-[#2F7D4A]">Agent 已收到，正在继续执行。</div>
+        <div className="mt-2 text-[12px] text-[#8C9198]">KiKi 已收到，正在继续执行。</div>
       ) : null}
     </div>
   );
@@ -122,6 +122,14 @@ function normalizeSpecificOptions(values: string[]) {
 
 function pickThreeOptions(values: string[]) {
   return normalizeSpecificOptions(values);
+}
+
+function isActionLikeOption(option: string) {
+  return /^(确认继续|需要修改|重新执行任务|调整任务完成标准|让\s*KiKi\s*修改后继续|提交答案并继续|提交信息并继续|我已完成，继续执行|确认并继续)$/.test(option.trim());
+}
+
+function pickFieldAnswerOptions(values: string[]) {
+  return pickThreeOptions(values.filter((option) => !isActionLikeOption(option)));
 }
 
 function optionTextForSubmit(option: string, instance: TaskInstance, item?: ReadinessItem) {
@@ -161,6 +169,20 @@ function missingItemsFrom(readiness: TaskReadiness | null) {
   return readiness?.items.filter((item) => item.status === "missing_user" && item.source === "user") ?? [];
 }
 
+function optionRowClass(selected: boolean) {
+  return [
+    "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-0 py-2 text-left text-[13px] transition",
+    selected ? "font-semibold text-[#1F2933]" : "text-[#4B5563] hover:text-[#1F2933]",
+  ].join(" ");
+}
+
+function optionDotClass(selected: boolean) {
+  return [
+    "h-2 w-2 shrink-0 rounded-full transition",
+    selected ? "bg-[#64748B] ring-4 ring-[#EEF0F3]" : "bg-[#D0D7DE] ring-4 ring-transparent",
+  ].join(" ");
+}
+
 export function AwaitingUserResumePanel({
   task,
   instance,
@@ -170,7 +192,7 @@ export function AwaitingUserResumePanel({
   instance: TaskInstance;
   onRunning?: () => void;
 }) {
-  const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
+  const resolveTaskInstanceAwaitingUser = useGoalStore((state) => state.resolveTaskInstanceAwaitingUser);
   const [selectedOption, setSelectedOption] = useState("");
   const [selectedItemOptions, setSelectedItemOptions] = useState<Record<string, string>>({});
   const [customText, setCustomText] = useState("");
@@ -190,8 +212,13 @@ export function AwaitingUserResumePanel({
     const raw = requirement?.options?.length ? requirement.options : [];
     return pickThreeOptions(raw);
   }, [missingItems.length, requirement?.options]);
+  const requirementFieldOptions = useMemo(() => {
+    const raw = requirement?.options?.length ? requirement.options : [];
+    return pickFieldAnswerOptions(raw);
+  }, [requirement?.options]);
 
   const optionsForMissingItem = (item: ReadinessItem) => {
+    if (missingItems.length === 1 && requirementFieldOptions.length > 0) return requirementFieldOptions;
     return item.options?.length ? pickThreeOptions(item.options) : [];
   };
 
@@ -263,21 +290,22 @@ export function AwaitingUserResumePanel({
     setPending(approved ? "approve" : "revise");
     setError(null);
     try {
-      const state = await resumeTaskRun({
-        taskInstanceId: instance.id,
-        resumeToken: blocker.resumeToken,
+      const action = approved ? primaryLabelFor(instance) : "让 KiKi 修改后继续";
+      const response = await respondGoalInstance({
+        instanceId: instance.id,
+        responseId: blocker.resumeToken,
+        responseSummary: normalizedFeedback,
         approved,
-        feedback: normalizedFeedback,
-        action: approved ? primaryLabelFor(instance) : "让 KiKi 修改后继续",
         fields: feedbackFields,
       });
-      syncTaskInstanceRun({
-        taskId: task.id,
-        instanceId: instance.id,
-        progress: state.progress,
-        logs: state.logs,
-        trajectory: state.trajectory,
-        waitingReason: state.waitingReason,
+      resolveTaskInstanceAwaitingUser(task.id, instance.id, {
+        type: requirement?.type ?? "confirm",
+        status: approved ? "submitted" : "rejected",
+        action,
+        approved,
+        feedback: normalizedFeedback || "用户已提交反馈，请继续执行。",
+        fields: feedbackFields,
+        submittedAt: new Date().toISOString(),
       });
       setSelectedOption("");
       setSelectedItemOptions({});
@@ -285,7 +313,7 @@ export function AwaitingUserResumePanel({
       setCustomFields({});
       setCustomMode(false);
       setCustomItemModes({});
-      if (state.progress?.status === "running") onRunning?.();
+      if (response.resumed) onRunning?.();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "任务恢复失败");
     } finally {
@@ -304,17 +332,21 @@ export function AwaitingUserResumePanel({
         : instance.awaitingUser.reason);
 
   return (
-    <div className="rounded-xl border border-[#F5D58B] bg-[#FFF9E8] p-4 text-[13px] leading-6 text-[#6E5A16]">
-      <div className="font-medium text-[#8A6D3B]">{titleFor(instance)}</div>
-      <div className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-[13px] leading-6 text-[#1F2328]">{headline}</div>
+    <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-[#1F2328]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#8C9198]" />
+        <span>{titleFor(instance)}</span>
+      </div>
+      <div className="mt-4 text-[14px] leading-6 text-[#374151]">{headline}</div>
       {missingItems.length ? (
         <div className="mt-3 space-y-3">
           {missingItems.map((item) => {
             const itemOptions = optionsForMissingItem(item);
+            const customSelected = Boolean(customItemModes[item.id]);
             return (
-              <div key={item.id} className="rounded-lg bg-white/60 px-3 py-3">
-                <div className="text-[12px] font-medium text-[#8A6D3B]">{item.optionQuestion?.trim() || `请选择${item.label}`}</div>
-                <div className="mt-2 space-y-2">
+              <div key={item.id}>
+                <div className="text-[12px] font-medium text-[#6B7280]">{item.optionQuestion?.trim() || `请选择${item.label}`}</div>
+                <div className="mt-2 space-y-1.5">
                   {itemOptions.map((option) => {
                     const selected = selectedItemOptions[item.id] === option && !customItemModes[item.id];
                     return (
@@ -322,24 +354,31 @@ export function AwaitingUserResumePanel({
                         key={`${item.id}-${option}`}
                         type="button"
                         onClick={() => chooseOption(option, item)}
-                        className="flex w-full items-center gap-2 py-1 text-left text-[13px] text-[#1F2328] hover:text-[#8A6D3B]"
+                        className={optionRowClass(selected)}
                       >
-                        <span
-                          className={
-                            selected
-                              ? "h-2 w-2 rounded-full bg-[#8A6D3B]"
-                              : "h-2 w-2 rounded-full bg-[#D8C995]"
-                          }
-                        />
-                        <span className={selected ? "font-medium" : ""}>{option}</span>
+                        <span className={optionDotClass(selected)} />
+                        <span>{option}</span>
                       </button>
                     );
                   })}
-                  <div className="flex items-center gap-2 py-1">
+                  <div
+                    role="radio"
+                    aria-checked={customSelected}
+                    tabIndex={0}
+                    onClick={() => chooseCustom(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        chooseCustom(item);
+                      }
+                    }}
+                    className={`${optionRowClass(customSelected)} grid cursor-pointer grid-cols-[8px_auto_minmax(0,1fr)]`}
+                  >
+                    <span className={optionDotClass(customSelected)} />
                     <button
                       type="button"
                       onClick={() => chooseCustom(item)}
-                      className="shrink-0 text-left text-[13px] text-[#6E5A16] hover:text-[#8A6D3B]"
+                      className="shrink-0 text-left text-[13px] text-inherit"
                     >
                       都不是，我自己描述
                     </button>
@@ -348,7 +387,7 @@ export function AwaitingUserResumePanel({
                       onFocus={() => chooseCustom(item)}
                       onChange={(event) => updateCustomValue(event.target.value, item)}
                       placeholder={item.inputPlaceholder?.trim() || `输入${item.label}`}
-                      className="min-w-0 flex-1 border-b border-[#E5D7A8] bg-transparent px-1 py-1 text-[13px] text-[#1F2328] outline-none placeholder:text-[#B7A66A] focus:border-[#8A6D3B]"
+                      className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
                     />
                   </div>
                 </div>
@@ -358,7 +397,7 @@ export function AwaitingUserResumePanel({
         </div>
       ) : (
         <div className="mt-3">
-          <div className="mt-2 space-y-2">
+          <div className="space-y-1.5">
             {options.map((option) => {
               const selected = selectedOption === option && !customMode;
               return (
@@ -366,24 +405,31 @@ export function AwaitingUserResumePanel({
                   key={option}
                   type="button"
                   onClick={() => chooseOption(option)}
-                  className="flex w-full items-center gap-2 py-1 text-left text-[13px] text-[#1F2328] hover:text-[#8A6D3B]"
+                  className={optionRowClass(selected)}
                 >
-                  <span
-                    className={
-                      selected
-                        ? "h-2 w-2 rounded-full bg-[#8A6D3B]"
-                        : "h-2 w-2 rounded-full bg-[#D8C995]"
-                    }
-                  />
-                  <span className={selected ? "font-medium" : ""}>{option}</span>
+                  <span className={optionDotClass(selected)} />
+                  <span>{option}</span>
                 </button>
               );
             })}
-            <div className="flex items-center gap-2 py-1">
+            <div
+              role="radio"
+              aria-checked={customMode}
+              tabIndex={0}
+              onClick={() => chooseCustom()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  chooseCustom();
+                }
+              }}
+              className={`${optionRowClass(customMode)} grid cursor-pointer grid-cols-[8px_auto_minmax(0,1fr)]`}
+            >
+              <span className={optionDotClass(customMode)} />
               <button
                 type="button"
                 onClick={() => chooseCustom()}
-                className="shrink-0 text-left text-[13px] text-[#6E5A16] hover:text-[#8A6D3B]"
+                className="shrink-0 text-left text-[13px] text-inherit"
               >
                 都不是，我自己描述
               </button>
@@ -392,21 +438,21 @@ export function AwaitingUserResumePanel({
                 onFocus={() => chooseCustom()}
                 onChange={(event) => updateCustomValue(event.target.value)}
                 placeholder={options.length ? "请输入你的选择" : "请输入需要补充的信息"}
-                className="min-w-0 flex-1 border-b border-[#E5D7A8] bg-transparent px-1 py-1 text-[13px] text-[#1F2328] outline-none placeholder:text-[#B7A66A] focus:border-[#8A6D3B]"
+                className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
               />
             </div>
           </div>
         </div>
       )}
       {blocker ? (
-        <div className="mt-4 space-y-3">
+        <div className="mt-5 space-y-3">
           {error ? <div className="text-[12px] text-[#B42318]">{error}</div> : null}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               disabled={Boolean(pending)}
               onClick={() => void submit(true)}
-              className="rounded-md bg-[#111] px-4 py-2 text-[12px] font-medium text-white hover:bg-[#333] disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#2B2B2B] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending === "approve" ? "提交中..." : primaryLabelFor(instance)}
             </button>
@@ -415,7 +461,7 @@ export function AwaitingUserResumePanel({
                 type="button"
                 disabled={Boolean(pending)}
                 onClick={() => void submit(false)}
-                className="rounded-md border border-[#D0D7DE] bg-white px-4 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-50"
+                className="bg-transparent px-0 py-2 text-[13px] text-[#6B7280] hover:text-[#1F2933] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pending === "revise" ? "提交中..." : "让 KiKi 修改后继续"}
               </button>

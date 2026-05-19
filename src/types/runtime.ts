@@ -53,6 +53,19 @@ export type RuntimeDiscoveryResult = {
   workingDirectory: string;
 };
 
+export type QuotedConversationMessageContext = {
+  roleLabel: string;
+  content: string;
+  messageId?: string;
+  messageKind?: import("@/types/kiki").ConversationMessage["kind"];
+  taskRef?: {
+    goalId: string;
+    subGoalId: string;
+    taskId: string;
+    instanceId: string;
+  };
+};
+
 export type ClaudeChatRequest = {
   message: string;
   conversationId: string;
@@ -70,10 +83,7 @@ export type ClaudeChatRequest = {
     conversation: import("@/types/kiki").Conversation;
     goal?: import("@/types/kiki").Goal | null;
   };
-  quotedMessage?: {
-    roleLabel: string;
-    content: string;
-  } | null;
+  quotedMessage?: QuotedConversationMessageContext | null;
 };
 
 export type ClaudeStreamEvent =

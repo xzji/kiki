@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 
-import type { RuntimePermissionMode } from "@/types/runtime";
+import type { QuotedConversationMessageContext, RuntimePermissionMode } from "@/types/runtime";
 
 import { buildClaudeEnv } from "./claudeEnv";
 import { normalizeWorkingDirectory, resolveCliPath } from "./runtimeEnvValidation";
@@ -43,15 +43,12 @@ type ClaudeStreamOptions = {
   claudeSessionId?: string;
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
-  quotedMessage?: {
-    roleLabel: string;
-    content: string;
-  } | null;
+  quotedMessage?: QuotedConversationMessageContext | null;
   signal?: AbortSignal;
   onEvent: (event: ClaudeStreamEvent) => void;
 };
 
-type ClaudeStreamEvent =
+export type ClaudeStreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "status"; status: "checking" | "running" | "completed" }
   | { type: "delta"; text: string }

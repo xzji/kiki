@@ -491,6 +491,11 @@ MECE (Mutually Exclusive, Collectively Exhaustive) 要求：
 4. 形成可执行的阶段序列
 
 # Instructions
+## 重要输出约束
+- 只能输出一个严格合法的 JSON 对象。
+- 不要输出 Markdown、标题、解释、代码块、emoji 或任何 JSON 之外的文字。
+- 不要先展示思考过程，所有分析都必须写入 JSON 字段。
+
 ## 拆解前思考
 在拆解前，请先思考：
 1. 这个目标的核心意图是什么？
@@ -518,7 +523,7 @@ MECE (Mutually Exclusive, Collectively Exhaustive) 要求：
 ${JSON.stringify(input.userContext, null, 2)}
 
 # Output Format
-请严格按照以下 JSON 格式返回，确保所有必填字段完整：
+请严格按照以下 JSON 格式返回，确保所有必填字段完整。回复必须以 { 开头，以 } 结尾：
 {
   "goalAnalysis": {
     "coreIntent": "核心意图：一句话概括目标的本质",
@@ -547,6 +552,64 @@ ${JSON.stringify(input.userContext, null, 2)}
 }`;
 }
 
+function buildDecompositionNormalizationPrompt(input: {
+  goalTitle: string;
+  goalDescription: string;
+  userContext: Record<string, unknown>;
+  rawOutput: string;
+  config: EasterEggSettings;
+}) {
+  return `你是目标拆解 JSON 规范化助手。下面的“原始输出”可能是 Markdown、自然语言或不合法 JSON。
+
+你的任务：把原始输出转换为严格合法的 JSON 对象，并符合指定 schema。
+
+硬性要求：
+1. 只能输出 JSON，不要输出 Markdown、解释、代码块或额外文字。
+2. 回复必须以 { 开头，以 } 结尾。
+3. 尽量保留原始输出中的拆解语义；如果原始输出缺少字段，请基于目标信息合理补齐。
+4. subGoals 数量建议 ${input.config.minSubGoals}-${input.config.maxSubGoals} 个。
+5. priority 只能是 critical、high、medium、low。
+6. successCriteria[].type 只能是 milestone、deliverable、condition。
+7. dependencies 必须是数字数组，引用前置子目标 id；无依赖则 []。
+
+目标信息：
+${JSON.stringify({
+  goalTitle: input.goalTitle,
+  goalDescription: input.goalDescription,
+  userContext: input.userContext,
+}, null, 2)}
+
+必须输出的 JSON schema：
+{
+  "goalAnalysis": {
+    "coreIntent": "核心意图",
+    "successState": "成功状态",
+    "assumptions": ["假设1"]
+  },
+  "subGoals": [
+    {
+      "id": 1,
+      "name": "子目标名称",
+      "description": "详细描述",
+      "why": "必要性说明",
+      "priority": "critical",
+      "weight": 0.2,
+      "dependencies": [],
+      "estimatedDurationMinutes": 480,
+      "successCriteria": [
+        { "description": "完成标准", "type": "milestone" }
+      ]
+    }
+  ],
+  "executionOrder": "执行顺序建议",
+  "risks": ["风险点"],
+  "reasoning": "拆解理由"
+}
+
+原始输出：
+${input.rawOutput}`;
+}
+
 function buildTaskGenerationPrompt(input: {
   goalTitle: string;
   goalDescription: string;
@@ -556,8 +619,10 @@ function buildTaskGenerationPrompt(input: {
   successCriteria: string[];
   config: EasterEggSettings;
 }) {
-  return `请为以下子目标生成具体的执行任务。
+  return `# Role
+你是 KiKi 的目标规划任务生成 Agent。你的职责是把子目标转化为具体、可执行、可验收的任务。
 
+# Dynamic Context
 子目标: ${input.subGoalName}
 描述: ${input.subGoalDescription}
 完成标准:
@@ -566,7 +631,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 目标补充说明: ${input.goalDescription}
 用户背景: ${JSON.stringify(input.userContext, null, 2)}
 
-要求:
+# Instructions
 1. 每个任务应该是具体可执行的
 2. 明确每个任务的预期产出
 3. 任务优先级要合理
@@ -580,13 +645,26 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 11. 必须明确交付形式：expected_output.presentation、primary_format、exportable_formats、required_blocks 都必须填写
 12. 信息类任务（type=information）默认使用 presentation=visual_report、primary_format=structured_blocks、exportable_formats 至少包含 html，避免只交付 markdown 长文
 13. 对比/研究/攻略/方案类任务必须优先要求 comparison_table、callout、key_value 等 blocks，形成可视化报告
+14. 信息类任务如果完成标准只是“生成报告/调研/对比/分析/清单”，用户查看、确认是否满意、选择下一步或圈定偏好只属于产出反馈/下游任务输入，不能写成当前任务的完成条件
+15. 只有 expected_output.type 是 decision/confirmation，或 completion_criteria 明确要求“必须由用户确认/审批/选择后才完成”，才允许把 user_interaction_type 设为 confirm
 
 协作模式规则:
 - agent_autonomous: Agent 可自主完成，用户只需知悉结果
-- agent_with_user_confirmation: Agent 自主产出，但需要用户确认、采纳或提出修改建议
+- agent_with_user_confirmation: Agent 自主产出，但当前任务的完成标准明确要求用户确认、采纳或提出修改建议
 - agent_user_collaborative: Agent 与用户共同完成，用户作答、选择或补充是任务完成的一部分
 - user_primary_agent_assistive: 用户主要完成，Agent 负责建议、提醒、检查和记录
 
+# Examples
+信息类任务示例：
+- 如果任务是“生成调研报告 / 城市对比 / 攻略 / 分析清单”，且完成标准只是产出信息结果，应设置：
+  - expected_output.type="information"
+  - collaboration.mode="agent_autonomous"
+  - collaboration.user_interaction_type="none"
+  - collaboration.user_interaction_timing="not_required"
+  - collaboration.completion_owner="agent"
+- 用户查看结果、提出反馈、选择下一步，只属于产出后的反馈或下游任务输入，不是当前任务完成条件。
+
+# Output Format
 请按 JSON 格式返回：
 {
   "sub_goal_analysis": {
@@ -642,7 +720,14 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
     "explanation": "覆盖度说明",
     "uncovered_risks": ["未覆盖风险1"]
   }
-}`;
+}
+
+# Critical Reminders
+1. 只能输出一个严格合法的 JSON 对象，不要输出 Markdown、代码块或额外解释。
+2. 信息类任务默认使用结构化 blocks，不要只交付 Markdown 长文。
+3. 信息类任务完成标准如果只是生成报告/调研/对比/分析/清单，不要把用户确认满意写成当前任务完成条件。
+4. 只有 expected_output.type 是 decision/confirmation，或 completion_criteria 明确要求用户确认/审批/选择后才完成，才允许 user_interaction_type=confirm。
+5. 每个任务都必须明确 Agent / 用户职责分工和完成归属。`;
 }
 
 function buildTaskReviewPrompt(input: {
@@ -1477,6 +1562,16 @@ function inferCollaborationMode(
   return "agent_autonomous";
 }
 
+function requiresUserConfirmationToComplete(input: {
+  expectedOutputType: TaskGenerationPayload["tasks"][number]["expected_output"]["type"];
+  completionCriteria?: string;
+}) {
+  if (input.expectedOutputType === "decision" || input.expectedOutputType === "confirmation") return true;
+  return /用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(
+    input.completionCriteria ?? "",
+  );
+}
+
 function normalizeTaskCollaborationPayload(
   task: Record<string, unknown> & {
     execution_mode?: unknown;
@@ -1507,41 +1602,55 @@ function normalizeTaskCollaborationPayload(
       format: "text" as const,
     },
   };
+  const completionCriteria = typeof expectedOutput.completion_criteria === "string" ? expectedOutput.completion_criteria.trim() : "";
+  const shouldTreatAsAgentOwnedInformation =
+    normalizedExpectedOutputType === "information" &&
+    !requiresUserConfirmationToComplete({
+      expectedOutputType: normalizedExpectedOutputType,
+      completionCriteria,
+    });
   const raw = isObject(task.collaboration) ? task.collaboration : {};
   const inferredInteractionType = inferUserInteractionType(normalizedTask);
-  const userInteractionType =
-    raw.user_interaction_type === "confirm" ||
-    raw.user_interaction_type === "answer" ||
-    raw.user_interaction_type === "provide_context" ||
-    raw.user_interaction_type === "perform_offline_action"
+  const userInteractionType = shouldTreatAsAgentOwnedInformation
+    ? "none"
+    : raw.user_interaction_type === "confirm" ||
+        raw.user_interaction_type === "answer" ||
+        raw.user_interaction_type === "provide_context" ||
+        raw.user_interaction_type === "perform_offline_action"
       ? raw.user_interaction_type
       : inferredInteractionType;
   const mode =
-    raw.mode === "agent_with_user_confirmation" ||
-    raw.mode === "agent_user_collaborative" ||
-    raw.mode === "user_primary_agent_assistive" ||
-    raw.mode === "agent_autonomous"
-      ? raw.mode
-      : inferCollaborationMode(userInteractionType);
+    shouldTreatAsAgentOwnedInformation
+      ? "agent_autonomous"
+      : raw.mode === "agent_with_user_confirmation" ||
+          raw.mode === "agent_user_collaborative" ||
+          raw.mode === "user_primary_agent_assistive" ||
+          raw.mode === "agent_autonomous"
+        ? raw.mode
+        : inferCollaborationMode(userInteractionType);
   const userInteractionTiming =
-    raw.user_interaction_timing === "before_execution" ||
-    raw.user_interaction_timing === "during_execution" ||
-    raw.user_interaction_timing === "after_agent_output" ||
-    raw.user_interaction_timing === "core_task_step"
-      ? raw.user_interaction_timing
-      : userInteractionType === "none"
-        ? "not_required"
-        : userInteractionType === "answer" || userInteractionType === "perform_offline_action"
-          ? "core_task_step"
-          : "after_agent_output";
+    shouldTreatAsAgentOwnedInformation
+      ? "not_required"
+      : raw.user_interaction_timing === "before_execution" ||
+          raw.user_interaction_timing === "during_execution" ||
+          raw.user_interaction_timing === "after_agent_output" ||
+          raw.user_interaction_timing === "core_task_step"
+        ? raw.user_interaction_timing
+        : userInteractionType === "none"
+          ? "not_required"
+          : userInteractionType === "answer" || userInteractionType === "perform_offline_action"
+            ? "core_task_step"
+            : "after_agent_output";
   const completionOwner =
-    raw.completion_owner === "user" || raw.completion_owner === "shared" || raw.completion_owner === "agent"
-      ? raw.completion_owner
-      : mode === "agent_user_collaborative"
-        ? "shared"
-        : mode === "user_primary_agent_assistive"
-          ? "user"
-          : "agent";
+    shouldTreatAsAgentOwnedInformation
+      ? "agent"
+      : raw.completion_owner === "user" || raw.completion_owner === "shared" || raw.completion_owner === "agent"
+        ? raw.completion_owner
+        : mode === "agent_user_collaborative"
+          ? "shared"
+          : mode === "user_primary_agent_assistive"
+            ? "user"
+            : "agent";
   const defaultActionLabel =
     userInteractionType === "answer"
       ? "开始作答"
@@ -1567,7 +1676,9 @@ function normalizeTaskCollaborationPayload(
       typeof raw.should_notify_user === "boolean" ? raw.should_notify_user : userInteractionType !== "none",
     completion_owner: completionOwner,
     completion_definition:
-      typeof raw.completion_definition === "string" && raw.completion_definition.trim()
+      shouldTreatAsAgentOwnedInformation && completionCriteria
+        ? completionCriteria
+        : typeof raw.completion_definition === "string" && raw.completion_definition.trim()
         ? raw.completion_definition.trim()
         : `完成「${normalizedTask.expected_output.description}」`,
   };
@@ -1752,20 +1863,66 @@ async function decomposeGoalWithClaude(input: {
       stepLabel: "拆解子目标",
     },
   });
-  return parseClaudeJson({
-    raw: stdout,
-    validator: validateDecomposition,
-    errorMessage: "Claude 子目标拆解 JSON 解析失败",
-    runtimeEnv: input.runtimeEnv,
-    conversationId: input.conversationId,
-    signal: input.signal,
-    context: {
+  const parseContext = {
+    requestId: input.requestId,
+    scope: "goal_plan" as GoalTelemetryScope,
+    phase: "decomposing" as GoalWorkflowPhase,
+    stepLabel: "拆解子目标",
+  };
+  try {
+    return await parseClaudeJson({
+      raw: stdout,
+      validator: validateDecomposition,
+      errorMessage: "Claude 子目标拆解 JSON 解析失败",
+      runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
+      signal: input.signal,
+      context: parseContext,
+    });
+  } catch (error) {
+    appendGoalLog({
       requestId: input.requestId,
       scope: "goal_plan",
+      level: "warn",
       phase: "decomposing",
-      stepLabel: "拆解子目标",
-    },
-  });
+      message: "子目标拆解解析失败，尝试按拆解 schema 语义修复",
+      details: error instanceof Error ? error.message : "未知解析错误",
+    });
+    const normalizedStdout = await runClaudeJson({
+      runtimeEnv: input.runtimeEnv,
+      prompt: buildDecompositionNormalizationPrompt({
+        goalTitle: input.goalTitle,
+        goalDescription: input.goalDescription,
+        userContext: input.userContext,
+        config: input.config,
+        rawOutput: stripJsonFences(extractTextFromPayload(stdout)),
+      }),
+      conversationId: input.conversationId,
+      signal: input.signal,
+      abortMessage: "子目标拆解修复已中断",
+      failureMessage: "Claude CLI 子目标拆解修复失败",
+      context: {
+        requestId: input.requestId,
+        scope: "goal_plan",
+        phase: "decomposing",
+        stepLabel: "修复拆解子目标",
+      },
+    });
+    return parseClaudeJson({
+      raw: normalizedStdout,
+      validator: validateDecomposition,
+      errorMessage: "Claude 子目标拆解 JSON 语义修复失败",
+      runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
+      signal: input.signal,
+      context: {
+        requestId: input.requestId,
+        scope: "goal_plan",
+        phase: "decomposing",
+        stepLabel: "修复拆解子目标",
+      },
+    });
+  }
 }
 
 async function generateTasksForSubGoalWithClaude(input: {

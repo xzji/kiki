@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { startTaskRun, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
@@ -295,7 +296,6 @@ function buildReminderItem(input: {
 
 function runExecutionWatchdogs(goals: Goal[]) {
   const settings = useEasterEggSettingsStore.getState().getSettings();
-  const goalStore = useGoalStore.getState();
   const inboxStore = useInboxStore.getState();
   const nowMs = Date.now();
 
@@ -305,7 +305,6 @@ function runExecutionWatchdogs(goals: Goal[]) {
         for (const instance of task.instances) {
           const ageMs = nowMs - new Date(instance.createdAt).getTime();
           if (instance.status === "in_progress" && ageMs >= settings.taskDefaultTimeoutMs) {
-            goalStore.markInstanceStatus(task.id, instance.id, "paused");
             const reminder = buildReminderItem({
               kind: "timeout",
               goal,
@@ -400,6 +399,17 @@ function runGoalSchedulerCycle() {
           instance: latestInstance,
           runtimeEnv,
         });
+        if (!run.requestId) {
+          useGoalStore.getState().syncTaskInstanceRun({
+            taskId: effectiveTask.id,
+            instanceId: run.taskInstanceId,
+            progress: run.progress,
+            logs: [],
+            trajectory: [],
+            waitingReason: run.waitingReason,
+          });
+          return;
+        }
         requestId = run.requestId;
         useGoalStore.getState().startTaskInstanceRun({
           taskId: effectiveTask.id,
@@ -440,7 +450,13 @@ function runGoalSchedulerCycle() {
             errorMessage: error instanceof Error ? error.message : "任务执行失败",
           });
         } else {
-          useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");
+          void transitionGoalInstance({
+            instanceId: latestInstance.id,
+            status: "error",
+            reason: error instanceof Error ? error.message : "任务执行启动失败",
+          }).catch(() => {
+            useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");
+          });
         }
       }
     })();
@@ -459,6 +475,7 @@ export function GoalSchedulerRuntime() {
   const settings = useEasterEggSettingsStore((state) => state.settings);
   const hydrateSettings = useEasterEggSettingsStore((state) => state.hydrate);
   const browserSchedulerEnabled = process.env.NEXT_PUBLIC_KIKI_ENABLE_BROWSER_SCHEDULER === "1";
+  const daemonNotificationsEnabled = process.env.NEXT_PUBLIC_KIKI_NOTIFICATIONS_RUNTIME === "daemon";
 
   useEffect(() => {
     hydrateSettings();
@@ -471,9 +488,10 @@ export function GoalSchedulerRuntime() {
   }, [browserSchedulerEnabled, goals, hydrated, settings.maxConcurrentTasks]);
 
   useEffect(() => {
+    if (daemonNotificationsEnabled) return;
     if (!hydrated) return;
     deliverPendingTaskNotifications(goals);
-  }, [goals, hydrated]);
+  }, [daemonNotificationsEnabled, goals, hydrated]);
 
   useEffect(() => {
     if (!browserSchedulerEnabled) return;

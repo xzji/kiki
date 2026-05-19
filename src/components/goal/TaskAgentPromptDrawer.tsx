@@ -42,7 +42,21 @@ export function TaskAgentPromptDrawer({
 
   const promptText = useMemo(() => {
     if (!goal || !subGoal || !task || !previewInstance) return "";
-    return buildGoalTaskRunnerPrompt({ goal, subGoal, task, instance: previewInstance });
+    return buildGoalTaskRunnerPrompt({
+      context: {
+        identity: {
+          conversationId: goal.conversationId ?? "",
+          goalId: goal.id,
+          subGoalId: subGoal.id,
+          taskId: task.id,
+          instanceId: previewInstance.id,
+        },
+        readiness: { state: "ready", blockers: [], summary: "" },
+        dependencies: [],
+        inputs: { goal, subGoal, task, instance: previewInstance },
+        budget: { maxPromptBytes: 8192, maxKeyPoints: 8, maxArtifacts: 5 },
+      },
+    });
   }, [goal, subGoal, task, previewInstance]);
 
   if (!open || !task || !goal || !subGoal) return null;

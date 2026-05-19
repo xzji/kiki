@@ -66,6 +66,21 @@ export async function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload> 
   return (await response.json()) as RuntimeStatePayload;
 }
 
+export async function materializeGoalSnapshot(goal: Goal) {
+  const response = await fetch("/api/goals/materialize", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ goal }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.reason || "目标写入服务端快照失败");
+  }
+  return payload;
+}
+
 export async function fetchRuntimeDaemonStatus(): Promise<RuntimeDaemonStatusPayload> {
   const response = await fetch("/api/runtime/daemon/status", { cache: "no-store" });
   if (!response.ok) {

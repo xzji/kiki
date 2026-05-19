@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { upsertGoalsSnapshot, upsertRuntimeEnvironmentsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { upsertRuntimeEnvironmentsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -28,8 +28,16 @@ function isConflict(result: { ok: boolean; conflict?: boolean }) {
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as Body;
+  if (body.goals !== undefined) {
+    return NextResponse.json(
+      {
+        ok: false,
+        reason: "/api/runtime/state/sync 不再接受 goals 字段；请使用 /api/goals/instances/:id/{transition|respond|cancel} 命令式 API",
+      },
+      { status: 410 },
+    );
+  }
   if (
-    !isValidArrayPayload(body.goals) ||
     !isValidArrayPayload(body.runtimeEnvironments) ||
     !isValidArrayPayload(body.scheduleEvents)
   ) {
@@ -37,7 +45,6 @@ export async function POST(request: NextRequest) {
   }
 
   const results = {
-    goals: body.goals ? upsertGoalsSnapshot(body.goals, body.baseRevision?.goals) : null,
     runtimeEnvironments: body.runtimeEnvironments
       ? upsertRuntimeEnvironmentsSnapshot(body.runtimeEnvironments, body.baseRevision?.runtimeEnvironments)
       : null,

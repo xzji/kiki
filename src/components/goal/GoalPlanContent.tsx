@@ -171,7 +171,7 @@ export function GoalPlanContent({
           </div>
 
           <div className="grid min-w-[260px] grid-cols-4 gap-3 border-t border-[#E5E7EB] pt-5 lg:min-w-[360px] lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
-            <SummaryStat label="已完成" value={summary.completedCount} />
+            <SummaryStat label="已结束" value={summary.completedCount} />
             <SummaryStat label="待确认" value={summary.awaitingCount} />
             <SummaryStat label="进行中" value={summary.inProgressCount} />
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
@@ -268,7 +268,7 @@ function phaseLabel(phase: GoalWorkflowPhase) {
     case "paused":
       return "已暂停";
     case "completed":
-      return "已完成";
+      return "已结束";
     case "error":
       return "目标工作流出错";
     default:

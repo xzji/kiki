@@ -29,6 +29,15 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function executionPhaseFromInstanceStatus(status: TaskInstanceStatus): TaskExecutionPhase {
+  if (status === "completed") return "completed";
+  if (status === "awaiting_user") return "awaiting_user";
+  if (status === "in_progress") return "running";
+  if (status === "error") return "failed";
+  if (status === "paused") return "paused";
+  return "queued";
+}
+
 function normalizeTimelineFromLogs(logs: GoalServerLogEntry[] | undefined): TaskExecutionStep[] | undefined {
   if (!logs?.length) return undefined;
   return logs
@@ -87,8 +96,10 @@ function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] |
             ? "result"
             : "phase",
     status: step.status,
+    agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
   }));
@@ -145,6 +156,16 @@ export function addGeneratedInstanceToGoalsSnapshot(goals: Goal[], taskId: strin
           instances: [nextInstance, ...task.instances],
         };
       }),
+    })),
+  }));
+}
+
+export function setTaskAutoRunDisabled(goals: Goal[], taskId: string, value: boolean) {
+  return goals.map((goal) => ({
+    ...goal,
+    subGoals: goal.subGoals.map((subGoal) => ({
+      ...subGoal,
+      tasks: subGoal.tasks.map((task) => (task.id === taskId ? { ...task, autoRunDisabled: value } : task)),
     })),
   }));
 }
@@ -295,6 +316,86 @@ export function markGoalInstanceRunStarted(
                     status: "in_progress" as TaskInstanceStatus,
                     startedAt: instance.execution?.startedAt ?? nowIso(),
                     lastUpdatedAt: nowIso(),
+                  },
+                }
+              : instance,
+          ),
+        };
+      }),
+    })),
+  }));
+}
+
+export function markGoalInstanceStatusSnapshot(
+  goals: Goal[],
+  input: {
+    taskId: string;
+    instanceId: string;
+    status: TaskInstanceStatus;
+    reason?: string;
+  },
+) {
+  const now = nowIso();
+  return goals.map((goal) => ({
+    ...goal,
+    subGoals: goal.subGoals.map((subGoal) => ({
+      ...subGoal,
+      tasks: subGoal.tasks.map((task) => {
+        if (task.id !== input.taskId) return task;
+        return {
+          ...task,
+          instances: task.instances.map((instance) =>
+            instance.id === input.instanceId
+              ? {
+                  ...instance,
+                  status: input.status,
+                  execution: {
+                    ...instance.execution,
+                    phase: executionPhaseFromInstanceStatus(input.status),
+                    status: input.status,
+                    startedAt: instance.execution?.startedAt ?? instance.createdAt,
+                    finishedAt: input.status === "completed" ? now : instance.execution?.finishedAt,
+                    lastUpdatedAt: now,
+                    errorMessage: input.status === "error" ? input.reason : instance.execution?.errorMessage,
+                  },
+                }
+              : instance,
+          ),
+        };
+      }),
+    })),
+  }));
+}
+
+export function markGoalTaskNotificationDeliveredSnapshot(
+  goals: Goal[],
+  input: {
+    taskId: string;
+    instanceId: string;
+    inboxItemId?: string;
+    conversationMessageId?: string;
+  },
+) {
+  const now = nowIso();
+  return goals.map((goal) => ({
+    ...goal,
+    subGoals: goal.subGoals.map((subGoal) => ({
+      ...subGoal,
+      tasks: subGoal.tasks.map((task) => {
+        if (task.id !== input.taskId) return task;
+        return {
+          ...task,
+          instances: task.instances.map((instance) =>
+            instance.id === input.instanceId && instance.notification
+              ? {
+                  ...instance,
+                  notification: {
+                    ...instance.notification,
+                    deliveryState: "delivered" as const,
+                    deliveredAt: now,
+                    inboxItemId: input.inboxItemId ?? instance.notification.inboxItemId,
+                    conversationMessageId:
+                      input.conversationMessageId ?? instance.notification.conversationMessageId,
                   },
                 }
               : instance,

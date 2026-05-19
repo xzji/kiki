@@ -5,20 +5,15 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 import { getSlashCommandSuggestions } from "@/lib/slashCommands";
 import type { SlashCommand } from "@/lib/slashCommands";
+import type { QuotedConversationMessageContext } from "@/types/runtime";
 
 type Props = {
   onSubmit: (
     value: string,
-    quotedMessage?: {
-      roleLabel: string;
-      content: string;
-    } | null,
+    quotedMessage?: QuotedConversationMessageContext | null,
   ) => void | Promise<void>;
   placeholder?: string;
-  quotedMessage?: {
-    roleLabel: string;
-    content: string;
-  } | null;
+  quotedMessage?: QuotedConversationMessageContext | null;
   onClearQuote?: () => void;
   disabled?: boolean;
   localMode?: boolean;

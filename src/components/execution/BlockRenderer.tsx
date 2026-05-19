@@ -114,8 +114,26 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
   }
 }
 
+function normalizeTitleForCompare(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/demo|报告|结果|分析|复盘|产出物/g, "")
+    .replace(/[\s\-_.,，。:：;；!?！？()[\]【】"'“”‘’/\\]+/g, "");
+}
+
+function isDuplicateLeadingHeading(title: string, block: ResultBlock) {
+  if (block.kind !== "heading") return false;
+  const normalizedTitle = normalizeTitleForCompare(title);
+  const normalizedHeading = normalizeTitleForCompare(block.text);
+  if (!normalizedTitle || !normalizedHeading) return false;
+  return normalizedTitle.includes(normalizedHeading) || normalizedHeading.includes(normalizedTitle);
+}
+
 export function TaskResultBlockView({ result }: { result: TaskResult }) {
   const presentationLabel = result.meta.presentation ? PRESENTATION_LABEL[result.meta.presentation] : "结构化产物";
+  const displayBlocks = isDuplicateLeadingHeading(result.title, result.blocks[0])
+    ? result.blocks.slice(1)
+    : result.blocks;
 
   return (
     <article className="rounded-xl border border-[#E5E7EB] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -124,7 +142,7 @@ export function TaskResultBlockView({ result }: { result: TaskResult }) {
       </div>
       <h3 className="mt-2 text-[16px] font-semibold leading-7 text-[#1F2328]">{result.title}</h3>
       <div className="mt-4 space-y-4">
-        {result.blocks.map((block, index) => (
+        {displayBlocks.map((block, index) => (
           <BlockRenderer key={`${block.kind}-${index}`} block={block} />
         ))}
       </div>

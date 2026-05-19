@@ -2,7 +2,10 @@ import { NextRequest } from "next/server";
 
 import { streamClaudeCli } from "@/lib/server/claudeCli";
 import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
-import { buildConversationContextPack } from "@/lib/server/workspace/contextPack";
+import {
+  buildConversationContextPack,
+  sanitizeConversationMessages,
+} from "@/lib/server/workspace/contextPack";
 import {
   ensureConversationWorkspace,
   getConversationContextFilePath,
@@ -31,7 +34,9 @@ export async function POST(request: NextRequest) {
         const workspace = ensureConversationWorkspace(body.conversationId);
         let contextPack: string | undefined;
         if (body.contextSnapshot?.conversation?.id === body.conversationId) {
-          const recentMessages = body.contextSnapshot.conversation.messages.slice(-20) as ConversationMessage[];
+          const recentMessages = sanitizeConversationMessages(
+            body.contextSnapshot.conversation.messages.slice(-20) as ConversationMessage[],
+          );
           contextPack = buildConversationContextPack({
             conversation: body.contextSnapshot.conversation,
             goal: body.contextSnapshot.goal ?? null,

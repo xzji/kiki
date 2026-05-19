@@ -1,4 +1,5 @@
 import { getDatabase } from "@/lib/server/db/client";
+import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
@@ -121,6 +122,14 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function appendRuntimeJobGoalEvent(input: Parameters<typeof appendGoalEventOnce>[0]) {
+  try {
+    return appendGoalEventOnce(input);
+  } catch {
+    return null;
+  }
+}
+
 export function upsertRuntimeJob(record: RuntimeJobRecord) {
   const db = getDatabase();
   db.prepare(
@@ -184,7 +193,10 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
   });
 }
 
-export function createQueuedRuntimeJob(payload: RuntimeJobPayload, input?: { requestId?: string }) {
+export function createQueuedRuntimeJob(
+  payload: RuntimeJobPayload,
+  input?: { requestId?: string; eventSource?: "scheduler" | "user" | "feedback" | "resume" },
+) {
   const now = nowIso();
   const jobId = `job-${payload.instance.id}`;
   const record: RuntimeJobRecord = {
@@ -210,6 +222,21 @@ export function createQueuedRuntimeJob(payload: RuntimeJobPayload, input?: { req
     updatedAt: now,
   };
   upsertRuntimeJob(record);
+  appendRuntimeJobGoalEvent({
+    goalId: payload.goal.id,
+    taskId: payload.task.id,
+    instanceId: payload.instance.id,
+    kind: "instance.created",
+    producedBy: input?.eventSource === "scheduler" || !input?.eventSource ? "scheduler" : "user",
+    idempotencyKey: `instance.created:${payload.instance.id}`,
+    createdAt: now,
+    payload: {
+      requestId: input?.requestId,
+      status: payload.instance.status,
+      runtimeEnvId: payload.runtimeEnv.id,
+      source: input?.eventSource ?? "scheduler",
+    },
+  });
   return record;
 }
 
@@ -245,8 +272,8 @@ export function claimQueuedRuntimeJobs(input: { leaseOwner: string; limit: numbe
     )
     .all(now, input.limit) as RuntimeJobRow[];
 
-  return rows.map((row) => {
-    db.prepare(
+  return rows.flatMap((row) => {
+    const result = db.prepare(
       `
         UPDATE runtime_jobs
         SET status = 'running',
@@ -255,8 +282,10 @@ export function claimQueuedRuntimeJobs(input: { leaseOwner: string; limit: numbe
             started_at = COALESCE(started_at, ?),
             updated_at = ?
         WHERE id = ?
+          AND status = 'queued'
       `,
     ).run(input.leaseOwner, leaseExpiresAt, now, now, row.id);
+    if (result.changes === 0) return [];
 
     return {
       ...mapRow({
@@ -303,7 +332,58 @@ export function updateRuntimeJobExecution(
     updatedAt: nowIso(),
   };
   upsertRuntimeJob(next);
+  if (updates.status && updates.status !== existing.status && next.goalId && next.taskId && next.taskInstanceId) {
+    appendRuntimeJobGoalEvent({
+      goalId: next.goalId,
+      taskId: next.taskId,
+      instanceId: next.taskInstanceId,
+      kind: "instance.status_changed",
+      producedBy: "worker",
+      idempotencyKey: `instance.status_changed:${next.taskInstanceId}:${existing.status}->${updates.status}:${next.updatedAt}`,
+      createdAt: next.updatedAt,
+      payload: {
+        previousStatus: existing.status,
+        nextStatus: updates.status,
+        requestId: next.requestId,
+        reason: updates.lastError,
+      },
+    });
+  }
+  if (updates.progress && next.goalId && next.taskId && next.taskInstanceId) {
+    appendRuntimeJobGoalEvent({
+      goalId: next.goalId,
+      taskId: next.taskId,
+      instanceId: next.taskInstanceId,
+      kind: "instance.progress",
+      producedBy: "worker",
+      idempotencyKey: `instance.progress:${next.taskInstanceId}:${next.updatedAt}`,
+      createdAt: next.updatedAt,
+      payload: {
+        requestId: next.requestId,
+        message: updates.progress.message,
+        progress: updates.progress,
+        trajectoryLength: updates.trajectory?.length ?? next.trajectory.length,
+      },
+    });
+  }
   return next;
+}
+
+export function markRuntimeJobAwaiting(jobId: string, input: { reason: string; blocker?: unknown }) {
+  const existing = getRuntimeJob(jobId);
+  if (!existing) return null;
+  return updateRuntimeJobExecution(jobId, {
+    status: "awaiting_user",
+    leaseOwner: undefined,
+    leaseExpiresAt: undefined,
+    lastError: undefined,
+    result: {
+      ...(existing.result ?? {}),
+      awaitingUser: true,
+      awaitingReason: input.reason,
+      contextBlocker: input.blocker,
+    },
+  });
 }
 
 export function isRuntimeJobLeaseHeld(jobId: string, leaseOwner: string) {

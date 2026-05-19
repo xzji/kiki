@@ -1,9 +1,31 @@
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Conversation, ConversationMessage, Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
+import type { QuotedConversationMessageContext } from "@/types/runtime";
 
 function truncate(value: string, max = 1200) {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}...`;
+}
+
+const TERMINAL_CONTROL_NOTICE_PATTERNS = [
+  /^\s*（已停止，未检测到正在运行的任务）\s*$/gm,
+  /^\s*已停止，未检测到正在运行的任务。\s*$/gm,
+];
+
+export function sanitizeConversationMessageContent(content: string) {
+  return TERMINAL_CONTROL_NOTICE_PATTERNS.reduce(
+    (next, pattern) => next.replace(pattern, ""),
+    content,
+  )
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function sanitizeConversationMessages<T extends ConversationMessage>(messages: T[]) {
+  return messages.map((message) => ({
+    ...message,
+    content: sanitizeConversationMessageContent(message.content),
+  }));
 }
 
 function messageRoleLabel(role: ConversationMessage["role"]) {
@@ -14,7 +36,7 @@ function messageRoleLabel(role: ConversationMessage["role"]) {
 export function serializeConversationMessages(messages: ConversationMessage[]) {
   return messages.map((message) => ({
     role: message.role,
-    content: message.content,
+    content: sanitizeConversationMessageContent(message.content),
     createdAt: message.createdAt,
     kind: message.kind,
   }));
@@ -29,7 +51,7 @@ export function buildConversationContextPack(input: {
   conversation: Conversation;
   goal?: Goal | null;
   recentMessages: ConversationMessage[];
-  quotedMessage?: { roleLabel: string; content: string } | null;
+  quotedMessage?: QuotedConversationMessageContext | null;
 }) {
   const lines: string[] = [
     "# 当前会话上下文",
@@ -66,11 +88,26 @@ export function buildConversationContextPack(input: {
 
   if (input.quotedMessage) {
     lines.push("", "## 用户引用消息", `[${input.quotedMessage.roleLabel}] ${truncate(input.quotedMessage.content)}`);
+    if (input.quotedMessage.taskRef) {
+      lines.push(
+        "",
+        "### 引用任务结构化定位",
+        `- goalId: ${input.quotedMessage.taskRef.goalId}`,
+        `- subGoalId: ${input.quotedMessage.taskRef.subGoalId}`,
+        `- taskId: ${input.quotedMessage.taskRef.taskId}`,
+        `- instanceId: ${input.quotedMessage.taskRef.instanceId}`,
+      );
+    }
   }
 
   lines.push("", "## 最近会话消息");
   input.recentMessages.slice(-12).forEach((message) => {
-    lines.push(`- ${messageRoleLabel(message.role)}（${message.createdAt}）：${truncate(message.content, 800)}`);
+    lines.push(
+      `- ${messageRoleLabel(message.role)}（${message.createdAt}）：${truncate(
+        sanitizeConversationMessageContent(message.content),
+        800,
+      )}`,
+    );
   });
 
   return `${lines.join("\n")}\n`;
