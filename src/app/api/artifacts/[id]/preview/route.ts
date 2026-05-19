@@ -49,6 +49,10 @@ function webAppHeaders(csp: string) {
 const MOCK_WEBAPP_ID = "artifact-demo-webapp-1778950506965";
 const MOCK_INTERNET_WEBAPP_ID = "artifact-demo-internet-webapp-1778950506965";
 
+function isDevDemoEnabled() {
+  return process.env.NODE_ENV === "development";
+}
+
 function mockWebAppHtml() {
   return `<!doctype html>
 <html>
@@ -184,8 +188,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const artifact = getArtifactById(id);
   if (!artifact) {
-    if (id === MOCK_WEBAPP_ID) return new Response(mockWebAppHtml(), { headers: webAppHeaders(WEBAPP_OFFLINE_CSP) });
-    if (id === MOCK_INTERNET_WEBAPP_ID) return new Response(mockInternetWebAppHtml(), { headers: webAppHeaders(WEBAPP_INTERNET_CSP) });
+    if (isDevDemoEnabled() && id === MOCK_WEBAPP_ID) return new Response(mockWebAppHtml(), { headers: webAppHeaders(WEBAPP_OFFLINE_CSP) });
+    if (isDevDemoEnabled() && id === MOCK_INTERNET_WEBAPP_ID) return new Response(mockInternetWebAppHtml(), { headers: webAppHeaders(WEBAPP_INTERNET_CSP) });
     return NextResponse.json({ ok: false, reason: "产物不存在" }, { status: 404 });
   }
   if (artifact.kind !== "webapp") {

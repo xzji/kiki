@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { createOpaqueId } from "@/lib/opaqueIds";
-import { createGeneratedInstance } from "@/mocks/goals";
-import { createQueuedRuntimeJob, updateRuntimeJobExecution } from "@/lib/server/repositories/runtimeJobsRepository";
+import { createGeneratedInstance } from "@/lib/goalFactory";
 import { markGoalInstanceRunStarted, upsertGoalTaskInstanceSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { updateGoalRuntimeJobExecution, writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
+import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { judgeTaskFeedback } from "@/lib/server/taskFeedbackJudge";
 import { ensureConversationWorkspace, ensureTaskWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import { buildTaskQuoteContent, getFeedbackHistory, withFeedbackRecord } from "@/lib/taskFeedback";
@@ -202,7 +203,7 @@ export async function POST(request: NextRequest) {
       assistantMessage: "我已收到你对任务结果的反馈。当前本地 Runtime 未连接，暂时不能自动重做；连接 Runtime 后可以再次引用这条结果让我按反馈修订。",
       createdAt: nowIso(),
     };
-    upsertGoalsSnapshot(updateFeedbackRecord(goals, located.task.id, located.instance.id, record));
+    writeGoalsProjection(updateFeedbackRecord(goals, located.task.id, located.instance.id, record));
     return NextResponse.json({ decision: record.decision, assistantMessage: record.assistantMessage });
   }
 
@@ -227,7 +228,7 @@ export async function POST(request: NextRequest) {
       revisionContext: judge.revisionContext,
       createdAt: nowIso(),
     };
-    upsertGoalsSnapshot(updateFeedbackRecord(goals, located.task.id, located.instance.id, record));
+    writeGoalsProjection(updateFeedbackRecord(goals, located.task.id, located.instance.id, record));
     return NextResponse.json({
       decision: judge.decision,
       assistantMessage: judge.assistantMessage,
@@ -294,7 +295,7 @@ export async function POST(request: NextRequest) {
     rerunInstanceId: nextInstance.id,
   };
   const goalsWithFeedback = updateFeedbackRecord(startedGoals, located.task.id, located.instance.id, record);
-  upsertGoalsSnapshot(goalsWithFeedback);
+  writeGoalsProjection(goalsWithFeedback);
   const latest = findTaskRef(goalsWithFeedback, {
     ...body.taskRef,
     instanceId: nextInstance.id,
@@ -308,20 +309,33 @@ export async function POST(request: NextRequest) {
     instance: queuedInstance,
     message: "已收到反馈，正在按反馈重新执行任务。",
   });
-  createQueuedRuntimeJob(
-    {
-      goal: located.goal,
-      subGoal: located.subGoal,
-      task: queuedTask,
-      instance: queuedInstance,
-      runtimeEnv: body.runtimeEnv,
-      conversationWorkspaceDir: workspace.workspaceDir,
-      taskWorkspaceDir,
-      resumeContext: revisionContext,
-    },
-    { requestId, eventSource: "feedback" },
-  );
-  updateRuntimeJobExecution(`job-${queuedInstance.id}`, {
+  const attempt = startTaskAttempt({
+    goal: located.goal,
+    subGoal: located.subGoal,
+    task: queuedTask,
+    instance: queuedInstance,
+    runtimeEnv: body.runtimeEnv,
+    triggerSource: "feedback_rerun",
+    requestId,
+    conversationWorkspaceDir: workspace.workspaceDir,
+    taskWorkspaceDir,
+    resumeContext: revisionContext,
+  });
+  if (attempt.outcome !== "queued") {
+    return NextResponse.json({
+      decision: attempt.outcome === "awaiting_user" ? "rerun" : "clarify",
+      assistantMessage:
+        attempt.outcome === "awaiting_user"
+          ? "已收到反馈，但重跑任务需要先补充关键信息。"
+          : attempt.outcome === "already_running"
+            ? "我已经在按这条任务结果的反馈进行修订执行，先继续跟进当前修订任务。"
+            : attempt.reason,
+      reason: "reason" in attempt ? attempt.reason : undefined,
+      progress: "progress" in attempt ? attempt.progress : undefined,
+      taskInstanceId: attempt.taskInstanceId,
+    });
+  }
+  updateGoalRuntimeJobExecution(`job-${queuedInstance.id}`, {
     requestId,
     status: "queued",
     progress,

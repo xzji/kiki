@@ -289,7 +289,7 @@ export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotifica
     return buildResultReadyDecision(input);
   }
 
-  if (task.taskType === "monitoring" && hasImportantSignal(result)) {
+  if (task.executionMode === "monitoring" && hasImportantSignal(result)) {
     return buildResultReadyDecision(input, { priority: "high" });
   }
 

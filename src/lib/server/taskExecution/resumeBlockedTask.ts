@@ -1,9 +1,13 @@
 import {
   getRuntimeJobByTaskInstanceId,
-  updateRuntimeJobExecution,
 } from "@/lib/server/repositories/runtimeJobsRepository";
-import { syncGoalInstanceFromProgress } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import {
+  requeueBlockedGoalRuntimeJob,
+  syncTaskInstanceProgressProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import {
   ensureTaskWorkspace,
   writeJsonFileAtomic,
@@ -284,16 +288,6 @@ function nonInteractiveRequirement() {
   } satisfies InteractionRequirement;
 }
 
-function taskRequiresUserConfirmationToComplete(task: NonNullable<ReturnType<typeof getRuntimeJobByTaskInstanceId>>["payload"]["task"]) {
-  const expectedType = task.expectedResult?.type;
-  if (expectedType === "decision" || expectedType === "confirmation") return true;
-  const criteria = task.expectedResult?.completionCriteria ?? "";
-  if (/用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(criteria)) {
-    return true;
-  }
-  return task.collaboration?.completionOwner === "user" && task.expectedResult?.type !== "information";
-}
-
 function isInformationFeedbackOnlyBlocker(input: {
   task: NonNullable<ReturnType<typeof getRuntimeJobByTaskInstanceId>>["payload"]["task"];
   blocker: ExecutionBlocker;
@@ -305,7 +299,7 @@ function isInformationFeedbackOnlyBlocker(input: {
     input.blocker.interactionRequirement.type === "confirm" &&
     input.blocker.interactionRequirement.timing === "after_agent_output" &&
     taskResult?.status === "done" &&
-    !taskRequiresUserConfirmationToComplete(input.task)
+    !requiresUserConfirmationToComplete(input.task, { includeUserCompletionOwner: true })
   );
 }
 
@@ -465,14 +459,14 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       phase: "completed",
       message: "已记录用户反馈，任务保持完成",
     });
-    const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
+    syncTaskInstanceProgressProjection({
+      goals: readGoalsSnapshot([]),
       taskId: job.payload.task.id,
       instanceId: job.payload.instance.id,
       progress: nextProgress,
       logs: job.logs,
       trajectory: nextTrajectory,
     });
-    upsertGoalsSnapshot(nextGoals);
     if (conversationId) {
       writeTaskRunSnapshot({
         conversationId,
@@ -483,7 +477,7 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
         result: resultPayload,
       });
     }
-    updateRuntimeJobExecution(job.id, {
+    updateGoalRuntimeJobExecution(job.id, {
       status: "completed",
       progress: nextProgress,
       trajectory: nextTrajectory,
@@ -540,14 +534,14 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       phase: "completed",
       message: "用户已确认，任务已完成",
     });
-    const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
+    syncTaskInstanceProgressProjection({
+      goals: readGoalsSnapshot([]),
       taskId: job.payload.task.id,
       instanceId: job.payload.instance.id,
       progress: nextProgress,
       logs: job.logs,
       trajectory: nextTrajectory,
     });
-    upsertGoalsSnapshot(nextGoals);
     if (conversationId) {
       writeTaskRunSnapshot({
         conversationId,
@@ -558,7 +552,7 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
         result: resultPayload,
       });
     }
-    updateRuntimeJobExecution(job.id, {
+    updateGoalRuntimeJobExecution(job.id, {
       status: "completed",
       progress: nextProgress,
       trajectory: nextTrajectory,
@@ -619,14 +613,14 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
     phase: "executing",
     message: body.approved ? "已收到用户确认，等待 Agent 生成最终方案" : "已收到用户反馈，等待 Agent 继续执行",
   });
-  const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
+  syncTaskInstanceProgressProjection({
+    goals: readGoalsSnapshot([]),
     taskId: job.payload.task.id,
     instanceId: job.payload.instance.id,
     progress: nextProgress,
     logs: job.logs,
     trajectory: nextTrajectory,
   });
-  upsertGoalsSnapshot(nextGoals);
   if (conversationId) {
     writeTaskRunSnapshot({
       conversationId,
@@ -637,20 +631,13 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       result: resultPayload,
     });
   }
-  updateRuntimeJobExecution(job.id, {
-    status: "queued",
-    payload: {
-      ...job.payload,
-      taskWorkspaceDir,
-      resumeContext: buildResumeContext({ approved: body.approved, feedback }),
-    },
+  requeueBlockedGoalRuntimeJob({
+    job,
+    taskWorkspaceDir,
+    resumeContext: buildResumeContext({ approved: body.approved, feedback }),
     progress: nextProgress,
     trajectory: nextTrajectory,
-    blocker: null,
     result: resultPayload,
-    finishedAt: undefined,
-    leaseOwner: undefined,
-    leaseExpiresAt: undefined,
   });
 
   return {

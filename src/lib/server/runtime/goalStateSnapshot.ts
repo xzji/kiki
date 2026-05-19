@@ -1,4 +1,4 @@
-import { createGeneratedInstance } from "@/mocks/goals";
+import { createGeneratedInstance } from "@/lib/goalFactory";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";

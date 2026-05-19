@@ -9,6 +9,7 @@ import type {
   TaskResultViewKind,
   TaskRunArtifact,
 } from "@/types/kiki";
+import { requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
 
 type JudgeTaskResultInput = {
   goal: Goal;
@@ -89,15 +90,6 @@ function isHighPriority(task: Task) {
 function hasImportantSignal(result: JudgeTaskResultInput["result"]) {
   const text = `${result.summary}\n${result.finalMessage}`.toLowerCase();
   return /异常|风险|阻塞|失败|紧急|机会|alert|risk|blocked|urgent|error/.test(text);
-}
-
-function taskRequiresUserConfirmationToComplete(task: Task) {
-  if (task.expectedResult?.type === "decision" || task.expectedResult?.type === "confirmation") return true;
-  const criteria = task.expectedResult?.completionCriteria ?? "";
-  if (/用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(criteria)) {
-    return true;
-  }
-  return task.requiresConfirmation === true && task.expectedResult?.type !== "information";
 }
 
 function baseDecision(
@@ -316,7 +308,7 @@ export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotifica
     return actionRequiredDecision(input, input.result.awaitingReason || "任务需要你参与后才能继续。");
   }
 
-  if (taskRequiresUserConfirmationToComplete(input.task)) {
+  if (requiresUserConfirmationToComplete(input.task, { includeRequiresConfirmation: true })) {
     return actionRequiredDecision(input, "任务已完成，建议你确认结果后继续推进。");
   }
 
@@ -336,7 +328,7 @@ export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotifica
     return digestReadyDecision(input);
   }
 
-  if (input.task.taskType === "monitoring" && hasImportantSignal(input.result)) {
+  if (input.task.executionMode === "monitoring" && hasImportantSignal(input.result)) {
     return resultReadyDecision(input, "high");
   }
 

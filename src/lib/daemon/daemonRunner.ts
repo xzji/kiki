@@ -6,7 +6,6 @@ import { runGoalSchedulerEngine } from "@/lib/server/worker/goalSchedulerEngine"
 import { runGoalDaemonSideEffects } from "@/lib/server/worker/goalNotificationWorker";
 import { runRecoveryWorker } from "@/lib/server/worker/recoveryWorker";
 import { runTaskDispatchWorker } from "@/lib/server/worker/taskDispatchWorker";
-import { initialGoals } from "@/mocks/goals";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,7 +35,7 @@ export async function runRuntimeDaemonLoop() {
       runtimeEnvironments.find((environment) => environment.isDefault && environment.type === "local") ??
       runtimeEnvironments.find((environment) => environment.type === "local") ??
       null;
-    const goals = readGoalsSnapshot(initialGoals);
+    const goals = readGoalsSnapshot([]);
 
     const schedulerResult = runGoalSchedulerEngine({
       goals,

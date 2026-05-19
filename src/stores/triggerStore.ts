@@ -2,8 +2,6 @@
 
 import { create } from "zustand";
 
-import { INITIAL_NOW } from "@/mocks/goals";
-
 type TriggerStore = {
   currentTime: string;
   firedKeys: string[];
@@ -14,7 +12,7 @@ type TriggerStore = {
 };
 
 export const useTriggerStore = create<TriggerStore>((set) => ({
-  currentTime: INITIAL_NOW,
+  currentTime: new Date().toISOString(),
   firedKeys: [],
   setCurrentTime: (time) => set({ currentTime: time }),
   advanceHours: (hours) => set((state) => ({ currentTime: new Date(new Date(state.currentTime).getTime() + hours * 3600 * 1000).toISOString() })),

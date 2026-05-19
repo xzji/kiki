@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createGoalEventsSource, fetchGoalEvents } from "@/lib/api/goal-events";
 import { fetchRuntimeStateSnapshot, materializeGoalSnapshot, syncRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
@@ -10,8 +10,10 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
-import type { Goal, InboxItem, Task } from "@/types/kiki";
+import type { Goal, InboxItem, Task, TaskInstance } from "@/types/kiki";
+import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { GoalEventRecord } from "@/types/goalEventLog";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 
 function stableStringify(value: unknown) {
   return JSON.stringify(value);
@@ -22,6 +24,9 @@ const EMPTY_REVISION: RuntimeStateRevision = {
   runtimeEnvironments: 0,
   scheduleEvents: 0,
 };
+
+const appliedGoalEventIds = new Set<number>();
+const pendingGoalEvents = new Map<number, GoalEventRecord>();
 
 function revisionFromSnapshot(snapshot: RuntimeStatePayload): RuntimeStateRevision {
   return {
@@ -133,10 +138,136 @@ function buildReminderItem(input: NonNullable<ReturnType<typeof findTaskByEvent>
   };
 }
 
+function statusFromEventPayload(status: unknown): TaskInstance["status"] | null {
+  switch (status) {
+    case "pending":
+    case "in_progress":
+    case "completed":
+    case "awaiting_user":
+    case "paused":
+    case "error":
+      return status;
+    case "queued":
+      return "pending";
+    case "running":
+      return "in_progress";
+    case "failed":
+      return "error";
+    case "cancelled":
+      return "paused";
+    default:
+      return null;
+  }
+}
+
+function applyInstanceStatusEvent(event: GoalEventRecord) {
+  if (!event.taskId || !event.instanceId) return false;
+  if (!findTaskByEvent(event)) return false;
+  const payload = event.payload as { nextStatus?: unknown };
+  const nextStatus = statusFromEventPayload(payload.nextStatus);
+  if (!nextStatus) return false;
+  useGoalStore.getState().markInstanceStatus(event.taskId, event.instanceId, nextStatus);
+  return true;
+}
+
+function applyInstanceProgressEvent(event: GoalEventRecord) {
+  if (!event.taskId || !event.instanceId) return false;
+  if (!findTaskByEvent(event)) return false;
+  const payload = event.payload as {
+    progress?: GoalServerProgress;
+    logs?: GoalServerLogEntry[];
+    trajectory?: ExecutionTrajectoryStep[];
+  };
+  if (!payload.progress) return false;
+  useGoalStore.getState().syncTaskInstanceRun({
+    taskId: event.taskId,
+    instanceId: event.instanceId,
+    progress: payload.progress,
+    logs: Array.isArray(payload.logs) ? payload.logs : undefined,
+    trajectory: Array.isArray(payload.trajectory) ? payload.trajectory : undefined,
+  });
+  return true;
+}
+
+function applyTimeoutPausedEvent(event: GoalEventRecord) {
+  if (!event.taskId || !event.instanceId) return false;
+  if (!findTaskByEvent(event)) return false;
+  useGoalStore.getState().markInstanceStatus(event.taskId, event.instanceId, "paused");
+  return true;
+}
+
+function refreshScheduleEventsFromSnapshot() {
+  void fetchRuntimeStateSnapshot()
+    .then((snapshot) => {
+      useScheduleStore.getState().replaceEvents(snapshot.scheduleEvents);
+    })
+    .catch(() => {
+      // ignore transient schedule refresh failures
+    });
+}
+
+function dependsOnLocalInstance(event: GoalEventRecord) {
+  return (
+    event.kind === "instance.status_changed" ||
+    event.kind === "instance.progress" ||
+    event.kind === "instance.timeout_paused" ||
+    event.kind === "notification.delivered"
+  );
+}
+
 function applyGoalEvent(event: GoalEventRecord) {
-  if (event.kind !== "notification.delivered") return;
+  if (appliedGoalEventIds.has(event.id)) {
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (dependsOnLocalInstance(event) && event.taskId && event.instanceId && !findTaskByEvent(event)) {
+    pendingGoalEvents.set(event.id, event);
+    return false;
+  }
+  if (event.kind === "instance.status_changed") {
+    if (applyInstanceStatusEvent(event)) {
+      appliedGoalEventIds.add(event.id);
+      pendingGoalEvents.delete(event.id);
+      return true;
+    }
+    appliedGoalEventIds.add(event.id);
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (event.kind === "instance.progress") {
+    if (applyInstanceProgressEvent(event)) {
+      appliedGoalEventIds.add(event.id);
+      pendingGoalEvents.delete(event.id);
+      return true;
+    }
+    appliedGoalEventIds.add(event.id);
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (event.kind === "instance.timeout_paused") {
+    if (applyTimeoutPausedEvent(event)) {
+      appliedGoalEventIds.add(event.id);
+      pendingGoalEvents.delete(event.id);
+      return true;
+    }
+    appliedGoalEventIds.add(event.id);
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (event.kind === "schedule.event_synthesized") {
+    refreshScheduleEventsFromSnapshot();
+    appliedGoalEventIds.add(event.id);
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (event.kind !== "notification.delivered") return true;
   const located = findTaskByEvent(event);
-  if (!located) return;
+  if (!located) {
+    pendingGoalEvents.set(event.id, event);
+    return false;
+  }
+  appliedGoalEventIds.add(event.id);
+  pendingGoalEvents.delete(event.id);
   const payload = event.payload as { target?: string; notificationId?: string };
   if (payload.target === "inbox") {
     const item = located.instance.notification
@@ -174,6 +305,7 @@ function applyGoalEvent(event: GoalEventRecord) {
       conversationStore.appendMessage(located.goal.conversationId, nextMessage);
     }
   }
+  return true;
 }
 
 // Runtime environments and schedule events still use sync as a Sprint 4-A -> 4-B bridge.
@@ -188,10 +320,12 @@ export function RuntimeEventBridge() {
   const replaceEvents = useScheduleStore((state) => state.replaceEvents);
 
   const currentGoalsKey = useMemo(() => stableStringify(goals), [goals]);
+  const currentGoalIdsKey = useMemo(() => goals.map((goal) => goal.id).sort().join("|"), [goals]);
   const currentEnvironmentsKey = useMemo(() => stableStringify({ environments, activeRuntimeEnvId }), [environments, activeRuntimeEnvId]);
   const currentEventsKey = useMemo(() => stableStringify(events), [events]);
   const isApplyingRemoteRef = useRef(false);
-  const didBootstrapRef = useRef(false);
+  const [bootstrapped, setBootstrapped] = useState(false);
+  const sseDisconnectedRef = useRef(false);
   const remoteRevisionRef = useRef<RuntimeStateRevision>(EMPTY_REVISION);
   const eventCursorRef = useRef<Record<string, number>>({});
   const remoteGoalKeysRef = useRef<Record<string, string>>({});
@@ -209,9 +343,9 @@ export function RuntimeEventBridge() {
         replaceGoals(mergeRemoteSnapshotWithPendingLocalGoals(snapshot.goals, useGoalStore.getState().goals));
         replaceEnvironments(snapshot.runtimeEnvironments);
         replaceEvents(snapshot.scheduleEvents);
-        didBootstrapRef.current = true;
+        setBootstrapped(true);
       } catch {
-        didBootstrapRef.current = true;
+        setBootstrapped(true);
       } finally {
         window.setTimeout(() => {
           isApplyingRemoteRef.current = false;
@@ -221,6 +355,7 @@ export function RuntimeEventBridge() {
     void hydrate();
 
     const timer = window.setInterval(async () => {
+      if (!sseDisconnectedRef.current) return;
       try {
         const snapshot = await fetchRuntimeStateSnapshot();
         if (cancelled) return;
@@ -266,10 +401,10 @@ export function RuntimeEventBridge() {
   }, [replaceEnvironments, replaceEvents, replaceGoals]);
 
   useEffect(() => {
-    if (!didBootstrapRef.current || goals.length === 0) return;
+    if (!bootstrapped || goals.length === 0) return;
     const sources: EventSource[] = [];
     let cancelled = false;
-    const goalIds = goals.map((goal) => goal.id);
+    const goalIds = currentGoalIdsKey.split("|").filter(Boolean);
     const bootstrapEvents = async () => {
       for (const goalId of goalIds) {
         try {
@@ -281,6 +416,7 @@ export function RuntimeEventBridge() {
           if (cancelled) return;
           response.events.forEach(applyGoalEvent);
           eventCursorRef.current[goalId] = response.nextCursor;
+          sseDisconnectedRef.current = false;
         } catch {
           // ignore event bootstrap failures
         }
@@ -305,6 +441,12 @@ export function RuntimeEventBridge() {
             // ignore malformed event payloads
           }
         });
+        source.addEventListener("open", () => {
+          sseDisconnectedRef.current = false;
+        });
+        source.addEventListener("error", () => {
+          sseDisconnectedRef.current = true;
+        });
         sources.push(source);
       }
     };
@@ -313,10 +455,17 @@ export function RuntimeEventBridge() {
       cancelled = true;
       sources.forEach((source) => source.close());
     };
-  }, [currentGoalsKey, goals]);
+  }, [bootstrapped, currentGoalIdsKey, goals.length]);
 
   useEffect(() => {
-    if (!didBootstrapRef.current || isApplyingRemoteRef.current) return;
+    if (!bootstrapped || pendingGoalEvents.size === 0) return;
+    for (const event of Array.from(pendingGoalEvents.values())) {
+      applyGoalEvent(event);
+    }
+  }, [bootstrapped, currentGoalsKey]);
+
+  useEffect(() => {
+    if (!bootstrapped || isApplyingRemoteRef.current) return;
     const confirmedGoals = goals.filter((goal) => goal.workflow?.planDecision === "confirmed");
     for (const goal of confirmedGoals) {
       const key = goalMaterializeKey(goal);
@@ -333,10 +482,10 @@ export function RuntimeEventBridge() {
           materializingGoalKeysRef.current.delete(key);
         });
     }
-  }, [currentGoalsKey, goals]);
+  }, [bootstrapped, currentGoalsKey, goals]);
 
   useEffect(() => {
-    if (!didBootstrapRef.current || isApplyingRemoteRef.current) return;
+    if (!bootstrapped || isApplyingRemoteRef.current) return;
     const syncSnapshot = async () => {
       try {
         const result = await syncRuntimeStateSnapshot({
@@ -373,6 +522,7 @@ export function RuntimeEventBridge() {
     events,
     replaceEnvironments,
     replaceEvents,
+    bootstrapped,
   ]);
 
   return null;

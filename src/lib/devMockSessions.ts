@@ -47,7 +47,7 @@ const TOEFL_PLAN_MOCK_DRAFT: GoalBreakdownDraft = {
           description:
             "按学科主题整理托福高频学术词，优先覆盖天文、生态、地质与生物四类 lecture 词汇。",
           expectedOutcome: "形成当天可直接开始记忆的一组学术词卡。",
-          taskType: "daily_repeat",
+          taskType: "repeat",
           triggerRule: "每天 07:30 触发",
           executionKind: "flashcard",
           priority: "high",
@@ -75,7 +75,7 @@ const TOEFL_PLAN_MOCK_DRAFT: GoalBreakdownDraft = {
           description:
             "根据常见独立口语题目生成答题框架，补齐观点、例子和转承句，形成 45 秒可复用模板。",
           expectedOutcome: "一版可直接练习的独立口语模板稿。",
-          taskType: "daily_repeat",
+          taskType: "repeat",
           triggerRule: "每天 19:30 触发",
           executionKind: "draft_review",
           priority: "medium",
@@ -103,7 +103,8 @@ const TOEFL_PLAN_MOCK_DRAFT: GoalBreakdownDraft = {
           description:
             "汇总本周训练结果，判断四科投入是否均衡，并调整下周任务重心与触发节奏。",
           expectedOutcome: "一份下周训练调整建议。",
-          taskType: "monitoring",
+          taskType: "repeat",
+          executionMode: "monitoring",
           triggerRule: "每天 21:00 触发",
           executionKind: "generic_result",
           priority: "medium",

@@ -239,7 +239,7 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
   });
 }
 
-export function createQueuedRuntimeJob(
+export function createQueuedRuntimeJobInternal(
   payload: RuntimeJobPayload,
   input?: { requestId?: string; eventSource?: "scheduler" | "user" | "feedback" | "resume" },
 ) {
@@ -388,7 +388,7 @@ export function claimQueuedRuntimeJobs(input: { leaseOwner: string; limit: numbe
   });
 }
 
-export function updateRuntimeJobExecution(
+export function updateRuntimeJobExecutionInternal(
   jobId: string,
   updates: Partial<
     Pick<
@@ -456,7 +456,7 @@ export function updateRuntimeJobExecution(
 export function markRuntimeJobAwaiting(jobId: string, input: { reason: string; blocker?: unknown }) {
   const existing = getRuntimeJob(jobId);
   if (!existing) return null;
-  return updateRuntimeJobExecution(jobId, {
+  return updateRuntimeJobExecutionInternal(jobId, {
     status: "awaiting_user",
     leaseOwner: undefined,
     leaseExpiresAt: undefined,

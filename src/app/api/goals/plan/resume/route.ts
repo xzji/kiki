@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
+import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import {
   beginGoalTelemetry,
   failGoalTelemetry,
@@ -31,16 +32,25 @@ export async function POST(request: NextRequest) {
     `goal-plan-resume-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   if (!conversationId) {
-    return NextResponse.json({ reason: "conversationId 不能为空" }, { status: 400 });
+    return withDeprecatedApiHeaders(
+      NextResponse.json({ reason: "conversationId 不能为空" }, { status: 400 }),
+      "/api/goals/plan",
+    );
   }
 
   if (!body.runtimeEnv || body.runtimeEnv.type !== "local") {
-    return NextResponse.json({ reason: "当前没有可用的本地 Claude 环境" }, { status: 400 });
+    return withDeprecatedApiHeaders(
+      NextResponse.json({ reason: "当前没有可用的本地 Claude 环境" }, { status: 400 }),
+      "/api/goals/plan",
+    );
   }
 
   const checkpoint = getGoalPlanningCheckpointForResume(conversationId);
   if (!checkpoint) {
-    return NextResponse.json({ reason: "当前会话没有可恢复的目标规划断点" }, { status: 404 });
+    return withDeprecatedApiHeaders(
+      NextResponse.json({ reason: "当前会话没有可恢复的目标规划断点" }, { status: 404 }),
+      "/api/goals/plan",
+    );
   }
 
   try {
@@ -76,7 +86,7 @@ export async function POST(request: NextRequest) {
       phase: "presenting_plan",
       message: "目标规划断点恢复完成",
     });
-    return NextResponse.json({ draft });
+    return withDeprecatedApiHeaders(NextResponse.json({ draft }), "/api/goals/plan");
   } catch (error) {
     failGoalTelemetry({
       requestId,
@@ -85,11 +95,14 @@ export async function POST(request: NextRequest) {
       message: "目标规划断点恢复失败",
       error: error instanceof Error ? error.message : "Claude 规划恢复失败",
     });
-    return NextResponse.json(
-      {
-        reason: error instanceof Error ? error.message : "Claude 规划恢复失败",
-      },
-      { status: 500 },
+    return withDeprecatedApiHeaders(
+      NextResponse.json(
+        {
+          reason: error instanceof Error ? error.message : "Claude 规划恢复失败",
+        },
+        { status: 500 },
+      ),
+      "/api/goals/plan",
     );
   }
 }

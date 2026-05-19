@@ -2,29 +2,43 @@
 
 import { create } from "zustand";
 
-import { initialScheduleEvents } from "@/mocks/schedule";
 import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 
 const STORAGE_KEY = "kiki.schedule.events";
 const RESET_VERSION_KEY = "kiki.schedule.events.reset-version";
-const MOCK_BASELINE_RESET_VERSION = "2";
+const MOCK_BASELINE_RESET_VERSION = "3";
+const MOCK_EVENT_TITLES = new Set([
+  "托福考试 110 分 · 学习冲刺日",
+  "大阪 6 日游 · 行前准备",
+  "专注学习时段",
+  "听力练习反馈会",
+  "教练 1v1",
+  "单词背诵复盘",
+  "AI 产品经理面试准备",
+  "KiKi 建议的深度思考时段",
+]);
+
+function removeMockEvents(events: AgentEvent[]) {
+  return events.filter((event) => !MOCK_EVENT_TITLES.has(event.title));
+}
 
 function loadEvents(): AgentEvent[] {
-  if (typeof window === "undefined") return initialScheduleEvents;
+  if (typeof window === "undefined") return [];
   try {
     const resetVersion = window.localStorage.getItem(RESET_VERSION_KEY);
-    if (resetVersion !== MOCK_BASELINE_RESET_VERSION) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(initialScheduleEvents));
-      window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
-      return initialScheduleEvents;
-    }
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return initialScheduleEvents;
+    if (!raw) {
+      window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
+      return [];
+    }
     const parsed = JSON.parse(raw) as AgentEvent[];
-    if (!Array.isArray(parsed)) return initialScheduleEvents;
-    return parsed;
+    if (!Array.isArray(parsed)) return [];
+    const events = resetVersion === MOCK_BASELINE_RESET_VERSION ? parsed : removeMockEvents(parsed);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
+    return events;
   } catch {
-    return initialScheduleEvents;
+    return [];
   }
 }
 
@@ -71,9 +85,9 @@ function stepDate(iso: string, direction: -1 | 1, mode: ScheduleViewMode): strin
 
 export const useScheduleStore = create<ScheduleStore>((set, get) => ({
   hydrated: false,
-  events: initialScheduleEvents,
+  events: [],
   viewMode: "week",
-  focusDate: new Date("2026-04-26T10:00:00+08:00").toISOString(),
+  focusDate: new Date().toISOString(),
   allDayCollapsed: false,
   hydrate: () =>
     set(() => {

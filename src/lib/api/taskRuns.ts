@@ -19,23 +19,25 @@ export class TaskRunApiError extends Error {
 }
 
 async function getTaskRunProgress(input: { requestId?: string; taskInstanceId?: string; signal?: AbortSignal }) {
-  const search = new URLSearchParams();
-  if (input.requestId) search.set("requestId", input.requestId);
-  if (input.taskInstanceId) search.set("taskInstanceId", input.taskInstanceId);
-  const response = await fetch(`/api/goals/tasks/progress?${search.toString()}`, {
-    method: "GET",
-    signal: input.signal,
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined as string | undefined };
+  if (input.taskInstanceId) {
+    const search = new URLSearchParams();
+    if (input.requestId) search.set("requestId", input.requestId);
+    const response = await fetch(`/api/goals/instances/${encodeURIComponent(input.taskInstanceId)}/runtime?${search.toString()}`, {
+      method: "GET",
+      signal: input.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined as string | undefined };
+    }
+    return (await response.json()) as {
+      progress: GoalServerProgress | null;
+      logs: GoalServerLogEntry[];
+      trajectory: ExecutionTrajectoryStep[];
+      waitingReason?: string;
+    };
   }
-  return (await response.json()) as {
-    progress: GoalServerProgress | null;
-    logs: GoalServerLogEntry[];
-    trajectory: ExecutionTrajectoryStep[];
-    waitingReason?: string;
-  };
+  return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined };
 }
 
 export async function startTaskRun(input: {
@@ -138,37 +140,27 @@ export async function fetchTaskRunProgress(input: {
   return getTaskRunProgress(input);
 }
 
-/** @deprecated 前端任务命令应使用 /api/goals/instances/:id/cancel。 */
 export async function cancelTaskRun(input: {
   requestId?: string;
   taskInstanceId: string;
 }) {
-  const response = await fetch("/api/goals/tasks/cancel", {
+  const response = await fetch(`/api/goals/instances/${encodeURIComponent(input.taskInstanceId)}/cancel`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Idempotency-Key": `cancel:${input.taskInstanceId}:${input.requestId ?? "manual"}`,
     },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      reason: "用户手动停止任务执行",
+    }),
   });
-  const data = (await response.json()) as {
-    reason?: string;
-    progress?: GoalServerProgress | null;
-    logs?: GoalServerLogEntry[];
-    trajectory?: ExecutionTrajectoryStep[];
-    waitingReason?: string;
-  };
+  const data = (await response.json()) as { reason?: string };
   if (!response.ok) {
     throw new Error(data.reason || "任务停止失败");
   }
-  return {
-    progress: data.progress ?? null,
-    logs: data.logs ?? [],
-    trajectory: data.trajectory ?? [],
-    waitingReason: data.waitingReason,
-  };
+  return getTaskRunProgress(input);
 }
 
-/** @deprecated 前端任务命令应使用 /api/goals/instances/:id/respond。 */
 export async function resumeTaskRun(input: {
   taskInstanceId: string;
   resumeToken: string;
@@ -177,12 +169,18 @@ export async function resumeTaskRun(input: {
   action?: string;
   fields?: Record<string, string>;
 }) {
-  const response = await fetch("/api/goals/tasks/resume", {
+  const response = await fetch(`/api/goals/instances/${encodeURIComponent(input.taskInstanceId)}/respond`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Idempotency-Key": `respond:${input.taskInstanceId}:${input.resumeToken}`,
     },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      responseId: input.resumeToken,
+      responseSummary: input.feedback,
+      approved: input.approved,
+      fields: input.fields,
+    }),
   });
   const data = (await response.json()) as {
     reason?: string;

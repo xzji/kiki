@@ -185,8 +185,6 @@ export type TaskPriority = "critical" | "high" | "medium" | "low";
 
 export type TaskExecutionMode = "standard" | "interactive" | "monitoring" | "event_triggered";
 
-export type TaskExecutionCycle = "once" | "recurring";
-
 export type ResultSurfaceKind = "interactive" | "files";
 export type InteractiveSurfaceKind = "blocks" | "iframe" | "webapp" | "dashboard" | "form" | "table";
 export type FileArtifactKind = "markdown" | "text" | "csv" | "json" | "zip" | "html";
@@ -383,7 +381,7 @@ export type Task = {
   title: string;
   description: string;
   expectedOutcome: string;
-  taskType: "daily_repeat" | "one_shot" | "monitoring";
+  taskType: "repeat" | "one_shot";
   triggerRule: string;
   deadline?: string;
   progress: number;
@@ -394,7 +392,6 @@ export type Task = {
   priority?: TaskPriority;
   dependencies?: string[];
   executionMode?: TaskExecutionMode;
-  executionCycle?: TaskExecutionCycle;
   expectedResult?: TaskExpectedResult;
   executionObjective?: string;
   recommendedWorkingDirectory?: string;
@@ -566,7 +563,6 @@ export type GoalBreakdownDraft = {
       priority?: TaskPriority;
       dependencies?: string[];
       executionMode?: TaskExecutionMode;
-      executionCycle?: TaskExecutionCycle;
       expectedResult?: TaskExpectedResult;
       executionObjective?: string;
       recommendedWorkingDirectory?: string;

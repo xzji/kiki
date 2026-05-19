@@ -284,7 +284,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 1. 每个任务应该是具体可执行的
 2. 明确每个任务的预期产出
 3. 任务优先级要合理
-4. execution_cycle 只能是 once(执行一次) | recurring(周期执行)
+4. task_type 只能是 repeat(重复任务) | one_shot(一次性任务)
 5. execution_mode 只能是 standard(标准) | interactive(需用户交互) | monitoring(持续监控) | event_triggered(事件触发)
 6. hierarchy_level 只能是 task | sub_task | action
 7. execution_kind 只能是 ${allowedExecutionKinds.join("、")}
@@ -313,10 +313,10 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
       "id": "task-1",
       "title": "任务标题",
       "description": "详细描述",
-      "execution_cycle": "once|recurring",
+      "task_type": "repeat|one_shot",
       "execution_mode": "standard|interactive|monitoring|event_triggered",
       "execution_kind": "generic_result",
-      "recurrence": "周期频率描述(仅 recurring 需要)",
+      "recurrence": "重复任务触发时机(仅 repeat/monitoring 需要)",
       "trigger_condition": "触发条件描述(仅 event_triggered 需要)",
       "hierarchy_level": "task|sub_task|action",
       "parent_id": "父任务ID(可选)",

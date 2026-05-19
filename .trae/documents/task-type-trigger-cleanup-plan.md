@@ -265,18 +265,48 @@
 
 变更内容：
 
-- 调整任务排序逻辑，删除 `taskType === "monitoring"` 分支
-- 若仍需保留监控类排序差异，则改用 `executionMode === "monitoring"`
+- 排序权重函数中：
+  - 删除 `task.taskType === "monitoring"` 这一分支
+  - 改成只剩 `task.taskType === "one_shot"` vs 其它（`repeat`）
+  - 监控特权改用 `task.executionMode === "monitoring"` 加一个独立的分量，保持原有“监控权重略高于普通重复任务”的相对关系
+- `task.progress >= 100 && task.taskType === "one_shot"` 这条“一次性任务跑完后不再调度”的逻辑保持不变
+- 注意区分：
+  - `task.taskType` —— 本次会改
+  - `goal.workflow.phase === "monitoring"` —— 这是目标级 workflow 阶段，不是任务类型，**不要动**
 
 #### `src/lib/server/worker/goalSchedulerEngine.ts`
 
 变更内容：
 
-- 与前端 runtime 调度保持一致，同步迁移排序与可执行性判断中的 `monitoring` 来源
+- 同步前端 runtime 的迁移：
+  - 排序权重去掉 `taskType === "monitoring"` 分支，改用 `executionMode === "monitoring"`
+- 准入判断 `if (task.taskType === "one_shot") return task.instances.length === 0;` 保持不变
+  - 原来 `monitoring` 任务在归一后会变成 `repeat`，因此走多次触发分支，这是预期行为
+  - 如果某些 mock 里的 `monitoring` 原本只想触发一次，需要在 mock 调整时单独把它改回 `one_shot`，详见第 8 节
+- 注意区分：
+  - `goal.workflow.phase !== "executing" && goal.workflow.phase !== "monitoring"` —— 这是 workflow 阶段判断，**不要动**
 
 原因：
 
 - 避免前后端调度规则分叉
+- 防止误删 workflow 阶段相关的 `"monitoring"` 字面量
+
+### 7.1 触发文案补全工具
+
+#### `src/lib/taskTriggerTime.ts`
+
+变更内容：
+
+- `normalizeConcreteTriggerRule(triggerRule, taskType)` 的 `Task["taskType"]` 联合收敛后由原来的 3 值变成 2 值
+  - 现有逻辑：`taskType === "one_shot"` 时不补全时间，否则补 `每天 09:00`
+  - 收敛后：原 `daily_repeat` 与 `monitoring` 都会走 `repeat` 分支，行为与原 `daily_repeat` 一致 —— 这是符合预期的（监控任务原本也都是周期触发）
+- 不需要改函数签名或行为，但必须确认调用方 `task.taskType` 的类型替换不会影响该工具的导入
+- 配套：在做 `executionMode === "event_triggered"` 的展示前缀化（详见第 5 节）时，建议把“事件触发任务的 triggerRule 不补默认时间”这一规则也下沉到这里，或在详情页 helper 里明确处理
+
+原因：
+
+- 该文件是 triggerRule 落库前的最后一道归一，必须显式纳入本次变更影响面
+- 否则容易在重构时漏掉，导致 `event_triggered` 类任务的展示文案被错误地补成 `每天 09:00`
 
 ### 8. 清理 mock / baseline / 文档引用
 
@@ -284,20 +314,25 @@
 
 变更内容：
 
-- 把 `taskType: "daily_repeat"` / `taskType: "monitoring"` 统一改成 `taskType: "repeat"`
-- 删除 `executionCycle` 写入
+- 把 `taskType: "daily_repeat"` 统一改成 `taskType: "repeat"`
+- 把 `taskType: "monitoring"` 同样改成 `taskType: "repeat"`
+  - 这些任务的“监控特性”如果之前依赖 `taskType === "monitoring"` 的通知/排序，现在改由 `executionMode: "monitoring"` 承担，需要在对应任务上补 `executionMode: "monitoring"`
+- 删除 mock 中残留的 `executionCycle` 写入
+- 注意：本文件还存在内联调用 `task({ ..., taskType: "daily_repeat", ... })` 的写法（如 `sg-mail-1`、`sg-news-1` 等），需要一并替换，避免漏改
 
 #### `src/mocks/goal-breakdown.ts`
 
 变更内容：
 
 - 同步 taskType 新值，删掉草稿里的 `executionCycle`
+- 原 `taskType: "monitoring"` 节点改为 `taskType: "repeat"` + `executionMode: "monitoring"`
 
 #### `src/lib/devMockSessions.ts`
 
 变更内容：
 
 - 同步 taskType 新值
+- 原 `taskType: "monitoring"` 同样改为 `taskType: "repeat"` + `executionMode: "monitoring"`
 
 #### 文档
 
@@ -308,6 +343,20 @@
 原因：
 
 - mock 和文档若继续保留旧结构，会导致后续测试样本和 prompt inventory 再次把旧字段带回来
+
+### 9. NOT-IN-SCOPE（明确不动的部分）
+
+避免实施时被误改：
+
+- `Goal.workflow.phase` 中的 `"monitoring"` 阶段
+  - 出现位置：`src/stores/goalStore.ts`、`src/components/providers/GoalSchedulerRuntime.tsx`、`src/lib/server/worker/goalSchedulerEngine.ts`、`src/components/goal/GoalPlanContent.tsx`
+  - 含义：目标级别的“监控阶段”，与任务类型完全不同
+  - 处理：保持不变
+- `Task.executionMode = "monitoring"`
+  - 含义：单个任务的执行模式
+  - 处理：保留，并承接原 `taskType === "monitoring"` 的特权语义
+- 服务端规划链路中的 `execution_mode` 字段
+  - 处理：保留
 
 ## Verification Steps
 
@@ -342,4 +391,6 @@
 
 - 最大风险不是 `executionCycle` 删除本身，而是“重复 / 监控”两层语义原来混在 `taskType` 上；如果只删字段、不迁移运行时判断，通知和排序会变
 - 本地持久化数据里可能还有旧的 `daily_repeat | monitoring | executionCycle`；必须依赖 `normalizeTask()` 做兼容收敛
+  - 同时建议把 `goalStore` 中的 `MOCK_BASELINE_RESET_VERSION` 加 1，触发一次持久化迁移，避免老用户遗留 `monitoring` 类型未被归一时的 UI 报错
 - 规划 prompt 与 validator 必须同步改，否则 Claude 返回结构和解析器会不一致
+- 内联 mock（如 `sg-mail-1`、`sg-news-1`）和数据快照 (`data/workspaces/conversations/**/checkpoint.json`) 中可能存在旧字段，运行期归一应能兼容；但如果以后做全量回归测试，需要二次确认这些样本的最终展示效果

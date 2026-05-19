@@ -1,16 +1,10 @@
 import { DEFAULT_EASTER_EGG_SETTINGS } from "@/lib/goalSystemConfig";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import {
-  markGoalInstanceStatusSnapshot,
-  markGoalTaskNotificationDeliveredSnapshot,
-} from "@/lib/server/runtime/goalStateSnapshot";
-import {
-  readGoalsSnapshot,
-  readScheduleEventsSnapshot,
-  upsertGoalsSnapshot,
-  upsertScheduleEventsSnapshot,
-} from "@/lib/server/runtime/stateSnapshot";
-import { initialScheduleEvents } from "@/mocks/schedule";
+  markTaskNotificationDeliveredProjection,
+  transitionTaskInstanceProjection,
+} from "@/lib/server/services/goalRuntimeService";
+import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, Task } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
 
@@ -66,7 +60,7 @@ function upsertScheduleEvent(events: AgentEvent[], event: AgentEvent) {
 }
 
 export function runGoalScheduleSynthesisWorker(goals: Goal[]) {
-  let events = readScheduleEventsSnapshot(initialScheduleEvents);
+  let events = readScheduleEventsSnapshot([]);
   let synthesized = 0;
   for (const goal of goals) {
     for (const subGoal of goal.subGoals) {
@@ -112,7 +106,8 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
             goal.conversationId && shouldDeliverToConversation(notification.channel)
               ? notification.conversationMessageId || `msg-task-${instance.id}`
               : undefined;
-          nextGoals = markGoalTaskNotificationDeliveredSnapshot(nextGoals, {
+          nextGoals = markTaskNotificationDeliveredProjection({
+            goals: nextGoals,
             taskId: task.id,
             instanceId: instance.id,
             inboxItemId,
@@ -141,9 +136,6 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
       }
     }
   }
-  if (delivered > 0) {
-    upsertGoalsSnapshot(nextGoals);
-  }
   return { delivered };
 }
 
@@ -159,7 +151,8 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
         for (const instance of task.instances) {
           const ageMs = nowMs - new Date(instance.createdAt).getTime();
           if (instance.status === "in_progress" && ageMs >= DEFAULT_EASTER_EGG_SETTINGS.taskDefaultTimeoutMs) {
-            nextGoals = markGoalInstanceStatusSnapshot(nextGoals, {
+            nextGoals = transitionTaskInstanceProjection({
+              goals: nextGoals,
               taskId: task.id,
               instanceId: instance.id,
               status: "paused",
@@ -199,9 +192,6 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
         }
       }
     }
-  }
-  if (paused > 0) {
-    upsertGoalsSnapshot(nextGoals);
   }
   return { paused, heartbeats };
 }

@@ -36,7 +36,7 @@
 3. 扩展 `src/types/kiki.ts`
    - 新增 `GoalWorkflowPhase`、`GoalPlanDecision`、`GoalWorkflow`。
    - `Goal` 增加 `workflow?: GoalWorkflow`、`conversationId?: string`。
-   - `Task` 增加可选 priority、dependencies、executionMode、executionCycle、expectedResult。
+   - `Task` 增加可选 priority、dependencies、executionMode、expectedResult。
    - `GoalBreakdownDraft` 增加 summary、deadline、assumptions、risks、reasoning、notificationStrategy，以及子目标/任务元信息。
 
 4. 改造 `src/stores/goalStore.ts`

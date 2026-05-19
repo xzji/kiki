@@ -1,4 +1,3 @@
-import { spawn } from "child_process";
 import fs from "fs";
 
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
@@ -10,13 +9,13 @@ import {
   getPlanningCheckpointFilePath,
   writeJsonFileAtomic,
 } from "@/lib/server/workspace/conversationWorkspace";
+import { requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
+import { extractBalancedJsonSnippet } from "@/lib/server/jsonExtraction";
+import { runPromptJson } from "@/lib/server/claude/transport";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, Task, TaskExpectedResult } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
-
-import { buildClaudeEnv } from "./claudeEnv";
-import { resolveCliPath } from "./runtimeEnvValidation";
 
 type ClaudeJsonPayload = {
   result?: string;
@@ -76,7 +75,7 @@ type TaskGenerationPayload = {
     id: string;
     title: string;
     description: string;
-    execution_cycle: "once" | "recurring";
+    task_type: "repeat" | "one_shot";
     execution_mode: "standard" | "interactive" | "monitoring" | "event_triggered";
     execution_kind?: string;
     recurrence?: string;
@@ -636,7 +635,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 1. 每个任务应该是具体可执行的
 2. 明确每个任务的预期产出
 3. 任务优先级要合理
-4. execution_cycle 只能是 once(执行一次) | recurring(周期执行)
+4. task_type 只能是 repeat(重复任务) | one_shot(一次性任务)
 5. execution_mode 只能是 standard(标准) | interactive(需用户交互) | monitoring(持续监控) | event_triggered(事件触发)
 6. hierarchy_level 只能是 task | sub_task | action
 7. execution_kind 只能是 ${allowedExecutionKinds.join("、")}
@@ -648,7 +647,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 13. 对比/研究/攻略/方案类任务必须优先要求 comparison_table、callout、key_value 等 blocks，形成可视化报告
 14. 信息类任务如果完成标准只是“生成报告/调研/对比/分析/清单”，用户查看、确认是否满意、选择下一步或圈定偏好只属于产出反馈/下游任务输入，不能写成当前任务的完成条件
 15. 只有 expected_output.type 是 decision/confirmation，或 completion_criteria 明确要求“必须由用户确认/审批/选择后才完成”，才允许把 user_interaction_type 设为 confirm
-16. 周期任务的 recurrence 必须包含具体 24 小时时间 HH:mm，例如“每天 07:30 触发”。禁止使用“早上/出发前/晚上/固定时间”等没有时分的模糊触发描述；如果用户没有提供出发时间，必须自行给出明确默认时间并在文案中说明假设，例如“每天 07:30 触发（默认出发前检查）”
+16. 重复任务的 recurrence 必须包含具体触发时机，例如“每天 07:30 触发”“每周日 20:00 触发”“每 3 个小时触发”。一次性任务如果不是立即触发，也必须给出具体触发时机，例如“2026-06-01 10:00 触发”“明天 10:00 触发”或“满足触发条件执行：价格低于 1800 元”。禁止使用“早上/出发前/晚上/固定时间”等没有时分、日期或间隔的模糊触发描述；如果用户没有提供出发时间，必须自行给出明确默认时间并在文案中说明假设，例如“每天 07:30 触发（默认出发前检查）”
 
 协作模式规则:
 - agent_autonomous: Agent 可自主完成，用户只需知悉结果
@@ -679,11 +678,11 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
       "id": "task-1",
       "title": "任务标题",
       "description": "详细描述",
-      "execution_cycle": "once|recurring",
+      "task_type": "repeat|one_shot",
       "execution_mode": "standard|interactive|monitoring|event_triggered",
       "execution_kind": "generic_result",
-      "recurrence": "周期频率描述(仅 recurring 需要，必须包含 HH:mm，例如 每天 07:30 触发)",
-      "trigger_condition": "触发条件描述(仅 event_triggered 需要)",
+      "recurrence": "触发时机(重复任务必填；一次性任务如非立即触发也可填写，例如 每天 07:30 触发、每周日 20:00 触发、每 3 个小时触发、2026-06-01 10:00 触发、明天 10:00 触发)",
+      "trigger_condition": "触发条件描述(仅 event_triggered 需要，例如 价格低于 1800 元)",
       "hierarchy_level": "task|sub_task|action",
       "parent_id": "父任务ID(可选)",
       "priority": "critical|high|medium|low",
@@ -828,123 +827,68 @@ async function runClaudeJson(input: {
   if (!cwd) {
     throw new Error("目标规划缺少 conversationId，无法进入隔离 conversation workspace");
   }
-  const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
-  return new Promise<string>((resolve, reject) => {
-    const startedAt = Date.now();
-    const promptChars = input.prompt.length;
+  const startedAt = Date.now();
+  const promptChars = input.prompt.length;
+  if (input.context) {
+    // #region debug-point goal-planning-latency-claude-start
+    appendGoalLog({
+      requestId: input.context.requestId,
+      scope: input.context.scope,
+      level: "info",
+      phase: input.context.phase,
+      message: `Claude 开始执行：${input.context.stepLabel}`,
+      details: formatTimingDetails({
+        promptChars,
+        cwd,
+      }),
+    });
+    // #endregion
+  }
+
+  try {
+    const result = await runPromptJson({
+      prompt: input.prompt,
+      runtimeEnv: input.runtimeEnv,
+      cwd,
+      abortSignal: input.signal,
+      abortMessage: input.abortMessage,
+      failureMessage: input.failureMessage,
+    });
     if (input.context) {
-      // #region debug-point goal-planning-latency-claude-start
+      // #region debug-point goal-planning-latency-claude-finished
       appendGoalLog({
         requestId: input.context.requestId,
         scope: input.context.scope,
         level: "info",
         phase: input.context.phase,
-        message: `Claude 开始执行：${input.context.stepLabel}`,
+        message: `Claude 执行完成：${input.context.stepLabel}`,
         details: formatTimingDetails({
+          elapsedMs: Date.now() - startedAt,
           promptChars,
-          cwd,
+          outputChars: result.raw.length,
         }),
       });
       // #endregion
     }
-
-    const child = spawn(cliPath, ["-p", "--output-format", "json", input.prompt], {
-      cwd,
-      env: buildClaudeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let output = "";
-    let errorOutput = "";
-    let aborted = false;
-
-    const abort = () => {
-      aborted = true;
-      child.kill("SIGTERM");
-      if (input.context) {
-        // #region debug-point goal-planning-latency-claude-abort
-        appendGoalLog({
-          requestId: input.context.requestId,
-          scope: input.context.scope,
-          level: "warn",
-          phase: input.context.phase,
-          message: `Claude 执行被中断：${input.context.stepLabel}`,
-        });
-        // #endregion
-      }
-      reject(new DOMException(input.abortMessage, "AbortError"));
-    };
-
-    if (input.signal?.aborted) {
-      abort();
-      return;
+    return result.raw;
+  } catch (error) {
+    if (input.context) {
+      // #region debug-point goal-planning-latency-claude-error
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: error instanceof DOMException && error.name === "AbortError" ? "warn" : "error",
+        phase: input.context.phase,
+        message:
+          error instanceof DOMException && error.name === "AbortError"
+            ? `Claude 执行被中断：${input.context.stepLabel}`
+            : `Claude 执行异常：${input.context.stepLabel}`,
+        details: error instanceof Error ? error.message : input.failureMessage,
+      });
+      // #endregion
     }
-
-    input.signal?.addEventListener("abort", abort, { once: true });
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      errorOutput += chunk.toString("utf8");
-    });
-
-    child.on("error", (error) => {
-      input.signal?.removeEventListener("abort", abort);
-      if (input.context) {
-        // #region debug-point goal-planning-latency-claude-error
-        appendGoalLog({
-          requestId: input.context.requestId,
-          scope: input.context.scope,
-          level: "error",
-          phase: input.context.phase,
-          message: `Claude 执行异常：${input.context.stepLabel}`,
-          details: error.message,
-        });
-        // #endregion
-      }
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      input.signal?.removeEventListener("abort", abort);
-      if (aborted) return;
-      if (code !== 0) {
-        if (input.context) {
-          // #region debug-point goal-planning-latency-claude-failed
-          appendGoalLog({
-            requestId: input.context.requestId,
-            scope: input.context.scope,
-            level: "error",
-            phase: input.context.phase,
-            message: `Claude 执行失败：${input.context.stepLabel}`,
-            details: errorOutput.trim() || input.failureMessage,
-          });
-          // #endregion
-        }
-        reject(new Error(errorOutput.trim() || input.failureMessage));
-        return;
-      }
-      if (input.context) {
-        // #region debug-point goal-planning-latency-claude-finished
-        appendGoalLog({
-          requestId: input.context.requestId,
-          scope: input.context.scope,
-          level: "info",
-          phase: input.context.phase,
-          message: `Claude 执行完成：${input.context.stepLabel}`,
-          details: formatTimingDetails({
-            elapsedMs: Date.now() - startedAt,
-            promptChars,
-            outputChars: output.length,
-          }),
-        });
-        // #endregion
-      }
-      resolve(output);
-    });
-  });
+    throw error;
+  }
 }
 
 function stripJsonFences(text: string) {
@@ -967,53 +911,6 @@ function extractTextFromPayload(raw: string) {
   }
 
   return text;
-}
-
-function extractBalancedJsonSnippet(text: string) {
-  const startIndex = text.search(/[\{\[]/);
-  if (startIndex < 0) return text.trim();
-
-  const opener = text[startIndex];
-  const closer = opener === "{" ? "}" : "]";
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = startIndex; index < text.length; index += 1) {
-    const char = text[index];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-    if (char === opener) {
-      depth += 1;
-      continue;
-    }
-    if (char === closer) {
-      depth -= 1;
-      if (depth === 0) {
-        return text.slice(startIndex, index + 1).trim();
-      }
-    }
-  }
-
-  return text.slice(startIndex).trim();
 }
 
 function repairCommonJsonIssues(text: string) {
@@ -1352,7 +1249,10 @@ function validateTaskGeneration(value: unknown): TaskGenerationPayload {
           : `task-${index + 1}`,
       title,
       description,
-      execution_cycle: task.execution_cycle === "recurring" ? "recurring" : "once",
+      task_type:
+        task.task_type === "one_shot" && task.execution_mode !== "monitoring" && !task.recurrence
+          ? "one_shot"
+          : "repeat",
       execution_mode:
         task.execution_mode === "interactive" ||
         task.execution_mode === "monitoring" ||
@@ -1564,16 +1464,6 @@ function inferCollaborationMode(
   return "agent_autonomous";
 }
 
-function requiresUserConfirmationToComplete(input: {
-  expectedOutputType: TaskGenerationPayload["tasks"][number]["expected_output"]["type"];
-  completionCriteria?: string;
-}) {
-  if (input.expectedOutputType === "decision" || input.expectedOutputType === "confirmation") return true;
-  return /用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(
-    input.completionCriteria ?? "",
-  );
-}
-
 function normalizeTaskCollaborationPayload(
   task: Record<string, unknown> & {
     execution_mode?: unknown;
@@ -1756,8 +1646,7 @@ function inferDraftCollaboration(task: DraftTask): NonNullable<DraftTask["collab
 }
 
 function inferTaskType(task: TaskGenerationPayload["tasks"][number]): DraftTask["taskType"] {
-  if (task.execution_mode === "monitoring") return "monitoring";
-  if (task.execution_cycle === "recurring") return "daily_repeat";
+  if (task.task_type === "repeat" || task.execution_mode === "monitoring" || task.recurrence) return "repeat";
   return "one_shot";
 }
 
@@ -1765,14 +1654,16 @@ function inferTriggerRule(task: TaskGenerationPayload["tasks"][number]) {
   const taskType = inferTaskType(task) as Task["taskType"];
   let triggerRule: string;
   if (task.execution_mode === "event_triggered") {
-    triggerRule = task.trigger_condition || "满足触发条件时执行";
+    triggerRule = task.trigger_condition
+      ? `满足触发条件执行：${task.trigger_condition}`
+      : "满足触发条件执行";
     return normalizeConcreteTriggerRule(triggerRule, taskType);
   }
   if (task.execution_mode === "monitoring") {
     triggerRule = task.recurrence || "每天固定时间巡检";
     return normalizeConcreteTriggerRule(triggerRule, taskType);
   }
-  if (task.execution_cycle === "recurring") {
+  if (task.task_type === "repeat") {
     triggerRule = task.recurrence || "每周固定节奏执行";
     return normalizeConcreteTriggerRule(triggerRule, taskType);
   }
@@ -2095,7 +1986,6 @@ function applyTaskReview(
         priority: effectivePriority,
         dependencies: task.dependencies,
         executionMode: task.execution_mode,
-        executionCycle: task.execution_cycle,
         expectedResult: {
           type: task.expected_output.type,
           description: task.expected_output.description,
@@ -2142,7 +2032,6 @@ function applyTaskReview(
       priority: firstTask.priority,
       dependencies: firstTask.dependencies,
       executionMode: firstTask.execution_mode,
-      executionCycle: firstTask.execution_cycle,
       expectedResult: {
         type: firstTask.expected_output.type,
         description: firstTask.expected_output.description,

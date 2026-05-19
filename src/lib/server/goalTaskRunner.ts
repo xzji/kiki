@@ -7,10 +7,11 @@ import { readinessFromContext } from "@/lib/server/taskExecution/readinessAdapte
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
 import { runMultiAgentOrchestration } from "@/lib/server/agentOrchestration/MultiAgentOrchestrator";
 import { selectAgentCollaborationStrategy } from "@/lib/server/agentOrchestration/strategy";
+import { classifyTaskRunError, requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
-import { normalizeFileWriteSpecs } from "@/lib/server/taskRunner/FileWriteRunner";
+import { normalizeFileWriteSpecs } from "@/lib/server/fileWriteSpecs";
 import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
 import { writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
 import {
@@ -51,7 +52,8 @@ import type { AcceptanceReport, LocalValidationReport, TaskAcceptanceRuntimeStat
 import type { TaskResult } from "@/types/taskResult";
 
 import { streamClaudeCli } from "./claudeCli";
-import { getRuntimeJobByRequestId, updateRuntimeJobExecution } from "./repositories/runtimeJobsRepository";
+import { getRuntimeJobByRequestId } from "./repositories/runtimeJobsRepository";
+import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
 
 type RunGoalTaskInput = {
   requestId: string;
@@ -147,16 +149,6 @@ function looksLikeFinalProtocolJsonFragment(text: string) {
   if (matchedProtocolKeyCount < 2) return false;
   const jsonKeyMatches = trimmed.match(/"[^"]+"\s*:/g) ?? [];
   return trimmed.startsWith("{") || jsonKeyMatches.length >= 4;
-}
-
-function classifyTaskRunError(error: unknown): TaskRunErrorCategory {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/abort|中断|cancel/i.test(message)) return "aborted";
-  if (/permission|权限|accept/i.test(message)) return "permission";
-  if (/network|fetch|ECONN|timed out|timeout|socket/i.test(message)) return "transient_network";
-  if (/spawn|ENOENT|启动失败|cli/i.test(message)) return "transient_cli";
-  if (/json|parse|格式|schema/i.test(message)) return "logic";
-  return "unknown";
 }
 
 type ReadinessJudgeVerdict = {
@@ -463,23 +455,13 @@ function normalizeInteractionRequirement(
   };
 }
 
-function taskRequiresUserConfirmationToComplete(task: Task) {
-  const expectedType = task.expectedResult?.type;
-  if (expectedType === "decision" || expectedType === "confirmation") return true;
-  const criteria = task.expectedResult?.completionCriteria ?? "";
-  if (/用户.*(确认|审批|选择|决定|采纳).*完成|必须.*用户.*(确认|审批|选择|决定|采纳)|经用户.*(确认|审批|选择|决定|采纳)/.test(criteria)) {
-    return true;
-  }
-  return task.collaboration?.completionOwner === "user" && task.expectedResult?.type !== "information";
-}
-
 function isNonBlockingInformationFeedback(input: RunGoalTaskInput, requirement: InteractionRequirement, taskResult: TaskResult | null) {
   return (
     input.task.expectedResult?.type === "information" &&
     requirement.type === "confirm" &&
     requirement.timing === "after_agent_output" &&
     taskResult?.status === "done" &&
-    !taskRequiresUserConfirmationToComplete(input.task)
+    !requiresUserConfirmationToComplete(input.task, { includeUserCompletionOwner: true })
   );
 }
 
@@ -1311,7 +1293,7 @@ function createTrajectoryStep(input: Omit<ExecutionTrajectoryStep, "id" | "index
 function persistTrajectorySnapshot(requestId: string, trajectory: ExecutionTrajectoryStep[]) {
   const job = getRuntimeJobByRequestId(requestId);
   if (!job) return;
-  updateRuntimeJobExecution(job.id, { trajectory });
+  updateGoalRuntimeJobExecution(job.id, { trajectory });
 }
 
 function progressPayloadWithTrajectory(trajectory: ExecutionTrajectoryStep[], resultPayload?: Record<string, unknown> | null) {
@@ -2283,7 +2265,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   });
   const blocker = createExecutionBlocker(input, result, trajectory);
   if (blocker) {
-    updateRuntimeJobExecution(`job-${input.instance.id}`, { blocker });
+    updateGoalRuntimeJobExecution(`job-${input.instance.id}`, { blocker });
   }
   return {
     ...result,
@@ -2410,7 +2392,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       taskInstanceId: input.instance.id,
     });
     if (blocker) {
-      updateRuntimeJobExecution(`job-${input.instance.id}`, {
+      updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
         blocker,
         trajectory,
         result: resultPayload,
@@ -2485,7 +2467,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
           taskId: input.task.id,
           taskInstanceId: input.instance.id,
         });
-        updateRuntimeJobExecution(`job-${input.instance.id}`, {
+        updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
           result: resultPayload,
           trajectory: result.trajectory,
           lastError: errorMessage,

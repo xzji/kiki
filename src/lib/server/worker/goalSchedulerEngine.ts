@@ -1,7 +1,7 @@
-import { createGeneratedInstance } from "@/mocks/goals";
+import { createGeneratedInstance } from "@/lib/goalFactory";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
-import { parseTaskTriggerTime } from "@/lib/taskTriggerTime";
+import { isTaskTriggerDue } from "@/lib/taskTriggerTime";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import type { Goal, Task, TaskInstanceStatus } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -39,28 +39,12 @@ function toTaskRuntimeStatus(task: Task) {
   return "pending";
 }
 
-function hasInstanceOnDay(task: Task, date: Date) {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const label = `${month}-${day}`;
-  return task.instances.some((instance) => instance.dateLabel === label);
-}
-
-function isTaskDue(task: Task, now: Date) {
-  if (task.taskType === "one_shot") return task.instances.length === 0;
-  if (hasInstanceOnDay(task, now)) return false;
-  const time = parseTaskTriggerTime(task.triggerRule);
-  if (!time) return false;
-  const due = new Date(now);
-  due.setHours(time.hour, time.minute, 0, 0);
-  return now.getTime() >= due.getTime();
-}
-
 function computePriorityScore(task: Task) {
   const priority = task.priority ?? "medium";
-  const taskTypeScore = task.taskType === "one_shot" ? 30 : task.taskType === "monitoring" ? 20 : 10;
+  const taskTypeScore = task.taskType === "one_shot" ? 30 : 10;
+  const monitoringScore = task.executionMode === "monitoring" ? 10 : 0;
   const executionScore = task.executionKind === "confirm_action" ? 20 : task.executionKind === "draft_review" ? 15 : 0;
-  return PRIORITY_WEIGHT[priority] + taskTypeScore + executionScore;
+  return PRIORITY_WEIGHT[priority] + taskTypeScore + monitoringScore + executionScore;
 }
 
 function getReadyTasks(goals: Goal[]) {
@@ -79,7 +63,7 @@ function getReadyTasks(goals: Goal[]) {
         if (task.progress >= 100 && task.taskType === "one_shot") continue;
         const runtimeStatus = toTaskRuntimeStatus(task);
         if (runtimeStatus !== "pending" && runtimeStatus !== "completed") continue;
-        if (!isTaskDue(task, now)) continue;
+        if (!isTaskTriggerDue(task, now)) continue;
         ready.push({
           goal,
           subGoalId: subGoal.id,

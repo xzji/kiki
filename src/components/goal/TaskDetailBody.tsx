@@ -20,10 +20,17 @@ import type { AgentRunPlan } from "@/types/agentOrchestration";
 import type { Goal, InteractionSubmission, Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
-  daily_repeat: "每日重复",
-  one_shot: "一次性",
-  monitoring: "监控追踪",
+  repeat: "重复任务",
+  one_shot: "一次性任务",
 };
+
+function formatTaskTriggerMoment(task: Task) {
+  const triggerRule = task.triggerRule.trim();
+  if (task.executionMode !== "event_triggered") return triggerRule;
+  if (!triggerRule) return "满足触发条件执行";
+  if (triggerRule.startsWith("满足触发条件执行")) return triggerRule;
+  return `满足触发条件执行：${triggerRule}`;
+}
 
 const EXECUTION_LABEL: Record<Task["executionKind"], string> = {
   flashcard: "记忆闪卡",
@@ -372,17 +379,8 @@ export function TaskDetailBody({
               <MetaLabel>任务类型</MetaLabel>
               <MetaValue>{TASK_TYPE_LABEL[task.taskType]}</MetaValue>
 
-              <MetaLabel>执行周期</MetaLabel>
-              <MetaValue>
-                {task.taskType === "daily_repeat"
-                  ? "每日"
-                  : task.taskType === "one_shot"
-                    ? "一次性"
-                    : "长期"}
-              </MetaValue>
-
-              <MetaLabel>触发时间</MetaLabel>
-              <MetaValue>{task.triggerRule}</MetaValue>
+              <MetaLabel>触发时机</MetaLabel>
+              <MetaValue>{formatTaskTriggerMoment(task)}</MetaValue>
 
               <MetaLabel>交付物</MetaLabel>
               <MetaValue>{task.expectedOutcome || "—"}</MetaValue>

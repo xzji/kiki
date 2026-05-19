@@ -5,8 +5,11 @@ import {
   writeRuntimeDaemonDeviceState,
   writeRuntimeDaemonState,
 } from "@/lib/daemon/daemonState";
-import { syncGoalInstanceFromProgress } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import {
+  syncTaskInstanceProgressProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import { getGoalTelemetryProgress, getTaskTelemetryLogs } from "@/lib/server/goalTelemetry";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
 import {
@@ -20,7 +23,6 @@ import {
   isRuntimeJobLeaseHeld,
   releaseExpiredRuntimeJobLeases,
   renewRuntimeJobLease,
-  updateRuntimeJobExecution,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 
 const DAEMON_VERSION = "0.1.0";
@@ -156,16 +158,16 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
           : latestProgress?.resultPayload?.awaitingUser || latestBlocker
             ? "awaiting_user"
             : "completed";
-      const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
+      syncTaskInstanceProgressProjection({
+        goals: readGoalsSnapshot([]),
         taskId: job.payload.task.id,
         instanceId: job.payload.instance.id,
         progress: latestProgress,
         logs: latestLogs,
         trajectory: latestTrajectory,
       });
-      upsertGoalsSnapshot(nextGoals);
 
-      updateRuntimeJobExecution(job.id, {
+      updateGoalRuntimeJobExecution(job.id, {
         status: nextStatus,
         progress: latestProgress,
         logs: latestLogs,
@@ -212,15 +214,15 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
             ? job.trajectory.concat(runTrajectory).filter((step, index, all) => all.findIndex((item) => item.id === step.id) === index)
             : runTrajectory)
         : job.trajectory;
-      const nextGoals = syncGoalInstanceFromProgress(readGoalsSnapshot([]), {
+      syncTaskInstanceProgressProjection({
+        goals: readGoalsSnapshot([]),
         taskId: job.payload.task.id,
         instanceId: job.payload.instance.id,
         progress: latestProgress,
         logs: latestLogs,
         trajectory: latestTrajectory,
       });
-      upsertGoalsSnapshot(nextGoals);
-      updateRuntimeJobExecution(job.id, {
+      updateGoalRuntimeJobExecution(job.id, {
         status: "failed",
         progress: latestProgress,
         logs: latestLogs,

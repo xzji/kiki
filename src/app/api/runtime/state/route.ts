@@ -6,15 +6,13 @@ import {
   readScheduleEventsSnapshotMeta,
 } from "@/lib/server/runtime/stateSnapshot";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
-import { initialGoals } from "@/mocks/goals";
-import { initialScheduleEvents } from "@/mocks/schedule";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const goals = readGoalsSnapshotMeta(initialGoals);
+  const goals = readGoalsSnapshotMeta([]);
   const runtimeEnvironments = readRuntimeEnvironmentsSnapshotMeta(INITIAL_RUNTIME_ENVIRONMENTS);
-  const scheduleEvents = readScheduleEventsSnapshotMeta(initialScheduleEvents);
+  const scheduleEvents = readScheduleEventsSnapshotMeta([]);
   return NextResponse.json({
     goals: goals.value,
     runtimeEnvironments: runtimeEnvironments.value,

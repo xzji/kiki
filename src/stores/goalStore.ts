@@ -6,8 +6,7 @@ import { persist } from "zustand/middleware";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { createOpaqueId, migrateGoalIds } from "@/lib/opaqueIds";
 import { normalizeConcreteTriggerRule, normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
-import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
-import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
+import { buildGoalFromDraft, createGeneratedInstance } from "@/lib/goalFactory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
@@ -29,7 +28,16 @@ import type {
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
-const MOCK_BASELINE_RESET_VERSION = 10;
+const MOCK_BASELINE_RESET_VERSION = 12;
+const MOCK_GOAL_TITLES = new Set([
+  "托福考试 110 分",
+  "购买 SUV 汽车",
+  "大阪 6 日游",
+  "邮件",
+  "今日要闻",
+  "找 AI 产品经理工作",
+  "西红柿炒鸡蛋怎么做",
+]);
 
 function mergeGoalsById(...groups: Goal[][]) {
   const merged = new Map<string, Goal>();
@@ -39,6 +47,10 @@ function mergeGoalsById(...groups: Goal[][]) {
     }
   }
   return Array.from(merged.values());
+}
+
+function removeMockGoals(goals: Goal[]) {
+  return goals.filter((goal) => !MOCK_GOAL_TITLES.has(goal.title));
 }
 
 function finalizeGoal(goal: Goal): Goal {
@@ -82,14 +94,24 @@ function defaultResultViewKind(task: Task) {
   return task.resultViewKind ?? task.executionKind ?? "generic_result";
 }
 
+function normalizeTaskType(taskType: unknown): Task["taskType"] {
+  return taskType === "one_shot" ? "one_shot" : "repeat";
+}
+
 function normalizeTask(task: Task): Task {
+  const normalizedTaskType = normalizeTaskType((task as { taskType?: unknown }).taskType);
+  const taskFields = { ...task } as Task & Record<string, unknown>;
+  delete taskFields["execution" + "Cycle"];
   return {
-    ...task,
-    triggerRule: normalizeConcreteTriggerRule(task.triggerRule, task.taskType),
+    ...taskFields,
+    taskType: normalizedTaskType,
+    triggerRule: normalizeConcreteTriggerRule(task.triggerRule, normalizedTaskType),
     resultViewKind: task.resultViewKind ?? task.executionKind ?? "generic_result",
     executionStrategy: task.executionStrategy ?? "agent_autonomous",
     executionObjective: task.executionObjective ?? task.description,
-    instances: task.instances.map((instance) => normalizeInstance(instance, task)),
+    instances: task.instances.map((instance) =>
+      normalizeInstance(instance, { ...taskFields, taskType: normalizedTaskType }),
+    ),
   };
 }
 
@@ -221,8 +243,7 @@ function inferSubGoalSuccessCriteria(subGoal: Goal["subGoals"][number]) {
 function inferSubGoalEstimatedDuration(subGoal: Goal["subGoals"][number]) {
   if (subGoal.tasks.length === 0) return undefined;
   return subGoal.tasks.reduce((total, task) => {
-    const taskTypeMinutes =
-      task.taskType === "one_shot" ? 90 : task.taskType === "monitoring" ? 45 : 60;
+    const taskTypeMinutes = task.taskType === "one_shot" ? 90 : 60;
     const executionBonus =
       task.executionMode === "interactive" ? 30 : task.executionMode === "monitoring" ? 15 : 0;
     return total + taskTypeMinutes + executionBonus;
@@ -562,7 +583,7 @@ function nowIso() {
 export const useGoalStore = create<GoalStore>()(
   persist(
     (set, get) => ({
-      goals: initialGoals.map((goal) => normalizeGoal(goal)),
+      goals: [],
       replaceGoals: (goals) => {
         set({
           goals: goals.map((goal) => normalizeGoal(goal)),
@@ -771,8 +792,22 @@ export const useGoalStore = create<GoalStore>()(
         return nextInstance;
       },
       createGoalFromInput: (title) => {
-        const draft = getGoalBreakdownDraft(title);
-        const nextGoal = buildGoalFromDraft(draft);
+        const now = nowIso();
+        const nextGoal: Goal = {
+          id: createOpaqueId("goal"),
+          title,
+          summary: title,
+          deadline: "",
+          progress: 0,
+          subGoals: [],
+          createdAt: now,
+          workflow: {
+            phase: "idle",
+            planDecision: "pending",
+            startedAt: now,
+            updatedAt: now,
+          },
+        };
         const normalized = normalizeGoal(nextGoal);
         set((state) => ({ goals: [...state.goals, normalized] }));
         return normalized;
@@ -827,7 +862,6 @@ export const useGoalStore = create<GoalStore>()(
                     priority: draftTask.priority,
                     dependencies: t.dependencies,
                     executionMode: draftTask.executionMode,
-                    executionCycle: draftTask.executionCycle,
                     expectedResult: draftTask.expectedResult,
                     resultViewKind: draftTask.resultViewKind ?? draftTask.executionKind,
                     executionStrategy: draftTask.executionStrategy ?? "agent_autonomous",
@@ -1280,20 +1314,21 @@ export const useGoalStore = create<GoalStore>()(
       version: MOCK_BASELINE_RESET_VERSION,
       migrate: (persisted) => {
         const next = persisted as Partial<GoalStore> | undefined;
-        const persistedGoals = Array.isArray(next?.goals) ? next.goals.map((goal) => normalizeGoal(goal)) : [];
+        const persistedGoals = Array.isArray(next?.goals)
+          ? removeMockGoals(next.goals.map((goal) => normalizeGoal(goal)))
+          : [];
         return {
-          goals: mergeGoalsById(persistedGoals, initialGoals.map((goal) => normalizeGoal(goal))),
+          goals: persistedGoals,
         };
       },
       partialize: (state) => ({ goals: state.goals }),
       merge: (persisted, current) => {
         const next = persisted as Partial<GoalStore>;
-        const persistedGoals = (next.goals ?? current.goals).map((goal) => normalizeGoal(goal));
-        const baselineGoals = initialGoals.map((goal) => normalizeGoal(goal));
+        const persistedGoals = removeMockGoals((next.goals ?? current.goals).map((goal) => normalizeGoal(goal)));
         return {
           ...current,
           ...next,
-          goals: mergeGoalsById(persistedGoals, baselineGoals),
+          goals: mergeGoalsById(persistedGoals),
         };
       },
     },

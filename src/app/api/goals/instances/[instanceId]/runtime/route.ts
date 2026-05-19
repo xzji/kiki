@@ -1,6 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import { getGoalTelemetryProgress, getTaskTelemetryLogs, getTaskTelemetryProgress } from "@/lib/server/goalTelemetry";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
@@ -53,21 +52,25 @@ function buildWaitingReason(input: {
   return undefined;
 }
 
-export async function GET(request: NextRequest) {
-  const requestId = request.nextUrl.searchParams.get("requestId")?.trim();
-  const taskInstanceId = request.nextUrl.searchParams.get("taskInstanceId")?.trim();
-
-  if (!requestId && !taskInstanceId) {
-    return withDeprecatedApiHeaders(
-      NextResponse.json({ reason: "requestId 或 taskInstanceId 不能为空" }, { status: 400 }),
-      "/api/goals/instances/{instanceId}/runtime",
-    );
+export async function GET(
+  request: Request,
+  context: {
+    params: {
+      instanceId: string;
+    };
+  },
+) {
+  const requestUrl = new URL(request.url);
+  const requestId = requestUrl.searchParams.get("requestId")?.trim();
+  const taskInstanceId = context.params.instanceId.trim();
+  if (!taskInstanceId) {
+    return NextResponse.json({ reason: "instanceId 不能为空" }, { status: 400 });
   }
 
-  const runtimeJob = taskInstanceId ? getRuntimeJobByTaskInstanceId(taskInstanceId) : null;
+  const runtimeJob = getRuntimeJobByTaskInstanceId(taskInstanceId);
   const progress = latestProgress([
     requestId ? getGoalTelemetryProgress(requestId) : null,
-    taskInstanceId ? getTaskTelemetryProgress(taskInstanceId) : null,
+    getTaskTelemetryProgress(taskInstanceId),
     runtimeJob?.progress,
   ]);
   const now = new Date().toISOString();
@@ -92,28 +95,25 @@ export async function GET(request: NextRequest) {
           },
         } satisfies GoalServerProgress)
       : null;
-  const telemetryLogs = taskInstanceId ? getTaskTelemetryLogs(taskInstanceId) : [];
+  const telemetryLogs = getTaskTelemetryLogs(taskInstanceId);
   const logs = telemetryLogs.length > 0 ? telemetryLogs : runtimeJob?.logs ?? [];
-  const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
-    ? progress.resultPayload.trajectory
+  const effectiveProgress = cancelledProgress ?? progress;
+  const resultPayload = effectiveProgress?.resultPayload as Record<string, unknown> | undefined;
+  const progressTrajectory = resultPayload && Array.isArray(resultPayload["trajectory"])
+    ? resultPayload["trajectory"]
     : [];
   const trajectory = progressTrajectory.length > 0 ? progressTrajectory : runtimeJob?.trajectory ?? [];
-  const effectiveProgress = cancelledProgress ?? progress;
   const waitingReason = buildWaitingReason({ runtimeJob, progress: effectiveProgress });
-  if (!effectiveProgress && (!logs || logs.length === 0)) {
-    return withDeprecatedApiHeaders(
-      NextResponse.json({ progress: null, logs: [], trajectory: [], waitingReason }, { status: 404 }),
-      "/api/goals/instances/{instanceId}/runtime",
-    );
+
+  if (!runtimeJob && !effectiveProgress && logs.length === 0) {
+    return NextResponse.json({ progress: null, logs: [], trajectory: [], blocker: null, waitingReason }, { status: 404 });
   }
 
-  return withDeprecatedApiHeaders(
-    NextResponse.json({
-      progress: effectiveProgress,
-      logs,
-      trajectory,
-      waitingReason,
-    }),
-    "/api/goals/instances/{instanceId}/runtime",
-  );
+  return NextResponse.json({
+    progress: effectiveProgress,
+    logs,
+    trajectory,
+    blocker: runtimeJob?.blocker ?? null,
+    waitingReason,
+  });
 }

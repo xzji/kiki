@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
-import { markGoalInstanceStatusSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { initialGoals } from "@/mocks/goals";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { transitionTaskInstanceProjection } from "@/lib/server/services/goalRuntimeService";
 import type { Goal, TaskInstanceStatus } from "@/types/kiki";
 
 export const runtime = "nodejs";
@@ -57,7 +56,7 @@ export async function POST(
   if (!validStatuses.includes(body.status)) {
     return NextResponse.json({ reason: "非法任务实例状态" }, { status: 400 });
   }
-  const goals = readGoalsSnapshot(initialGoals);
+  const goals = readGoalsSnapshot([]);
   const located = findInstance(goals, context.params.instanceId);
   if (!located) {
     return NextResponse.json({ reason: "未找到任务实例" }, { status: 404 });
@@ -97,13 +96,13 @@ export async function POST(
   if (!isTaskInstanceStatus(nextStatus) || nextStatus !== body.status) {
     return NextResponse.json({ reason: "Idempotency-Key 已用于不同的状态变更" }, { status: 409 });
   }
-  const nextGoals = markGoalInstanceStatusSnapshot(goals, {
+  transitionTaskInstanceProjection({
+    goals,
     taskId: located.task.id,
     instanceId: located.instance.id,
     status: nextStatus,
     reason: body.reason,
   });
-  upsertGoalsSnapshot(nextGoals);
   return NextResponse.json({
     ok: true,
     event: statusEvent,

@@ -4,8 +4,6 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { migrateConversationIds } from "@/lib/opaqueIds";
-import { buildConversationsFromGoals } from "@/mocks/conversations";
-import { initialGoals } from "@/mocks/goals";
 import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 
 type ConversationStore = {
@@ -33,58 +31,20 @@ type ConversationStore = {
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 
-const MOCK_BASELINE_RESET_VERSION = 10;
+const MOCK_BASELINE_RESET_VERSION = 11;
+const MOCK_CONVERSATION_TITLES = new Set([
+  "托福考试 110 分",
+  "购买 SUV 汽车",
+  "大阪 6 日游",
+  "邮件",
+  "今日要闻",
+  "找 AI 产品经理工作",
+  "西红柿炒鸡蛋怎么做",
+  "越南玩5天",
+]);
 const TERMINAL_CONTROL_NOTICE_PATTERNS = [
   /^\s*（已停止，未检测到正在运行的任务）\s*$/gm,
   /^\s*已停止，未检测到正在运行的任务。\s*$/gm,
-];
-const RECOVERED_WORKSPACE_CONVERSATIONS: Conversation[] = [
-  {
-    id: "conv-new-1779009317391",
-    title: "越南玩5天",
-    status: "error",
-    workspacePath: "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779009317391",
-    workspaceInitializedAt: "2026-05-17T09:15:17.453Z",
-    updatedAt: "2026-05-17T09:28:17.486Z",
-    planningRunState: {
-      status: "failed",
-      phase: "generating_tasks",
-      action: "resume_plan",
-      goalText: "越南玩5天",
-      errorMessage: "任务生成已中断",
-      failedAt: "2026-05-17T09:28:17.486Z",
-      updatedAt: "2026-05-17T09:28:17.486Z",
-      lastUserMessage: "计划5.21去，胡志明和芽庄、预算3000没人",
-    },
-    messages: [
-      {
-        id: "msg-recovered-1779009320539-user",
-        role: "user",
-        kind: "text",
-        content: "/goal 越南玩5天",
-        createdAt: "2026-05-17T09:15:20.539Z",
-        unread: false,
-      },
-      {
-        id: "msg-recovered-1779009320539-kiki",
-        role: "kiki",
-        kind: "text",
-        content: "正在理解目标和关键约束...\n正在准备几个关键澄清问题...\n正在生成首轮澄清问题...",
-        createdAt: "2026-05-17T09:15:20.539Z",
-        unread: false,
-        status: "done",
-      },
-      {
-        id: "msg-recovered-1779010097486-kiki",
-        role: "kiki",
-        kind: "text",
-        content: "目标规划生成失败：任务生成已中断。可从已保存的 checkpoint 继续恢复。",
-        createdAt: "2026-05-17T09:28:17.486Z",
-        unread: true,
-        status: "error",
-      },
-    ],
-  },
 ];
 
 function sanitizeConversationMessageContent(content: string) {
@@ -97,7 +57,7 @@ function sanitizeConversationMessageContent(content: string) {
 }
 
 function sanitizeConversationHistory(conversations: Conversation[]) {
-  return conversations.map((conversation) => {
+  return conversations.filter((conversation) => !MOCK_CONVERSATION_TITLES.has(conversation.title)).map((conversation) => {
     const migratedConversation = migrateConversationIds(conversation);
     return {
       ...migratedConversation,
@@ -121,11 +81,10 @@ function mergeConversationsById(...groups: Conversation[][]) {
 
 function migrateConversationState(persistedState: unknown) {
   const persisted = persistedState as Partial<ConversationStore> | undefined;
-  const baseline = buildConversationsFromGoals(initialGoals);
   const persistedConversations = Array.isArray(persisted?.conversations) ? persisted.conversations : [];
   return {
     conversations: sanitizeConversationHistory(
-      mergeConversationsById(persistedConversations, RECOVERED_WORKSPACE_CONVERSATIONS, baseline),
+      mergeConversationsById(persistedConversations),
     ),
   };
 }
@@ -133,7 +92,7 @@ function migrateConversationState(persistedState: unknown) {
 export const useConversationStore = create<ConversationStore>()(
   persist(
     (set, get) => ({
-      conversations: buildConversationsFromGoals(initialGoals),
+      conversations: [],
       createConversation: (title) => {
         const now = new Date().toISOString();
         const next: Conversation = {
@@ -320,8 +279,6 @@ export const useConversationStore = create<ConversationStore>()(
           conversations: sanitizeConversationHistory(
             mergeConversationsById(
               persisted?.conversations ?? currentState.conversations,
-              RECOVERED_WORKSPACE_CONVERSATIONS,
-              buildConversationsFromGoals(initialGoals),
             ),
           ),
         };

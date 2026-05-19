@@ -1,7 +1,7 @@
 import type { Task } from "@/types/kiki";
 
 export function DetailPanel({ task }: { task: Task }) {
-  const typeLabel = task.taskType === "daily_repeat" ? "每天重复任务" : task.taskType === "monitoring" ? "监控任务" : "一次性任务";
+  const typeLabel = task.taskType === "one_shot" ? "一次性任务" : "重复任务";
 
   return (
     <div className="mb-6 grid gap-4 rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-4 md:grid-cols-2">

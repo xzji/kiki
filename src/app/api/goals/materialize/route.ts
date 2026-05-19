@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { initialGoals } from "@/mocks/goals";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { materializeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
 import type { Goal, Task } from "@/types/kiki";
 
 export const runtime = "nodejs";
@@ -73,12 +73,12 @@ export async function POST(request: NextRequest) {
   if (!body.goal?.id || !Array.isArray(body.goal.subGoals)) {
     return NextResponse.json({ ok: false, reason: "缺少有效 goal payload" }, { status: 400 });
   }
-  const goals = readGoalsSnapshot(initialGoals);
+  const goals = readGoalsSnapshot([]);
   const existing = goals.find((goal) => goal.id === body.goal?.id);
   if (existing && materializeKey(existing) === materializeKey(body.goal)) {
     return NextResponse.json({ ok: true, idempotencyKey, skipped: true });
   }
   const nextGoals = mergeGoalIntoSnapshot(goals, body.goal);
-  const result = upsertGoalsSnapshot(nextGoals);
+  const result = materializeGoalsProjection(nextGoals);
   return NextResponse.json({ ok: true, result });
 }

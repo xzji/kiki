@@ -2,7 +2,6 @@
 
 import { create } from "zustand";
 
-import { initialInboxItems } from "@/mocks/inbox";
 import type { InboxItem } from "@/types/kiki";
 
 type InboxStore = {
@@ -16,7 +15,7 @@ type InboxStore = {
 };
 
 export const useInboxStore = create<InboxStore>((set) => ({
-  items: initialInboxItems,
+  items: [],
   historyItems: [],
   markRead: (id) => set((state) => ({ items: state.items.map((item) => (item.id === id ? { ...item, unreadCount: 0 } : item)) })),
   removeItem: (id) => set((state) => ({ items: state.items.filter((item) => item.id !== id) })),

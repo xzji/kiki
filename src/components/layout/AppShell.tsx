@@ -75,7 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className={contentClassName}>{children}</div>
       </main>
       <UserMenu />
-      <DevPanel />
+      {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
       <TaskDetailDrawer />
       <AssistantSidebar />
       {!taskDrawerOpen ? <AssistantFab /> : null}

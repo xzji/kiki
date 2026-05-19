@@ -44,7 +44,7 @@ V1 明确边界：
 
 - `src/types/kiki.ts`
   - `Goal` 仅有 `workflow / subGoals / summary` 等字段
-  - `Task` 虽然已有 `taskType: "monitoring"` 和 `executionMode: "monitoring"`，但它们仍然是“任务层”抽象
+  - `Task` 虽然已有 `executionMode: "monitoring"`，但它仍然是“任务层”抽象
   - 缺少：
     - 监控源定义
     - 监控快照

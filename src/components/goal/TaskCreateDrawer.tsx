@@ -29,7 +29,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
     title: "",
     description: "",
     expectedOutcome: "",
-    taskType: "daily_repeat" as Task["taskType"],
+    taskType: "repeat" as Task["taskType"],
     triggerRule: "",
     executionKind: "generic_result" as Task["executionKind"],
   });
@@ -40,7 +40,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
         title: "",
         description: "",
         expectedOutcome: "",
-        taskType: "daily_repeat",
+        taskType: "repeat",
         triggerRule: "",
         executionKind: "generic_result",
       });
@@ -116,16 +116,15 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
               onChange={(e) => setForm((prev) => ({ ...prev, taskType: e.target.value as Task["taskType"] }))}
               className="w-full rounded-lg border border-[#E5E7EB] bg-[#F5F6F8] px-3 py-2 text-sm text-[#1F2328] outline-none focus:border-[#1F2328]"
             >
-              <option value="daily_repeat">每日重复</option>
-              <option value="one_shot">一次性</option>
-              <option value="monitoring">监控追踪</option>
+              <option value="repeat">重复任务</option>
+              <option value="one_shot">一次性任务</option>
             </select>
           </Field>
-          <Field label="触发规则" required>
+          <Field label="触发时机" required>
             <input
               value={form.triggerRule}
               onChange={(e) => setForm((prev) => ({ ...prev, triggerRule: e.target.value }))}
-              placeholder="例：每天 21:00 触发 / 周六上午 10:00"
+              placeholder="例：2026-06-01 10:00 / 明天 10:00 / 每天 07:30 / 每周日 20:00 / 每 3 个小时 / 满足触发条件执行：航班价格低于 1800 元"
               className="w-full rounded-lg border border-[#E5E7EB] bg-[#F5F6F8] px-3 py-2 text-sm text-[#1F2328] outline-none focus:border-[#1F2328]"
             />
           </Field>

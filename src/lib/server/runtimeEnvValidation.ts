@@ -1,6 +1,5 @@
-import { access, stat } from "fs/promises";
-import { constants } from "fs";
-import { execFile, spawn } from "child_process";
+import { stat } from "fs/promises";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
 import type {
@@ -10,7 +9,8 @@ import type {
   RuntimeDiscoveryItem,
 } from "@/types/runtime";
 
-import { buildClaudeEnv } from "./claudeEnv";
+import { runPromptJson } from "@/lib/server/claude/transport";
+import { expandHomeDir, normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimePath";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,11 +40,6 @@ const runtimeDefinitions: Record<LocalRuntimeKind, {
   },
 };
 
-function expandHomeDir(input: string) {
-  if (!input.startsWith("~/")) return input;
-  return `${process.env.HOME || ""}/${input.slice(2)}`;
-}
-
 async function pathExists(path: string) {
   try {
     await stat(path);
@@ -52,18 +47,6 @@ async function pathExists(path: string) {
   } catch {
     return false;
   }
-}
-
-export async function resolveCliPath(cliPath: string) {
-  const normalized = expandHomeDir(cliPath || "claude");
-
-  if (normalized.includes("/")) {
-    await access(normalized, constants.X_OK);
-    return normalized;
-  }
-
-  const { stdout } = await execFileAsync("which", [normalized]);
-  return stdout.trim();
 }
 
 async function getRuntimeVersion(runtimeKind: LocalRuntimeKind, cliPath: string) {
@@ -107,49 +90,44 @@ export async function discoverLocalRuntimes() {
 }
 
 async function runHealthCheck(cliPath: string, workingDirectory: string) {
-  const stdout = await new Promise<string>((resolve, reject) => {
-    const child = spawn(cliPath, ["-p", "--output-format", "json", "请只回复 ok"], {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  let stdout = "";
+  try {
+    const result = await runPromptJson({
+      prompt: "请只回复 ok",
+      runtimeEnv: {
+        id: "health-check",
+        type: "local",
+        name: "Claude CLI",
+        workingDirectory,
+        cliPath,
+        permissionMode: "readonly",
+      },
       cwd: workingDirectory,
-      env: buildClaudeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
+      abortSignal: controller.signal,
+      abortMessage: "Claude CLI 可用性检测超时",
+      failureMessage: "Claude CLI 可用性检测失败",
     });
-
-    let output = "";
-    let errorOutput = "";
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new Error("Claude CLI 可用性检测超时"));
-    }, 30000);
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      errorOutput += chunk.toString("utf8");
-    });
-
-    child.on("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      if (code !== 0) {
-        reject(new Error(errorOutput.trim() || "Claude CLI 可用性检测失败"));
-        return;
-      }
-      resolve(output);
-    });
-  });
+    stdout = result.raw;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const lines = stdout
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
   const lastLine = lines[lines.length - 1];
-  const parsed = JSON.parse(lastLine) as { result?: string; subtype?: string; is_error?: boolean };
+  if (!lastLine) {
+    throw new Error("Claude CLI 可用性检测失败：未返回有效 JSON 输出");
+  }
+  let parsed: { result?: string; subtype?: string; is_error?: boolean };
+  try {
+    parsed = JSON.parse(lastLine) as { result?: string; subtype?: string; is_error?: boolean };
+  } catch {
+    throw new Error("Claude CLI 可用性检测失败：返回内容不是有效 JSON");
+  }
 
   return {
     authenticated: parsed.subtype === "success" && !parsed.is_error,
@@ -216,6 +194,4 @@ export async function validateRuntimeEnvironment(
   }
 }
 
-export function normalizeWorkingDirectory(path: string) {
-  return expandHomeDir(path);
-}
+export { normalizeWorkingDirectory, resolveCliPath };

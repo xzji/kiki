@@ -145,13 +145,16 @@ export async function resumeGoalPlanFromCheckpoint(input: {
     signal,
     onProgress: input.onServerProgress,
     task: () =>
-      fetch("/api/goals/plan/resume", {
+      fetch("/api/goals/plan", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-goal-request-id": requestId,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ...body,
+          resumeFromCheckpoint: true,
+        }),
         signal,
       }),
   });

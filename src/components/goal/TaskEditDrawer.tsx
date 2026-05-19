@@ -13,7 +13,7 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
     title: task?.title ?? "",
     description: task?.description ?? "",
     expectedOutcome: task?.expectedOutcome ?? "",
-    taskType: task?.taskType ?? "daily_repeat",
+    taskType: task?.taskType ?? "repeat",
     triggerRule: task?.triggerRule ?? "",
     deadline: formatDateInput(task?.deadline),
     executionKind: task?.executionKind ?? "flashcard",
@@ -25,7 +25,7 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
       title: task?.title ?? "",
       description: task?.description ?? "",
       expectedOutcome: task?.expectedOutcome ?? "",
-      taskType: task?.taskType ?? "daily_repeat",
+      taskType: task?.taskType ?? "repeat",
       triggerRule: task?.triggerRule ?? "",
       deadline: formatDateInput(task?.deadline),
       executionKind: task?.executionKind ?? "flashcard",
@@ -44,8 +44,8 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
             <Field label="标题"><input value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} className="input" /></Field>
             <Field label="描述"><textarea value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} className="textarea" /></Field>
             <Field label="预期结果"><input value={form.expectedOutcome} onChange={(e) => setForm((prev) => ({ ...prev, expectedOutcome: e.target.value }))} className="input" /></Field>
-            <Field label="任务类型"><select value={form.taskType} onChange={(e) => setForm((prev) => ({ ...prev, taskType: e.target.value as Task["taskType"] }))} className="input"><option value="daily_repeat">每天重复</option><option value="one_shot">一次性任务</option><option value="monitoring">监控任务</option></select></Field>
-            <Field label="触发时机"><input value={form.triggerRule} onChange={(e) => setForm((prev) => ({ ...prev, triggerRule: e.target.value }))} className="input" /></Field>
+            <Field label="任务类型"><select value={form.taskType} onChange={(e) => setForm((prev) => ({ ...prev, taskType: e.target.value as Task["taskType"] }))} className="input"><option value="repeat">重复任务</option><option value="one_shot">一次性任务</option></select></Field>
+            <Field label="触发时机"><input value={form.triggerRule} onChange={(e) => setForm((prev) => ({ ...prev, triggerRule: e.target.value }))} placeholder="例：2026-06-01 10:00 / 明天 10:00 / 每天 07:30 / 每周日 20:00 / 每 3 个小时 / 满足触发条件执行：航班价格低于 1800 元" className="input" /></Field>
             <Field label="截止时间"><input type="date" value={form.deadline} onChange={(e) => setForm((prev) => ({ ...prev, deadline: e.target.value }))} className="input" /></Field>
           </Section>
           <Section title="所属关系">

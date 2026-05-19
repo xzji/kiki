@@ -52,3 +52,8 @@ export function extractJsonObject(raw: string) {
   }
   return snippet;
 }
+
+export function tryExtractJsonObject(raw: string) {
+  const snippet = extractBalancedJsonSnippet(raw);
+  return snippet && snippet.startsWith("{") ? snippet : null;
+}

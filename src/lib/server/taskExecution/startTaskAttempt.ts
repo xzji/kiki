@@ -1,10 +1,12 @@
-import { createGeneratedInstance } from "@/mocks/goals";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { createGeneratedInstance } from "@/lib/goalFactory";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import {
-  setTaskAutoRunDisabled,
-  syncGoalInstanceFromProgress,
-  upsertGoalTaskInstanceSnapshot,
-} from "@/lib/server/runtime/goalStateSnapshot";
+  disableTaskAutoRunProjection,
+  enqueueGoalRuntimeJob,
+  persistTaskInstanceProjection,
+  syncTaskInstanceProgressProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import { resolveAdmitDecision } from "@/lib/server/taskExecution/contextResolver";
 import { readinessFromContext } from "@/lib/server/taskExecution/readinessAdapter";
 import {
@@ -14,17 +16,15 @@ import {
   createPreExecutionTaskResult,
 } from "@/lib/server/taskExecution/preExecutionBlocker";
 import {
-  createQueuedRuntimeJob,
   getLatestOpenRuntimeJobByTaskId,
   getRuntimeJobByTaskInstanceId,
-  updateRuntimeJobExecution,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
-type TriggerSource = "user" | "scheduler";
+type TriggerSource = "user" | "scheduler" | "feedback_rerun" | "resume_after_block";
 
 type StartTaskAttemptInput = {
   goal: Goal;
@@ -34,6 +34,9 @@ type StartTaskAttemptInput = {
   runtimeEnv: RuntimeEnvironment;
   triggerSource: TriggerSource;
   requestId: string;
+  conversationWorkspaceDir?: string;
+  taskWorkspaceDir?: string;
+  resumeContext?: string;
 };
 
 export type StartTaskAttemptResult =
@@ -104,19 +107,51 @@ function persistInstanceSnapshot(input: {
   task: Task;
   instance: TaskInstance;
 }) {
-  const nextGoals = upsertGoalTaskInstanceSnapshot(input.goals, {
+  return persistTaskInstanceProjection({
+    goals: input.goals,
     goal: input.goal,
     subGoal: input.subGoal,
     task: input.task,
     instance: input.instance,
   });
-  upsertGoalsSnapshot(nextGoals);
-  return nextGoals;
 }
 
 function disableAutoRunIfNeeded(goals: Goal[], triggerSource: TriggerSource, taskId: string) {
   if (triggerSource !== "scheduler") return;
-  upsertGoalsSnapshot(setTaskAutoRunDisabled(goals, taskId, true));
+  disableTaskAutoRunProjection({ goals, taskId });
+}
+
+function runtimeJobEventSource(triggerSource: TriggerSource) {
+  if (triggerSource === "feedback_rerun") return "feedback";
+  if (triggerSource === "resume_after_block") return "resume";
+  return triggerSource;
+}
+
+function enqueueRuntimeJob(input: {
+  goal: Goal;
+  subGoal: SubGoal;
+  task: Task;
+  instance: TaskInstance;
+  runtimeEnv: RuntimeEnvironment;
+  triggerSource: TriggerSource;
+  requestId: string;
+  conversationWorkspaceDir?: string;
+  taskWorkspaceDir?: string;
+  resumeContext?: string;
+}) {
+  return enqueueGoalRuntimeJob(
+    {
+      goal: input.goal,
+      subGoal: input.subGoal,
+      task: input.task,
+      instance: input.instance,
+      runtimeEnv: input.runtimeEnv,
+      conversationWorkspaceDir: input.conversationWorkspaceDir,
+      taskWorkspaceDir: input.taskWorkspaceDir,
+      resumeContext: input.resumeContext,
+    },
+    { requestId: input.requestId, eventSource: runtimeJobEventSource(input.triggerSource) },
+  );
 }
 
 function isMissingUserInputOnly(decision: ReturnType<typeof resolveAdmitDecision>) {
@@ -253,26 +288,28 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       task: latestTask,
       instance,
     });
-    const nextGoals = syncGoalInstanceFromProgress(nextGoalsWithInstance, {
+    syncTaskInstanceProgressProjection({
+      goals: nextGoalsWithInstance,
       taskId: latestTask.id,
       instanceId: instance.id,
       progress,
       logs: [],
       trajectory: [],
     });
-    upsertGoalsSnapshot(nextGoals);
 
-    createQueuedRuntimeJob(
-      {
-        goal: latestGoal,
-        subGoal: latestSubGoal,
-        task: latestTask,
-        instance,
-        runtimeEnv: input.runtimeEnv,
-      },
-      { requestId: input.requestId, eventSource: input.triggerSource },
-    );
-    updateRuntimeJobExecution(`job-${instance.id}`, {
+    enqueueRuntimeJob({
+      goal: latestGoal,
+      subGoal: latestSubGoal,
+      task: latestTask,
+      instance,
+      runtimeEnv: input.runtimeEnv,
+      triggerSource: input.triggerSource,
+      requestId: input.requestId,
+      conversationWorkspaceDir: input.conversationWorkspaceDir,
+      taskWorkspaceDir: input.taskWorkspaceDir,
+      resumeContext: input.resumeContext,
+    });
+    updateGoalRuntimeJobExecution(`job-${instance.id}`, {
       status: "awaiting_user",
       progress,
       logs: [],
@@ -308,16 +345,18 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     instance,
   });
 
-  createQueuedRuntimeJob(
-    {
-      goal: latestGoal,
-      subGoal: latestSubGoal,
-      task: latestTask,
-      instance,
-      runtimeEnv: input.runtimeEnv,
-    },
-    { requestId: input.requestId, eventSource: input.triggerSource },
-  );
+  enqueueRuntimeJob({
+    goal: latestGoal,
+    subGoal: latestSubGoal,
+    task: latestTask,
+    instance,
+    runtimeEnv: input.runtimeEnv,
+    triggerSource: input.triggerSource,
+    requestId: input.requestId,
+    conversationWorkspaceDir: input.conversationWorkspaceDir,
+    taskWorkspaceDir: input.taskWorkspaceDir,
+    resumeContext: input.resumeContext,
+  });
 
   return {
     schemaVersion: 1,

@@ -1,4 +1,5 @@
 import { streamClaudeCli } from "@/lib/server/claudeCli";
+import { tryExtractJsonObject } from "@/lib/server/jsonExtraction";
 import { buildTaskQuoteContent, summarizeTaskResult } from "@/lib/taskFeedback";
 import type { TaskFeedbackDecision } from "@/lib/taskFeedback";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
@@ -11,14 +12,6 @@ export type TaskFeedbackJudgeResult = {
   revisionContext?: string;
   clarifyingQuestion?: string;
 };
-
-function extractJsonObject(text: string) {
-  const trimmed = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  return trimmed.slice(start, end + 1);
-}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -140,7 +133,7 @@ export async function judgeTaskFeedback(input: {
       clarifyingQuestion: "你希望我具体修改这份任务结果的哪一部分？",
     };
   }
-  const json = extractJsonObject(finalMessage);
+  const json = tryExtractJsonObject(finalMessage);
   if (!json) {
     return normalizeJudgeResult(null, "我没能判断你是否希望重做。请明确说明要修改哪里、补充什么，或确认只是记录反馈。");
   }
