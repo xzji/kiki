@@ -4,6 +4,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
+import { createOpaqueId, migrateGoalIds } from "@/lib/opaqueIds";
+import { normalizeConcreteTriggerRule, normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
 import { getGoalBreakdownDraft } from "@/mocks/goal-breakdown";
 import { buildGoalFromDraft, createGeneratedInstance, initialGoals } from "@/mocks/goals";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
@@ -27,7 +29,7 @@ import type {
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
-const MOCK_BASELINE_RESET_VERSION = 9;
+const MOCK_BASELINE_RESET_VERSION = 10;
 
 function mergeGoalsById(...groups: Goal[][]) {
   const merged = new Map<string, Goal>();
@@ -83,6 +85,7 @@ function defaultResultViewKind(task: Task) {
 function normalizeTask(task: Task): Task {
   return {
     ...task,
+    triggerRule: normalizeConcreteTriggerRule(task.triggerRule, task.taskType),
     resultViewKind: task.resultViewKind ?? task.executionKind ?? "generic_result",
     executionStrategy: task.executionStrategy ?? "agent_autonomous",
     executionObjective: task.executionObjective ?? task.description,
@@ -464,9 +467,10 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
 }
 
 function normalizeGoal(goal: Goal): Goal {
+  const migrated = normalizeGoalTriggerRules(migrateGoalIds(goal));
   return finalizeGoal(enrichSubGoalMetadata({
-    ...goal,
-    subGoals: goal.subGoals.map((subGoal) => ({
+    ...migrated,
+    subGoals: migrated.subGoals.map((subGoal) => ({
       ...subGoal,
       tasks: subGoal.tasks.map((task) => normalizeTask(task)),
     })),
@@ -502,6 +506,7 @@ type GoalStore = {
   updateTask: (taskId: string, values: TaskEditInput) => void;
   replaceGoals: (goals: Goal[]) => void;
   deleteTask: (taskId: string) => void;
+  removeTaskInstance: (taskId: string, instanceId: string) => void;
   markInstanceStatus: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
   controlTaskExecution: (taskId: string, action: "start" | "pause" | "resume") => void;
   completeTaskInstance: (taskId: string, instanceId: string, submission?: InteractionSubmission) => void;
@@ -550,33 +555,8 @@ type GoalStore = {
   addTask: (goalId: string, subGoalId: string, input: TaskCreateInput) => void;
 };
 
-function buildGoalIdFromTitle(goalTitle: string) {
-  const slug = goalTitle
-    .trim()
-    .toLowerCase()
-    .replace(/[^\w\u4e00-\u9fa5]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return `goal-${Date.now()}-${slug || "new"}`;
-}
-
 function nowIso() {
   return new Date().toISOString();
-}
-
-function namespaceDependencyIds(
-  dependencies: string[] | undefined,
-  taskIdMap: Map<string, string>,
-  goalId: string,
-) {
-  if (!dependencies?.length) return dependencies;
-  return dependencies.map((dependencyId) => {
-    const trimmed = dependencyId.trim();
-    if (!trimmed) return trimmed;
-    if (taskIdMap.has(trimmed)) return taskIdMap.get(trimmed)!;
-    if (trimmed.startsWith(`${goalId}-`)) return trimmed;
-    return taskIdMap.get(trimmed.replace(/^.*?task-/, "task-")) ?? trimmed;
-  });
 }
 
 export const useGoalStore = create<GoalStore>()(
@@ -614,6 +594,14 @@ export const useGoalStore = create<GoalStore>()(
               ...subGoal,
               tasks: subGoal.tasks.filter((task) => task.id !== taskId),
             })),
+          })),
+        }));
+      },
+      removeTaskInstance: (taskId, instanceId) => {
+        set((state) => ({
+          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
+            ...task,
+            instances: task.instances.filter((instance) => instance.id !== instanceId),
           })),
         }));
       },
@@ -749,7 +737,6 @@ export const useGoalStore = create<GoalStore>()(
         const baseInstance = createGeneratedInstance(found.task, createdAt);
         const nextInstance = {
           ...baseInstance,
-          id: `${baseInstance.id}-run-${date.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
           dateLabel: `${dateLabel} ${timeLabel}`,
           intro: `用户手动发起执行“${found.task.title.replace(/^任务\d+：/, "")}”。`,
         };
@@ -770,7 +757,6 @@ export const useGoalStore = create<GoalStore>()(
         const nextInstance = normalizeInstance(
           {
             ...baseInstance,
-            id: `${baseInstance.id}-rerun-${date.getTime()}`,
             dateLabel: `${baseInstance.dateLabel} 重跑 ${timeLabel}`,
             intro: `重新执行“${found.task.title.replace(/^任务\d+：/, "")}”，KiKi 将基于当前任务要求重新产出结果。`,
           },
@@ -793,7 +779,6 @@ export const useGoalStore = create<GoalStore>()(
       },
       createGoalFromDraft: (draft, options) => {
         const base = buildGoalFromDraft(draft);
-        const goalId = buildGoalIdFromTitle(draft.goalTitle);
         const now = nowIso();
         const workflow: GoalWorkflow = {
           phase: "presenting_plan",
@@ -813,51 +798,12 @@ export const useGoalStore = create<GoalStore>()(
         };
         const nextGoal: Goal = {
           ...base,
-          id: goalId,
           title: draft.goalTitle,
           summary: draft.summary,
           deadline: draft.deadline || base.deadline,
           conversationId: options?.conversationId,
           workflow,
-          subGoals: base.subGoals.map((sg) => ({
-            ...sg,
-            id: `${goalId}-${sg.id}`,
-            goalId,
-            tasks: sg.tasks.map((t) => ({
-              ...t,
-              id: `${goalId}-${t.id}`,
-              subGoalId: `${goalId}-${t.subGoalId}`,
-            })),
-          })),
         };
-
-        const subGoalIdMap = new Map<string, string>();
-        base.subGoals.forEach((baseSubGoal, sgIndex) => {
-          const nextSubGoal = nextGoal.subGoals[sgIndex];
-          if (nextSubGoal) {
-            subGoalIdMap.set(baseSubGoal.id, nextSubGoal.id);
-          }
-        });
-
-        const taskIdMap = new Map<string, string>();
-        draft.subGoals.forEach((draftSubGoal, sgIndex) => {
-          const nextSubGoal = nextGoal.subGoals[sgIndex];
-          draftSubGoal.tasks.forEach((draftTask, taskIndex) => {
-            const nextTask = nextSubGoal?.tasks[taskIndex];
-            if (nextTask) {
-              taskIdMap.set(draftTask.id, nextTask.id);
-            }
-          });
-        });
-
-        // Fix subGoalId on tasks after we namespaced ids.
-        nextGoal.subGoals = nextGoal.subGoals.map((sg) => ({
-          ...sg,
-          tasks: sg.tasks.map((t) => ({
-            ...t,
-            subGoalId: sg.id,
-          })),
-        }));
 
         // Map optional meta fields from draft tasks into tasks (by title match within same subgoal index).
         nextGoal.subGoals = nextGoal.subGoals.map((sg, sgIndex) => {
@@ -869,9 +815,7 @@ export const useGoalStore = create<GoalStore>()(
             why: draftSubGoal?.why ?? sg.why,
             priority: draftSubGoal?.priority ?? sg.priority,
             weight: draftSubGoal?.weight ?? sg.weight,
-            dependencies:
-              sg.dependencies?.map((dependencyId) => subGoalIdMap.get(dependencyId) ?? dependencyId) ??
-              draftSubGoal?.dependencies,
+            dependencies: sg.dependencies ?? draftSubGoal?.dependencies,
             estimatedDurationMinutes:
               draftSubGoal?.estimatedDurationMinutes ?? sg.estimatedDurationMinutes,
             successCriteria: draftSubGoal?.successCriteria ?? sg.successCriteria,
@@ -881,7 +825,7 @@ export const useGoalStore = create<GoalStore>()(
                 ? {
                     ...t,
                     priority: draftTask.priority,
-                    dependencies: namespaceDependencyIds(draftTask.dependencies, taskIdMap, goalId),
+                    dependencies: t.dependencies,
                     executionMode: draftTask.executionMode,
                     executionCycle: draftTask.executionCycle,
                     expectedResult: draftTask.expectedResult,
@@ -1290,7 +1234,7 @@ export const useGoalStore = create<GoalStore>()(
             if (goal.id !== goalId) return goal;
             const nextIndex = goal.subGoals.length + 1;
             const newSubGoal = {
-              id: `${goalId}-sg-custom-${Date.now()}`,
+              id: createOpaqueId("sg"),
               goalId,
               title: title.startsWith("子目标") ? title : `子目标${nextIndex}：${title}`,
               tasks: [],
@@ -1309,7 +1253,7 @@ export const useGoalStore = create<GoalStore>()(
                 if (subGoal.id !== subGoalId) return subGoal;
                 const nextIndex = subGoal.tasks.length + 1;
                 const newTask: Task = {
-                  id: `${subGoalId}-task-custom-${Date.now()}`,
+                  id: createOpaqueId("task"),
                   subGoalId,
                   title: input.title.startsWith("任务") ? input.title : `任务${nextIndex}：${input.title}`,
                   description: input.description,
@@ -1336,18 +1280,20 @@ export const useGoalStore = create<GoalStore>()(
       version: MOCK_BASELINE_RESET_VERSION,
       migrate: (persisted) => {
         const next = persisted as Partial<GoalStore> | undefined;
-        const persistedGoals = Array.isArray(next?.goals) ? next.goals : [];
+        const persistedGoals = Array.isArray(next?.goals) ? next.goals.map((goal) => normalizeGoal(goal)) : [];
         return {
-          goals: mergeGoalsById(persistedGoals, initialGoals).map((goal) => normalizeGoal(goal)),
+          goals: mergeGoalsById(persistedGoals, initialGoals.map((goal) => normalizeGoal(goal))),
         };
       },
       partialize: (state) => ({ goals: state.goals }),
       merge: (persisted, current) => {
         const next = persisted as Partial<GoalStore>;
+        const persistedGoals = (next.goals ?? current.goals).map((goal) => normalizeGoal(goal));
+        const baselineGoals = initialGoals.map((goal) => normalizeGoal(goal));
         return {
           ...current,
           ...next,
-          goals: mergeGoalsById(next.goals ?? current.goals, initialGoals).map((goal) => normalizeGoal(goal)),
+          goals: mergeGoalsById(persistedGoals, baselineGoals),
         };
       },
     },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { createOpaqueId } from "@/lib/opaqueIds";
 import { createGeneratedInstance } from "@/mocks/goals";
 import { createQueuedRuntimeJob, updateRuntimeJobExecution } from "@/lib/server/repositories/runtimeJobsRepository";
 import { markGoalInstanceRunStarted, upsertGoalTaskInstanceSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
@@ -244,7 +245,6 @@ export async function POST(request: NextRequest) {
   });
   const nextInstance: TaskInstance = {
     ...baseInstance,
-    id: `${baseInstance.id}-feedback-${Date.now()}`,
     dateLabel: `${baseInstance.dateLabel} 修订 ${new Date(createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`,
     intro: `根据你的反馈重新执行“${located.task.title.replace(/^任务\d+：/, "")}”。`,
     result: {
@@ -258,6 +258,7 @@ export async function POST(request: NextRequest) {
       },
     },
   };
+  nextInstance.id = createOpaqueId("inst");
   const requestId = `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const taskWorkspaceDir = ensureTaskWorkspace({
     conversationId: body.conversationId,

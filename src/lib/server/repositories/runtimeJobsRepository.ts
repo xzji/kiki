@@ -1,4 +1,13 @@
 import { getDatabase } from "@/lib/server/db/client";
+import {
+  createIdempotencyKey,
+  migrateGoalIds,
+  migrateTaskIds,
+  migrateTaskInstanceIds,
+  normalizeInstanceId,
+  normalizeSubGoalId,
+  normalizeTaskId,
+} from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
@@ -88,12 +97,49 @@ function parseNullableJson<T>(value: string | null): T | null {
   return JSON.parse(value) as T;
 }
 
+function normalizeBlocker(blocker: ExecutionBlocker | null): ExecutionBlocker | null {
+  if (!blocker) return blocker;
+  return {
+    ...blocker,
+    taskId: normalizeTaskId(blocker.taskId),
+    instanceId: normalizeInstanceId(blocker.instanceId),
+  };
+}
+
+function normalizeRuntimeJobPayload(payload: RuntimeJobPayload): RuntimeJobPayload {
+  const goal = migrateGoalIds(payload.goal);
+  const subGoalId = normalizeSubGoalId(payload.subGoal.id);
+  const taskId = normalizeTaskId(payload.task.id);
+  const instanceId = normalizeInstanceId(payload.instance.id);
+  const subGoal =
+    goal.subGoals.find((item) => item.id === subGoalId) ?? {
+      ...payload.subGoal,
+      id: subGoalId,
+      goalId: goal.id,
+      tasks: payload.subGoal.tasks.map((task) => migrateTaskIds(task)),
+    };
+  const task = subGoal.tasks.find((item) => item.id === taskId) ?? migrateTaskIds(payload.task);
+  const instance =
+    task.instances.find((item) => item.id === instanceId) ??
+    migrateTaskInstanceIds(payload.instance, task.id);
+
+  return {
+    ...payload,
+    goal,
+    subGoal,
+    task,
+    instance,
+  };
+}
+
 function mapRow(row: RuntimeJobRow): RuntimeJobRecord {
+  const payload = normalizeRuntimeJobPayload(JSON.parse(row.payload_json) as RuntimeJobPayload);
+  const blocker = normalizeBlocker(parseNullableJson<ExecutionBlocker>(row.blocker_json));
   return {
     id: row.id,
-    taskInstanceId: row.task_instance_id ?? undefined,
-    taskId: row.task_id ?? undefined,
-    goalId: row.goal_id ?? undefined,
+    taskInstanceId: row.task_instance_id ? normalizeInstanceId(row.task_instance_id) : payload.instance.id,
+    taskId: row.task_id ? normalizeTaskId(row.task_id) : payload.task.id,
+    goalId: row.goal_id ? migrateGoalIds({ ...payload.goal, id: row.goal_id }).id : payload.goal.id,
     conversationId: row.conversation_id ?? undefined,
     userId: row.user_id,
     kind: row.kind,
@@ -101,11 +147,11 @@ function mapRow(row: RuntimeJobRow): RuntimeJobRecord {
     requestId: row.request_id ?? undefined,
     runtimeEnvId: row.runtime_env_id ?? undefined,
     runtimeTransport: row.runtime_transport,
-    payload: JSON.parse(row.payload_json) as RuntimeJobPayload,
+    payload,
     progress: parseNullableJson<GoalServerProgress>(row.progress_json),
     logs: parseNullableJson<GoalServerLogEntry[]>(row.logs_json) ?? [],
     trajectory: parseNullableJson<ExecutionTrajectoryStep[]>(row.trajectory_json) ?? [],
-    blocker: parseNullableJson<ExecutionBlocker>(row.blocker_json),
+    blocker,
     result: parseNullableJson<Record<string, unknown>>(row.result_json),
     leaseOwner: row.lease_owner ?? undefined,
     leaseExpiresAt: row.lease_expires_at ?? undefined,
@@ -228,7 +274,7 @@ export function createQueuedRuntimeJob(
     instanceId: payload.instance.id,
     kind: "instance.created",
     producedBy: input?.eventSource === "scheduler" || !input?.eventSource ? "scheduler" : "user",
-    idempotencyKey: `instance.created:${payload.instance.id}`,
+    idempotencyKey: createIdempotencyKey("instance.created", payload.instance.id),
     createdAt: now,
     payload: {
       requestId: input?.requestId,
@@ -245,7 +291,45 @@ export function getRuntimeJobByTaskInstanceId(taskInstanceId: string) {
   const row = db
     .prepare(`SELECT * FROM runtime_jobs WHERE task_instance_id = ? ORDER BY updated_at DESC LIMIT 1`)
     .get(taskInstanceId) as RuntimeJobRow | undefined;
-  return row ? mapRow(row) : null;
+  if (row) return mapRow(row);
+
+  const normalizedTaskInstanceId = normalizeInstanceId(taskInstanceId);
+  const fallbackRow = db
+    .prepare(`SELECT * FROM runtime_jobs ORDER BY updated_at DESC`)
+    .all()
+    .find((candidate) => {
+      const job = mapRow(candidate as RuntimeJobRow);
+      return job.taskInstanceId && normalizeInstanceId(job.taskInstanceId) === normalizedTaskInstanceId;
+    }) as RuntimeJobRow | undefined;
+  return fallbackRow ? mapRow(fallbackRow) : null;
+}
+
+export function getLatestOpenRuntimeJobByTaskId(taskId: string) {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT * FROM runtime_jobs
+       WHERE task_id = ?
+         AND status IN ('queued', 'running', 'awaiting_user')
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+    )
+    .get(taskId) as RuntimeJobRow | undefined;
+  if (row) return mapRow(row);
+
+  const normalizedTaskId = normalizeTaskId(taskId);
+  const fallbackRow = db
+    .prepare(
+      `SELECT * FROM runtime_jobs
+       WHERE status IN ('queued', 'running', 'awaiting_user')
+       ORDER BY updated_at DESC`,
+    )
+    .all()
+    .find((candidate) => {
+      const job = mapRow(candidate as RuntimeJobRow);
+      return job.taskId && normalizeTaskId(job.taskId) === normalizedTaskId;
+    }) as RuntimeJobRow | undefined;
+  return fallbackRow ? mapRow(fallbackRow) : null;
 }
 
 export function getRuntimeJobByRequestId(requestId: string) {
@@ -339,7 +423,7 @@ export function updateRuntimeJobExecution(
       instanceId: next.taskInstanceId,
       kind: "instance.status_changed",
       producedBy: "worker",
-      idempotencyKey: `instance.status_changed:${next.taskInstanceId}:${existing.status}->${updates.status}:${next.updatedAt}`,
+      idempotencyKey: createIdempotencyKey("instance.status_changed.worker", next.taskInstanceId, existing.status, updates.status, next.updatedAt),
       createdAt: next.updatedAt,
       payload: {
         previousStatus: existing.status,
@@ -356,7 +440,7 @@ export function updateRuntimeJobExecution(
       instanceId: next.taskInstanceId,
       kind: "instance.progress",
       producedBy: "worker",
-      idempotencyKey: `instance.progress:${next.taskInstanceId}:${next.updatedAt}`,
+      idempotencyKey: createIdempotencyKey("instance.progress", next.taskInstanceId, next.updatedAt),
       createdAt: next.updatedAt,
       payload: {
         requestId: next.requestId,
@@ -482,7 +566,21 @@ export function cancelRuntimeJobByTaskRun(input: { requestId?: string; taskInsta
       `,
     )
     .get(...params) as RuntimeJobRow | undefined;
-  if (!row) return null;
+  const fallbackRow =
+    row || !input.taskInstanceId
+      ? row
+      : (db
+          .prepare(
+            `SELECT * FROM runtime_jobs
+             WHERE status IN ('queued', 'running', 'awaiting_user')
+             ORDER BY updated_at DESC`,
+          )
+          .all()
+          .find((candidate) => {
+            const job = mapRow(candidate as RuntimeJobRow);
+            return job.taskInstanceId && normalizeInstanceId(job.taskInstanceId) === normalizeInstanceId(input.taskInstanceId!);
+          }) as RuntimeJobRow | undefined);
+  if (!fallbackRow) return null;
   db.prepare(
     `
       UPDATE runtime_jobs
@@ -494,8 +592,8 @@ export function cancelRuntimeJobByTaskRun(input: { requestId?: string; taskInsta
           last_error = ?
       WHERE id = ?
     `,
-  ).run(now, now, "用户手动停止任务执行", row.id);
-  return getRuntimeJob(row.id);
+  ).run(now, now, "用户手动停止任务执行", fallbackRow.id);
+  return getRuntimeJob(fallbackRow.id);
 }
 
 export function releaseRuntimeJobLeasesByConversationId(conversationId: string) {

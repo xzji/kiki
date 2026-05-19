@@ -15,6 +15,7 @@ import {
 } from "@/lib/server/taskExecution/preExecutionBlocker";
 import {
   createQueuedRuntimeJob,
+  getLatestOpenRuntimeJobByTaskId,
   getRuntimeJobByTaskInstanceId,
   updateRuntimeJobExecution,
   type RuntimeJobRecord,
@@ -118,6 +119,13 @@ function disableAutoRunIfNeeded(goals: Goal[], triggerSource: TriggerSource, tas
   upsertGoalsSnapshot(setTaskAutoRunDisabled(goals, taskId, true));
 }
 
+function isMissingUserInputOnly(decision: ReturnType<typeof resolveAdmitDecision>) {
+  return (
+    decision.readiness.blockers.length > 0 &&
+    decision.readiness.blockers.every((blocker) => blocker.kind === "missing_user_input")
+  );
+}
+
 export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttemptResult {
   const { currentGoals, latestGoal, latestSubGoal, latestTask } = locateLatestTask(input);
   const conversationId = latestGoal.conversationId;
@@ -129,6 +137,33 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     instance: input.instance,
     triggerSource: input.triggerSource,
   });
+  const taskLevelOpenJob = getLatestOpenRuntimeJobByTaskId(latestTask.id);
+  if (taskLevelOpenJob && taskLevelOpenJob.taskInstanceId !== instance.id) {
+    if (taskLevelOpenJob.status === "awaiting_user" && taskLevelOpenJob.progress) {
+      return {
+        schemaVersion: 1,
+        outcome: "awaiting_user",
+        requestId: taskLevelOpenJob.requestId ?? input.requestId,
+        taskInstanceId: taskLevelOpenJob.taskInstanceId ?? instance.id,
+        createdNewInstance: false,
+        reason:
+          (taskLevelOpenJob.result?.awaitingReason as string | undefined) ||
+          (taskLevelOpenJob.progress.resultPayload?.awaitingReason as string | undefined) ||
+          "等待用户补充信息。",
+        progress: taskLevelOpenJob.progress,
+        waitingReason:
+          (taskLevelOpenJob.result?.awaitingReason as string | undefined) ||
+          (taskLevelOpenJob.progress.resultPayload?.awaitingReason as string | undefined) ||
+          "等待用户补充信息。",
+      };
+    }
+    return {
+      schemaVersion: 1,
+      outcome: "already_running",
+      requestId: taskLevelOpenJob.requestId,
+      taskInstanceId: taskLevelOpenJob.taskInstanceId ?? instance.id,
+    };
+  }
   const existing = getRuntimeJobByTaskInstanceId(instance.id);
   if (isOpenJob(existing)) {
     if (existing?.status === "awaiting_user" && existing.progress) {
@@ -170,6 +205,14 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     const blockingKinds = new Set(decision.readiness.blockers.map((blocker) => blocker.kind));
     if (blockingKinds.has("cycle") || blockingKinds.has("config")) {
       disableAutoRunIfNeeded(currentGoals, input.triggerSource, latestTask.id);
+      return {
+        schemaVersion: 1,
+        outcome: "blocked_config",
+        taskInstanceId: instance.id,
+        reason: decision.readiness.summary,
+      };
+    }
+    if (!isMissingUserInputOnly(decision)) {
       return {
         schemaVersion: 1,
         outcome: "blocked_config",

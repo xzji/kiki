@@ -1014,7 +1014,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {/* 顶部栏 */}
-      <header className="flex h-11 flex-none items-center justify-between border-b border-[#E5E7EB] px-2">
+      <header className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4 sm:px-6 lg:px-8">
         <div className="text-[15px] font-semibold text-[#1F2328]">{conversation.title}</div>
         {conversation.goalId ? (
           <button
@@ -1036,9 +1036,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
-          className="flex h-full overflow-y-auto overscroll-contain px-2 pb-5 pt-3"
+          className="h-full overflow-y-auto overscroll-contain"
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pb-5 pt-3 sm:px-6 lg:px-8">
             {streamErrorUi?.kind === "runtime" ? (
               <div className="rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
                 <div>{streamErrorUi.title}</div>
@@ -1057,55 +1057,55 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 可以进入目标规划模式。
               </div>
             ) : (
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-              {sortedMessages.map((msg) => (
-                <div key={msg.id}>
-                  {firstUnreadId === msg.id ? (
-                    <div
-                      ref={firstUnreadMarkerRef}
-                      className="mb-5 flex items-center gap-3 text-[12px] text-[#8C9198]"
-                    >
-                      <div className="h-px flex-1 bg-[#E5E7EB]" />
-                      <span>以下为新消息</span>
-                      <div className="h-px flex-1 bg-[#E5E7EB]" />
-                    </div>
-                  ) : null}
-                  <ConversationMessageItem
-                    message={msg}
-                    onQuote={(message) => setQuotedMessage(message)}
-                    onOpenResult={(message) => {
-                      setTaskInfoMessage(null);
-                      setPlanOpen(false);
-                      setResultMessage(message);
-                    }}
-                    onOpenTaskInfo={(message) => {
-                      setResultMessage(null);
-                      setTaskInfoMessage(message);
-                    }}
-                    onOpenGoalPlan={(goalId) => {
-                      setResultMessage(null);
-                      setTaskInfoMessage(null);
-                      setActivePlanGoalId(goalId);
-                      setPlanFocus(null);
-                      setPlanOpen(true);
-                    }}
-                    onTaskOptionalFeedback={onTaskOptionalFeedback}
-                    onDelete={(messageId) => {
-                      deleteMessage(conversation.id, messageId);
-                      if (quotedMessage?.id === messageId) {
-                        setQuotedMessage(null);
-                      }
-                      if (resultMessage?.id === messageId) {
-                        setResultMessage(null);
-                      }
-                      if (taskInfoMessage?.id === messageId) {
+              <>
+                {sortedMessages.map((msg) => (
+                  <div key={msg.id}>
+                    {firstUnreadId === msg.id ? (
+                      <div
+                        ref={firstUnreadMarkerRef}
+                        className="mb-5 flex items-center gap-3 text-[12px] text-[#8C9198]"
+                      >
+                        <div className="h-px flex-1 bg-[#E5E7EB]" />
+                        <span>以下为新消息</span>
+                        <div className="h-px flex-1 bg-[#E5E7EB]" />
+                      </div>
+                    ) : null}
+                    <ConversationMessageItem
+                      message={msg}
+                      onQuote={(message) => setQuotedMessage(message)}
+                      onOpenResult={(message) => {
                         setTaskInfoMessage(null);
-                      }
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+                        setPlanOpen(false);
+                        setResultMessage(message);
+                      }}
+                      onOpenTaskInfo={(message) => {
+                        setResultMessage(null);
+                        setTaskInfoMessage(message);
+                      }}
+                      onOpenGoalPlan={(goalId) => {
+                        setResultMessage(null);
+                        setTaskInfoMessage(null);
+                        setActivePlanGoalId(goalId);
+                        setPlanFocus(null);
+                        setPlanOpen(true);
+                      }}
+                      onTaskOptionalFeedback={onTaskOptionalFeedback}
+                      onDelete={(messageId) => {
+                        deleteMessage(conversation.id, messageId);
+                        if (quotedMessage?.id === messageId) {
+                          setQuotedMessage(null);
+                        }
+                        if (resultMessage?.id === messageId) {
+                          setResultMessage(null);
+                        }
+                        if (taskInfoMessage?.id === messageId) {
+                          setTaskInfoMessage(null);
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </div>
@@ -1128,7 +1128,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       </div>
 
       {/* 底部输入 */}
-      <div className="flex-none bg-white px-2 pb-3 pt-3">
+      <div className="flex-none bg-white px-4 pb-3 pt-3 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl">
           <AssistantComposer
             onSubmit={onSend}

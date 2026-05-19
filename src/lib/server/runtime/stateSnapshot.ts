@@ -1,4 +1,6 @@
 import { getDatabase } from "@/lib/server/db/client";
+import { migrateGoalIds } from "@/lib/opaqueIds";
+import { normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
 import type { Goal } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -84,15 +86,25 @@ function upsertSnapshot<T>(key: SnapshotKey, value: T, expectedRevision?: number
 }
 
 export function upsertGoalsSnapshot(goals: Goal[], expectedRevision?: number) {
-  return upsertSnapshot("goals", goals, expectedRevision);
+  return upsertSnapshot(
+    "goals",
+    goals.map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal))),
+    expectedRevision,
+  );
 }
 
 export function readGoalsSnapshot(fallback: Goal[]) {
-  return readSnapshotWithMeta("goals", fallback).value;
+  return readSnapshotWithMeta("goals", fallback).value.map((goal) =>
+    normalizeGoalTriggerRules(migrateGoalIds(goal)),
+  );
 }
 
 export function readGoalsSnapshotMeta(fallback: Goal[]) {
-  return readSnapshotWithMeta("goals", fallback);
+  const snapshot = readSnapshotWithMeta("goals", fallback);
+  return {
+    ...snapshot,
+    value: snapshot.value.map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal))),
+  };
 }
 
 export function upsertRuntimeEnvironmentsSnapshot(environments: RuntimeEnvironment[], expectedRevision?: number) {

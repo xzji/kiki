@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 
+import { normalizeGoalId, normalizeInstanceId, normalizeTaskId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
 import type { GoalEventKind, GoalEventPayload, GoalEventProducer, GoalEventRecord } from "@/types/goalEventLog";
 
@@ -40,9 +41,9 @@ function mapRow<K extends GoalEventKind = GoalEventKind>(row: GoalEventLogRow): 
   return {
     id: row.id,
     eventId: row.event_id,
-    goalId: row.goal_id,
-    taskId: row.task_id ?? undefined,
-    instanceId: row.instance_id ?? undefined,
+    goalId: normalizeGoalId(row.goal_id),
+    taskId: row.task_id ? normalizeTaskId(row.task_id) : undefined,
+    instanceId: row.instance_id ? normalizeInstanceId(row.instance_id) : undefined,
     kind: row.kind as K,
     payload: JSON.parse(row.payload_json) as GoalEventPayload<K>,
     producedBy: row.produced_by,
@@ -66,9 +67,9 @@ export function appendGoalEvent<K extends GoalEventKind>(input: AppendGoalEventI
     `,
   ).run({
     event_id: eventId,
-    goal_id: input.goalId,
-    task_id: input.taskId ?? null,
-    instance_id: input.instanceId ?? null,
+    goal_id: normalizeGoalId(input.goalId),
+    task_id: input.taskId ? normalizeTaskId(input.taskId) : null,
+    instance_id: input.instanceId ? normalizeInstanceId(input.instanceId) : null,
     kind: input.kind,
     payload_json: JSON.stringify(input.payload),
     produced_by: input.producedBy,
@@ -96,9 +97,9 @@ export function appendGoalEventOnce<K extends GoalEventKind>(input: AppendGoalEv
     `,
   ).run({
     event_id: eventId,
-    goal_id: input.goalId,
-    task_id: input.taskId ?? null,
-    instance_id: input.instanceId ?? null,
+    goal_id: normalizeGoalId(input.goalId),
+    task_id: input.taskId ? normalizeTaskId(input.taskId) : null,
+    instance_id: input.instanceId ? normalizeInstanceId(input.instanceId) : null,
     kind: input.kind,
     payload_json: JSON.stringify(input.payload),
     produced_by: input.producedBy,
@@ -113,24 +114,26 @@ export function appendGoalEventOnce<K extends GoalEventKind>(input: AppendGoalEv
 
 export function getGoalEvents(input: { goalId: string; fromId?: number; limit?: number }) {
   const db = getDatabase();
+  const normalizedGoalId = normalizeGoalId(input.goalId);
   const rows = db
     .prepare(
       `
         SELECT * FROM goal_event_log
-        WHERE goal_id = ?
-          AND id > ?
+        WHERE id > ?
         ORDER BY id ASC
-        LIMIT ?
       `,
     )
-    .all(input.goalId, input.fromId ?? 0, input.limit ?? 200) as GoalEventLogRow[];
-  return rows.map((row) => mapRow(row));
+    .all(input.fromId ?? 0) as GoalEventLogRow[];
+  return rows
+    .map((row) => mapRow(row))
+    .filter((event) => event.goalId === normalizedGoalId)
+    .slice(0, input.limit ?? 200);
 }
 
 export function getLatestGoalEventId(goalId: string) {
   const db = getDatabase();
-  const row = db
-    .prepare(`SELECT id FROM goal_event_log WHERE goal_id = ? ORDER BY id DESC LIMIT 1`)
-    .get(goalId) as { id: number } | undefined;
+  const normalizedGoalId = normalizeGoalId(goalId);
+  const rows = db.prepare(`SELECT * FROM goal_event_log ORDER BY id DESC`).all() as GoalEventLogRow[];
+  const row = rows.find((candidate) => mapRow(candidate).goalId === normalizedGoalId);
   return row?.id ?? 0;
 }

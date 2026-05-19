@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
 import { markGoalInstanceStatusSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
@@ -45,7 +46,7 @@ export async function POST(
     instanceId: located.instance.id,
     kind: "instance.status_changed",
     producedBy: "user",
-    idempotencyKey: request.headers.get("Idempotency-Key") ?? `instance.status_changed:cancel:${located.instance.id}`,
+    idempotencyKey: request.headers.get("Idempotency-Key") ?? createIdempotencyKey("instance.status_changed.cancel", located.instance.id),
     payload: {
       previousStatus: located.instance.status,
       nextStatus: "paused",
@@ -72,7 +73,7 @@ export async function POST(
     instanceId: located.instance.id,
     kind: "instance.user_command",
     producedBy: "user",
-    idempotencyKey: `instance.user_command:cancel:${located.instance.id}`,
+    idempotencyKey: createIdempotencyKey("instance.user_command.cancel", located.instance.id),
     payload: {
       command: "cancel",
       reason: body.reason,

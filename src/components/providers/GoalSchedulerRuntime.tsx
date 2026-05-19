@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { startTaskRun, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import { parseTaskTriggerTime } from "@/lib/taskTriggerTime";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -108,12 +109,6 @@ function dependenciesMet(goal: Goal, task: Task) {
   });
 }
 
-function parseHourMinute(triggerRule: string) {
-  const match = triggerRule.match(/(\d{1,2})[:：](\d{2})/);
-  if (!match) return null;
-  return { hour: Number(match[1]), minute: Number(match[2]) };
-}
-
 function hasInstanceOnDay(task: Task, date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -130,8 +125,8 @@ function isTaskDue(task: Task, now: Date) {
     return false;
   }
 
-  const time = parseHourMinute(task.triggerRule);
-  if (!time) return true;
+  const time = parseTaskTriggerTime(task.triggerRule);
+  if (!time) return false;
 
   const due = new Date(now);
   due.setHours(time.hour, time.minute, 0, 0);
@@ -391,6 +386,7 @@ function runGoalSchedulerCycle() {
 
     void (async () => {
       let requestId: string | undefined;
+      let activeInstanceId = latestInstance.id;
       try {
         const run = await startTaskRun({
           goal: latestGoal,
@@ -399,10 +395,14 @@ function runGoalSchedulerCycle() {
           instance: latestInstance,
           runtimeEnv,
         });
+        activeInstanceId = run.taskInstanceId;
+        if (activeInstanceId !== latestInstance.id) {
+          useGoalStore.getState().removeTaskInstance(effectiveTask.id, latestInstance.id);
+        }
         if (!run.requestId) {
           useGoalStore.getState().syncTaskInstanceRun({
             taskId: effectiveTask.id,
-            instanceId: run.taskInstanceId,
+            instanceId: activeInstanceId,
             progress: run.progress,
             logs: [],
             trajectory: [],
@@ -413,7 +413,7 @@ function runGoalSchedulerCycle() {
         requestId = run.requestId;
         useGoalStore.getState().startTaskInstanceRun({
           taskId: effectiveTask.id,
-          instanceId: latestInstance.id,
+          instanceId: activeInstanceId,
           requestId: run.requestId,
           runtimeEnvId: runtimeEnv.id,
           permissionMode: runtimeEnv.permissionMode,
@@ -421,11 +421,11 @@ function runGoalSchedulerCycle() {
         });
         const result = await waitForTaskRunCompletion({
           requestId: run.requestId,
-          taskInstanceId: latestInstance.id,
+          taskInstanceId: activeInstanceId,
           onProgress: (payload) => {
             useGoalStore.getState().syncTaskInstanceRun({
               taskId: effectiveTask.id,
-              instanceId: latestInstance.id,
+              instanceId: activeInstanceId,
               progress: payload.progress,
               logs: payload.logs,
               trajectory: payload.trajectory,
@@ -435,7 +435,7 @@ function runGoalSchedulerCycle() {
         });
         useGoalStore.getState().syncTaskInstanceRun({
           taskId: effectiveTask.id,
-          instanceId: latestInstance.id,
+          instanceId: activeInstanceId,
           progress: result.progress,
           logs: result.logs,
           trajectory: result.trajectory,
@@ -445,17 +445,17 @@ function runGoalSchedulerCycle() {
         if (requestId) {
           useGoalStore.getState().failTaskInstanceRun({
             taskId: effectiveTask.id,
-            instanceId: latestInstance.id,
+            instanceId: activeInstanceId,
             requestId,
             errorMessage: error instanceof Error ? error.message : "任务执行失败",
           });
         } else {
           void transitionGoalInstance({
-            instanceId: latestInstance.id,
+            instanceId: activeInstanceId,
             status: "error",
             reason: error instanceof Error ? error.message : "任务执行启动失败",
           }).catch(() => {
-            useGoalStore.getState().markInstanceStatus(effectiveTask.id, latestInstance.id, "error");
+            useGoalStore.getState().markInstanceStatus(effectiveTask.id, activeInstanceId, "error");
           });
         }
       }

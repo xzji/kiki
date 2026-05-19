@@ -4,12 +4,13 @@ import fs from "fs";
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
 import { appendGoalLog } from "@/lib/server/goalTelemetry";
+import { normalizeConcreteTriggerRule } from "@/lib/taskTriggerTime";
 import {
   ensureConversationWorkspace,
   getPlanningCheckpointFilePath,
   writeJsonFileAtomic,
 } from "@/lib/server/workspace/conversationWorkspace";
-import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, TaskExpectedResult } from "@/types/kiki";
+import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, Task, TaskExpectedResult } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -647,6 +648,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
 13. 对比/研究/攻略/方案类任务必须优先要求 comparison_table、callout、key_value 等 blocks，形成可视化报告
 14. 信息类任务如果完成标准只是“生成报告/调研/对比/分析/清单”，用户查看、确认是否满意、选择下一步或圈定偏好只属于产出反馈/下游任务输入，不能写成当前任务的完成条件
 15. 只有 expected_output.type 是 decision/confirmation，或 completion_criteria 明确要求“必须由用户确认/审批/选择后才完成”，才允许把 user_interaction_type 设为 confirm
+16. 周期任务的 recurrence 必须包含具体 24 小时时间 HH:mm，例如“每天 07:30 触发”。禁止使用“早上/出发前/晚上/固定时间”等没有时分的模糊触发描述；如果用户没有提供出发时间，必须自行给出明确默认时间并在文案中说明假设，例如“每天 07:30 触发（默认出发前检查）”
 
 协作模式规则:
 - agent_autonomous: Agent 可自主完成，用户只需知悉结果
@@ -680,7 +682,7 @@ ${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${it
       "execution_cycle": "once|recurring",
       "execution_mode": "standard|interactive|monitoring|event_triggered",
       "execution_kind": "generic_result",
-      "recurrence": "周期频率描述(仅 recurring 需要)",
+      "recurrence": "周期频率描述(仅 recurring 需要，必须包含 HH:mm，例如 每天 07:30 触发)",
       "trigger_condition": "触发条件描述(仅 event_triggered 需要)",
       "hierarchy_level": "task|sub_task|action",
       "parent_id": "父任务ID(可选)",
@@ -1760,16 +1762,22 @@ function inferTaskType(task: TaskGenerationPayload["tasks"][number]): DraftTask[
 }
 
 function inferTriggerRule(task: TaskGenerationPayload["tasks"][number]) {
+  const taskType = inferTaskType(task) as Task["taskType"];
+  let triggerRule: string;
   if (task.execution_mode === "event_triggered") {
-    return task.trigger_condition || "满足触发条件时执行";
+    triggerRule = task.trigger_condition || "满足触发条件时执行";
+    return normalizeConcreteTriggerRule(triggerRule, taskType);
   }
   if (task.execution_mode === "monitoring") {
-    return task.recurrence || "每天固定时间巡检";
+    triggerRule = task.recurrence || "每天固定时间巡检";
+    return normalizeConcreteTriggerRule(triggerRule, taskType);
   }
   if (task.execution_cycle === "recurring") {
-    return task.recurrence || "每周固定节奏执行";
+    triggerRule = task.recurrence || "每周固定节奏执行";
+    return normalizeConcreteTriggerRule(triggerRule, taskType);
   }
-  return task.trigger_condition || "准备好后执行一次";
+  triggerRule = task.trigger_condition || "准备好后执行一次";
+  return normalizeConcreteTriggerRule(triggerRule, taskType);
 }
 
 function dedupeStrings(items: Array<string | undefined>) {

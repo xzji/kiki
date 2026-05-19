@@ -1,6 +1,7 @@
 import { emailDrafts } from "@/mocks/emails";
 import { flashcards } from "@/mocks/flashcards";
 import { newsArticles } from "@/mocks/news";
+import { createOpaqueId, deriveOpaqueId, migrateGoalIds } from "@/lib/opaqueIds";
 import type {
   ExecutionKind,
   ExecutionPayload,
@@ -986,7 +987,7 @@ function task(data: Omit<Task, "instances"> & { instances?: TaskInstance[] }): T
   };
 }
 
-export const initialGoals: Goal[] = [
+const rawInitialGoals: Goal[] = [
   {
     id: "goal-toefl",
     title: "托福考试 110 分",
@@ -1499,10 +1500,13 @@ export const initialGoals: Goal[] = [
   },
 ];
 
+export const initialGoals: Goal[] = rawInitialGoals.map((goal) => migrateGoalIds(goal));
+
 export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
-  const goalId = `goal-${draft.goalTitle.replace(/\s+/g, "-").toLowerCase()}`;
-  const subGoalIdMap = new Map(
-    draft.subGoals.map((subGoal, subGoalIndex) => [subGoal.id, `${goalId}-sg-${subGoalIndex + 1}`]),
+  const goalId = createOpaqueId("goal");
+  const subGoalIdMap = new Map(draft.subGoals.map((subGoal) => [subGoal.id, createOpaqueId("sg")]));
+  const taskIdMap = new Map(
+    draft.subGoals.flatMap((subGoal) => subGoal.tasks.map((taskItem) => [taskItem.id, createOpaqueId("task")] as const)),
   );
 
   return {
@@ -1513,8 +1517,8 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
     createdAt: INITIAL_NOW,
     kind: "collab",
     summary: draft.summary,
-    subGoals: draft.subGoals.map((subGoal, subGoalIndex) => ({
-      id: `${goalId}-sg-${subGoalIndex + 1}`,
+    subGoals: draft.subGoals.map((subGoal) => ({
+      id: subGoalIdMap.get(subGoal.id) ?? createOpaqueId("sg"),
       goalId,
       title: subGoal.title,
       description: subGoal.description,
@@ -1526,9 +1530,9 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       ),
       estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
       successCriteria: subGoal.successCriteria,
-      tasks: subGoal.tasks.map((taskItem, taskIndex) => ({
-        id: `${goalId}-sg-${subGoalIndex + 1}-task-${taskIndex + 1}`,
-        subGoalId: `${goalId}-sg-${subGoalIndex + 1}`,
+      tasks: subGoal.tasks.map((taskItem) => ({
+        id: taskIdMap.get(taskItem.id) ?? createOpaqueId("task"),
+        subGoalId: subGoalIdMap.get(subGoal.id) ?? createOpaqueId("sg"),
         title: taskItem.title,
         description: taskItem.description,
         expectedOutcome: taskItem.expectedOutcome,
@@ -1541,7 +1545,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
         resultViewKind: taskItem.resultViewKind ?? taskItem.executionKind,
         executionStrategy: taskItem.executionStrategy ?? "agent_autonomous",
         priority: taskItem.priority,
-        dependencies: taskItem.dependencies,
+        dependencies: taskItem.dependencies?.map((dependencyId) => taskIdMap.get(dependencyId) ?? deriveOpaqueId("task", dependencyId)),
         executionMode: taskItem.executionMode,
         executionCycle: taskItem.executionCycle,
         expectedResult: taskItem.expectedResult,
@@ -1561,7 +1565,7 @@ export function createGeneratedInstance(task: Task, createdAt: string): TaskInst
   const date = new Date(createdAt);
   const dateLabel = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   return {
-    id: `${task.id}-${dateLabel}`,
+    id: createOpaqueId("inst"),
     taskId: task.id,
     dateLabel,
     status: "pending",

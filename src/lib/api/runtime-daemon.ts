@@ -67,10 +67,13 @@ export async function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload> 
 }
 
 export async function materializeGoalSnapshot(goal: Goal) {
+  const workflowUpdatedAt = goal.workflow?.updatedAt ?? goal.createdAt;
+  const taskShape = goal.subGoals.map((subGoal) => `${subGoal.id}:${subGoal.tasks.map((task) => task.id).join(",")}`).join("|");
   const response = await fetch("/api/goals/materialize", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Idempotency-Key": `goal.materialize:${goal.id}:${workflowUpdatedAt}:${taskShape}`,
     },
     body: JSON.stringify({ goal }),
   });

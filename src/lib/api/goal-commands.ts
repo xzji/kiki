@@ -1,6 +1,6 @@
 "use client";
 
-import { makeId } from "@/lib/utils";
+import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import type { GoalEventRecord } from "@/types/goalEventLog";
 import type { TaskInstanceStatus } from "@/types/kiki";
 
@@ -59,7 +59,7 @@ export async function transitionGoalInstance(input: {
   idempotencyKey?: string;
 }) {
   const idempotencyKey =
-    input.idempotencyKey ?? `instance.status_changed:${input.instanceId}:to-${input.status}:${makeId("action")}`;
+    input.idempotencyKey ?? createIdempotencyKey("instance.status_changed", input.instanceId, input.status);
   return postCommand<{ ok: true; event: GoalEventRecord }>({
     url: `/api/goals/instances/${input.instanceId}/transition`,
     body: {
@@ -78,8 +78,8 @@ export async function respondGoalInstance(input: {
   fields?: Record<string, string>;
   idempotencyKey?: string;
 }) {
-  const responseId = input.responseId ?? makeId("response");
-  const idempotencyKey = input.idempotencyKey ?? `instance.user_response:${input.instanceId}:${responseId}`;
+  const responseId = input.responseId ?? createOpaqueId("idem");
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("instance.user_response", input.instanceId, responseId);
   return postCommand<{ ok: true; resumed: boolean; event: GoalEventRecord }>({
     url: `/api/goals/instances/${input.instanceId}/respond`,
     body: {
@@ -97,7 +97,7 @@ export async function cancelGoalInstance(input: {
   reason?: string;
   idempotencyKey?: string;
 }) {
-  const idempotencyKey = input.idempotencyKey ?? `instance.status_changed:cancel:${input.instanceId}:${makeId("action")}`;
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("instance.status_changed.cancel", input.instanceId);
   return postCommand<{ ok: true; event: GoalEventRecord }>({
     url: `/api/goals/instances/${input.instanceId}/cancel`,
     body: {

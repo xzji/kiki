@@ -1,4 +1,9 @@
+import { normalizeGoalId, normalizeTaskId } from "@/lib/opaqueIds";
 import type { InboxItem } from "@/types/kiki";
+
+function taskLink(goalId: string, taskId: string, view: "exec" | "list") {
+  return `/goals/${normalizeGoalId(goalId)}/tasks/${normalizeTaskId(taskId)}?view=${view}`;
+}
 
 export const initialInboxItems: InboxItem[] = [
   {
@@ -9,8 +14,8 @@ export const initialInboxItems: InboxItem[] = [
     badge: "need_answer",
     unreadCount: 1,
     timeLabel: "11:00",
-    linkTo: "/goals/goal-toefl/tasks/task-toefl-listening?view=list",
-    goalId: "goal-toefl",
+    linkTo: taskLink("goal-toefl", "task-toefl-listening", "list"),
+    goalId: normalizeGoalId("goal-toefl"),
     createdAt: "2026-04-26T11:00:00+08:00",
   },
   {
@@ -20,8 +25,8 @@ export const initialInboxItems: InboxItem[] = [
     snippet: "整理了 4 条 AI 行业的重点大新闻，OpenAI 发布多智能体协作框架位列第一。",
     unreadCount: 1,
     timeLabel: "09:00",
-    linkTo: "/goals/goal-news/tasks/task-news-digest?view=exec",
-    goalId: "goal-news",
+    linkTo: taskLink("goal-news", "task-news-digest", "exec"),
+    goalId: normalizeGoalId("goal-news"),
     createdAt: "2026-04-26T09:00:00+08:00",
   },
   {
@@ -32,8 +37,8 @@ export const initialInboxItems: InboxItem[] = [
     badge: "need_confirm",
     unreadCount: 1,
     timeLabel: "04-10",
-    linkTo: "/goals/goal-osaka/tasks/task-osaka-ticket?view=exec",
-    goalId: "goal-osaka",
+    linkTo: taskLink("goal-osaka", "task-osaka-ticket", "exec"),
+    goalId: normalizeGoalId("goal-osaka"),
     createdAt: "2026-04-10T09:00:00+08:00",
   },
   {
@@ -43,8 +48,8 @@ export const initialInboxItems: InboxItem[] = [
     snippet: "我整理了 30 张高频学术词卡片，先快速走一轮，再把难词标记出来。",
     unreadCount: 1,
     timeLabel: "04-01",
-    linkTo: "/goals/goal-toefl/tasks/task-toefl-vocab?view=list",
-    goalId: "goal-toefl",
+    linkTo: taskLink("goal-toefl", "task-toefl-vocab", "list"),
+    goalId: normalizeGoalId("goal-toefl"),
     createdAt: "2026-04-01T11:00:00+08:00",
   },
   {
@@ -55,8 +60,8 @@ export const initialInboxItems: InboxItem[] = [
     badge: "need_confirm",
     unreadCount: 1,
     timeLabel: "04-01",
-    linkTo: "/goals/goal-mail/tasks/task-mail-review?view=exec",
-    goalId: "goal-mail",
+    linkTo: taskLink("goal-mail", "task-mail-review", "exec"),
+    goalId: normalizeGoalId("goal-mail"),
     createdAt: "2026-04-01T09:00:00+08:00",
   },
 ];

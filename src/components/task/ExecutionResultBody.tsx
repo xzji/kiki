@@ -392,19 +392,28 @@ export function ExecutionResultBody(props: {
             <div className="text-[12px] text-[#8C9198]">依赖任务</div>
             <div className="mt-2 space-y-2">
               {dependencyViews.map((dependency) => (
-                <div key={dependency.id} className="flex flex-wrap items-center gap-2 text-[13px] leading-6">
-                  <span className="font-medium text-[#1F2328]">{dependency.title}</span>
-                  <span
-                    className={
-                      dependency.missing
-                        ? "rounded-md bg-[#FDECEC] px-2 py-0.5 text-[11px] text-[#B42318]"
-                        : dependency.satisfied
-                          ? "rounded-md bg-[#E8F5E9] px-2 py-0.5 text-[11px] text-[#25663A]"
-                          : "rounded-md bg-[#F5F6F8] px-2 py-0.5 text-[11px] text-[#6B7280]"
-                    }
-                  >
-                    {dependency.statusLabel}
-                  </span>
+                <div key={dependency.id} className="space-y-1 text-[13px] leading-6">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-[#1F2328]">{dependency.title}</span>
+                    <span className="font-mono text-[11px] text-[#8C9198]">{dependency.id}</span>
+                    <span
+                      className={
+                        dependency.missing
+                          ? "rounded-md bg-[#FDECEC] px-2 py-0.5 text-[11px] text-[#B42318]"
+                          : dependency.satisfied
+                            ? "rounded-md bg-[#E8F5E9] px-2 py-0.5 text-[11px] text-[#25663A]"
+                            : "rounded-md bg-[#F5F6F8] px-2 py-0.5 text-[11px] text-[#6B7280]"
+                      }
+                    >
+                      {dependency.statusLabel}
+                    </span>
+                  </div>
+                  <div className="text-[12px] leading-5 text-[#6B7280]">
+                    需要信息：{dependency.expectedOutcome || "依赖任务本身不存在，无法读取预期产出。"}
+                  </div>
+                  <div className={dependency.missing ? "text-[12px] leading-5 text-[#B42318]" : "text-[12px] leading-5 text-[#6B7280]"}>
+                    当前原因：{dependency.reason}
+                  </div>
                 </div>
               ))}
             </div>

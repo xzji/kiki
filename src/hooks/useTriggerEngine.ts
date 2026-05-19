@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import { parseTaskTriggerTime } from "@/lib/taskTriggerTime";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useTriggerStore } from "@/stores/triggerStore";
@@ -26,8 +27,8 @@ function toInboxItem(task: Task, goalId: string, createdAt: string): InboxItem {
 }
 
 function getRuleHour(rule: string) {
-  const match = rule.match(/(\d{1,2}):(\d{2})/);
-  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : null;
+  const time = parseTaskTriggerTime(rule);
+  return time ? `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")}` : null;
 }
 
 export function useTriggerEngine() {

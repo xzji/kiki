@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { migrateConversationIds } from "@/lib/opaqueIds";
 import { buildConversationsFromGoals } from "@/mocks/conversations";
 import { initialGoals } from "@/mocks/goals";
 import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
@@ -32,7 +33,7 @@ type ConversationStore = {
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 
-const MOCK_BASELINE_RESET_VERSION = 9;
+const MOCK_BASELINE_RESET_VERSION = 10;
 const TERMINAL_CONTROL_NOTICE_PATTERNS = [
   /^\s*（已停止，未检测到正在运行的任务）\s*$/gm,
   /^\s*已停止，未检测到正在运行的任务。\s*$/gm,
@@ -96,13 +97,16 @@ function sanitizeConversationMessageContent(content: string) {
 }
 
 function sanitizeConversationHistory(conversations: Conversation[]) {
-  return conversations.map((conversation) => ({
-    ...conversation,
-    messages: conversation.messages.map((message) => ({
-      ...message,
-      content: sanitizeConversationMessageContent(message.content),
-    })),
-  }));
+  return conversations.map((conversation) => {
+    const migratedConversation = migrateConversationIds(conversation);
+    return {
+      ...migratedConversation,
+      messages: migratedConversation.messages.map((message) => ({
+        ...message,
+        content: sanitizeConversationMessageContent(message.content),
+      })),
+    };
+  });
 }
 
 function mergeConversationsById(...groups: Conversation[][]) {

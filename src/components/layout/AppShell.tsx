@@ -29,7 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     /^\/conversations\/[^/]+\/results\/[^/]+$/.test(pathname) ||
     /^\/inbox\/[^/]+\/result$/.test(pathname);
   const useImmersiveShell = isConversation || isFullscreenResult;
-  const contentWidth = isWide || useImmersiveShell ? "max-w-[1600px]" : "max-w-5xl";
+  const contentWidth = useImmersiveShell ? "" : isWide ? "max-w-[1600px]" : "max-w-5xl";
 
   const { isOpen, hydrated, hydrate } = useAssistantStore();
   useEffect(() => {
@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     ? "h-screen overflow-hidden bg-white px-0 pb-0 pt-0"
     : "h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8";
   const contentClassName = useImmersiveShell
-    ? `mx-auto h-full w-full ${contentWidth}`
+    ? "h-full w-full"
     : `mx-auto w-full ${contentWidth}`;
 
   return (

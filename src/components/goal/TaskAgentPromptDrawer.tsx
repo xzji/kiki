@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { deriveOpaqueId } from "@/lib/opaqueIds";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 
@@ -30,7 +31,7 @@ export function TaskAgentPromptDrawer({
     )[0];
     if (latest) return latest;
     return {
-      id: `${task.id}-preview`,
+      id: deriveOpaqueId("inst", `${task.id}:preview`),
       taskId: task.id,
       dateLabel: "—",
       status: "pending",

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { markGoalInstanceStatusSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
 import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
@@ -63,7 +64,7 @@ export async function POST(
   }
   const idempotencyKey =
     request.headers.get("Idempotency-Key") ??
-    `instance.status_changed:${located.instance.id}:${located.instance.status}->${body.status}`;
+    createIdempotencyKey("instance.status_changed", located.instance.id, located.instance.status, body.status);
   const statusEvent = appendGoalEventOnce({
     goalId: located.goal.id,
     taskId: located.task.id,
@@ -86,7 +87,7 @@ export async function POST(
     instanceId: located.instance.id,
     kind: "instance.user_command",
     producedBy: "user",
-    idempotencyKey: `instance.user_command:${idempotencyKey}`,
+    idempotencyKey: createIdempotencyKey("instance.user_command", idempotencyKey),
     payload: {
       command: toCommand(body.status),
       reason: body.reason,

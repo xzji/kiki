@@ -397,22 +397,31 @@ export function TaskDetailBody({
                 <>
                   <MetaLabel>依赖任务</MetaLabel>
                   <MetaValue>
-                    <div className="space-y-1">
+                    <div className="space-y-3">
                       {dependencyViews.map((dependency) => (
-                        <div key={dependency.id} className="flex flex-wrap items-center gap-2">
-                          <span>{dependency.title}</span>
-                          <span
-                            className={cn(
-                              "rounded-md px-2 py-0.5 text-[11px]",
-                              dependency.missing
-                                ? "bg-[#FDECEC] text-[#B42318]"
-                                : dependency.satisfied
-                                  ? "bg-[#E8F5E9] text-[#25663A]"
-                                  : "bg-[#F5F6F8] text-[#6B7280]",
-                            )}
-                          >
-                            {dependency.statusLabel}
-                          </span>
+                        <div key={dependency.id} className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>{dependency.title}</span>
+                            <span className="font-mono text-[11px] text-[#8C9198]">{dependency.id}</span>
+                            <span
+                              className={cn(
+                                "rounded-md px-2 py-0.5 text-[11px]",
+                                dependency.missing
+                                  ? "bg-[#FDECEC] text-[#B42318]"
+                                  : dependency.satisfied
+                                    ? "bg-[#E8F5E9] text-[#25663A]"
+                                    : "bg-[#F5F6F8] text-[#6B7280]",
+                              )}
+                            >
+                              {dependency.statusLabel}
+                            </span>
+                          </div>
+                          <div className="text-[12px] leading-5 text-[#6B7280]">
+                            需要信息：{dependency.expectedOutcome || "依赖任务本身不存在，无法读取预期产出。"}
+                          </div>
+                          <div className={cn("text-[12px] leading-5", dependency.missing ? "text-[#B42318]" : "text-[#6B7280]")}>
+                            当前原因：{dependency.reason}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -697,23 +706,6 @@ function InstanceCard({
       {expanded ? (
         <div className="border-t border-[#E5E7EB] bg-[#FAFAFB] px-4 py-4">
           <div className="space-y-4">
-            {canStop ? (
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void runTaskExecutionAction(task.id, "pause", {
-                      instanceId: instance.id,
-                    }).catch((error) => {
-                      window.alert(error instanceof Error ? error.message : "任务停止失败");
-                    });
-                  }}
-                  className="rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"
-                >
-                  停止执行
-                </button>
-              </div>
-            ) : null}
             {instance.status === "paused" ? (
               <div className="flex justify-end">
                 <button

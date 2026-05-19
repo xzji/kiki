@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
-import { getRuntimeJobByTaskInstanceId, updateRuntimeJobExecution } from "@/lib/server/repositories/runtimeJobsRepository";
-import { markGoalInstanceStatusSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, upsertGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
+import { resumeBlockedTask } from "@/lib/server/taskExecution/resumeBlockedTask";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { initialGoals } from "@/mocks/goals";
 import type { Goal } from "@/types/kiki";
 
@@ -44,7 +45,7 @@ export async function POST(
   }
   const idempotencyKey =
     request.headers.get("Idempotency-Key") ??
-    `instance.user_response:${located.instance.id}:${body.responseId ?? Date.now()}`;
+    createIdempotencyKey("instance.user_response", located.instance.id, body.responseId ?? `${Date.now()}`);
   const event = appendGoalEventOnce({
     goalId: located.goal.id,
     taskId: located.task.id,
@@ -69,47 +70,20 @@ export async function POST(
       reason: "已记录用户响应，但当前任务没有等待恢复的 runtime job。",
     });
   }
-  const feedback = body.responseSummary?.trim() || "用户已提交反馈，请继续执行。";
-  updateRuntimeJobExecution(job.id, {
-    status: "queued",
-    payload: {
-      ...job.payload,
-      resumeContext: [
-        `用户对阻塞点 ${job.blocker.resumeToken} 的响应：`,
-        feedback,
-        body.approved === false ? "用户未确认当前方案，请根据反馈调整后继续。" : "用户已确认/补充信息，请继续执行。",
-      ].join("\n"),
-    },
-    blocker: null,
-    result: {
-      ...(job.result ?? {}),
-      awaitingUser: false,
-      awaitingReason: undefined,
-      interactionSubmission: {
-        type: job.blocker.interactionRequirement.type,
-        status: body.approved === false ? "rejected" : "submitted",
-        action: body.approved === false ? "要求修改" : "提交反馈",
-        approved: body.approved ?? true,
-        feedback,
-        fields: body.fields,
-        submittedAt: new Date().toISOString(),
-      },
-    },
-    leaseOwner: undefined,
-    leaseExpiresAt: undefined,
-    finishedAt: undefined,
+  const resumeResult = await resumeBlockedTask({
+    taskInstanceId: located.instance.id,
+    resumeToken: job.blocker.resumeToken,
+    approved: body.approved ?? true,
+    feedback: body.responseSummary?.trim() || "用户已提交反馈，请继续执行。",
+    fields: body.fields,
+    action: body.approved === false ? "要求修改" : "提交反馈",
   });
-  upsertGoalsSnapshot(
-    markGoalInstanceStatusSnapshot(goals, {
-      taskId: located.task.id,
-      instanceId: located.instance.id,
-      status: "in_progress",
-      reason: "已收到用户响应，等待 daemon 继续执行。",
-    }),
-  );
   return NextResponse.json({
     ok: true,
     event,
-    resumed: true,
+    resumed: resumeResult.body.resumed ?? false,
+    completed: resumeResult.body.completed ?? false,
+    progress: resumeResult.body.progress ?? null,
+    trajectory: resumeResult.body.trajectory ?? [],
   });
 }

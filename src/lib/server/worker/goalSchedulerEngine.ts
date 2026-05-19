@@ -1,6 +1,7 @@
 import { createGeneratedInstance } from "@/mocks/goals";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
+import { parseTaskTriggerTime } from "@/lib/taskTriggerTime";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import type { Goal, Task, TaskInstanceStatus } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -38,12 +39,6 @@ function toTaskRuntimeStatus(task: Task) {
   return "pending";
 }
 
-function parseHourMinute(triggerRule: string) {
-  const match = triggerRule.match(/(\d{1,2})[:：](\d{2})/);
-  if (!match) return null;
-  return { hour: Number(match[1]), minute: Number(match[2]) };
-}
-
 function hasInstanceOnDay(task: Task, date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -54,8 +49,8 @@ function hasInstanceOnDay(task: Task, date: Date) {
 function isTaskDue(task: Task, now: Date) {
   if (task.taskType === "one_shot") return task.instances.length === 0;
   if (hasInstanceOnDay(task, now)) return false;
-  const time = parseHourMinute(task.triggerRule);
-  if (!time) return true;
+  const time = parseTaskTriggerTime(task.triggerRule);
+  if (!time) return false;
   const due = new Date(now);
   due.setHours(time.hour, time.minute, 0, 0);
   return now.getTime() >= due.getTime();

@@ -61,18 +61,20 @@ export function contextBlockersFromReadiness(readiness: TaskReadinessCheck) {
 }
 
 export function readinessFromContext(context: TaskExecutionContext): TaskReadinessCheck {
-  const items: TaskReadinessInfoItem[] = context.readiness.blockers.map((blocker) => ({
-    id: blocker.id,
-    label: blocker.label,
-    description: blocker.message,
-    source: blocker.source,
-    status: blocker.kind === "missing_user_input" ? "missing_user" : "missing_user",
-    reason: blocker.reason || blocker.message,
-    value: blocker.value,
-    options: blocker.options,
-    optionQuestion: blocker.optionQuestion,
-    inputPlaceholder: blocker.inputPlaceholder,
-  }));
+  const items: TaskReadinessInfoItem[] = context.readiness.blockers
+    .filter((blocker) => blocker.kind === "missing_user_input")
+    .map((blocker) => ({
+      id: blocker.id,
+      label: blocker.label,
+      description: blocker.message,
+      source: blocker.source,
+      status: "missing_user",
+      reason: blocker.reason || blocker.message,
+      value: blocker.value,
+      options: blocker.options,
+      optionQuestion: blocker.optionQuestion,
+      inputPlaceholder: blocker.inputPlaceholder,
+    }));
   return {
     status: items.length ? "blocked" : "ready",
     generatedAt: new Date().toISOString(),

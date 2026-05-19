@@ -48,6 +48,19 @@ function snapshotGoalKeys(goals: Goal[]) {
   return Object.fromEntries(goals.map((goal) => [goal.id, goalMaterializeKey(goal)]));
 }
 
+function mergeRemoteSnapshotWithPendingLocalGoals(remoteGoals: Goal[], localGoals: Goal[]) {
+  const remoteById = new Map(remoteGoals.map((goal) => [goal.id, goal]));
+  const merged = remoteGoals.map((remoteGoal) => {
+    const localGoal = localGoals.find((goal) => goal.id === remoteGoal.id);
+    if (!localGoal || localGoal.workflow?.planDecision !== "confirmed") return remoteGoal;
+    return goalMaterializeKey(localGoal) === goalMaterializeKey(remoteGoal) ? remoteGoal : localGoal;
+  });
+  const localOnlyGoals = localGoals.filter(
+    (goal) => goal.workflow?.planDecision === "confirmed" && !remoteById.has(goal.id),
+  );
+  return [...merged, ...localOnlyGoals];
+}
+
 function formatLocalTime(date: Date) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
@@ -193,7 +206,7 @@ export function RuntimeEventBridge() {
         isApplyingRemoteRef.current = true;
         remoteRevisionRef.current = revisionFromSnapshot(snapshot);
         remoteGoalKeysRef.current = snapshotGoalKeys(snapshot.goals);
-        replaceGoals(snapshot.goals);
+        replaceGoals(mergeRemoteSnapshotWithPendingLocalGoals(snapshot.goals, useGoalStore.getState().goals));
         replaceEnvironments(snapshot.runtimeEnvironments);
         replaceEvents(snapshot.scheduleEvents);
         didBootstrapRef.current = true;
@@ -211,7 +224,8 @@ export function RuntimeEventBridge() {
       try {
         const snapshot = await fetchRuntimeStateSnapshot();
         if (cancelled) return;
-        const remoteGoalsKey = stableStringify(snapshot.goals);
+        const nextGoals = mergeRemoteSnapshotWithPendingLocalGoals(snapshot.goals, useGoalStore.getState().goals);
+        const remoteGoalsKey = stableStringify(nextGoals);
         const remoteEnvironmentsKey = stableStringify({
           environments: snapshot.runtimeEnvironments,
           activeRuntimeEnvId: snapshot.runtimeEnvironments.find((item) => item.isDefault)?.id ?? null,
@@ -230,7 +244,7 @@ export function RuntimeEventBridge() {
           isApplyingRemoteRef.current = true;
           remoteRevisionRef.current = remoteRevision;
           remoteGoalKeysRef.current = snapshotGoalKeys(snapshot.goals);
-          replaceGoals(snapshot.goals);
+          replaceGoals(nextGoals);
           replaceEnvironments(snapshot.runtimeEnvironments);
           replaceEvents(snapshot.scheduleEvents);
           window.setTimeout(() => {

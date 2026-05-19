@@ -68,6 +68,11 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       runtimeEnv,
     });
 
+    const usingCanonicalInstance = run.taskInstanceId !== targetInstance.id;
+    if (usingCanonicalInstance) {
+      useGoalStore.getState().removeTaskInstance(current.task.id, targetInstance.id);
+    }
+
     if (run.outcome === "awaiting_user") {
       useGoalStore.getState().syncTaskInstanceRun({
         taskId: current.task.id,
