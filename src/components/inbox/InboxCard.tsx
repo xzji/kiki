@@ -5,7 +5,7 @@ import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { resolveInboxTaskContext } from "@/lib/inboxItem";
 import { cn } from "@/lib/utils";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import type { InboxItem } from "@/types/kiki";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
@@ -35,7 +35,7 @@ function renderSnippet(snippet: string, unread: boolean) {
 
 export function InboxCard({ item }: { item: InboxItem }) {
   const Icon = iconMap[item.iconType];
-  const goals = useGoalStore((state) => state.goals);
+  const goals = useGoalStore(selectVisibleGoals);
   const markRead = useInboxStore((state) => state.markRead);
   const [expanded, setExpanded] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);

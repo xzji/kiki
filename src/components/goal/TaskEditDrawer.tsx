@@ -1,14 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { formatDateInput } from "@/lib/date";
+import { updateGoalTaskCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { useGoalStore } from "@/stores/goalStore";
 import type { Task } from "@/types/kiki";
 
-export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; open: boolean; onClose: () => void }) {
-  const updateTask = useGoalStore((state) => state.updateTask);
-  const initialPayload = useMemo(() => JSON.stringify(task?.instances[0]?.payload ?? { kind: task?.executionKind }, null, 2), [task]);
+export function TaskEditDrawer({
+  goalId,
+  task,
+  open,
+  onClose,
+}: {
+  goalId: string;
+  task: Task | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const addPendingTaskUpdate = useGoalStore((state) => state.addPendingTaskUpdate);
+  const removePendingTaskUpdate = useGoalStore((state) => state.removePendingTaskUpdate);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     title: task?.title ?? "",
     description: task?.description ?? "",
@@ -17,7 +32,6 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
     triggerRule: task?.triggerRule ?? "",
     deadline: formatDateInput(task?.deadline),
     executionKind: task?.executionKind ?? "flashcard",
-    payload: initialPayload,
   });
 
   useEffect(() => {
@@ -29,7 +43,6 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
       triggerRule: task?.triggerRule ?? "",
       deadline: formatDateInput(task?.deadline),
       executionKind: task?.executionKind ?? "flashcard",
-      payload: JSON.stringify(task?.instances[0]?.payload ?? { kind: task?.executionKind }, null, 2),
     });
   }, [task]);
 
@@ -53,7 +66,6 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
           </Section>
           <Section title="执行方式">
             <Field label="执行类型"><select value={form.executionKind} onChange={(e) => setForm((prev) => ({ ...prev, executionKind: e.target.value as Task["executionKind"] }))} className="input"><option value="flashcard">flashcard</option><option value="listening_qa">listening_qa</option><option value="reading_digest">reading_digest</option><option value="confirm_action">confirm_action</option><option value="draft_review">draft_review</option><option value="freeform_chat">freeform_chat</option><option value="generic_result">generic_result</option></select></Field>
-            <Field label="内容区配置"><textarea value={form.payload} onChange={(e) => setForm((prev) => ({ ...prev, payload: e.target.value }))} className="h-40 w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-[#111] outline-none" /></Field>
           </Section>
           <Section title="KiKi 的建议">
             <p className="rounded-lg border border-dashed border-[#D0D7DE] bg-[#F8FAFC] px-3 py-3 text-sm leading-6 text-[#6B7280]">这个任务适合保留每天 11:00 触发，因为它和你的托福训练节奏已经形成稳定习惯。若要进一步提升效率，可以把 payload 中的词汇组改成更聚焦的天文领域词汇。</p>
@@ -62,24 +74,51 @@ export function TaskEditDrawer({ task, open, onClose }: { task: Task | null; ope
         <div className="mt-8 flex justify-end gap-3">
           <button onClick={onClose} className="rounded-lg border border-[#D0D7DE] px-4 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]">取消</button>
           <button
-            onClick={() => {
-              let payload;
-              try {
-                payload = JSON.parse(form.payload);
-              } catch {
-                payload = undefined;
-              }
-              updateTask(task.id, {
-                title: form.title,
-                description: form.description,
-                expectedOutcome: form.expectedOutcome,
+            disabled={submitting}
+            onClick={async () => {
+              if (submitting) return;
+              setSubmitting(true);
+              const taskInput = {
+                title: form.title.trim(),
+                description: form.description.trim(),
+                expectedOutcome: form.expectedOutcome.trim(),
                 taskType: form.taskType as Task["taskType"],
-                triggerRule: form.triggerRule,
+                triggerRule: form.triggerRule.trim(),
                 deadline: form.deadline ? new Date(form.deadline).toISOString() : undefined,
                 executionKind: form.executionKind as Task["executionKind"],
-                payload,
+              };
+              const overlayId = createOpaqueId("idem");
+              const idempotencyKey = createIdempotencyKey("goal.update_task", goalId, task.id, overlayId);
+              addPendingTaskUpdate({
+                id: overlayId,
+                goalId,
+                taskId: task.id,
+                idempotencyKey,
+                createdAt: new Date().toISOString(),
+                task: {
+                  ...task,
+                  ...taskInput,
+                  resultViewKind: task.resultViewKind ?? taskInput.executionKind,
+                  executionObjective: taskInput.description,
+                },
               });
               onClose();
+              try {
+                const result = await updateGoalTaskCommand({
+                  goalId,
+                  taskId: task.id,
+                  task: taskInput,
+                  baseRevision: goalProjectionRevision,
+                  idempotencyKey,
+                });
+                applyGoalsProjection(result.goals, result.revision);
+                removePendingTaskUpdate(overlayId);
+              } catch (error) {
+                removePendingTaskUpdate(overlayId);
+                window.alert(error instanceof Error ? error.message : "任务保存失败");
+              } finally {
+                setSubmitting(false);
+              }
             }}
             className="rounded-lg bg-[#111] px-4 py-2 text-sm text-white hover:bg-[#333]"
           >

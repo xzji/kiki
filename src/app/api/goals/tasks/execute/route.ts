@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -11,7 +12,7 @@ type RequestBody = {
   goal: Goal;
   subGoal: SubGoal;
   task: Task;
-  instance: TaskInstance;
+  instance?: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
 };
 
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
     request.headers.get("x-goal-request-id")?.trim() ||
     `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  if (!body.goal || !body.subGoal || !body.task || !body.instance || !body.runtimeEnv) {
+  if (!body.goal || !body.subGoal || !body.task || !body.runtimeEnv) {
     return NextResponse.json({ reason: "任务执行参数不完整" }, { status: 400 });
   }
   if (body.runtimeEnv.type !== "local") {
@@ -40,6 +41,8 @@ export async function POST(request: NextRequest) {
   if (result.outcome === "blocked_config") {
     return NextResponse.json({ outcome: result.outcome, reason: result.reason, taskInstanceId: result.taskInstanceId }, { status: 409 });
   }
+  const goalsSnapshot = readGoalsSnapshotMeta([]);
+  const goals = goalsSnapshot.value;
 
   if (result.outcome === "awaiting_user") {
     return NextResponse.json({
@@ -48,6 +51,8 @@ export async function POST(request: NextRequest) {
       taskInstanceId: result.taskInstanceId,
       waitingReason: result.waitingReason,
       progress: result.progress,
+      goals,
+      revision: goalsSnapshot.revision,
       queued: false,
     });
   }
@@ -57,6 +62,8 @@ export async function POST(request: NextRequest) {
       outcome: result.outcome,
       requestId: result.requestId ?? requestId,
       taskInstanceId: result.taskInstanceId,
+      goals,
+      revision: goalsSnapshot.revision,
       queued: true,
     });
   }
@@ -65,6 +72,8 @@ export async function POST(request: NextRequest) {
     outcome: result.outcome,
     requestId: result.requestId,
     taskInstanceId: result.taskInstanceId,
+    goals,
+    revision: goalsSnapshot.revision,
     queued: true,
   });
 }

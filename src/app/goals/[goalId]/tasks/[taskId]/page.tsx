@@ -8,8 +8,8 @@ import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { ExecutionShell } from "@/components/task/ExecutionShell";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
-import { taskDrawerReturnPath } from "@/lib/routes";
-import { useGoalStore } from "@/stores/goalStore";
+import { goalDetailPath, taskDrawerReturnPath } from "@/lib/routes";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import type { Goal, Task } from "@/types/kiki";
 
 function safeDecodeRouteParam(value: string) {
@@ -42,8 +42,8 @@ export default function TaskDetailPage({
   searchParams?: { view?: string; instanceId?: string };
 }) {
   const router = useRouter();
-  const goals = useGoalStore((state) => state.goals);
-  const replaceGoals = useGoalStore((state) => state.replaceGoals);
+  const goals = useGoalStore(selectVisibleGoals);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const goalId = safeDecodeRouteParam(params.goalId);
   const taskId = safeDecodeRouteParam(params.taskId);
   const routeKey = `${goalId}:${taskId}`;
@@ -61,7 +61,7 @@ export default function TaskDetailPage({
     setRemoteLookup({ key: routeKey, loading: true, loaded: false });
     fetchRuntimeStateSnapshot()
       .then((snapshot) => {
-        if (!cancelled) replaceGoals(snapshot.goals);
+        if (!cancelled) applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
       })
       .catch(() => {
         // Keep the page resilient even when the local runtime snapshot is temporarily unavailable.
@@ -73,7 +73,7 @@ export default function TaskDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [remoteLookup, replaceGoals, routeKey, routeMatch]);
+  }, [applyGoalsProjection, remoteLookup, routeKey, routeMatch]);
 
   if (!goal || !task) {
     const isLookingUpRemote = remoteLookup?.key !== routeKey || remoteLookup.loading || !remoteLookup?.loaded;
@@ -116,7 +116,7 @@ export default function TaskDetailPage({
           <Minimize2 className="h-4 w-4" />
         </button>
       </div>
-      <TaskDetailBody goal={goal} task={task} />
+      <TaskDetailBody goal={goal} task={task} onDeleted={() => router.replace(goalDetailPath(goal.id))} />
     </div>
   );
 }

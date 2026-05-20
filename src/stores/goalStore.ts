@@ -4,16 +4,14 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
-import { createOpaqueId, migrateGoalIds, normalizeGoalId } from "@/lib/opaqueIds";
+import { migrateGoalIds, normalizeGoalId } from "@/lib/opaqueIds";
 import { normalizeConcreteTriggerRule, normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
-import { buildGoalFromDraft, createGeneratedInstance } from "@/lib/goalFactory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type {
   ExecutionPayload,
   Goal,
-  GoalBreakdownDraft,
   GoalWorkflow,
   InteractionRequirement,
   InteractionSubmission,
@@ -28,32 +26,7 @@ import type {
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
-const MOCK_BASELINE_RESET_VERSION = 12;
-const MOCK_GOAL_IDS = new Set(
-  [
-    "goal-toefl",
-    "goal-suv",
-    "goal-osaka",
-    "goal-mail",
-    "goal-news",
-    "goal-job",
-    "goal-tomato-egg",
-  ].map((id) => normalizeGoalId(id)),
-);
-
-function mergeGoalsById(...groups: Goal[][]) {
-  const merged = new Map<string, Goal>();
-  for (const group of groups) {
-    for (const goal of group) {
-      if (!merged.has(goal.id)) merged.set(goal.id, goal);
-    }
-  }
-  return Array.from(merged.values());
-}
-
-function removeMockGoals(goals: Goal[]) {
-  return goals.filter((goal) => !MOCK_GOAL_IDS.has(goal.id));
-}
+const LOCAL_GOAL_STORAGE_RESET_VERSION = 13;
 
 function finalizeGoal(goal: Goal): Goal {
   const tasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
@@ -511,47 +484,100 @@ function findTaskLocation(goals: Goal[], taskId: string) {
   return null;
 }
 
-type TaskEditInput = {
-  title: string;
-  description: string;
-  expectedOutcome: string;
-  taskType: Task["taskType"];
-  triggerRule: string;
-  deadline?: string;
-  executionKind: Task["executionKind"];
-  payload?: ExecutionPayload;
+export type PendingTaskCreateOverlay = {
+  id: string;
+  goalId: string;
+  subGoalId: string;
+  idempotencyKey: string;
+  task: Task;
+  createdAt: string;
 };
 
-type TaskCreateInput = Omit<TaskEditInput, "payload">;
+export type PendingSubGoalCreateOverlay = {
+  id: string;
+  goalId: string;
+  idempotencyKey: string;
+  subGoal: Goal["subGoals"][number];
+  createdAt: string;
+};
+
+export type PendingTaskUpdateOverlay = {
+  id: string;
+  goalId: string;
+  taskId: string;
+  idempotencyKey: string;
+  task: Task;
+  createdAt: string;
+};
+
+export type PendingTaskDeleteOverlay = {
+  id: string;
+  goalId: string;
+  taskId: string;
+  idempotencyKey: string;
+  createdAt: string;
+};
+
+export type PendingGoalWorkflowOverlay = {
+  id: string;
+  goalId: string;
+  idempotencyKey: string;
+  workflow: GoalWorkflow;
+  createdAt: string;
+};
+
+export type PendingConversationGoalDeleteOverlay = {
+  id: string;
+  conversationId: string;
+  idempotencyKey: string;
+  createdAt: string;
+};
+
+function taskMatchesPendingUpdate(task: Task | undefined, pendingTask: Task) {
+  if (!task) return false;
+  return (
+    task.title === pendingTask.title &&
+    task.description === pendingTask.description &&
+    task.expectedOutcome === pendingTask.expectedOutcome &&
+    task.taskType === pendingTask.taskType &&
+    task.triggerRule === pendingTask.triggerRule &&
+    task.deadline === pendingTask.deadline &&
+    task.executionKind === pendingTask.executionKind
+  );
+}
+
+function workflowMatchesPendingOverlay(workflow: GoalWorkflow | undefined, pendingWorkflow: GoalWorkflow) {
+  return Boolean(
+    workflow &&
+      workflow.phase === pendingWorkflow.phase &&
+      workflow.planDecision === pendingWorkflow.planDecision,
+  );
+}
 
 type GoalStore = {
   goals: Goal[];
-  updateTask: (taskId: string, values: TaskEditInput) => void;
-  replaceGoals: (goals: Goal[]) => void;
-  deleteTask: (taskId: string) => void;
-  removeTaskInstance: (taskId: string, instanceId: string) => void;
-  markInstanceStatus: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
-  controlTaskExecution: (taskId: string, action: "start" | "pause" | "resume") => void;
-  completeTaskInstance: (taskId: string, instanceId: string, submission?: InteractionSubmission) => void;
-  generateInstance: (taskId: string, createdAt: string) => TaskInstance | null;
-  generateRerunInstance: (taskId: string, createdAt: string) => TaskInstance | null;
-  createGoalFromInput: (title: string) => Goal;
-  createGoalFromDraft: (draft: GoalBreakdownDraft, options?: { conversationId?: string }) => Goal;
-  deleteGoalsByConversationId: (conversationId: string) => void;
-  updateGoalWorkflow: (goalId: string, updates: Partial<GoalWorkflow>) => void;
-  confirmGoalPlan: (goalId: string) => void;
-  requestGoalPlanRevision: (goalId: string, feedback: string) => void;
-  activateGoal: (goalId: string) => void;
-  failGoalWorkflow: (goalId: string, error: string) => void;
-  startTaskInstanceRun: (input: {
-    taskId: string;
-    instanceId: string;
-    requestId: string;
-    runtimeEnvId?: string;
-    permissionMode?: "readonly" | "confirm" | "execute";
-    workingDirectory?: string;
-  }) => void;
-  syncTaskInstanceRun: (input: {
+  goalProjectionRevision: number;
+  pendingTaskCreates: PendingTaskCreateOverlay[];
+  pendingSubGoalCreates: PendingSubGoalCreateOverlay[];
+  pendingTaskUpdates: PendingTaskUpdateOverlay[];
+  pendingTaskDeletes: PendingTaskDeleteOverlay[];
+  pendingGoalWorkflows: PendingGoalWorkflowOverlay[];
+  pendingConversationGoalDeletes: PendingConversationGoalDeleteOverlay[];
+  applyGoalsProjection: (goals: Goal[], revision?: number) => void;
+  addPendingTaskCreate: (overlay: PendingTaskCreateOverlay) => void;
+  removePendingTaskCreate: (id: string) => void;
+  addPendingSubGoalCreate: (overlay: PendingSubGoalCreateOverlay) => void;
+  removePendingSubGoalCreate: (id: string) => void;
+  addPendingTaskUpdate: (overlay: PendingTaskUpdateOverlay) => void;
+  removePendingTaskUpdate: (id: string) => void;
+  addPendingTaskDelete: (overlay: PendingTaskDeleteOverlay) => void;
+  removePendingTaskDelete: (id: string) => void;
+  addPendingGoalWorkflow: (overlay: PendingGoalWorkflowOverlay) => void;
+  removePendingGoalWorkflow: (id: string) => void;
+  addPendingConversationGoalDelete: (overlay: PendingConversationGoalDeleteOverlay) => void;
+  removePendingConversationGoalDelete: (id: string) => void;
+  applyInstanceStatusProjection: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
+  applyInstanceProgressProjection: (input: {
     taskId: string;
     instanceId: string;
     progress: GoalServerProgress | null;
@@ -559,76 +585,164 @@ type GoalStore = {
     trajectory?: ExecutionTrajectoryStep[];
     waitingReason?: string;
   }) => void;
-  failTaskInstanceRun: (input: {
-    taskId: string;
-    instanceId: string;
-    requestId?: string;
-    errorMessage: string;
-  }) => void;
-  retryTaskInstanceRun: (taskId: string, instanceId: string) => void;
-  stopTaskInstanceRun: (taskId: string, instanceId: string) => void;
-  resolveTaskInstanceAwaitingUser: (taskId: string, instanceId: string, submission: InteractionSubmission) => void;
-  markTaskNotificationDelivered: (input: {
+  applyNotificationProjection: (input: {
     taskId: string;
     instanceId: string;
     inboxItemId?: string;
     conversationMessageId?: string;
   }) => void;
-  addSubGoal: (goalId: string, title: string) => void;
-  addTask: (goalId: string, subGoalId: string, input: TaskCreateInput) => void;
 };
 
 function nowIso() {
   return new Date().toISOString();
 }
 
+let visibleGoalsCache:
+  | {
+      goals: Goal[];
+      pending: PendingConversationGoalDeleteOverlay[];
+      result: Goal[];
+    }
+  | null = null;
+
+export function selectVisibleGoals(state: Pick<GoalStore, "goals" | "pendingConversationGoalDeletes">) {
+  const { goals, pendingConversationGoalDeletes: pending } = state;
+  if (visibleGoalsCache && visibleGoalsCache.goals === goals && visibleGoalsCache.pending === pending) {
+    return visibleGoalsCache.result;
+  }
+  let result: Goal[];
+  if (pending.length === 0) {
+    result = goals;
+  } else {
+    const hiddenConversationIds = new Set(pending.map((item) => item.conversationId));
+    const filtered = goals.filter(
+      (goal) => !goal.conversationId || !hiddenConversationIds.has(goal.conversationId),
+    );
+    result = filtered.length === goals.length ? goals : filtered;
+  }
+  visibleGoalsCache = { goals, pending, result };
+  return result;
+}
+
 export const useGoalStore = create<GoalStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       goals: [],
-      replaceGoals: (goals) => {
-        set({
-          goals: goals.map((goal) => normalizeGoal(goal)),
-        });
-      },
-      updateTask: (taskId, values) => {
+      goalProjectionRevision: 0,
+      pendingTaskCreates: [],
+      pendingSubGoalCreates: [],
+      pendingTaskUpdates: [],
+      pendingTaskDeletes: [],
+      pendingGoalWorkflows: [],
+      pendingConversationGoalDeletes: [],
+      applyGoalsProjection: (goals, revision) => {
+        const normalizedGoals = goals.map((goal) => normalizeGoal(goal));
+        const projectedSubGoalIds = new Set(normalizedGoals.flatMap((goal) => goal.subGoals.map((subGoal) => subGoal.id)));
+        const projectedConversationIds = new Set(
+          normalizedGoals.map((goal) => goal.conversationId).filter((id): id is string => Boolean(id)),
+        );
+        const projectedTasks = new Map(
+          normalizedGoals.flatMap((goal) =>
+            goal.subGoals.flatMap((subGoal) => subGoal.tasks.map((task) => [task.id, task] as const)),
+          ),
+        );
+        const projectedWorkflows = new Map(normalizedGoals.map((goal) => [goal.id, goal.workflow] as const));
         set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            title: values.title,
-            description: values.description,
-            expectedOutcome: values.expectedOutcome,
-            taskType: values.taskType,
-            triggerRule: values.triggerRule,
-            deadline: values.deadline,
-            executionKind: values.executionKind,
-            resultViewKind: task.resultViewKind ?? values.executionKind,
-            instances: values.payload
-              ? task.instances.map((instance) => ({ ...instance, payload: values.payload! }))
-              : task.instances,
-          })),
+          goals: normalizedGoals,
+          ...(typeof revision === "number" ? { goalProjectionRevision: revision } : {}),
+          pendingTaskCreates: state.pendingTaskCreates.filter((item) => !projectedTasks.has(item.task.id)),
+          pendingSubGoalCreates: state.pendingSubGoalCreates.filter((item) => !projectedSubGoalIds.has(item.subGoal.id)),
+          pendingTaskUpdates: state.pendingTaskUpdates.filter(
+            (item) => !taskMatchesPendingUpdate(projectedTasks.get(item.taskId), item.task),
+          ),
+          pendingTaskDeletes: state.pendingTaskDeletes.filter((item) => projectedTasks.has(item.taskId)),
+          pendingGoalWorkflows: state.pendingGoalWorkflows.filter(
+            (item) => !workflowMatchesPendingOverlay(projectedWorkflows.get(item.goalId), item.workflow),
+          ),
+          pendingConversationGoalDeletes: state.pendingConversationGoalDeletes.filter((item) =>
+            projectedConversationIds.has(item.conversationId),
+          ),
         }));
       },
-      deleteTask: (taskId) => {
+      addPendingTaskCreate: (overlay) => {
         set((state) => ({
-          goals: state.goals.map((goal) => ({
-            ...goal,
-            subGoals: goal.subGoals.map((subGoal) => ({
-              ...subGoal,
-              tasks: subGoal.tasks.filter((task) => task.id !== taskId),
-            })),
-          })),
+          pendingTaskCreates: [
+            ...state.pendingTaskCreates.filter((item) => item.id !== overlay.id),
+            overlay,
+          ],
         }));
       },
-      removeTaskInstance: (taskId, instanceId) => {
+      removePendingTaskCreate: (id) => {
         set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: task.instances.filter((instance) => instance.id !== instanceId),
-          })),
+          pendingTaskCreates: state.pendingTaskCreates.filter((item) => item.id !== id),
         }));
       },
-      markInstanceStatus: (taskId, instanceId, status) => {
+      addPendingSubGoalCreate: (overlay) => {
+        set((state) => ({
+          pendingSubGoalCreates: [
+            ...state.pendingSubGoalCreates.filter((item) => item.id !== overlay.id),
+            overlay,
+          ],
+        }));
+      },
+      removePendingSubGoalCreate: (id) => {
+        set((state) => ({
+          pendingSubGoalCreates: state.pendingSubGoalCreates.filter((item) => item.id !== id),
+        }));
+      },
+      addPendingTaskUpdate: (overlay) => {
+        set((state) => ({
+          pendingTaskUpdates: [
+            ...state.pendingTaskUpdates.filter((item) => item.taskId !== overlay.taskId),
+            overlay,
+          ],
+        }));
+      },
+      removePendingTaskUpdate: (id) => {
+        set((state) => ({
+          pendingTaskUpdates: state.pendingTaskUpdates.filter((item) => item.id !== id),
+        }));
+      },
+      addPendingTaskDelete: (overlay) => {
+        set((state) => ({
+          pendingTaskDeletes: [
+            ...state.pendingTaskDeletes.filter((item) => item.taskId !== overlay.taskId),
+            overlay,
+          ],
+        }));
+      },
+      removePendingTaskDelete: (id) => {
+        set((state) => ({
+          pendingTaskDeletes: state.pendingTaskDeletes.filter((item) => item.id !== id),
+        }));
+      },
+      addPendingGoalWorkflow: (overlay) => {
+        set((state) => ({
+          pendingGoalWorkflows: [
+            ...state.pendingGoalWorkflows.filter((item) => item.goalId !== overlay.goalId),
+            overlay,
+          ],
+        }));
+      },
+      removePendingGoalWorkflow: (id) => {
+        set((state) => ({
+          pendingGoalWorkflows: state.pendingGoalWorkflows.filter((item) => item.id !== id),
+        }));
+      },
+      addPendingConversationGoalDelete: (overlay) => {
+        set((state) => ({
+          pendingConversationGoalDeletes: [
+            ...state.pendingConversationGoalDeletes.filter((item) => item.conversationId !== overlay.conversationId),
+            overlay,
+          ],
+        }));
+      },
+      removePendingConversationGoalDelete: (id) => {
+        set((state) => ({
+          pendingConversationGoalDeletes: state.pendingConversationGoalDeletes.filter((item) => item.id !== id),
+        }));
+      },
+      applyInstanceStatusProjection: (taskId, instanceId, status) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
             ...task,
@@ -666,351 +780,7 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
-      controlTaskExecution: (taskId, action) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => {
-            const sortedInstances = [...task.instances].sort(
-              (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt),
-            );
-            const target = sortedInstances.find((instance) => instance.status !== "completed");
-
-            if (!target) {
-              const nextInstance = {
-                ...createGeneratedInstance(task, nowIso()),
-                status: action === "pause" ? ("paused" as const) : ("in_progress" as const),
-              };
-              return { ...task, instances: [normalizeInstance(nextInstance, task), ...task.instances] };
-            }
-
-            const nextStatus =
-              action === "start" || action === "resume"
-                ? "in_progress"
-                : action === "pause"
-                  ? "paused"
-                  : target.status;
-
-            return {
-              ...task,
-              instances: task.instances.map((instance) =>
-                instance.id === target.id
-                  ? normalizeInstance(
-                      {
-                        ...instance,
-                        status: nextStatus,
-                        execution: {
-                          phase: nextStatus === "paused" ? "failed" : "running",
-                          status: nextStatus,
-                          startedAt: instance.execution?.startedAt ?? nowIso(),
-                          lastUpdatedAt: nowIso(),
-                        },
-                      },
-                      task,
-                    )
-                  : instance,
-              ),
-            };
-          }),
-        }));
-      },
-      completeTaskInstance: (taskId, instanceId, submission) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            progress: Math.min(100, task.progress + (task.executionKind === "flashcard" ? 8 : 5)),
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      status: "completed",
-                      result: submission
-                        ? {
-                            ...instance.result,
-                            summary: `${submission.action}已提交`,
-                            interactionSubmission: submission,
-                            structuredOutput: {
-                              ...(instance.result?.structuredOutput ?? {}),
-                              interactionSubmission: submission,
-                            },
-                          }
-                        : instance.result,
-                      execution: {
-                        phase: "completed",
-                        status: "completed",
-                        startedAt: instance.execution?.startedAt ?? instance.createdAt,
-                        finishedAt: nowIso(),
-                        lastUpdatedAt: nowIso(),
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
-          })),
-        }));
-      },
-      generateInstance: (taskId, createdAt) => {
-        const found = findTaskLocation(get().goals, taskId);
-        if (!found) return null;
-        const date = new Date(createdAt);
-        const dateLabel = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-          date.getDate(),
-        ).padStart(2, "0")}`;
-        const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-        const baseInstance = createGeneratedInstance(found.task, createdAt);
-        const nextInstance = {
-          ...baseInstance,
-          dateLabel: `${dateLabel} ${timeLabel}`,
-          intro: `用户手动发起执行“${found.task.title.replace(/^任务\d+：/, "")}”。`,
-        };
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: [normalizeInstance(nextInstance, task), ...task.instances],
-          })),
-        }));
-        return nextInstance;
-      },
-      generateRerunInstance: (taskId, createdAt) => {
-        const found = findTaskLocation(get().goals, taskId);
-        if (!found) return null;
-        const baseInstance = createGeneratedInstance(found.task, createdAt);
-        const date = new Date(createdAt);
-        const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-        const nextInstance = normalizeInstance(
-          {
-            ...baseInstance,
-            dateLabel: `${baseInstance.dateLabel} 重跑 ${timeLabel}`,
-            intro: `重新执行“${found.task.title.replace(/^任务\d+：/, "")}”，KiKi 将基于当前任务要求重新产出结果。`,
-          },
-          found.task,
-        );
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: [nextInstance, ...task.instances],
-          })),
-        }));
-        return nextInstance;
-      },
-      createGoalFromInput: (title) => {
-        const now = nowIso();
-        const nextGoal: Goal = {
-          id: createOpaqueId("goal"),
-          title,
-          summary: title,
-          deadline: "",
-          progress: 0,
-          subGoals: [],
-          createdAt: now,
-          workflow: {
-            phase: "idle",
-            planDecision: "pending",
-            startedAt: now,
-            updatedAt: now,
-          },
-        };
-        const normalized = normalizeGoal(nextGoal);
-        set((state) => ({ goals: [...state.goals, normalized] }));
-        return normalized;
-      },
-      createGoalFromDraft: (draft, options) => {
-        const base = buildGoalFromDraft(draft);
-        const now = nowIso();
-        const workflow: GoalWorkflow = {
-          phase: "presenting_plan",
-          planDecision: "pending",
-          collectedInfo: {
-            collectedInfoSummary: draft.collectedInfoSummary,
-            goalAnalysis: draft.goalAnalysis,
-            executionOrder: draft.executionOrder,
-            reviewSummary: draft.reviewSummary,
-          },
-          assumptions: draft.assumptions,
-          risks: draft.risks,
-          reasoning: draft.reasoning,
-          notificationStrategy: draft.notificationStrategy,
-          startedAt: now,
-          updatedAt: now,
-        };
-        const nextGoal: Goal = {
-          ...base,
-          title: draft.goalTitle,
-          summary: draft.summary,
-          deadline: draft.deadline || base.deadline,
-          conversationId: options?.conversationId,
-          workflow,
-        };
-
-        // Map optional meta fields from draft tasks into tasks (by title match within same subgoal index).
-        nextGoal.subGoals = nextGoal.subGoals.map((sg, sgIndex) => {
-          const draftSubGoal = draft.subGoals[sgIndex];
-          return {
-            ...sg,
-            title: draftSubGoal?.title ?? sg.title,
-            description: draftSubGoal?.description ?? sg.description,
-            why: draftSubGoal?.why ?? sg.why,
-            priority: draftSubGoal?.priority ?? sg.priority,
-            weight: draftSubGoal?.weight ?? sg.weight,
-            dependencies: sg.dependencies ?? draftSubGoal?.dependencies,
-            estimatedDurationMinutes:
-              draftSubGoal?.estimatedDurationMinutes ?? sg.estimatedDurationMinutes,
-            successCriteria: draftSubGoal?.successCriteria ?? sg.successCriteria,
-            tasks: sg.tasks.map((t, tIndex) => {
-              const draftTask = draftSubGoal?.tasks?.[tIndex];
-              return draftTask
-                ? {
-                    ...t,
-                    priority: draftTask.priority,
-                    dependencies: t.dependencies,
-                    executionMode: draftTask.executionMode,
-                    expectedResult: draftTask.expectedResult,
-                    resultViewKind: draftTask.resultViewKind ?? draftTask.executionKind,
-                    executionStrategy: draftTask.executionStrategy ?? "agent_autonomous",
-                    executionObjective: draftTask.executionObjective ?? draftTask.description,
-                    recommendedWorkingDirectory: draftTask.recommendedWorkingDirectory,
-                    autoRunDisabled: draftTask.autoRunDisabled,
-                    requiresConfirmation: draftTask.requiresConfirmation,
-                  }
-                : t;
-            }),
-          };
-        });
-
-        const finalizedGoal = finalizeGoal(nextGoal);
-        set((state) => ({ goals: [...state.goals, finalizedGoal] }));
-        return finalizedGoal;
-      },
-      deleteGoalsByConversationId: (conversationId) => {
-        set((state) => ({
-          goals: state.goals.filter((goal) => goal.conversationId !== conversationId),
-        }));
-      },
-      updateGoalWorkflow: (goalId, updates) => {
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            const prev = goal.workflow;
-            const next: GoalWorkflow = {
-              phase: prev?.phase ?? "idle",
-              planDecision: prev?.planDecision ?? "pending",
-              startedAt: prev?.startedAt ?? nowIso(),
-              updatedAt: nowIso(),
-              ...prev,
-              ...updates,
-            };
-            return { ...goal, workflow: next };
-          }),
-        }));
-      },
-      confirmGoalPlan: (goalId) => {
-        const now = nowIso();
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            const prev = goal.workflow;
-            const next: GoalWorkflow = {
-              ...prev,
-              phase: "executing",
-              planDecision: "confirmed",
-              startedAt: prev?.startedAt ?? now,
-              updatedAt: now,
-              confirmedAt: now,
-            };
-            return { ...goal, workflow: next };
-          }),
-        }));
-      },
-      requestGoalPlanRevision: (goalId, feedback) => {
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            const prev = goal.workflow;
-            const next: GoalWorkflow = {
-              ...prev,
-              phase: "decomposing",
-              planDecision: "revision_requested",
-              startedAt: prev?.startedAt ?? nowIso(),
-              updatedAt: nowIso(),
-              collectedInfo: {
-                ...(prev?.collectedInfo ?? {}),
-                revisionFeedback: feedback,
-              },
-            };
-            return { ...goal, workflow: next };
-          }),
-        }));
-      },
-      activateGoal: (goalId) => {
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            const prev = goal.workflow;
-            return {
-              ...goal,
-              workflow: {
-                ...prev,
-                phase: "monitoring",
-                planDecision: prev?.planDecision ?? "confirmed",
-                startedAt: prev?.startedAt ?? nowIso(),
-                updatedAt: nowIso(),
-              },
-            };
-          }),
-        }));
-      },
-      failGoalWorkflow: (goalId, error) => {
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            const prev = goal.workflow;
-            return {
-              ...goal,
-              workflow: {
-                ...prev,
-                phase: "error",
-                planDecision: prev?.planDecision ?? "pending",
-                startedAt: prev?.startedAt ?? nowIso(),
-                updatedAt: nowIso(),
-                error,
-              },
-            };
-          }),
-        }));
-      },
-      startTaskInstanceRun: ({ taskId, instanceId, requestId, runtimeEnvId, permissionMode, workingDirectory }) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      status: "in_progress",
-                      runner: {
-                        requestId,
-                        runtimeEnvId,
-                        permissionMode,
-                        workingDirectory,
-                        attemptCount: (instance.runner?.attemptCount ?? 0) + 1,
-                        lastAttemptAt: nowIso(),
-                      },
-                      execution: {
-                        phase: "running",
-                        status: "in_progress",
-                        startedAt: instance.execution?.startedAt ?? nowIso(),
-                        lastUpdatedAt: nowIso(),
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
-          })),
-        }));
-      },
-      syncTaskInstanceRun: ({ taskId, instanceId, progress, logs, trajectory }) => {
+      applyInstanceProgressProjection: ({ taskId, instanceId, progress, logs, trajectory }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => {
             const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
@@ -1033,9 +803,9 @@ export const useGoalStore = create<GoalStore>()(
                       : "completed"
                     : progress?.status === "cancelled"
                       ? "paused"
-                    : progress?.status === "failed"
-                      ? "error"
-                      : "in_progress";
+                      : progress?.status === "failed"
+                        ? "error"
+                        : "in_progress";
                 const nextKind = (progress?.resultPayload?.resultViewKind as TaskResultViewKind | undefined) ?? defaultResultViewKind(task);
                 const artifacts = Array.isArray(progress?.resultPayload?.artifacts)
                   ? (progress.resultPayload.artifacts as TaskRunArtifact[])
@@ -1070,7 +840,7 @@ export const useGoalStore = create<GoalStore>()(
                               ? "failed"
                               : nextStatus === "paused"
                                 ? "cancelled"
-                              : "running",
+                                : "running",
                       status: nextStatus,
                       startedAt: instance.execution?.startedAt ?? progress?.startedAt ?? instance.createdAt,
                       finishedAt: progress?.finishedAt,
@@ -1120,126 +890,7 @@ export const useGoalStore = create<GoalStore>()(
           }),
         }));
       },
-      failTaskInstanceRun: ({ taskId, instanceId, requestId, errorMessage }) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      status: "error",
-                      execution: {
-                        phase: "failed",
-                        status: "error",
-                        startedAt: instance.execution?.startedAt,
-                        finishedAt: nowIso(),
-                        lastUpdatedAt: nowIso(),
-                        errorCategory: "unknown",
-                        errorMessage,
-                      },
-                      result: {
-                        ...instance.result,
-                        summary: errorMessage,
-                        structuredOutput: {
-                          ...(instance.result?.structuredOutput ?? {}),
-                          requestId,
-                        },
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
-          })),
-        }));
-      },
-      retryTaskInstanceRun: (taskId, instanceId) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      status: "pending",
-                      execution: {
-                        phase: "retrying",
-                        status: "pending",
-                        startedAt: instance.execution?.startedAt,
-                        lastUpdatedAt: nowIso(),
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
-          })),
-        }));
-      },
-      stopTaskInstanceRun: (taskId, instanceId) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      status: "paused",
-                      execution: {
-                        phase: "cancelled",
-                        status: "paused",
-                        startedAt: instance.execution?.startedAt,
-                        finishedAt: nowIso(),
-                        lastUpdatedAt: nowIso(),
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
-          })),
-        }));
-      },
-      resolveTaskInstanceAwaitingUser: (taskId, instanceId, submission) => {
-        set((state) => ({
-          goals: updateTaskInGoals(state.goals, taskId, (task) => ({
-            ...task,
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      status: "in_progress",
-                      awaitingUser: undefined,
-                      blocker: undefined,
-                      result: {
-                        ...instance.result,
-                        interactionSubmission: submission,
-                        structuredOutput: {
-                          ...(instance.result?.structuredOutput ?? {}),
-                          interactionSubmission: submission,
-                        },
-                      },
-                      execution: {
-                        ...instance.execution,
-                        phase: "running",
-                        status: "in_progress",
-                        startedAt: instance.execution?.startedAt ?? instance.createdAt,
-                        lastUpdatedAt: nowIso(),
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
-          })),
-        }));
-      },
-      markTaskNotificationDelivered: ({ taskId, instanceId, inboxItemId, conversationMessageId }) => {
+      applyNotificationProjection: ({ taskId, instanceId, inboxItemId, conversationMessageId }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
             ...task,
@@ -1264,73 +915,25 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
-      addSubGoal: (goalId, title) => {
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            const nextIndex = goal.subGoals.length + 1;
-            const newSubGoal = {
-              id: createOpaqueId("sg"),
-              goalId,
-              title: title.startsWith("子目标") ? title : `子目标${nextIndex}：${title}`,
-              tasks: [],
-            };
-            return { ...goal, subGoals: [...goal.subGoals, newSubGoal] };
-          }),
-        }));
-      },
-      addTask: (goalId, subGoalId, input) => {
-        set((state) => ({
-          goals: state.goals.map((goal) => {
-            if (goal.id !== goalId) return goal;
-            return finalizeGoal({
-              ...goal,
-              subGoals: goal.subGoals.map((subGoal) => {
-                if (subGoal.id !== subGoalId) return subGoal;
-                const nextIndex = subGoal.tasks.length + 1;
-                const newTask: Task = {
-                  id: createOpaqueId("task"),
-                  subGoalId,
-                  title: input.title.startsWith("任务") ? input.title : `任务${nextIndex}：${input.title}`,
-                  description: input.description,
-                  expectedOutcome: input.expectedOutcome,
-                  taskType: input.taskType,
-                  triggerRule: input.triggerRule,
-                  deadline: input.deadline,
-                  progress: 0,
-                  instances: [],
-                  executionKind: input.executionKind,
-                  resultViewKind: input.executionKind,
-                  executionStrategy: "agent_autonomous",
-                  executionObjective: input.description,
-                };
-                return { ...subGoal, tasks: [...subGoal.tasks, newTask] };
-              }),
-            });
-          }),
-        }));
-      },
     }),
     {
       name: "kiki.goals",
-      version: MOCK_BASELINE_RESET_VERSION,
-      migrate: (persisted) => {
-        const next = persisted as Partial<GoalStore> | undefined;
-        const persistedGoals = Array.isArray(next?.goals)
-          ? removeMockGoals(next.goals.map((goal) => normalizeGoal(goal)))
-          : [];
+      version: LOCAL_GOAL_STORAGE_RESET_VERSION,
+      migrate: () => {
         return {
-          goals: persistedGoals,
+          goals: [],
+          goalProjectionRevision: 0,
         };
       },
-      partialize: (state) => ({ goals: state.goals }),
-      merge: (persisted, current) => {
-        const next = persisted as Partial<GoalStore>;
-        const persistedGoals = removeMockGoals((next.goals ?? current.goals).map((goal) => normalizeGoal(goal)));
+      partialize: () => ({
+        goals: [],
+        goalProjectionRevision: 0,
+      }),
+      merge: (_persisted, current) => {
         return {
           ...current,
-          ...next,
-          goals: mergeGoalsById(persistedGoals),
+          goals: [],
+          goalProjectionRevision: 0,
         };
       },
     },
@@ -1338,9 +941,9 @@ export const useGoalStore = create<GoalStore>()(
 );
 
 export function getGoalById(goalId: string) {
-  return useGoalStore.getState().goals.find((goal) => goal.id === goalId);
+  return selectVisibleGoals(useGoalStore.getState()).find((goal) => goal.id === goalId);
 }
 
 export function getTaskById(taskId: string) {
-  return findTaskLocation(useGoalStore.getState().goals, taskId);
+  return findTaskLocation(selectVisibleGoals(useGoalStore.getState()), taskId);
 }

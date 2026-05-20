@@ -4,7 +4,9 @@ import { SendHorizonal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
-import { useChatStore } from "@/stores/chatStore";
+import { formatMessageTime } from "@/lib/date";
+import { makeId } from "@/lib/utils";
+import type { KikiMessage } from "@/types/kiki";
 
 function replyFor(message: string) {
   if (message.includes("改方案")) return "我会先保留你原本的偏好，再重新拉一版更便宜、换乘更少的方案给你确认。";
@@ -14,16 +16,24 @@ function replyFor(message: string) {
 }
 
 export function FreeformChatView({ threadId, seed }: { threadId: string; seed: string }) {
-  const threads = useChatStore((state) => state.threads);
-  const seedThread = useChatStore((state) => state.seedThread);
-  const sendUserMessage = useChatStore((state) => state.sendUserMessage);
-  const sendKikiMessage = useChatStore((state) => state.sendKikiMessage);
   const [value, setValue] = useState("");
-  const messages = threads[threadId] ?? [];
+  const [messages, setMessages] = useState<KikiMessage[]>([]);
 
   useEffect(() => {
-    seedThread(threadId, [{ id: `${threadId}-seed`, role: "kiki", content: seed, timestamp: "04-26 11:00" }]);
-  }, [seed, seedThread, threadId]);
+    setMessages([{ id: `${threadId}-seed`, role: "kiki", content: seed, timestamp: "04-26 11:00" }]);
+  }, [seed, threadId]);
+
+  const send = () => {
+    const content = value.trim();
+    if (!content) return;
+    const now = formatMessageTime(new Date());
+    setMessages((prev) => [
+      ...prev,
+      { id: makeId("msg"), role: "user", content, timestamp: now },
+      { id: makeId("msg"), role: "kiki", content: replyFor(content), timestamp: now },
+    ]);
+    setValue("");
+  };
 
   return (
     <div className="space-y-4">
@@ -40,18 +50,11 @@ export function FreeformChatView({ threadId, seed }: { threadId: string; seed: s
       <div className="flex gap-2 rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-3">
         <input value={value} onChange={(event) => setValue(event.target.value)} placeholder="继续和 KiKi 对话" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#9AA4B2]" onKeyDown={(event) => {
           if (event.key === "Enter" && value.trim()) {
-            const content = value.trim();
-            sendUserMessage(threadId, content);
-            sendKikiMessage(threadId, replyFor(content));
-            setValue("");
+            send();
           }
         }} />
         <button className="rounded-lg bg-[#111] p-2 text-white hover:bg-[#333]" onClick={() => {
-          const content = value.trim();
-          if (!content) return;
-          sendUserMessage(threadId, content);
-          sendKikiMessage(threadId, replyFor(content));
-          setValue("");
+          send();
         }}><SendHorizonal className="h-4 w-4" /></button>
       </div>
     </div>

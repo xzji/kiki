@@ -3,6 +3,8 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { createGoalTaskCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey, deriveOpaqueId } from "@/lib/opaqueIds";
 import { useGoalStore } from "@/stores/goalStore";
 import type { Task } from "@/types/kiki";
 
@@ -24,7 +26,11 @@ const EXECUTION_OPTIONS: { value: Task["executionKind"]; label: string }[] = [
 ];
 
 export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
-  const addTask = useGoalStore((state) => state.addTask);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const addPendingTaskCreate = useGoalStore((state) => state.addPendingTaskCreate);
+  const removePendingTaskCreate = useGoalStore((state) => state.removePendingTaskCreate);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -59,17 +65,65 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
 
   const canSubmit = form.title.trim() && form.expectedOutcome.trim() && form.triggerRule.trim();
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
-    addTask(goalId, subGoalId, {
+  const handleSubmit = async () => {
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
+    const now = new Date().toISOString();
+    const taskInput = {
       title: form.title.trim(),
       description: form.description.trim(),
       expectedOutcome: form.expectedOutcome.trim(),
       taskType: form.taskType,
       triggerRule: form.triggerRule.trim(),
       executionKind: form.executionKind,
+    };
+    const idempotencyKey = createIdempotencyKey(
+      "goal.create_task",
+      goalId,
+      subGoalId,
+      taskInput.title,
+      `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    );
+    const pendingTaskId = deriveOpaqueId("task", idempotencyKey);
+    addPendingTaskCreate({
+      id: pendingTaskId,
+      goalId,
+      subGoalId,
+      idempotencyKey,
+      createdAt: now,
+      task: {
+        id: pendingTaskId,
+        subGoalId,
+        title: taskInput.title,
+        description: taskInput.description,
+        expectedOutcome: taskInput.expectedOutcome,
+        taskType: taskInput.taskType,
+        triggerRule: taskInput.triggerRule,
+        progress: 0,
+        instances: [],
+        executionKind: taskInput.executionKind,
+        resultViewKind: taskInput.executionKind,
+        executionStrategy: "agent_autonomous",
+        executionObjective: taskInput.description,
+      },
     });
     onClose();
+    try {
+      const result = await createGoalTaskCommand({
+        goalId,
+        subGoalId,
+        task: taskInput,
+        baseRevision: goalProjectionRevision,
+        idempotencyKey,
+      });
+      applyGoalsProjection(result.goals, result.revision);
+      removePendingTaskCreate(pendingTaskId);
+    } catch (error) {
+      removePendingTaskCreate(pendingTaskId);
+      window.alert(error instanceof Error ? error.message : "任务创建失败");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -148,7 +202,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
           </button>
           <button
             type="button"
-            disabled={!canSubmit}
+            disabled={!canSubmit || submitting}
             onClick={handleSubmit}
             className="rounded-lg bg-[#1F2328] px-3 py-1.5 text-sm text-white disabled:opacity-40"
           >

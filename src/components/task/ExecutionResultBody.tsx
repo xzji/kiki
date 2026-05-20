@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
 import { ConfirmActionView } from "@/components/execution/ConfirmActionView";
 import { DraftReviewView } from "@/components/execution/DraftReviewView";
@@ -151,8 +152,8 @@ export function ExecutionResultBody(props: {
   mode?: "shell" | "result";
 }) {
   const { goal, task, instance } = props;
-  const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
-  const completeTaskInstance = useGoalStore((state) => state.completeTaskInstance);
+  const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
+  const applyInstanceStatusProjection = useGoalStore((state) => state.applyInstanceStatusProjection);
   const [refreshTick, setRefreshTick] = useState(0);
   const currentKind = task.resultViewKind ?? task.executionKind;
   const optionalFeedbackResult = hasOptionalResultFeedback(instance);
@@ -178,7 +179,7 @@ export function ExecutionResultBody(props: {
         taskInstanceId: instance.id,
       });
       if (cancelled) return;
-      syncTaskInstanceRun({
+      applyInstanceProgressProjection({
         taskId: task.id,
         instanceId: instance.id,
         progress: state.progress,
@@ -196,12 +197,15 @@ export function ExecutionResultBody(props: {
     return () => {
       cancelled = true;
     };
-  }, [instance.id, instance.runner?.requestId, refreshTick, syncTaskInstanceRun, task.id]);
+  }, [applyInstanceProgressProjection, instance.id, instance.runner?.requestId, refreshTick, task.id]);
 
   const finish = (submission: Omit<InteractionSubmission, "submittedAt">) => {
-    completeTaskInstance(task.id, instance.id, {
-      ...submission,
-      submittedAt: new Date().toISOString(),
+    void transitionGoalInstance({
+      instanceId: instance.id,
+      status: "completed",
+      reason: submission.feedback || submission.action,
+    }).then(() => {
+      applyInstanceStatusProjection(task.id, instance.id, "completed");
     });
   };
   const hasBuiltInDeliverable =

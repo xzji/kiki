@@ -3,6 +3,8 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { createSubGoalCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey, deriveOpaqueId } from "@/lib/opaqueIds";
 import { useGoalStore } from "@/stores/goalStore";
 
 type Props = {
@@ -12,8 +14,12 @@ type Props = {
 };
 
 export function SubGoalCreateDrawer({ open, goalId, onClose }: Props) {
-  const addSubGoal = useGoalStore((state) => state.addSubGoal);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const addPendingSubGoalCreate = useGoalStore((state) => state.addPendingSubGoalCreate);
+  const removePendingSubGoalCreate = useGoalStore((state) => state.removePendingSubGoalCreate);
   const [title, setTitle] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) setTitle("");
@@ -29,11 +35,45 @@ export function SubGoalCreateDrawer({ open, goalId, onClose }: Props) {
 
   if (!open) return null;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const trimmed = title.trim();
-    if (!trimmed) return;
-    addSubGoal(goalId, trimmed);
+    if (!trimmed || submitting) return;
+    setSubmitting(true);
+    const idempotencyKey = createIdempotencyKey(
+      "goal.create_sub_goal",
+      goalId,
+      trimmed,
+      `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    );
+    const pendingSubGoalId = deriveOpaqueId("sg", idempotencyKey);
+    addPendingSubGoalCreate({
+      id: pendingSubGoalId,
+      goalId,
+      idempotencyKey,
+      createdAt: new Date().toISOString(),
+      subGoal: {
+        id: pendingSubGoalId,
+        goalId,
+        title: trimmed,
+        tasks: [],
+      },
+    });
     onClose();
+    try {
+      const result = await createSubGoalCommand({
+        goalId,
+        title: trimmed,
+        baseRevision: goalProjectionRevision,
+        idempotencyKey,
+      });
+      applyGoalsProjection(result.goals, result.revision);
+      removePendingSubGoalCreate(pendingSubGoalId);
+    } catch (error) {
+      removePendingSubGoalCreate(pendingSubGoalId);
+      window.alert(error instanceof Error ? error.message : "子目标创建失败");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -66,7 +106,7 @@ export function SubGoalCreateDrawer({ open, goalId, onClose }: Props) {
           </button>
           <button
             type="button"
-            disabled={!title.trim()}
+            disabled={!title.trim() || submitting}
             onClick={handleSubmit}
             className="rounded-lg bg-[#1F2328] px-3 py-1.5 text-sm text-white disabled:opacity-40"
           >

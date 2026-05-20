@@ -8,13 +8,13 @@ import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { taskDetailPath } from "@/lib/routes";
 import { useAssistantStore } from "@/stores/assistantStore";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
 export function TaskDetailDrawer() {
   const { activeGoalId, activeTaskId, close } = useTaskDrawerStore();
-  const goals = useGoalStore((state) => state.goals);
+  const goals = useGoalStore(selectVisibleGoals);
   const assistantOpen = useAssistantStore((state) => state.isOpen);
   const openAssistant = useAssistantStore((state) => state.open);
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
@@ -88,7 +88,7 @@ export function TaskDetailDrawer() {
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
-        <TaskDetailBody goal={goal} task={task} />
+        <TaskDetailBody goal={goal} task={task} onDeleted={close} />
       </div>
 
       {!assistantOpen ? (

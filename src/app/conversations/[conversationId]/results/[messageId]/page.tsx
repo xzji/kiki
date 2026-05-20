@@ -5,7 +5,7 @@ import { notFound, useRouter } from "next/navigation";
 
 import { ExecutionResultBody, buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
 import { useConversationStore } from "@/stores/conversationStore";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 
 export default function ConversationResultPage({
   params,
@@ -14,7 +14,7 @@ export default function ConversationResultPage({
 }) {
   const router = useRouter();
   const conversations = useConversationStore((state) => state.conversations);
-  const goals = useGoalStore((state) => state.goals);
+  const goals = useGoalStore(selectVisibleGoals);
 
   const conversation = conversations.find((c) => c.id === params.conversationId) ?? null;
   const message =

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { InboxEmptyState } from "@/components/inbox/InboxEmptyState";
 import { InboxList } from "@/components/inbox/InboxList";
 import { formatChineseDate } from "@/lib/date";
 import { useInboxStore } from "@/stores/inboxStore";
@@ -15,7 +16,7 @@ export default function HomePage() {
   return (
     <div>
       <h1 className="mb-6 text-[32px] font-semibold tracking-tight text-[#111]">{formatChineseDate(currentTime)}</h1>
-      <InboxList items={orderedItems} />
+      {orderedItems.length > 0 ? <InboxList items={orderedItems} /> : <InboxEmptyState />}
     </div>
   );
 }

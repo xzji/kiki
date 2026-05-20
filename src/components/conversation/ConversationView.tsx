@@ -26,7 +26,7 @@ import { openSettings } from "@/lib/settings";
 import { parseSlashCommand } from "@/lib/slashCommands";
 import { taskDetailPath } from "@/lib/routes";
 import { useConversationStore } from "@/stores/conversationStore";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { ConversationMessage, Goal } from "@/types/kiki";
 import type { QuotedConversationMessageContext } from "@/types/runtime";
@@ -48,7 +48,7 @@ function classifyConversationError(message: string | null) {
       actionLabel: "前往运行环境",
     };
   }
-  if (/JSON|解析|review|格式|schema/i.test(message)) {
+  if (/JSON|解析|review|格式|schema|结构|字段/i.test(message)) {
     return {
       kind: "recoverable" as const,
       title: message,
@@ -88,7 +88,7 @@ function goalPlanMessageContent() {
 
 function planningFailureMessage(error: unknown) {
   const message = getErrorMessage(error, "目标规划生成失败");
-  if (/JSON|解析|review|格式|schema/i.test(message)) {
+  if (/JSON|解析|review|格式|schema|结构|字段/i.test(message)) {
     return `${message}\n\n已保留本次目标、补充信息和执行上下文。你可以回复“继续修复”“重试生成”或补充新的要求，KiKi 会从上次失败点继续处理。`;
   }
   if (/fetch|network|Failed to fetch|断网|网络/i.test(message)) {
@@ -156,8 +156,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const setConversationStatus = useConversationStore((state) => state.setConversationStatus);
   const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
   const renameConversation = useConversationStore((state) => state.renameConversation);
-  const goals = useGoalStore((state) => state.goals);
-  const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
+  const goals = useGoalStore(selectVisibleGoals);
+  const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
   const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
   const contextGoal = useMemo(
@@ -349,7 +349,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         });
       }
       if (feedback.progress && feedback.taskInstanceId) {
-        syncTaskInstanceRun({
+        applyInstanceProgressProjection({
           taskId: sourceMessage.taskRef.taskId,
           instanceId: feedback.taskInstanceId,
           progress: feedback.progress,
@@ -378,7 +378,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             requestId: feedback.progress.requestId,
             taskInstanceId: feedback.taskInstanceId,
             onProgress: (payload) => {
-              syncTaskInstanceRun({
+              applyInstanceProgressProjection({
                 taskId: feedback.taskCardMessage!.taskRef.taskId,
                 instanceId: feedback.taskInstanceId!,
                 progress: payload.progress,
@@ -388,7 +388,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
               });
             },
           }).then((result) => {
-            syncTaskInstanceRun({
+            applyInstanceProgressProjection({
               taskId: feedback.taskCardMessage!.taskRef.taskId,
               instanceId: feedback.taskInstanceId!,
               progress: result.progress,
@@ -795,7 +795,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           status: "done",
         }));
         if (feedback.progress && feedback.taskInstanceId) {
-          syncTaskInstanceRun({
+          applyInstanceProgressProjection({
             taskId: feedbackTaskRef.taskId,
             instanceId: feedback.taskInstanceId,
             progress: feedback.progress,
@@ -824,7 +824,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
               requestId: feedback.progress.requestId,
               taskInstanceId: feedback.taskInstanceId,
               onProgress: (payload) => {
-                syncTaskInstanceRun({
+                applyInstanceProgressProjection({
                   taskId: feedback.taskCardMessage!.taskRef.taskId,
                   instanceId: feedback.taskInstanceId!,
                   progress: payload.progress,
@@ -834,7 +834,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 });
               },
             }).then((result) => {
-              syncTaskInstanceRun({
+              applyInstanceProgressProjection({
                 taskId: feedback.taskCardMessage!.taskRef.taskId,
                 instanceId: feedback.taskInstanceId!,
                 progress: result.progress,
@@ -1206,7 +1206,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             </div>
             <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
               <div className="mx-auto w-full max-w-3xl">
-                <TaskDetailBody goal={taskInfo.goal} task={taskInfo.task} />
+                <TaskDetailBody goal={taskInfo.goal} task={taskInfo.task} onDeleted={() => setTaskInfoMessage(null)} />
               </div>
             </div>
           </aside>

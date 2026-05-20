@@ -1,5 +1,5 @@
 import { sleep } from "@/lib/utils";
-import { getGoalById, useGoalStore } from "@/stores/goalStore";
+import { getGoalById, selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import type { CollectedInfoSummary, GoalBreakdownDraft } from "@/types/kiki";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
@@ -7,7 +7,7 @@ import type { RuntimeEnvironment } from "@/types/runtime";
 
 export async function getGoals() {
   await sleep();
-  return useGoalStore.getState().goals;
+  return selectVisibleGoals(useGoalStore.getState());
 }
 
 export async function getGoal(goalId: string) {

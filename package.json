@@ -7,9 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "worker": "tsx scripts/start-worker.ts",
+    "worker": "tsx src/bin/kiki-runtime-daemon.ts",
     "daemon": "tsx src/bin/kiki-runtime-daemon.ts",
-    "reconcile:goal-events": "tsx scripts/reconcile-goal-event-log.ts"
+    "reconcile:goal-events": "tsx scripts/reconcile-goal-event-log.ts",
+    "verify:architecture": "tsx scripts/verify-architecture.ts",
+    "verify:goal-commands": "tsx scripts/verify-goal-command-service.ts",
+    "verify:goal-event-cursor": "tsx scripts/verify-goal-event-cursor.ts",
+    "verify": "pnpm verify:architecture && pnpm verify:goal-commands && pnpm verify:goal-event-cursor"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.5",

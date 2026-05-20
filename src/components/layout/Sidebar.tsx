@@ -17,6 +17,8 @@ import {
   deleteConversationWorkspaceApi,
   ensureConversationWorkspaceApi,
 } from "@/lib/api/conversationWorkspace";
+import { deleteGoalsByConversationCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -37,7 +39,10 @@ export function Sidebar() {
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const setConversationWorkspace = useConversationStore((state) => state.setConversationWorkspace);
   const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
-  const deleteGoalsByConversationId = useGoalStore((state) => state.deleteGoalsByConversationId);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const addPendingConversationGoalDelete = useGoalStore((state) => state.addPendingConversationGoalDelete);
+  const removePendingConversationGoalDelete = useGoalStore((state) => state.removePendingConversationGoalDelete);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
   const setCollapsed = useNavSidebarStore((state) => state.setCollapsed);
@@ -77,18 +82,33 @@ export function Sidebar() {
   const confirmDeleteConversation = async () => {
     if (!deleteTarget || deletePending) return;
     setDeletePending(true);
+    const idempotencyKey = createIdempotencyKey("goal.delete_by_conversation", deleteTarget.id);
+    const overlayId = `conversation-goal-delete:${idempotencyKey}`;
+    addPendingConversationGoalDelete({
+      id: overlayId,
+      conversationId: deleteTarget.id,
+      idempotencyKey,
+      createdAt: new Date().toISOString(),
+    });
     try {
       await deleteConversationWorkspaceApi({
         conversationId: deleteTarget.id,
         claudeSessionId: deleteTarget.claudeSessionId,
       });
-      deleteGoalsByConversationId(deleteTarget.id);
+      const result = await deleteGoalsByConversationCommand({
+        conversationId: deleteTarget.id,
+        baseRevision: goalProjectionRevision,
+        idempotencyKey,
+      });
+      applyGoalsProjection(result.goals, result.revision);
+      removePendingConversationGoalDelete(overlayId);
       deleteConversation(deleteTarget.id);
       if (pathname.startsWith(`/conversations/${deleteTarget.id}`)) {
         router.push("/conversations");
       }
       setDeleteTarget(null);
     } catch (error) {
+      removePendingConversationGoalDelete(overlayId);
       window.alert(error instanceof Error ? error.message : "删除会话失败");
     } finally {
       setDeletePending(false);
@@ -170,7 +190,7 @@ export function Sidebar() {
         />
       </nav>
 
-      <div className="mt-6 flex items-center justify-between px-2 text-xs font-medium text-[#6B7280]">
+      <div className="mt-6 flex items-center justify-between px-3 text-xs font-medium text-[#6B7280]">
         <span className="flex items-center gap-2">
           <MessageCircle className="h-3.5 w-3.5" />
           会话
@@ -187,7 +207,7 @@ export function Sidebar() {
 
       <div className="mt-2 flex-1 overflow-y-auto overscroll-contain pr-1">
         {sortedConversations.length === 0 ? (
-          <div className="mt-3 px-3 py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
+          <div className="mt-3 px-[34px] py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
         ) : (
           <ul className="space-y-1">
             {sortedConversations.map((conv) => {
@@ -356,12 +376,12 @@ function ConversationListItem({
           setMenuOpen(true);
         }}
         className={cn(
-          "group flex items-start gap-2 rounded-lg px-3 py-2 transition hover:bg-white/80",
+          "group flex items-start gap-2 rounded-lg pl-[34px] pr-2 py-2 transition hover:bg-white/80",
           active && "bg-white shadow-sm",
         )}
       >
         {isRenaming ? (
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-1 items-center justify-between gap-2">
             <input
               ref={renameInputRef}
               value={draftTitle}

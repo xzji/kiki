@@ -102,6 +102,10 @@ CREATE TABLE IF NOT EXISTS goal_event_log (
 CREATE INDEX IF NOT EXISTS idx_goal_event_log_goal
   ON goal_event_log(goal_id, id);
 
+CREATE INDEX IF NOT EXISTS idx_goal_event_log_idempotency_key
+  ON goal_event_log(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_goal_event_log_instance
   ON goal_event_log(instance_id, id);
 

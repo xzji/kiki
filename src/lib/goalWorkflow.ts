@@ -10,9 +10,11 @@ import {
   ensureConversationWorkspaceApi,
   writeConversationContextApi,
 } from "@/lib/api/conversationWorkspace";
+import { createGoalCommand } from "@/lib/api/goal-commands";
+import { buildGoalFromDraft } from "@/lib/goalFactory";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { useConversationStore } from "@/stores/conversationStore";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type {
   CollectedInfoSummary,
@@ -20,6 +22,7 @@ import type {
   GoalInfoCollection,
   GoalInfoCollectionRound,
   GoalPlanningRecoveryAction,
+  GoalWorkflow,
   GoalWorkflowPhase,
 } from "@/types/kiki";
 
@@ -99,7 +102,9 @@ async function ensureClientConversationWorkspace(conversationId: string) {
 async function writeCurrentConversationContext(conversationId: string, goalId?: string) {
   const conversation = useConversationStore.getState().conversations.find((item) => item.id === conversationId);
   if (!conversation) return;
-  const goal = goalId ? useGoalStore.getState().goals.find((item) => item.id === goalId) ?? null : null;
+  const goal = goalId
+    ? selectVisibleGoals(useGoalStore.getState()).find((item) => item.id === goalId) ?? null
+    : null;
   await writeConversationContextApi({ conversation, goal }).catch(() => undefined);
 }
 
@@ -186,7 +191,34 @@ async function commitGoalDraftToStores(input: {
 }): Promise<GoalWorkflowResult> {
   const conversationStore = useConversationStore.getState();
   const goalStore = useGoalStore.getState();
-  const goal = goalStore.createGoalFromDraft(input.draft, { conversationId: input.conversationId });
+  const base = buildGoalFromDraft(input.draft);
+  const now = new Date().toISOString();
+  const workflow: GoalWorkflow = {
+    phase: "presenting_plan",
+    planDecision: "pending",
+    collectedInfo: {
+      collectedInfoSummary: input.draft.collectedInfoSummary,
+      goalAnalysis: input.draft.goalAnalysis,
+      executionOrder: input.draft.executionOrder,
+      reviewSummary: input.draft.reviewSummary,
+    },
+    assumptions: input.draft.assumptions,
+    risks: input.draft.risks,
+    reasoning: input.draft.reasoning,
+    notificationStrategy: input.draft.notificationStrategy,
+    startedAt: now,
+    updatedAt: now,
+  };
+  const goal = {
+    ...base,
+    title: input.draft.goalTitle,
+    summary: input.draft.summary,
+    deadline: input.draft.deadline || base.deadline,
+    conversationId: input.conversationId,
+    workflow,
+  };
+  const result = await createGoalCommand({ goal, baseRevision: goalStore.goalProjectionRevision });
+  goalStore.applyGoalsProjection(result.goals, result.revision);
   conversationStore.setGoalForConversation(input.conversationId, goal.id);
   conversationStore.renameConversation(input.conversationId, input.draft.goalTitle);
   conversationStore.setGoalInfoCollection(input.conversationId, null);

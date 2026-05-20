@@ -1,9 +1,10 @@
 "use client";
 
 import { ensureConversationWorkspaceApi, writeConversationContextApi } from "@/lib/api/conversationWorkspace";
+import { buildGoalFromDraft } from "@/lib/goalFactory";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
-import type { GoalBreakdownDraft } from "@/types/kiki";
+import type { GoalBreakdownDraft, GoalWorkflow } from "@/types/kiki";
 
 const TOEFL_PLAN_MOCK_DRAFT: GoalBreakdownDraft = {
   goalTitle: "托福备考冲刺 110 分",
@@ -150,9 +151,30 @@ export function seedToeflMockGoalPlanConversation() {
     source: "system",
   });
 
-  const goal = goalStore.createGoalFromDraft(TOEFL_PLAN_MOCK_DRAFT, {
+  const baseGoal = buildGoalFromDraft(TOEFL_PLAN_MOCK_DRAFT);
+  const now = new Date().toISOString();
+  const workflow: GoalWorkflow = {
+    phase: "presenting_plan",
+    planDecision: "pending",
+    collectedInfo: {
+      collectedInfoSummary: TOEFL_PLAN_MOCK_DRAFT.collectedInfoSummary,
+      goalAnalysis: TOEFL_PLAN_MOCK_DRAFT.goalAnalysis,
+      executionOrder: TOEFL_PLAN_MOCK_DRAFT.executionOrder,
+      reviewSummary: TOEFL_PLAN_MOCK_DRAFT.reviewSummary,
+    },
+    assumptions: TOEFL_PLAN_MOCK_DRAFT.assumptions,
+    risks: TOEFL_PLAN_MOCK_DRAFT.risks,
+    reasoning: TOEFL_PLAN_MOCK_DRAFT.reasoning,
+    notificationStrategy: TOEFL_PLAN_MOCK_DRAFT.notificationStrategy,
+    startedAt: now,
+    updatedAt: now,
+  };
+  const goal = {
+    ...baseGoal,
     conversationId: conversation.id,
-  });
+    workflow,
+  };
+  goalStore.applyGoalsProjection([...goalStore.goals, goal]);
 
   conversationStore.setGoalForConversation(conversation.id, goal.id);
   conversationStore.renameConversation(conversation.id, goal.title);

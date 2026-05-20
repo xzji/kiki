@@ -13,6 +13,9 @@ export function SubGoalBlock({
   subGoal,
   unreadByTask,
   highlighted = false,
+  isPendingCreate = false,
+  pendingTaskCreateIds = new Set<string>(),
+  pendingTaskUpdateIds = new Set<string>(),
   onOpenTask,
 }: {
   index: number;
@@ -20,18 +23,22 @@ export function SubGoalBlock({
   subGoal: Goal["subGoals"][number];
   unreadByTask: Record<string, number>;
   highlighted?: boolean;
+  isPendingCreate?: boolean;
+  pendingTaskCreateIds?: Set<string>;
+  pendingTaskUpdateIds?: Set<string>;
   onOpenTask: (task: Task) => void;
 }) {
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const displayTasks = subGoal.tasks;
 
-  const completedCount = subGoal.tasks.filter((task) => {
+  const completedCount = displayTasks.filter((task) => {
     const latest = task.instances[0];
     const latestStatus = latest?.status;
     if (latestStatus === "awaiting_user" || latest?.awaitingUser) return false;
     return latestStatus === "completed" || task.progress >= 100;
   }).length;
-  const progress = subGoal.tasks.length === 0 ? 0 : Math.round((completedCount / subGoal.tasks.length) * 100);
+  const progress = displayTasks.length === 0 ? 0 : Math.round((completedCount / displayTasks.length) * 100);
   const dependencyTitles =
     subGoal.dependencies?.map((dependencyId) => {
       const dependency = goal.subGoals.find((item) => item.id === dependencyId);
@@ -62,6 +69,11 @@ export function SubGoalBlock({
               <h2 className="truncate text-[15px] font-semibold text-[#1F2328]">
                 {stripPrefix(subGoal.title)}
               </h2>
+              {isPendingCreate ? (
+                <span className="inline-flex shrink-0 items-center rounded-md bg-[#F5F6F8] px-2 py-0.5 text-[11px] font-medium text-[#8C9198]">
+                  保存中
+                </span>
+              ) : null}
               {hasDetails ? (
                 <button
                   type="button"
@@ -132,35 +144,42 @@ export function SubGoalBlock({
           ) : null}
         </div>
         <div className="shrink-0 text-[12px] font-medium tabular-nums text-[#8C9198]">
-          {completedCount} / {subGoal.tasks.length}
+          {completedCount} / {displayTasks.length}
         </div>
       </div>
 
       <div className="space-y-1.5">
-        {subGoal.tasks.map((task) => (
+        {displayTasks.map((task) => (
           <TaskRow
             key={task.id}
+            goalId={goal.id}
             task={task}
+            isPendingCreate={pendingTaskCreateIds.has(task.id)}
+            isPendingUpdate={pendingTaskUpdateIds.has(task.id)}
             unreadCount={unreadByTask[task.id] ?? 0}
             onOpen={() => onOpenTask(task)}
           />
         ))}
-        <button
-          type="button"
-          onClick={() => setTaskDrawerOpen(true)}
-          className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#D4D7DD] bg-transparent px-3 py-2.5 text-[13px] text-[#6B7280] hover:border-[#1F2328] hover:text-[#1F2328]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          添加任务
-        </button>
+        {!isPendingCreate ? (
+          <button
+            type="button"
+            onClick={() => setTaskDrawerOpen(true)}
+            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#D4D7DD] bg-transparent px-3 py-2.5 text-[13px] text-[#6B7280] hover:border-[#1F2328] hover:text-[#1F2328]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            添加任务
+          </button>
+        ) : null}
       </div>
 
-      <TaskCreateDrawer
-        open={taskDrawerOpen}
-        goalId={goal.id}
-        subGoalId={subGoal.id}
-        onClose={() => setTaskDrawerOpen(false)}
-      />
+      {!isPendingCreate ? (
+        <TaskCreateDrawer
+          open={taskDrawerOpen}
+          goalId={goal.id}
+          subGoalId={subGoal.id}
+          onClose={() => setTaskDrawerOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }

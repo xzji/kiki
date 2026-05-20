@@ -1,0 +1,9 @@
+{
+  "status": "failed",
+  "phase": "generating_tasks",
+  "action": "retry_plan",
+  "goalText": "越南5天游，今天晚上北京出发，机票和酒店已经买完了。",
+  "errorMessage": "Claude 任务生成 JSON 解析失败",
+  "failedAt": "2026-05-20T10:22:00.396Z",
+  "updatedAt": "2026-05-20T10:22:00.396Z"
+}

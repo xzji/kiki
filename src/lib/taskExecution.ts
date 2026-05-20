@@ -1,8 +1,8 @@
 "use client";
 
-import { cancelGoalInstance, GoalCommandError } from "@/lib/api/goal-commands";
+import { cancelGoalInstance } from "@/lib/api/goal-commands";
 import { startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
@@ -14,7 +14,7 @@ export function canStopTaskInstance(instance: TaskInstance) {
 
 export async function runTaskExecutionAction(taskId: string, action: TaskExecutionAction, options?: { instanceId?: string }) {
   if (action === "pause") {
-    const location = findTaskLocation(useGoalStore.getState().goals, taskId);
+    const location = findTaskLocation(selectVisibleGoals(useGoalStore.getState()), taskId);
     if (!location) throw new Error("未找到对应任务。");
     const target = resolveTargetInstance(location.task, "pause", options?.instanceId);
     if (!target) throw new Error("未找到可停止的任务实例。");
@@ -23,7 +23,6 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       instanceId: target.id,
       reason: "用户暂停任务执行",
     });
-    useGoalStore.getState().stopTaskInstanceRun(taskId, target.id);
     return;
   }
 
@@ -35,29 +34,13 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     throw new Error("当前本地 Runtime 离线，请先重新检测连接状态。");
   }
 
-  const location = findTaskLocation(useGoalStore.getState().goals, taskId);
+  const location = findTaskLocation(selectVisibleGoals(useGoalStore.getState()), taskId);
   if (!location) {
     throw new Error("未找到对应任务。");
   }
 
-  let current = location;
-  let targetInstance = resolveTargetInstance(current.task, action, options?.instanceId);
-
-  if (!targetInstance) {
-    const created =
-      action === "rerun"
-        ? useGoalStore.getState().generateRerunInstance(taskId, new Date().toISOString())
-        : useGoalStore.getState().generateInstance(taskId, new Date().toISOString());
-    if (!created) {
-      throw new Error("任务实例创建失败，请稍后重试。");
-    }
-    const refreshed = findTaskLocation(useGoalStore.getState().goals, taskId);
-    if (!refreshed) {
-      throw new Error("任务实例创建后未能重新定位任务。");
-    }
-    current = refreshed;
-    targetInstance = current.task.instances.find((instance) => instance.id === created.id) ?? created;
-  }
+  const current = location;
+  const targetInstance = resolveTargetInstance(current.task, action, options?.instanceId) ?? undefined;
 
   try {
     const run = await startTaskRun({
@@ -67,14 +50,12 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       instance: targetInstance,
       runtimeEnv,
     });
-
-    const usingCanonicalInstance = run.taskInstanceId !== targetInstance.id;
-    if (usingCanonicalInstance) {
-      useGoalStore.getState().removeTaskInstance(current.task.id, targetInstance.id);
+    if (run.goals) {
+      useGoalStore.getState().applyGoalsProjection(run.goals, run.revision);
     }
 
     if (run.outcome === "awaiting_user") {
-      useGoalStore.getState().syncTaskInstanceRun({
+      useGoalStore.getState().applyInstanceProgressProjection({
         taskId: current.task.id,
         instanceId: run.taskInstanceId,
         progress: run.progress,
@@ -83,17 +64,6 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
         waitingReason: run.waitingReason,
       });
       return;
-    }
-
-    if (run.requestId) {
-      useGoalStore.getState().startTaskInstanceRun({
-        taskId: current.task.id,
-        instanceId: run.taskInstanceId,
-        requestId: run.requestId,
-        runtimeEnvId: runtimeEnv.id,
-        permissionMode: runtimeEnv.permissionMode,
-        workingDirectory: run.workspacePath,
-      });
     }
 
     if (run.outcome === "already_running") {
@@ -108,7 +78,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       requestId,
       taskInstanceId: run.taskInstanceId,
       onProgress: (payload) => {
-        useGoalStore.getState().syncTaskInstanceRun({
+        useGoalStore.getState().applyInstanceProgressProjection({
           taskId: current.task.id,
           instanceId: run.taskInstanceId,
           progress: payload.progress,
@@ -119,7 +89,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       },
     })
       .then((result) => {
-        useGoalStore.getState().syncTaskInstanceRun({
+        useGoalStore.getState().applyInstanceProgressProjection({
           taskId: current.task.id,
           instanceId: run.taskInstanceId,
           progress: result.progress,
@@ -129,38 +99,17 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
         });
       })
       .catch((error) => {
-        useGoalStore.getState().failTaskInstanceRun({
-          taskId: current.task.id,
-          instanceId: run.taskInstanceId,
-          requestId,
-          errorMessage: error instanceof Error ? error.message : "任务执行失败",
-        });
         console.error("手动执行任务失败", error);
       });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "任务执行失败";
     if (error instanceof TaskRunApiError && error.status >= 400 && error.status < 500) {
-      try {
+      if (targetInstance) {
         await cancelGoalInstance({
           instanceId: targetInstance.id,
           reason: errorMessage,
         });
-        useGoalStore.getState().stopTaskInstanceRun(current.task.id, targetInstance.id);
-      } catch (commandError) {
-        if (!(commandError instanceof GoalCommandError && commandError.status === 409)) {
-          useGoalStore.getState().failTaskInstanceRun({
-            taskId: current.task.id,
-            instanceId: targetInstance.id,
-            errorMessage,
-          });
-        }
       }
-    } else {
-      useGoalStore.getState().failTaskInstanceRun({
-        taskId: current.task.id,
-        instanceId: targetInstance.id,
-        errorMessage,
-      });
     }
     throw error;
   }

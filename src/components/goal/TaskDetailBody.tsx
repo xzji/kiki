@@ -8,6 +8,8 @@ import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
+import { deleteGoalTaskCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { getTaskDependencyViews } from "@/lib/taskDependencies";
 import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
@@ -176,11 +178,24 @@ function applyWaitingReasonToSteps(steps: TaskExecutionStep[], waitingReason: st
 
 export function TaskDetailBody({
   goal,
-  task,
+  task: canonicalTask,
+  onDeleted,
 }: {
   goal: Goal;
   task: Task;
+  onDeleted?: () => void;
 }) {
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const pendingTaskUpdates = useGoalStore((state) => state.pendingTaskUpdates);
+  const pendingTaskDeletes = useGoalStore((state) => state.pendingTaskDeletes);
+  const addPendingTaskDelete = useGoalStore((state) => state.addPendingTaskDelete);
+  const removePendingTaskDelete = useGoalStore((state) => state.removePendingTaskDelete);
+  const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
+  const pendingTaskUpdate = pendingTaskUpdates.find((item) => item.goalId === goal.id && item.taskId === canonicalTask.id);
+  const pendingTaskDelete = pendingTaskDeletes.find((item) => item.goalId === goal.id && item.taskId === canonicalTask.id);
+  const task = pendingTaskUpdate?.task ?? canonicalTask;
+  const isPendingChange = Boolean(pendingTaskUpdate || pendingTaskDelete);
   const [metaOpen, setMetaOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -191,8 +206,6 @@ export function TaskDetailBody({
     running: runningLength(task) > 0,
     completed: completedLength(task) > 0,
   });
-  const deleteTask = useGoalStore((state) => state.deleteTask);
-  const syncTaskInstanceRun = useGoalStore((state) => state.syncTaskInstanceRun);
   const dependencyViews = useMemo(() => getTaskDependencyViews(goal, task), [goal, task]);
   const promptContext = useMemo(() => {
     for (const subGoal of goal.subGoals) {
@@ -217,7 +230,7 @@ export function TaskDetailBody({
             : taskState === "paused"
               ? "已暂停"
               : "待开始";
-  const executionAction = getExecutionAction();
+  const executionAction = isPendingChange ? null : getExecutionAction();
   const cleanTitle = task.title.replace(/^任务\d+：/, "");
 
   const sortedInstances = useMemo(
@@ -273,7 +286,7 @@ export function TaskDetailBody({
               signal: controller.signal,
             });
             if (cancelled || controller.signal.aborted) return;
-            syncTaskInstanceRun({
+            applyInstanceProgressProjection({
               taskId: task.id,
               instanceId: instance.id,
               progress: state.progress,
@@ -297,7 +310,7 @@ export function TaskDetailBody({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [refreshTick, runningInstances, syncTaskInstanceRun, task.id]);
+  }, [applyInstanceProgressProjection, refreshTick, runningInstances, task.id]);
 
   return (
     <div>
@@ -305,7 +318,7 @@ export function TaskDetailBody({
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
           <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium", taskStatusClassName(taskState))}>
-            {statusLabel}
+            {pendingTaskDelete ? "删除中" : pendingTaskUpdate ? "保存中" : statusLabel}
           </span>
           <span>{EXECUTION_LABEL[task.resultViewKind ?? task.executionKind]}</span>
           <span className="text-[#D0D7DE]">/</span>
@@ -337,6 +350,7 @@ export function TaskDetailBody({
               <ChevronRight className="h-3.5 w-3.5 text-[#6B7280]" />
             )}
           </button>
+          {!isPendingChange ? (
           <button
             type="button"
             aria-label="更多任务操作"
@@ -345,6 +359,7 @@ export function TaskDetailBody({
           >
             <Ellipsis className="h-4 w-4" />
           </button>
+          ) : null}
           {menuOpen ? (
             <div className="absolute right-0 top-8 z-20 w-28 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328]">
               <button
@@ -360,8 +375,31 @@ export function TaskDetailBody({
               <button
                 type="button"
                 onClick={() => {
-                  deleteTask(task.id);
+                  const overlayId = createOpaqueId("idem");
+                  const idempotencyKey = createIdempotencyKey("goal.delete_task", goal.id, task.id, overlayId);
+                  addPendingTaskDelete({
+                    id: overlayId,
+                    goalId: goal.id,
+                    taskId: task.id,
+                    idempotencyKey,
+                    createdAt: new Date().toISOString(),
+                  });
                   setMenuOpen(false);
+                  void deleteGoalTaskCommand({
+                    goalId: goal.id,
+                    taskId: task.id,
+                    baseRevision: goalProjectionRevision,
+                    idempotencyKey,
+                  })
+                    .then((result) => {
+                      applyGoalsProjection(result.goals, result.revision);
+                      removePendingTaskDelete(overlayId);
+                      onDeleted?.();
+                    })
+                    .catch((error) => {
+                      removePendingTaskDelete(overlayId);
+                      window.alert(error instanceof Error ? error.message : "任务删除失败");
+                    });
                 }}
                 className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
               >
@@ -498,7 +536,7 @@ export function TaskDetailBody({
         />
       </div>
 
-      <TaskEditDrawer task={task} open={editOpen} onClose={() => setEditOpen(false)} />
+      <TaskEditDrawer goalId={goal.id} task={task} open={editOpen} onClose={() => setEditOpen(false)} />
       <TaskAgentPromptDrawer
         open={promptDrawerOpen}
         onClose={() => setPromptDrawerOpen(false)}

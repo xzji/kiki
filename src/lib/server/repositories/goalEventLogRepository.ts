@@ -82,9 +82,19 @@ export function appendGoalEvent<K extends GoalEventKind>(input: AppendGoalEventI
   return row ? mapRow<K>(row) : null;
 }
 
+export function getGoalEventByIdempotencyKey<K extends GoalEventKind = GoalEventKind>(idempotencyKey: string) {
+  const db = getDatabase();
+  const row = db
+    .prepare(`SELECT * FROM goal_event_log WHERE idempotency_key = ? LIMIT 1`)
+    .get(idempotencyKey) as GoalEventLogRow | undefined;
+  return row ? mapRow<K>(row) : null;
+}
+
 export function appendGoalEventOnce<K extends GoalEventKind>(input: AppendGoalEventInput<K>) {
   if (!input.idempotencyKey) return appendGoalEvent(input);
   const db = getDatabase();
+  const existing = getGoalEventByIdempotencyKey<K>(input.idempotencyKey);
+  if (existing) return existing;
   const eventId = input.eventId ?? createEventId();
   const createdAt = input.createdAt ?? nowIso();
   db.prepare(

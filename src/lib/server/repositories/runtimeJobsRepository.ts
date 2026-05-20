@@ -421,9 +421,9 @@ export function updateRuntimeJobExecutionInternal(
       goalId: next.goalId,
       taskId: next.taskId,
       instanceId: next.taskInstanceId,
-      kind: "instance.status_changed",
+      kind: "job.status_changed",
       producedBy: "worker",
-      idempotencyKey: createIdempotencyKey("instance.status_changed.worker", next.taskInstanceId, existing.status, updates.status, next.updatedAt),
+      idempotencyKey: createIdempotencyKey("job.status_changed.worker", next.taskInstanceId, existing.status, updates.status, next.updatedAt),
       createdAt: next.updatedAt,
       payload: {
         previousStatus: existing.status,

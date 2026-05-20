@@ -6,13 +6,13 @@ import { notFound, useRouter } from "next/navigation";
 import { ExecutionResultBody, buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
 import { resolveInboxTaskContext } from "@/lib/inboxItem";
 import { taskDrawerReturnPath } from "@/lib/routes";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 
 export default function InboxResultPage({ params }: { params: { itemId: string } }) {
   const router = useRouter();
   const item = useInboxStore((state) => state.items.find((entry) => entry.id === params.itemId));
-  const goals = useGoalStore((state) => state.goals);
+  const goals = useGoalStore(selectVisibleGoals);
 
   if (!item) return notFound();
 

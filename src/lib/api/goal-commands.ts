@@ -2,7 +2,7 @@
 
 import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import type { GoalEventRecord } from "@/types/goalEventLog";
-import type { TaskInstanceStatus } from "@/types/kiki";
+import type { ExecutionKind, Goal, Task, TaskInstanceStatus } from "@/types/kiki";
 
 export class GoalCommandError extends Error {
   constructor(
@@ -19,6 +19,25 @@ type CommandResponse = {
   reason?: string;
   event?: GoalEventRecord;
   resumed?: boolean;
+  goals?: Goal[];
+  revision?: number;
+};
+
+type TaskCommandInput = {
+  title: string;
+  description?: string;
+  expectedOutcome: string;
+  taskType: Task["taskType"];
+  triggerRule: string;
+  deadline?: string;
+  executionKind: ExecutionKind;
+};
+
+type GoalStructureCommandResponse = {
+  ok: true;
+  event: GoalEventRecord;
+  goals: Goal[];
+  revision: number;
 };
 
 async function readCommandResponse(response: Response): Promise<CommandResponse> {
@@ -102,6 +121,170 @@ export async function cancelGoalInstance(input: {
     url: `/api/goals/instances/${input.instanceId}/cancel`,
     body: {
       reason: input.reason,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function confirmGoalPlanCommand(input: {
+  goalId: string;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("goal.confirm_plan", input.goalId);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "confirm_goal_plan",
+        goalId: input.goalId,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function createGoalCommand(input: { goal: Goal; baseRevision?: number; idempotencyKey?: string }) {
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("goal.create", input.goal.id);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "create_goal",
+        goal: input.goal,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function requestGoalPlanRevisionCommand(input: {
+  goalId: string;
+  feedback: string;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("goal.request_plan_revision", input.goalId, input.feedback);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "request_goal_plan_revision",
+        goalId: input.goalId,
+        feedback: input.feedback,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function createSubGoalCommand(input: {
+  goalId: string;
+  title: string;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("goal.create_sub_goal", input.goalId, input.title);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "create_sub_goal",
+        goalId: input.goalId,
+        title: input.title,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function createGoalTaskCommand(input: {
+  goalId: string;
+  subGoalId: string;
+  task: TaskCommandInput;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey =
+    input.idempotencyKey ?? createIdempotencyKey("goal.create_task", input.goalId, input.subGoalId, input.task.title);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "create_task",
+        goalId: input.goalId,
+        subGoalId: input.subGoalId,
+        task: input.task,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function updateGoalTaskCommand(input: {
+  goalId: string;
+  taskId: string;
+  task: TaskCommandInput;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("goal.update_task", input.goalId, input.taskId);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "update_task",
+        goalId: input.goalId,
+        taskId: input.taskId,
+        task: input.task,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function deleteGoalTaskCommand(input: {
+  goalId: string;
+  taskId: string;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("goal.delete_task", input.goalId, input.taskId);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "delete_task",
+        goalId: input.goalId,
+        taskId: input.taskId,
+      },
+      baseRevision: input.baseRevision,
+    },
+    idempotencyKey,
+  });
+}
+
+export async function deleteGoalsByConversationCommand(input: {
+  conversationId: string;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}) {
+  const idempotencyKey =
+    input.idempotencyKey ?? createIdempotencyKey("goal.delete_by_conversation", input.conversationId);
+  return postCommand<GoalStructureCommandResponse>({
+    url: "/api/goals/commands",
+    body: {
+      command: {
+        type: "delete_goals_by_conversation",
+        conversationId: input.conversationId,
+      },
+      baseRevision: input.baseRevision,
     },
     idempotencyKey,
   });

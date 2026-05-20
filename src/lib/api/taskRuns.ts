@@ -44,7 +44,7 @@ export async function startTaskRun(input: {
   goal: Goal;
   subGoal: SubGoal;
   task: Task;
-  instance: TaskInstance;
+  instance?: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
 }) {
@@ -73,16 +73,24 @@ export async function startTaskRun(input: {
     blockers?: Array<{ message?: string; reason?: string }>;
     progress?: GoalServerProgress | null;
     waitingReason?: string;
+    goals?: Goal[];
+    revision?: number;
   };
   if (!response.ok || data.outcome === "blocked_config") {
     const blockerMessage = data.blockers?.[0]?.message || data.blockers?.[0]?.reason;
     throw new TaskRunApiError(response.status, blockerMessage || data.reason || "任务执行启动失败");
   }
+  const taskInstanceId = data.taskInstanceId ?? input.instance?.id;
+  if (!taskInstanceId) {
+    throw new TaskRunApiError(response.status, data.reason || "任务执行启动失败：缺少 taskInstanceId");
+  }
   if (data.outcome === "awaiting_user") {
     return {
       outcome: "awaiting_user" as const,
       requestId: data.requestId,
-      taskInstanceId: data.taskInstanceId ?? input.instance.id,
+      taskInstanceId,
+      goals: data.goals,
+      revision: data.revision,
       workspacePath: data.workspacePath,
       progress: data.progress ?? null,
       waitingReason: data.waitingReason,
@@ -92,7 +100,9 @@ export async function startTaskRun(input: {
     return {
       outcome: "already_running" as const,
       requestId: data.requestId,
-      taskInstanceId: data.taskInstanceId ?? input.instance.id,
+      taskInstanceId,
+      goals: data.goals,
+      revision: data.revision,
       workspacePath: data.workspacePath,
       progress: data.progress ?? null,
       waitingReason: data.waitingReason,
@@ -104,7 +114,9 @@ export async function startTaskRun(input: {
   return {
     outcome: "queued" as const,
     requestId: data.requestId,
-    taskInstanceId: data.taskInstanceId ?? input.instance.id,
+    taskInstanceId,
+    goals: data.goals,
+    revision: data.revision,
     workspacePath: data.workspacePath,
     progress: data.progress ?? null,
     waitingReason: data.waitingReason,

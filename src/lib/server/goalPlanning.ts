@@ -910,6 +910,58 @@ async function repairMalformedJsonWithClaude(input: {
   return normalizeClaudeJsonText(stdout);
 }
 
+function isJsonSyntaxLikeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (error instanceof SyntaxError) return true;
+  return /Unexpected token|Unexpected end|unterminated|JSON|position \d+|after property name|property names must be double-quoted/i.test(message);
+}
+
+function classifyClaudeJsonFailure(errorMessage: string, lastError: unknown) {
+  const detail = lastError instanceof Error ? lastError.message.trim() : String(lastError ?? "").trim();
+  const build = (reason: string) => ({
+    userMessage: `${errorMessage}：${reason}`,
+    logMessage: detail || reason,
+  });
+
+  if (isJsonSyntaxLikeError(lastError)) {
+    return build("Claude 输出不是合法 JSON，可能混入了解释文字、代码块，或缺少逗号/引号。");
+  }
+  if (/缺少 tasks/i.test(detail)) {
+    return build("Claude 输出缺少 tasks 字段，无法生成任务列表。");
+  }
+  if (/结果为空|tasks.*为空/i.test(detail)) {
+    return build("Claude 输出里的任务列表为空，无法继续规划。");
+  }
+  if (/字段不完整/i.test(detail)) {
+    return build("Claude 输出的任务字段不完整，缺少标题、描述或交付要求。");
+  }
+  if (/缺少 reviewResults/i.test(detail)) {
+    return build("Claude 输出缺少 reviewResults 字段，无法完成任务 review。");
+  }
+  if (/不是 JSON 对象/i.test(detail)) {
+    return build("Claude 输出不是系统要求的 JSON 对象结构。");
+  }
+  if (/缺少 questions/i.test(detail)) {
+    return build("Claude 输出缺少 questions 字段，无法生成澄清问题。");
+  }
+  if (/缺少 subGoals/i.test(detail)) {
+    return build("Claude 输出缺少 subGoals 字段，无法完成目标拆解。");
+  }
+  if (/缺少 goalTitle/i.test(detail)) {
+    return build("Claude 输出缺少 goalTitle，无法生成完整规划。");
+  }
+  if (/缺少 title 或 tasks/i.test(detail)) {
+    return build("Claude 输出的子目标结构不完整，缺少标题或任务列表。");
+  }
+  if (detail) {
+    return build(`Claude 输出结构不符合系统要求（${detail}）。`);
+  }
+  return {
+    userMessage: errorMessage,
+    logMessage: errorMessage,
+  };
+}
+
 async function parseClaudeJson<T>(input: {
   raw: string;
   validator: (value: unknown) => T;
@@ -996,8 +1048,9 @@ async function parseClaudeJson<T>(input: {
     lastError = error;
   }
 
+  const classifiedFailure = classifyClaudeJsonFailure(input.errorMessage, lastError);
+
   if (input.context) {
-    const errorDetails = lastError instanceof Error ? lastError.message : input.errorMessage;
     appendGoalLog({
       requestId: input.context.requestId,
       scope: input.context.scope,
@@ -1005,7 +1058,7 @@ async function parseClaudeJson<T>(input: {
       phase: input.context.phase,
       message: `JSON 解析失败：${input.context.stepLabel}`,
       details: [
-        `error: ${errorDetails}`,
+        `error: ${classifiedFailure.logMessage}`,
         `rawChars: ${primary.length}`,
         "",
         "## raw output",
@@ -1033,7 +1086,7 @@ async function parseClaudeJson<T>(input: {
       ].filter(Boolean).join("\n"),
     });
   }
-  throw new Error(input.errorMessage);
+  throw new Error(classifiedFailure.userMessage);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

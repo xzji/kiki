@@ -8,7 +8,7 @@ import { GoalPlanBreadcrumb, GoalPlanContent } from "@/components/goal/GoalPlanC
 import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
 import { goalDetailPath, taskDetailPath } from "@/lib/routes";
 import type { Task } from "@/types/kiki";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 
 /**
@@ -28,7 +28,7 @@ export function GoalPlanDrawer({
   focusSubGoalId?: string | null;
   onClose: () => void;
 }) {
-  const goals = useGoalStore((state) => state.goals);
+  const goals = useGoalStore(selectVisibleGoals);
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
   const setNavCollapsed = useNavSidebarStore((state) => state.setCollapsed);
   const prevNavRef = useRef<boolean | null>(null);
@@ -110,7 +110,7 @@ export function GoalPlanDrawer({
         <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
           {activeTask ? (
             <div className="mx-auto w-full max-w-3xl px-2 py-2">
-              <TaskDetailBody goal={goal} task={activeTask} />
+              <TaskDetailBody goal={goal} task={activeTask} onDeleted={() => setActiveTaskId(null)} />
             </div>
           ) : (
             <GoalPlanContent

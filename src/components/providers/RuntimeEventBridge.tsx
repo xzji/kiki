@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createGoalEventsSource, fetchGoalEvents } from "@/lib/api/goal-events";
-import { fetchRuntimeStateSnapshot, materializeGoalSnapshot, syncRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeStateSnapshot, syncRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import {
+  advanceGoalEventCursor,
+  GOAL_EVENT_CURSOR_CHANNEL,
+  GOAL_EVENT_CURSOR_STORAGE_KEY,
+  type GoalEventCursorMap,
+  mergeGoalEventCursors,
+  normalizeGoalEventCursors,
+  readGoalEventCursors,
+  writeGoalEventCursors,
+} from "@/lib/goalEventCursor";
 import type { RuntimeStatePayload, RuntimeStateRevision, RuntimeStateSyncResponse } from "@/lib/api/runtime-daemon";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -27,6 +37,18 @@ const EMPTY_REVISION: RuntimeStateRevision = {
 
 const appliedGoalEventIds = new Set<number>();
 const pendingGoalEvents = new Map<number, GoalEventRecord>();
+const runtimeEventMetrics = {
+  applied: 0,
+  duplicates: 0,
+  pending: 0,
+  replayed: 0,
+  sseErrors: 0,
+  snapshotRefreshes: 0,
+};
+
+type RuntimeEventMetricsWindow = Window & {
+  __KIKI_RUNTIME_EVENT_METRICS__?: typeof runtimeEventMetrics;
+};
 
 function revisionFromSnapshot(snapshot: RuntimeStatePayload): RuntimeStateRevision {
   return {
@@ -41,29 +63,6 @@ function mergeSyncRevision(current: RuntimeStateRevision, response: RuntimeState
     runtimeEnvironments: response.results?.runtimeEnvironments?.revision ?? current.runtimeEnvironments,
     scheduleEvents: response.results?.scheduleEvents?.revision ?? current.scheduleEvents,
   };
-}
-
-function goalMaterializeKey(goal: Goal) {
-  const workflowUpdatedAt = goal.workflow?.updatedAt ?? goal.createdAt;
-  const taskShape = goal.subGoals.map((subGoal) => `${subGoal.id}:${subGoal.tasks.map((task) => task.id).join(",")}`).join("|");
-  return `${goal.id}:${workflowUpdatedAt}:${taskShape}`;
-}
-
-function snapshotGoalKeys(goals: Goal[]) {
-  return Object.fromEntries(goals.map((goal) => [goal.id, goalMaterializeKey(goal)]));
-}
-
-function mergeRemoteSnapshotWithPendingLocalGoals(remoteGoals: Goal[], localGoals: Goal[]) {
-  const remoteById = new Map(remoteGoals.map((goal) => [goal.id, goal]));
-  const merged = remoteGoals.map((remoteGoal) => {
-    const localGoal = localGoals.find((goal) => goal.id === remoteGoal.id);
-    if (!localGoal || localGoal.workflow?.planDecision !== "confirmed") return remoteGoal;
-    return goalMaterializeKey(localGoal) === goalMaterializeKey(remoteGoal) ? remoteGoal : localGoal;
-  });
-  const localOnlyGoals = localGoals.filter(
-    (goal) => goal.workflow?.planDecision === "confirmed" && !remoteById.has(goal.id),
-  );
-  return [...merged, ...localOnlyGoals];
 }
 
 function formatLocalTime(date: Date) {
@@ -166,7 +165,7 @@ function applyInstanceStatusEvent(event: GoalEventRecord) {
   const payload = event.payload as { nextStatus?: unknown };
   const nextStatus = statusFromEventPayload(payload.nextStatus);
   if (!nextStatus) return false;
-  useGoalStore.getState().markInstanceStatus(event.taskId, event.instanceId, nextStatus);
+  useGoalStore.getState().applyInstanceStatusProjection(event.taskId, event.instanceId, nextStatus);
   return true;
 }
 
@@ -179,7 +178,7 @@ function applyInstanceProgressEvent(event: GoalEventRecord) {
     trajectory?: ExecutionTrajectoryStep[];
   };
   if (!payload.progress) return false;
-  useGoalStore.getState().syncTaskInstanceRun({
+  useGoalStore.getState().applyInstanceProgressProjection({
     taskId: event.taskId,
     instanceId: event.instanceId,
     progress: payload.progress,
@@ -192,7 +191,7 @@ function applyInstanceProgressEvent(event: GoalEventRecord) {
 function applyTimeoutPausedEvent(event: GoalEventRecord) {
   if (!event.taskId || !event.instanceId) return false;
   if (!findTaskByEvent(event)) return false;
-  useGoalStore.getState().markInstanceStatus(event.taskId, event.instanceId, "paused");
+  useGoalStore.getState().applyInstanceStatusProjection(event.taskId, event.instanceId, "paused");
   return true;
 }
 
@@ -218,45 +217,54 @@ function dependsOnLocalInstance(event: GoalEventRecord) {
 function applyGoalEvent(event: GoalEventRecord) {
   if (appliedGoalEventIds.has(event.id)) {
     pendingGoalEvents.delete(event.id);
+    runtimeEventMetrics.duplicates += 1;
     return true;
   }
   if (dependsOnLocalInstance(event) && event.taskId && event.instanceId && !findTaskByEvent(event)) {
     pendingGoalEvents.set(event.id, event);
+    runtimeEventMetrics.pending += 1;
     return false;
   }
   if (event.kind === "instance.status_changed") {
     if (applyInstanceStatusEvent(event)) {
       appliedGoalEventIds.add(event.id);
+      runtimeEventMetrics.applied += 1;
       pendingGoalEvents.delete(event.id);
       return true;
     }
     appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
   if (event.kind === "instance.progress") {
     if (applyInstanceProgressEvent(event)) {
       appliedGoalEventIds.add(event.id);
+      runtimeEventMetrics.applied += 1;
       pendingGoalEvents.delete(event.id);
       return true;
     }
     appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
   if (event.kind === "instance.timeout_paused") {
     if (applyTimeoutPausedEvent(event)) {
       appliedGoalEventIds.add(event.id);
+      runtimeEventMetrics.applied += 1;
       pendingGoalEvents.delete(event.id);
       return true;
     }
     appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
   if (event.kind === "schedule.event_synthesized") {
     refreshScheduleEventsFromSnapshot();
     appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
@@ -267,6 +275,7 @@ function applyGoalEvent(event: GoalEventRecord) {
     return false;
   }
   appliedGoalEventIds.add(event.id);
+  runtimeEventMetrics.applied += 1;
   pendingGoalEvents.delete(event.id);
   const payload = event.payload as { target?: string; notificationId?: string };
   if (payload.target === "inbox") {
@@ -309,10 +318,10 @@ function applyGoalEvent(event: GoalEventRecord) {
 }
 
 // Runtime environments and schedule events still use sync as a Sprint 4-A -> 4-B bridge.
-// Goal changes are materialized through /api/goals/materialize and never posted to runtime sync.
+// Goal changes are committed through /api/goals/commands and replayed here as server projections.
 export function RuntimeEventBridge() {
   const goals = useGoalStore((state) => state.goals);
-  const replaceGoals = useGoalStore((state) => state.replaceGoals);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const environments = useRuntimeEnvStore((state) => state.environments);
   const activeRuntimeEnvId = useRuntimeEnvStore((state) => state.activeRuntimeEnvId);
   const replaceEnvironments = useRuntimeEnvStore((state) => state.replaceEnvironments);
@@ -327,9 +336,41 @@ export function RuntimeEventBridge() {
   const [bootstrapped, setBootstrapped] = useState(false);
   const sseDisconnectedRef = useRef(false);
   const remoteRevisionRef = useRef<RuntimeStateRevision>(EMPTY_REVISION);
-  const eventCursorRef = useRef<Record<string, number>>({});
-  const remoteGoalKeysRef = useRef<Record<string, string>>({});
-  const materializingGoalKeysRef = useRef<Set<string>>(new Set());
+  const eventCursorRef = useRef<GoalEventCursorMap>(readGoalEventCursors());
+  const cursorChannelRef = useRef<BroadcastChannel | null>(null);
+
+  const refreshSnapshot = async () => {
+    const snapshot = await fetchRuntimeStateSnapshot();
+    const remoteRevision = revisionFromSnapshot(snapshot);
+    runtimeEventMetrics.snapshotRefreshes += 1;
+    remoteRevisionRef.current = remoteRevision;
+    isApplyingRemoteRef.current = true;
+    applyGoalsProjection(snapshot.goals, remoteRevision.goals);
+    replaceEnvironments(snapshot.runtimeEnvironments);
+    replaceEvents(snapshot.scheduleEvents);
+    window.setTimeout(() => {
+      isApplyingRemoteRef.current = false;
+    }, 0);
+  };
+
+  const persistCursor = (goalId: string, cursor: number) => {
+    const next = advanceGoalEventCursor(eventCursorRef.current, goalId, cursor);
+    if (next === eventCursorRef.current) return;
+    eventCursorRef.current = next;
+    writeGoalEventCursors(next);
+    cursorChannelRef.current?.postMessage(next);
+  };
+
+  const applyGoalEventAndAdvance = (event: GoalEventRecord) => {
+    const goalId = event.goalId;
+    if (event.id <= (eventCursorRef.current[goalId] ?? 0)) {
+      runtimeEventMetrics.duplicates += 1;
+      return true;
+    }
+    const applied = applyGoalEvent(event);
+    if (applied) persistCursor(goalId, event.id);
+    return applied;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -338,9 +379,9 @@ export function RuntimeEventBridge() {
         const snapshot = await fetchRuntimeStateSnapshot();
         if (cancelled) return;
         isApplyingRemoteRef.current = true;
-        remoteRevisionRef.current = revisionFromSnapshot(snapshot);
-        remoteGoalKeysRef.current = snapshotGoalKeys(snapshot.goals);
-        replaceGoals(mergeRemoteSnapshotWithPendingLocalGoals(snapshot.goals, useGoalStore.getState().goals));
+        const remoteRevision = revisionFromSnapshot(snapshot);
+        remoteRevisionRef.current = remoteRevision;
+        applyGoalsProjection(snapshot.goals, remoteRevision.goals);
         replaceEnvironments(snapshot.runtimeEnvironments);
         replaceEvents(snapshot.scheduleEvents);
         setBootstrapped(true);
@@ -359,8 +400,7 @@ export function RuntimeEventBridge() {
       try {
         const snapshot = await fetchRuntimeStateSnapshot();
         if (cancelled) return;
-        const nextGoals = mergeRemoteSnapshotWithPendingLocalGoals(snapshot.goals, useGoalStore.getState().goals);
-        const remoteGoalsKey = stableStringify(nextGoals);
+        const remoteGoalsKey = stableStringify(snapshot.goals);
         const remoteEnvironmentsKey = stableStringify({
           environments: snapshot.runtimeEnvironments,
           activeRuntimeEnvId: snapshot.runtimeEnvironments.find((item) => item.isDefault)?.id ?? null,
@@ -378,8 +418,7 @@ export function RuntimeEventBridge() {
         ) {
           isApplyingRemoteRef.current = true;
           remoteRevisionRef.current = remoteRevision;
-          remoteGoalKeysRef.current = snapshotGoalKeys(snapshot.goals);
-          replaceGoals(nextGoals);
+          applyGoalsProjection(snapshot.goals, remoteRevision.goals);
           replaceEnvironments(snapshot.runtimeEnvironments);
           replaceEvents(snapshot.scheduleEvents);
           window.setTimeout(() => {
@@ -387,7 +426,6 @@ export function RuntimeEventBridge() {
           }, 0);
         } else {
           remoteRevisionRef.current = remoteRevision;
-          remoteGoalKeysRef.current = snapshotGoalKeys(snapshot.goals);
         }
       } catch {
         // ignore polling failures
@@ -398,7 +436,52 @@ export function RuntimeEventBridge() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [replaceEnvironments, replaceEvents, replaceGoals]);
+  }, [applyGoalsProjection, replaceEnvironments, replaceEvents]);
+
+  useEffect(() => {
+    const mergeExternalCursors = (incoming: GoalEventCursorMap) => {
+      const next = mergeGoalEventCursors(eventCursorRef.current, incoming);
+      if (next === eventCursorRef.current || stableStringify(next) === stableStringify(eventCursorRef.current)) return;
+      eventCursorRef.current = next;
+      writeGoalEventCursors(next);
+      void refreshSnapshot().catch(() => {
+        // Snapshot refresh is a convergence aid; SSE/polling remain active if it fails.
+      });
+    };
+
+    if ("BroadcastChannel" in window) {
+      cursorChannelRef.current = new BroadcastChannel(GOAL_EVENT_CURSOR_CHANNEL);
+      cursorChannelRef.current.onmessage = (event) => {
+        mergeExternalCursors(normalizeGoalEventCursors(event.data));
+      };
+    }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== GOAL_EVENT_CURSOR_STORAGE_KEY) return;
+      try {
+        mergeExternalCursors(normalizeGoalEventCursors(JSON.parse(event.newValue ?? "{}")));
+      } catch {
+        // ignore malformed external cursor state
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      cursorChannelRef.current?.close();
+      cursorChannelRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const publish = () => {
+      (window as RuntimeEventMetricsWindow).__KIKI_RUNTIME_EVENT_METRICS__ = { ...runtimeEventMetrics };
+      window.localStorage.setItem("kiki.runtime-event.metrics.v1", JSON.stringify(runtimeEventMetrics));
+    };
+    publish();
+    const timer = window.setInterval(publish, 10000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!bootstrapped || goals.length === 0) return;
@@ -414,8 +497,9 @@ export function RuntimeEventBridge() {
             limit: 500,
           });
           if (cancelled) return;
-          response.events.forEach(applyGoalEvent);
-          eventCursorRef.current[goalId] = response.nextCursor;
+          for (const event of response.events) {
+            if (!applyGoalEventAndAdvance(event)) break;
+          }
           sseDisconnectedRef.current = false;
         } catch {
           // ignore event bootstrap failures
@@ -433,9 +517,8 @@ export function RuntimeEventBridge() {
               events?: GoalEventRecord[];
               nextCursor?: number;
             };
-            payload.events?.forEach(applyGoalEvent);
-            if (typeof payload.nextCursor === "number") {
-              eventCursorRef.current[goalId] = payload.nextCursor;
+            for (const event of payload.events ?? []) {
+              if (!applyGoalEventAndAdvance(event)) break;
             }
           } catch {
             // ignore malformed event payloads
@@ -445,6 +528,7 @@ export function RuntimeEventBridge() {
           sseDisconnectedRef.current = false;
         });
         source.addEventListener("error", () => {
+          runtimeEventMetrics.sseErrors += 1;
           sseDisconnectedRef.current = true;
         });
         sources.push(source);
@@ -460,29 +544,11 @@ export function RuntimeEventBridge() {
   useEffect(() => {
     if (!bootstrapped || pendingGoalEvents.size === 0) return;
     for (const event of Array.from(pendingGoalEvents.values())) {
-      applyGoalEvent(event);
+      if (applyGoalEventAndAdvance(event)) {
+        runtimeEventMetrics.replayed += 1;
+      }
     }
   }, [bootstrapped, currentGoalsKey]);
-
-  useEffect(() => {
-    if (!bootstrapped || isApplyingRemoteRef.current) return;
-    const confirmedGoals = goals.filter((goal) => goal.workflow?.planDecision === "confirmed");
-    for (const goal of confirmedGoals) {
-      const key = goalMaterializeKey(goal);
-      if (remoteGoalKeysRef.current[goal.id] === key || materializingGoalKeysRef.current.has(key)) continue;
-      materializingGoalKeysRef.current.add(key);
-      void materializeGoalSnapshot(goal)
-        .then(() => {
-          remoteGoalKeysRef.current = {
-            ...remoteGoalKeysRef.current,
-            [goal.id]: key,
-          };
-        })
-        .catch(() => {
-          materializingGoalKeysRef.current.delete(key);
-        });
-    }
-  }, [bootstrapped, currentGoalsKey, goals]);
 
   useEffect(() => {
     if (!bootstrapped || isApplyingRemoteRef.current) return;
@@ -502,7 +568,6 @@ export function RuntimeEventBridge() {
           const snapshot = await fetchRuntimeStateSnapshot();
           isApplyingRemoteRef.current = true;
           remoteRevisionRef.current = revisionFromSnapshot(snapshot);
-          remoteGoalKeysRef.current = snapshotGoalKeys(snapshot.goals);
           replaceEnvironments(snapshot.runtimeEnvironments);
           replaceEvents(snapshot.scheduleEvents);
           window.setTimeout(() => {

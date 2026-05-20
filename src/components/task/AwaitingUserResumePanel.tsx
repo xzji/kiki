@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 
 import { respondGoalInstance } from "@/lib/api/goal-commands";
-import { useGoalStore } from "@/stores/goalStore";
 import type { Task, TaskInstance } from "@/types/kiki";
 
 type ReadinessItem = {
@@ -192,7 +191,6 @@ export function AwaitingUserResumePanel({
   instance: TaskInstance;
   onRunning?: () => void;
 }) {
-  const resolveTaskInstanceAwaitingUser = useGoalStore((state) => state.resolveTaskInstanceAwaitingUser);
   const [selectedOption, setSelectedOption] = useState("");
   const [selectedItemOptions, setSelectedItemOptions] = useState<Record<string, string>>({});
   const [customText, setCustomText] = useState("");
@@ -290,22 +288,12 @@ export function AwaitingUserResumePanel({
     setPending(approved ? "approve" : "revise");
     setError(null);
     try {
-      const action = approved ? primaryLabelFor(instance) : "让 KiKi 修改后继续";
       const response = await respondGoalInstance({
         instanceId: instance.id,
         responseId: blocker.resumeToken,
         responseSummary: normalizedFeedback,
         approved,
         fields: feedbackFields,
-      });
-      resolveTaskInstanceAwaitingUser(task.id, instance.id, {
-        type: requirement?.type ?? "confirm",
-        status: approved ? "submitted" : "rejected",
-        action,
-        approved,
-        feedback: normalizedFeedback || "用户已提交反馈，请继续执行。",
-        fields: feedbackFields,
-        submittedAt: new Date().toISOString(),
       });
       setSelectedOption("");
       setSelectedItemOptions({});

@@ -2,7 +2,7 @@
 
 import { GoalPlanContent } from "@/components/goal/GoalPlanContent";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useEffect, useState } from "react";
 
 function safeDecodeRouteParam(value: string) {
@@ -14,8 +14,8 @@ function safeDecodeRouteParam(value: string) {
 }
 
 export default function GoalDetailPage({ params }: { params: { goalId: string } }) {
-  const goals = useGoalStore((state) => state.goals);
-  const replaceGoals = useGoalStore((state) => state.replaceGoals);
+  const goals = useGoalStore(selectVisibleGoals);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const goalId = safeDecodeRouteParam(params.goalId);
   const goal = goals.find((item) => item.id === goalId);
   const [remoteLookup, setRemoteLookup] = useState<{ key: string; loading: boolean; loaded: boolean } | null>(null);
@@ -28,7 +28,7 @@ export default function GoalDetailPage({ params }: { params: { goalId: string } 
     setRemoteLookup({ key: goalId, loading: true, loaded: false });
     fetchRuntimeStateSnapshot()
       .then((snapshot) => {
-        if (!cancelled) replaceGoals(snapshot.goals);
+        if (!cancelled) applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
       })
       .catch(() => {
         // Keep the full-page route stable while the runtime snapshot is temporarily unavailable.
@@ -40,7 +40,7 @@ export default function GoalDetailPage({ params }: { params: { goalId: string } 
     return () => {
       cancelled = true;
     };
-  }, [goal, goalId, remoteLookup, replaceGoals]);
+  }, [applyGoalsProjection, goal, goalId, remoteLookup]);
 
   if (!goal) {
     const isLookingUpRemote = remoteLookup?.key !== goalId || remoteLookup.loading || !remoteLookup?.loaded;

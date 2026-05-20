@@ -2,6 +2,8 @@ import type { GoalWorkflowPhase, TaskInstanceStatus } from "@/types/kiki";
 
 export type GoalEventKind =
   | "goal.workflow_changed"
+  | "goal.structure_changed"
+  | "job.status_changed"
   | "instance.created"
   | "instance.status_changed"
   | "instance.progress"
@@ -19,6 +21,25 @@ export type GoalEventPayloadMap = {
   "goal.workflow_changed": {
     previousPhase?: GoalWorkflowPhase;
     nextPhase: GoalWorkflowPhase;
+    reason?: string;
+  };
+  "goal.structure_changed": {
+    action:
+      | "goal.created"
+      | "task.updated"
+      | "task.created"
+      | "task.deleted"
+      | "sub_goal.created"
+      | "goal.conversation_unlinked";
+    entityId?: string;
+    entityHash?: string;
+    parentId?: string;
+    title?: string;
+  };
+  "job.status_changed": {
+    previousStatus?: "queued" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+    nextStatus: "queued" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+    requestId?: string;
     reason?: string;
   };
   "instance.created": {
@@ -83,4 +104,3 @@ export type GoalEventRecord<K extends GoalEventKind = GoalEventKind> = {
   idempotencyKey?: string;
   createdAt: string;
 };
-

@@ -4,16 +4,35 @@ import { Check, Circle, CircleDot, Dot, Ellipsis } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { TaskEditDrawer } from "@/components/goal/TaskEditDrawer";
+import { deleteGoalTaskCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { runTaskExecutionAction } from "@/lib/taskExecution";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
 import type { Task } from "@/types/kiki";
 
-export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount: number; onOpen: () => void }) {
+export function TaskRow({
+  goalId,
+  task,
+  unreadCount,
+  onOpen,
+  isPendingCreate = false,
+  isPendingUpdate = false,
+}: {
+  goalId: string;
+  task: Task;
+  unreadCount: number;
+  onOpen: () => void;
+  isPendingCreate?: boolean;
+  isPendingUpdate?: boolean;
+}) {
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const deleteTask = useGoalStore((state) => state.deleteTask);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const addPendingTaskDelete = useGoalStore((state) => state.addPendingTaskDelete);
+  const removePendingTaskDelete = useGoalStore((state) => state.removePendingTaskDelete);
   const taskState = useMemo(() => getTaskDisplayState(task), [task]);
   const Icon = taskState === "completed" ? CircleDot : taskState === "in_progress" || taskState === "awaiting_user" ? Dot : Circle;
   const statusLabel =
@@ -26,7 +45,8 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
           : taskState === "paused"
             ? "已暂停"
             : "待开始";
-  const executionAction = getExecutionAction(task, taskState);
+  const isPendingChange = isPendingCreate || isPendingUpdate;
+  const executionAction = isPendingChange ? null : getExecutionAction(task, taskState);
 
   return (
     <>
@@ -38,14 +58,19 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
         setHovered(false);
         setMenuOpen(false);
       }}
-      onClick={onOpen}
+      onClick={() => {
+        if (!isPendingChange) onOpen();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpen();
+          if (!isPendingChange) onOpen();
         }
       }}
-      className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-[#F8F9FB]"
+      className={cn(
+        "flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition",
+        isPendingChange ? "cursor-default opacity-70" : "hover:bg-[#F8F9FB]",
+      )}
     >
       <span
         className={cn(
@@ -93,7 +118,7 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
                       : "bg-[#F5F6F8] text-[#8C9198]"
                 )}
               >
-                {statusLabel}
+                {isPendingChange ? "保存中" : statusLabel}
               </span>
               {unreadCount > 0 ? <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#E5484D]" /> : null}
             </div>
@@ -116,6 +141,7 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
                 {executionAction.label}
               </button>
             ) : null}
+            {!isPendingChange ? (
             <button
               type="button"
               aria-label="更多任务操作"
@@ -130,6 +156,7 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
             >
               <Ellipsis className="h-4 w-4" />
             </button>
+            ) : null}
             {menuOpen ? (
               <div
                 onClick={(event) => event.stopPropagation()}
@@ -148,8 +175,30 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
                 <button
                   type="button"
                   onClick={() => {
-                    deleteTask(task.id);
+                    const overlayId = createOpaqueId("idem");
+                    const idempotencyKey = createIdempotencyKey("goal.delete_task", goalId, task.id, overlayId);
+                    addPendingTaskDelete({
+                      id: overlayId,
+                      goalId,
+                      taskId: task.id,
+                      idempotencyKey,
+                      createdAt: new Date().toISOString(),
+                    });
                     setMenuOpen(false);
+                    void deleteGoalTaskCommand({
+                      goalId,
+                      taskId: task.id,
+                      baseRevision: goalProjectionRevision,
+                      idempotencyKey,
+                    })
+                      .then((result) => {
+                        applyGoalsProjection(result.goals, result.revision);
+                        removePendingTaskDelete(overlayId);
+                      })
+                      .catch((error) => {
+                        removePendingTaskDelete(overlayId);
+                        window.alert(error instanceof Error ? error.message : "任务删除失败");
+                      });
                   }}
                   className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
                 >
@@ -164,7 +213,7 @@ export function TaskRow({ task, unreadCount, onOpen }: { task: Task; unreadCount
         ) : null}
       </div>
     </div>
-    <TaskEditDrawer task={task} open={editOpen} onClose={() => setEditOpen(false)} />
+    <TaskEditDrawer goalId={goalId} task={task} open={editOpen} onClose={() => setEditOpen(false)} />
     </>
   );
 }

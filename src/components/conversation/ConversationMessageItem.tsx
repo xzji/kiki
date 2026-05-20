@@ -7,7 +7,7 @@ import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { cn } from "@/lib/utils";
-import { useGoalStore } from "@/stores/goalStore";
+import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import type { ConversationMessage } from "@/types/kiki";
 
 /**
@@ -34,7 +34,7 @@ export function ConversationMessageItem({
   onTaskOptionalFeedback?: (message: ConversationMessage, feedback: string) => Promise<void> | void;
   onDelete: (messageId: string) => void;
 }) {
-  const goals = useGoalStore((state) => state.goals);
+  const goals = useGoalStore(selectVisibleGoals);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 

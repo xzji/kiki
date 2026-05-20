@@ -9,6 +9,8 @@ import { ChatHistoryView } from "@/components/goal/ChatHistoryView";
 import { DigestGoalView } from "@/components/goal/DigestGoalView";
 import { SubGoalBlock } from "@/components/goal/SubGoalBlock";
 import { SubGoalCreateDrawer } from "@/components/goal/SubGoalCreateDrawer";
+import { confirmGoalPlanCommand, requestGoalPlanRevisionCommand } from "@/lib/api/goal-commands";
+import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { cn } from "@/lib/utils";
 import { BASE_DATE, formatDateInput } from "@/lib/date";
 import { goalDetailPath, taskDetailPath } from "@/lib/routes";
@@ -88,9 +90,59 @@ export function GoalPlanContent({
 }) {
   const router = useRouter();
   const inboxItems = useInboxStore((state) => state.items);
-  const confirmGoalPlan = useGoalStore((state) => state.confirmGoalPlan);
-  const requestGoalPlanRevision = useGoalStore((state) => state.requestGoalPlanRevision);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
+  const pendingSubGoalCreates = useGoalStore((state) => state.pendingSubGoalCreates);
+  const pendingTaskCreates = useGoalStore((state) => state.pendingTaskCreates);
+  const pendingTaskUpdates = useGoalStore((state) => state.pendingTaskUpdates);
+  const pendingTaskDeletes = useGoalStore((state) => state.pendingTaskDeletes);
+  const pendingGoalWorkflows = useGoalStore((state) => state.pendingGoalWorkflows);
+  const addPendingGoalWorkflow = useGoalStore((state) => state.addPendingGoalWorkflow);
+  const removePendingGoalWorkflow = useGoalStore((state) => state.removePendingGoalWorkflow);
   const [subGoalDrawerOpen, setSubGoalDrawerOpen] = useState(false);
+  const pendingTaskCreateIds = new Set(
+    pendingTaskCreates
+      .filter((item) => item.goalId === goal.id)
+      .map((item) => item.task.id),
+  );
+  const pendingTaskUpdateIds = new Set(
+    pendingTaskUpdates
+      .filter((item) => item.goalId === goal.id)
+      .map((item) => item.taskId),
+  );
+  const pendingTaskDeleteIds = new Set(
+    pendingTaskDeletes
+      .filter((item) => item.goalId === goal.id)
+      .map((item) => item.taskId),
+  );
+  const pendingTaskUpdatesById = new Map(
+    pendingTaskUpdates
+      .filter((item) => item.goalId === goal.id)
+      .map((item) => [item.taskId, item.task]),
+  );
+  const pendingSubGoals = pendingSubGoalCreates
+    .filter((item) => item.goalId === goal.id)
+    .filter((item) => !goal.subGoals.some((subGoal) => subGoal.id === item.subGoal.id))
+    .map((item) => item.subGoal);
+  const displaySubGoals = [...goal.subGoals, ...pendingSubGoals].map((subGoal) => {
+    const pendingTasks = pendingTaskCreates
+      .filter((item) => item.goalId === goal.id && item.subGoalId === subGoal.id)
+      .filter((item) => !pendingTaskDeleteIds.has(item.task.id))
+      .filter((item) => !subGoal.tasks.some((task) => task.id === item.task.id))
+      .map((item) => item.task);
+    return {
+      ...subGoal,
+      tasks: [
+        ...subGoal.tasks
+          .filter((task) => !pendingTaskDeleteIds.has(task.id))
+          .map((task) => pendingTaskUpdatesById.get(task.id) ?? task),
+        ...pendingTasks,
+      ],
+    };
+  });
+  const pendingGoalWorkflow = pendingGoalWorkflows.find((item) => item.goalId === goal.id);
+  const displayWorkflow = pendingGoalWorkflow?.workflow ?? goal.workflow;
+  const displayGoal = { ...goal, workflow: displayWorkflow, subGoals: displaySubGoals };
 
   const unreadByTask = useMemo(() => {
     return inboxItems.reduce<Record<string, number>>((acc, item) => {
@@ -101,7 +153,7 @@ export function GoalPlanContent({
   }, [inboxItems]);
 
   const summary = useMemo(() => {
-    const allTasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
+    const allTasks = displaySubGoals.flatMap((subGoal) => subGoal.tasks);
     const statusList = allTasks.map(getTaskSummaryStatus);
     const completedCount = statusList.filter((status) => status === "completed").length;
     const awaitingCount = statusList.filter((status) => status === "awaiting_user").length;
@@ -122,7 +174,7 @@ export function GoalPlanContent({
       pendingCount,
       daysLeft,
     };
-  }, [goal]);
+  }, [displaySubGoals, goal.deadline]);
 
   if (goal.kind === "chat_history") {
     return <ChatHistoryView goal={goal} />;
@@ -160,7 +212,7 @@ export function GoalPlanContent({
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <CircleDot className="h-3.5 w-3.5" />
-                  {goal.subGoals.length} 个子目标
+                  {displaySubGoals.length} 个子目标
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <ListTodo className="h-3.5 w-3.5" />
@@ -177,26 +229,58 @@ export function GoalPlanContent({
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
           </div>
         </div>
-        {goal.workflow ? (
+        {displayWorkflow ? (
           <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="text-[12px] text-[#6B7280]">目标工作流</div>
                 <div className="mt-1 text-sm font-medium text-[#1F2328]">
-                  {phaseLabel(goal.workflow.phase)}
+                  {phaseLabel(displayWorkflow.phase)}
                 </div>
-                {goal.workflow.error ? (
-                  <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{goal.workflow.error}</div>
+                {pendingGoalWorkflow ? (
+                  <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">保存中...</div>
+                ) : null}
+                {displayWorkflow.error ? (
+                  <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{displayWorkflow.error}</div>
                 ) : null}
               </div>
-              {goal.workflow.phase === "presenting_plan" && goal.workflow.planDecision === "pending" ? (
+              {displayWorkflow.phase === "presenting_plan" && displayWorkflow.planDecision === "pending" ? (
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
                       const feedback = window.prompt("告诉 KiKi 你希望如何调整这份计划：");
                       if (!feedback?.trim()) return;
-                      requestGoalPlanRevision(goal.id, feedback.trim());
+                      const overlayId = createOpaqueId("idem");
+                      const idempotencyKey = createIdempotencyKey("goal.request_plan_revision", goal.id, feedback.trim(), overlayId);
+                      addPendingGoalWorkflow({
+                        id: overlayId,
+                        goalId: goal.id,
+                        idempotencyKey,
+                        createdAt: new Date().toISOString(),
+                        workflow: {
+                          ...displayWorkflow,
+                          phase: "decomposing",
+                          planDecision: "revision_requested",
+                          updatedAt: new Date().toISOString(),
+                          collectedInfo: {
+                            ...(displayWorkflow.collectedInfo ?? {}),
+                            revisionFeedback: feedback.trim(),
+                          },
+                        },
+                      });
+                      void requestGoalPlanRevisionCommand({
+                        goalId: goal.id,
+                        feedback: feedback.trim(),
+                        baseRevision: goalProjectionRevision,
+                        idempotencyKey,
+                      }).then((result) => {
+                        applyGoalsProjection(result.goals, result.revision);
+                        removePendingGoalWorkflow(overlayId);
+                      }).catch((error) => {
+                        removePendingGoalWorkflow(overlayId);
+                        window.alert(error instanceof Error ? error.message : "规划调整提交失败");
+                      });
                     }}
                     className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
                   >
@@ -204,7 +288,30 @@ export function GoalPlanContent({
                   </button>
                   <button
                     type="button"
-                    onClick={() => confirmGoalPlan(goal.id)}
+                    onClick={() => {
+                      const overlayId = createOpaqueId("idem");
+                      const idempotencyKey = createIdempotencyKey("goal.confirm_plan", goal.id, overlayId);
+                      addPendingGoalWorkflow({
+                        id: overlayId,
+                        goalId: goal.id,
+                        idempotencyKey,
+                        createdAt: new Date().toISOString(),
+                        workflow: {
+                          ...displayWorkflow,
+                          phase: "executing",
+                          planDecision: "confirmed",
+                          updatedAt: new Date().toISOString(),
+                          confirmedAt: displayWorkflow.confirmedAt ?? new Date().toISOString(),
+                        },
+                      });
+                      void confirmGoalPlanCommand({ goalId: goal.id, baseRevision: goalProjectionRevision, idempotencyKey }).then((result) => {
+                        applyGoalsProjection(result.goals, result.revision);
+                        removePendingGoalWorkflow(overlayId);
+                      }).catch((error) => {
+                        removePendingGoalWorkflow(overlayId);
+                        window.alert(error instanceof Error ? error.message : "规划确认失败");
+                      });
+                    }}
                     className="rounded-lg bg-[#111] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#333]"
                   >
                     确认并启动
@@ -217,13 +324,16 @@ export function GoalPlanContent({
       </section>
 
       <div className="space-y-4">
-        {goal.subGoals.map((subGoal, index) => (
+        {displaySubGoals.map((subGoal, index) => (
           <SubGoalBlock
             key={subGoal.id}
             index={index + 1}
-            goal={goal}
+            goal={displayGoal}
             subGoal={subGoal}
             unreadByTask={unreadByTask}
+            isPendingCreate={pendingSubGoals.some((pendingSubGoal) => pendingSubGoal.id === subGoal.id)}
+            pendingTaskCreateIds={pendingTaskCreateIds}
+            pendingTaskUpdateIds={pendingTaskUpdateIds}
             highlighted={focusSubGoalId === subGoal.id}
             onOpenTask={handleOpenTask}
           />
