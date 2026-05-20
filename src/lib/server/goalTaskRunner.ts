@@ -7,7 +7,11 @@ import { readinessFromContext } from "@/lib/server/taskExecution/readinessAdapte
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
 import { runMultiAgentOrchestration } from "@/lib/server/agentOrchestration/MultiAgentOrchestrator";
 import { selectAgentCollaborationStrategy } from "@/lib/server/agentOrchestration/strategy";
-import { classifyTaskRunError, requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
+import {
+  classifyTaskRunError,
+  inferInteractionRequirement,
+  requiresUserConfirmationToComplete,
+} from "@/lib/server/domain/taskPolicy";
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
@@ -425,19 +429,14 @@ function normalizeInteractionRequirement(
     rawTiming === "after_agent_output" ||
     rawTiming === "core_task_step"
       ? rawTiming
-      : type === "none"
-        ? "not_required"
-        : type === "answer" || type === "perform_offline_action"
-          ? "core_task_step"
-          : "after_agent_output";
+      : undefined;
   const suggestedActions = Array.isArray(raw.suggested_actions)
     ? normalizeStringList(raw.suggested_actions)
     : Array.isArray(raw.suggestedActions)
       ? normalizeStringList(raw.suggestedActions)
       : fallback?.suggestedActions;
-
-  return {
-    type,
+  const requirement = inferInteractionRequirement({
+    interactionType: type,
     timing,
     reason:
       typeof raw.reason === "string" && raw.reason.trim()
@@ -451,7 +450,12 @@ function normalizeInteractionRequirement(
         ? raw.should_notify_user
         : typeof raw.shouldNotifyUser === "boolean"
           ? raw.shouldNotifyUser
-          : fallback?.shouldNotifyUser ?? (type === "confirm" || type === "answer" || type === "provide_context" || type === "perform_offline_action"),
+          : undefined,
+    fallbackShouldNotifyUser: fallback?.shouldNotifyUser,
+  });
+
+  return {
+    ...requirement,
   };
 }
 

@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { migrateConversationIds } from "@/lib/opaqueIds";
+import { migrateConversationIds, normalizeGoalId } from "@/lib/opaqueIds";
 import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 
 type ConversationStore = {
@@ -32,16 +32,22 @@ type ConversationStore = {
 };
 
 const MOCK_BASELINE_RESET_VERSION = 11;
-const MOCK_CONVERSATION_TITLES = new Set([
-  "托福考试 110 分",
-  "购买 SUV 汽车",
-  "大阪 6 日游",
-  "邮件",
-  "今日要闻",
-  "找 AI 产品经理工作",
-  "西红柿炒鸡蛋怎么做",
-  "越南玩5天",
+const MOCK_GOAL_IDS = new Set(
+  [
+    "goal-toefl",
+    "goal-suv",
+    "goal-osaka",
+    "goal-mail",
+    "goal-news",
+    "goal-job",
+    "goal-tomato-egg",
+  ].map((id) => normalizeGoalId(id)),
+);
+const MOCK_CONVERSATION_IDS = new Set([
+  "conv-new-1779009317391",
+  ...Array.from(MOCK_GOAL_IDS, (goalId) => `conv-${goalId}`),
 ]);
+const LEGACY_MOCK_CONVERSATION_TITLES = new Set(["越南玩5天"]);
 const TERMINAL_CONTROL_NOTICE_PATTERNS = [
   /^\s*（已停止，未检测到正在运行的任务）\s*$/gm,
   /^\s*已停止，未检测到正在运行的任务。\s*$/gm,
@@ -57,16 +63,18 @@ function sanitizeConversationMessageContent(content: string) {
 }
 
 function sanitizeConversationHistory(conversations: Conversation[]) {
-  return conversations.filter((conversation) => !MOCK_CONVERSATION_TITLES.has(conversation.title)).map((conversation) => {
-    const migratedConversation = migrateConversationIds(conversation);
-    return {
-      ...migratedConversation,
-      messages: migratedConversation.messages.map((message) => ({
+  return conversations
+    .map((conversation) => migrateConversationIds(conversation))
+    .filter((conversation) => !MOCK_CONVERSATION_IDS.has(conversation.id))
+    .filter((conversation) => !conversation.goalId || !MOCK_GOAL_IDS.has(conversation.goalId))
+    .filter((conversation) => !LEGACY_MOCK_CONVERSATION_TITLES.has(conversation.title))
+    .map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.map((message) => ({
         ...message,
         content: sanitizeConversationMessageContent(message.content),
       })),
-    };
-  });
+    }));
 }
 
 function mergeConversationsById(...groups: Conversation[][]) {

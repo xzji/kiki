@@ -5,7 +5,7 @@ import type { Goal } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
-type SnapshotKey = "goals" | "conversations" | "runtimeEnvironments" | "scheduleEvents";
+type SnapshotKey = "goals" | "runtimeEnvironments" | "scheduleEvents";
 
 export type SnapshotMeta = {
   revision: number;

@@ -6,6 +6,8 @@ import { formatMessageTime } from "@/lib/date";
 import { makeId } from "@/lib/utils";
 import type { KikiMessage } from "@/types/kiki";
 
+// Demo-only local thread store for FreeformChatView.
+// Runtime conversations use conversationStore and server-backed workspace state.
 type ChatStore = {
   threads: Record<string, KikiMessage[]>;
   seedThread: (threadId: string, messages: KikiMessage[]) => void;

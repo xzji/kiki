@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
-import { createOpaqueId, migrateGoalIds } from "@/lib/opaqueIds";
+import { createOpaqueId, migrateGoalIds, normalizeGoalId } from "@/lib/opaqueIds";
 import { normalizeConcreteTriggerRule, normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
 import { buildGoalFromDraft, createGeneratedInstance } from "@/lib/goalFactory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
@@ -29,15 +29,17 @@ import type {
 import type { TaskResult } from "@/types/taskResult";
 
 const MOCK_BASELINE_RESET_VERSION = 12;
-const MOCK_GOAL_TITLES = new Set([
-  "托福考试 110 分",
-  "购买 SUV 汽车",
-  "大阪 6 日游",
-  "邮件",
-  "今日要闻",
-  "找 AI 产品经理工作",
-  "西红柿炒鸡蛋怎么做",
-]);
+const MOCK_GOAL_IDS = new Set(
+  [
+    "goal-toefl",
+    "goal-suv",
+    "goal-osaka",
+    "goal-mail",
+    "goal-news",
+    "goal-job",
+    "goal-tomato-egg",
+  ].map((id) => normalizeGoalId(id)),
+);
 
 function mergeGoalsById(...groups: Goal[][]) {
   const merged = new Map<string, Goal>();
@@ -50,7 +52,7 @@ function mergeGoalsById(...groups: Goal[][]) {
 }
 
 function removeMockGoals(goals: Goal[]) {
-  return goals.filter((goal) => !MOCK_GOAL_TITLES.has(goal.title));
+  return goals.filter((goal) => !MOCK_GOAL_IDS.has(goal.id));
 }
 
 function finalizeGoal(goal: Goal): Goal {

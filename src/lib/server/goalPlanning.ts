@@ -9,22 +9,23 @@ import {
   getPlanningCheckpointFilePath,
   writeJsonFileAtomic,
 } from "@/lib/server/workspace/conversationWorkspace";
-import { requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
-import { extractBalancedJsonSnippet } from "@/lib/server/jsonExtraction";
+import {
+  inferUserInteractionType as inferPolicyUserInteractionType,
+  requiresUserConfirmationToComplete,
+  shouldNotifyUser,
+} from "@/lib/server/domain/taskPolicy";
+import {
+  buildJsonParseCandidates,
+  buildJsonRepairPrompt,
+  normalizeClaudeJsonText,
+  parseJsonWithCandidates,
+  parseRepairedJsonText,
+} from "@/lib/server/claude/jsonRepair";
 import { runPromptJson } from "@/lib/server/claude/transport";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, Task, TaskExpectedResult } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
-
-type ClaudeJsonPayload = {
-  result?: string;
-  message?: {
-    content?: Array<{
-      text?: string;
-    }>;
-  };
-};
 
 export type GoalClarificationQuestions = {
   questions: string[];
@@ -891,65 +892,22 @@ async function runClaudeJson(input: {
   }
 }
 
-function stripJsonFences(text: string) {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return fenced ? fenced[1].trim() : trimmed;
-}
-
-function extractTextFromPayload(raw: string) {
-  const text = raw.trim();
-  if (!text) return "";
-
-  try {
-    const parsed = JSON.parse(text) as ClaudeJsonPayload;
-    if (typeof parsed.result === "string") return parsed.result;
-    const content = parsed.message?.content?.map((item) => item.text || "").join("");
-    if (content) return content;
-  } catch {
-    // Fall through to raw text parsing.
-  }
-
-  return text;
-}
-
-function repairCommonJsonIssues(text: string) {
-  return text
-    .replace(/^\uFEFF/, "")
-    .replace(/[“”]/g, "\"")
-    .replace(/[‘’]/g, "'")
-    .replace(/,\s*([}\]])/g, "$1")
-    .replace(/(["\]\}\d])\s*\n\s*("[-_$a-zA-Z0-9\u4e00-\u9fa5]+":)/g, "$1,\n$2")
-    .replace(/(["\]\}\d])\s+("[-_$a-zA-Z0-9\u4e00-\u9fa5]+":)/g, "$1, $2")
-    .trim();
-}
-
 async function repairMalformedJsonWithClaude(input: {
   runtimeEnv: RuntimeEnvironment;
   malformedJson: string;
   conversationId?: string;
   signal?: AbortSignal;
 }) {
-  const prompt = `你是 JSON 修复助手。请把下面这段不合法或不完整的 JSON 修复为严格合法的 JSON。
-
-要求：
-1. 只能输出修复后的严格 JSON。
-2. 不要输出 Markdown、解释、代码块或额外说明。
-3. 尽量保留原始字段和值语义，不要擅自改写业务含义。
-
-待修复内容：
-${input.malformedJson}`;
-
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
-    prompt,
+    prompt: buildJsonRepairPrompt(input.malformedJson),
     conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "JSON 修复已中断",
     failureMessage: "Claude CLI JSON 修复失败",
   });
 
-  return stripJsonFences(extractTextFromPayload(stdout));
+  return normalizeClaudeJsonText(stdout);
 }
 
 async function parseClaudeJson<T>(input: {
@@ -962,44 +920,32 @@ async function parseClaudeJson<T>(input: {
   context?: ClaudeRunContext;
 }) {
   const parseStartedAt = Date.now();
-  const primary = stripJsonFences(extractTextFromPayload(input.raw));
-  const candidates = [
-    { label: "primary", value: primary },
-    { label: "balanced", value: extractBalancedJsonSnippet(primary) },
-    { label: "common_repair", value: repairCommonJsonIssues(primary) },
-    { label: "balanced_common_repair", value: repairCommonJsonIssues(extractBalancedJsonSnippet(primary)) },
-  ];
-
-  let lastError: unknown = null;
+  const primary = normalizeClaudeJsonText(input.raw);
+  const attempt = parseJsonWithCandidates(buildJsonParseCandidates(primary), input.validator);
   let repairedForLog = "";
   let repairedCandidateForLog = "";
 
-  for (const candidate of candidates) {
-    if (!candidate.value) continue;
-    try {
-      const parsed = input.validator(JSON.parse(candidate.value) as unknown);
-      if (input.context) {
-        // #region debug-point goal-planning-latency-parse-hit
-        appendGoalLog({
-          requestId: input.context.requestId,
-          scope: input.context.scope,
-          level: "info",
-          phase: input.context.phase,
-          message: `JSON 解析命中：${input.context.stepLabel}`,
-          details: formatTimingDetails({
-            strategy: candidate.label,
-            elapsedMs: Date.now() - parseStartedAt,
-            rawChars: primary.length,
-          }),
-        });
-        // #endregion
-      }
-      return parsed;
-    } catch (error) {
-      lastError = error;
+  if (attempt.ok) {
+    if (input.context) {
+      // #region debug-point goal-planning-latency-parse-hit
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: "info",
+        phase: input.context.phase,
+        message: `JSON 解析命中：${input.context.stepLabel}`,
+        details: formatTimingDetails({
+          strategy: attempt.strategy,
+          elapsedMs: Date.now() - parseStartedAt,
+          rawChars: primary.length,
+        }),
+      });
+      // #endregion
     }
+    return attempt.parsed;
   }
 
+  let lastError: unknown = attempt.error;
   try {
     if (input.context) {
       // #region debug-point goal-planning-latency-parse-repair-start
@@ -1023,9 +969,11 @@ async function parseClaudeJson<T>(input: {
       signal: input.signal,
     });
     repairedForLog = repaired;
-    const repairedCandidate = repairCommonJsonIssues(extractBalancedJsonSnippet(repaired));
-    repairedCandidateForLog = repairedCandidate;
-    const parsed = input.validator(JSON.parse(repairedCandidate) as unknown);
+    const repairedAttempt = parseRepairedJsonText(repaired, input.validator);
+    repairedCandidateForLog = repairedAttempt.candidateForLog;
+    if (!repairedAttempt.ok) {
+      throw repairedAttempt.error instanceof Error ? repairedAttempt.error : new Error(input.errorMessage);
+    }
     if (input.context) {
       // #region debug-point goal-planning-latency-parse-repair-finished
       appendGoalLog({
@@ -1043,7 +991,7 @@ async function parseClaudeJson<T>(input: {
       });
       // #endregion
     }
-    return parsed;
+    return repairedAttempt.parsed;
   } catch (error) {
     lastError = error;
   }
@@ -1446,13 +1394,13 @@ function inferRequiredBlocks(presentation: NonNullable<TaskExpectedResult["prese
 }
 
 function inferUserInteractionType(task: Pick<TaskGenerationPayload["tasks"][number], "execution_mode" | "expected_output" | "execution_kind">) {
-  const kind = task.execution_kind;
-  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") return "answer";
-  if (kind === "confirm_action" || kind === "draft_review") return "confirm";
-  if (task.expected_output.type === "decision" || task.expected_output.type === "confirmation") return "confirm";
-  if (task.expected_output.type === "action" && task.execution_mode === "interactive") return "perform_offline_action";
-  if (task.execution_mode === "interactive") return "confirm";
-  return "none";
+  return inferPolicyUserInteractionType({
+    executionKind: allowedExecutionKinds.includes(task.execution_kind as DraftTask["executionKind"])
+      ? (task.execution_kind as DraftTask["executionKind"])
+      : undefined,
+    executionMode: task.execution_mode,
+    expectedOutputType: task.expected_output.type,
+  });
 }
 
 function inferCollaborationMode(
@@ -1564,8 +1512,10 @@ function normalizeTaskCollaborationPayload(
       typeof raw.user_facing_action_label === "string" && raw.user_facing_action_label.trim()
         ? raw.user_facing_action_label.trim()
         : defaultActionLabel,
-    should_notify_user:
-      typeof raw.should_notify_user === "boolean" ? raw.should_notify_user : userInteractionType !== "none",
+    should_notify_user: shouldNotifyUser({
+      explicit: typeof raw.should_notify_user === "boolean" ? raw.should_notify_user : undefined,
+      interactionType: userInteractionType,
+    }),
     completion_owner: completionOwner,
     completion_definition:
       shouldTreatAsAgentOwnedInformation && completionCriteria
@@ -1794,7 +1744,7 @@ async function decomposeGoalWithClaude(input: {
         goalDescription: input.goalDescription,
         userContext: input.userContext,
         config: input.config,
-        rawOutput: stripJsonFences(extractTextFromPayload(stdout)),
+        rawOutput: normalizeClaudeJsonText(stdout),
       }),
       conversationId: input.conversationId,
       signal: input.signal,

@@ -7,19 +7,19 @@ import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 const STORAGE_KEY = "kiki.schedule.events";
 const RESET_VERSION_KEY = "kiki.schedule.events.reset-version";
 const MOCK_BASELINE_RESET_VERSION = "3";
-const MOCK_EVENT_TITLES = new Set([
-  "托福考试 110 分 · 学习冲刺日",
-  "大阪 6 日游 · 行前准备",
-  "专注学习时段",
-  "听力练习反馈会",
-  "教练 1v1",
-  "单词背诵复盘",
-  "AI 产品经理面试准备",
-  "KiKi 建议的深度思考时段",
+const MOCK_EVENT_IDS = new Set([
+  "evt-all-day-toefl",
+  "evt-osaka-trip",
+  "evt-focus-morning",
+  "evt-listening",
+  "evt-listening-overlap",
+  "evt-vocab",
+  "evt-interview",
+  "evt-agent-focus",
 ]);
 
 function removeMockEvents(events: AgentEvent[]) {
-  return events.filter((event) => !MOCK_EVENT_TITLES.has(event.title));
+  return events.filter((event) => !MOCK_EVENT_IDS.has(event.id));
 }
 
 function loadEvents(): AgentEvent[] {
