@@ -80,6 +80,75 @@ export function writeJsonFileAtomic(filePath: string, value: unknown) {
   writeTextFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+export function writePlanningParseFailureSnapshot(input: {
+  conversationId: string;
+  requestId?: string;
+  phase?: string;
+  stepLabel?: string;
+  errorMessage: string;
+  rawOutput: string;
+  repairedOutput?: string;
+  repairedCandidate?: string;
+}) {
+  const workspace = ensureConversationWorkspace(input.conversationId);
+  const parseFailuresDir = ensureDir(path.join(workspace.planningDir, "raw", "parse-failures"));
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const label = sanitizeWorkspaceSegment(`${input.phase ?? "unknown"}-${input.stepLabel ?? "parse_failure"}`);
+  const filePath = path.join(parseFailuresDir, `${timestamp}-${label}.json`);
+  assertPathInsideWorkspace({ workspaceDir: workspace.workspaceDir, targetPath: filePath });
+  writeJsonFileAtomic(filePath, {
+    capturedAt: new Date().toISOString(),
+    requestId: input.requestId,
+    phase: input.phase,
+    stepLabel: input.stepLabel,
+    errorMessage: input.errorMessage,
+    rawOutput: input.rawOutput,
+    repairedOutput: input.repairedOutput,
+    repairedCandidate: input.repairedCandidate,
+  });
+  return {
+    filePath,
+    relativePath: path.relative(workspace.workspaceDir, filePath),
+  };
+}
+
+export function writeTaskParseFailureSnapshot(input: {
+  workspaceDir: string;
+  taskWorkspaceDir: string;
+  requestId?: string;
+  taskId: string;
+  instanceId: string;
+  errorMessage: string;
+  rawOutput: string;
+  balancedSnippet?: string;
+  contextExcerpt?: string;
+  parseCandidates?: Array<{
+    label: string;
+    value: string;
+    error?: string;
+  }>;
+}) {
+  const parseFailuresDir = ensureDir(path.join(input.taskWorkspaceDir, "parse-failures"));
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filePath = path.join(parseFailuresDir, `${timestamp}-task-result-parse-failure.json`);
+  assertPathInsideWorkspace({ workspaceDir: input.workspaceDir, targetPath: filePath });
+  writeJsonFileAtomic(filePath, {
+    capturedAt: new Date().toISOString(),
+    requestId: input.requestId,
+    taskId: input.taskId,
+    instanceId: input.instanceId,
+    errorMessage: input.errorMessage,
+    contextExcerpt: input.contextExcerpt,
+    rawOutput: input.rawOutput,
+    balancedSnippet: input.balancedSnippet,
+    parseCandidates: input.parseCandidates,
+  });
+  return {
+    filePath,
+    relativePath: path.relative(input.workspaceDir, filePath),
+  };
+}
+
 export function ensureConversationWorkspace(conversationId: string): ConversationWorkspaceInfo {
   const workspaceDir = ensureDir(getConversationWorkspaceDir(conversationId));
   const contextDir = ensureDir(path.join(workspaceDir, "context"));

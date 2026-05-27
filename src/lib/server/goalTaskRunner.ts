@@ -1,4 +1,6 @@
 import { appendGoalLog, beginGoalTelemetry, failGoalTelemetry, finishGoalTelemetry, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
+import fs from "fs";
+import path from "path";
 import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
 import { resolveExecutionContext } from "@/lib/server/taskExecution/contextResolver";
@@ -12,12 +14,13 @@ import {
   inferInteractionRequirement,
   requiresUserConfirmationToComplete,
 } from "@/lib/server/domain/taskPolicy";
-import { extractJsonObject } from "@/lib/server/jsonExtraction";
+import { buildJsonParseCandidates, buildJsonRepairPrompt, parseJsonWithCandidates } from "@/lib/server/claude/jsonRepair";
+import { extractBalancedJsonSnippet, extractJsonObject, extractParseFailureContext } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
 import { normalizeFileWriteSpecs } from "@/lib/server/fileWriteSpecs";
 import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
-import { writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
+import { writeTaskParseFailureSnapshot, writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
 import {
   buildUserConfirmationOptionsRepairPrompt,
   buildUserConfirmationOptionsPrompt,
@@ -53,7 +56,7 @@ import type {
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { RuntimeEnvironment } from "@/types/runtime";
 import type { AcceptanceReport, LocalValidationReport, TaskAcceptanceRuntimeState } from "@/types/taskAcceptance";
-import type { TaskResult } from "@/types/taskResult";
+import type { ResultBlock, TaskResult } from "@/types/taskResult";
 
 import { streamClaudeCli } from "./claudeCli";
 import { getRuntimeJobByRequestId } from "./repositories/runtimeJobsRepository";
@@ -117,6 +120,24 @@ type ExternalEmbedSpec = {
   description?: string;
   url: string;
   provider?: "youtube" | "generic";
+};
+
+type RawTaskRunnerPayload = {
+  summary?: string;
+  final_message?: string;
+  result_view_kind?: TaskResultViewKind;
+  awaiting_user?: boolean;
+  awaiting_reason?: string;
+  suggested_actions?: string[];
+  interaction_requirement?: unknown;
+  artifacts?: Array<{ label?: string; kind?: TaskRunArtifact["kind"]; content?: string; href?: string }>;
+  files?: unknown;
+  webapp?: unknown;
+  external_embed?: unknown;
+  task_result?: unknown;
+  taskResult?: unknown;
+  deliverable_check?: unknown;
+  structured_output?: Record<string, unknown> | null;
 };
 
 type TaskRunAttemptResult = ParsedTaskRunnerResult & {
@@ -914,24 +935,45 @@ function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: Parsed
   };
 }
 
+function validateTaskRunnerPayload(value: unknown): RawTaskRunnerPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("任务执行结果不是 JSON 对象");
+  }
+  const payload = value as Record<string, unknown>;
+  const hasProtocolSignal = [
+    "summary",
+    "final_message",
+    "result_view_kind",
+    "interaction_requirement",
+    "artifacts",
+    "files",
+    "webapp",
+    "external_embed",
+    "task_result",
+    "taskResult",
+    "deliverable_check",
+  ].some((key) => key in payload);
+  if (!hasProtocolSignal) {
+    throw new Error("JSON 对象不包含任务结果协议字段");
+  }
+  return value as RawTaskRunnerPayload;
+}
+
+function parseTaskRunnerPayload(raw: string) {
+  const candidates = buildJsonParseCandidates(raw);
+  const attempt = parseJsonWithCandidates(candidates, validateTaskRunnerPayload);
+  if (attempt.ok) {
+    return {
+      parsed: attempt.parsed,
+      strategy: attempt.strategy,
+    };
+  }
+  const message = attempt.error instanceof Error ? attempt.error.message : String(attempt.error ?? "未知解析错误");
+  throw new Error(`任务结果 JSON 解析失败：${message}`);
+}
+
 function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKind: TaskResultViewKind): ParsedTaskRunnerResult {
-  const parsed = JSON.parse(extractJsonObject(raw)) as {
-    summary?: string;
-    final_message?: string;
-    result_view_kind?: TaskResultViewKind;
-    awaiting_user?: boolean;
-    awaiting_reason?: string;
-    suggested_actions?: string[];
-    interaction_requirement?: unknown;
-    artifacts?: Array<{ label?: string; kind?: TaskRunArtifact["kind"]; content?: string; href?: string }>;
-    files?: unknown;
-    webapp?: unknown;
-    external_embed?: unknown;
-    task_result?: unknown;
-    taskResult?: unknown;
-    deliverable_check?: unknown;
-    structured_output?: Record<string, unknown> | null;
-  };
+  const { parsed } = parseTaskRunnerPayload(raw);
   const parsedFiles = normalizeFileWriteSpecs(parsed.files);
   const parsedWebApp = normalizeWebAppSpec(parsed.webapp);
   const parsedExternalEmbed = normalizeExternalEmbedSpec(parsed.external_embed);
@@ -1052,6 +1094,49 @@ function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKin
   };
 }
 
+function buildParseCandidateDiagnostics(raw: string) {
+  return buildJsonParseCandidates(raw).map((candidate) => {
+    try {
+      validateTaskRunnerPayload(JSON.parse(candidate.value));
+      return {
+        label: candidate.label,
+        value: candidate.value,
+      };
+    } catch (error) {
+      return {
+        label: candidate.label,
+        value: candidate.value,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+}
+
+function buildTaskParseError(input: RunGoalTaskInput, raw: string, error: unknown) {
+  const context = extractParseFailureContext(raw, error);
+  let snapshotPath = "";
+  if (input.conversationWorkspaceDir && input.taskWorkspaceDir) {
+    try {
+      const snapshot = writeTaskParseFailureSnapshot({
+        workspaceDir: input.conversationWorkspaceDir,
+        taskWorkspaceDir: input.taskWorkspaceDir,
+        requestId: input.requestId,
+        taskId: input.task.id,
+        instanceId: input.instance.id,
+        errorMessage: context.message,
+        rawOutput: raw,
+        balancedSnippet: extractBalancedJsonSnippet(raw),
+        contextExcerpt: context.excerpt,
+        parseCandidates: buildParseCandidateDiagnostics(raw),
+      });
+      snapshotPath = snapshot.relativePath;
+    } catch {
+      snapshotPath = "";
+    }
+  }
+  return [context.formatted, snapshotPath ? `快照: ${snapshotPath}` : ""].filter(Boolean).join("\n");
+}
+
 function tryParseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKind: TaskResultViewKind) {
   try {
     return {
@@ -1061,7 +1146,7 @@ function tryParseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallback
   } catch (error) {
     return {
       result: null,
-      error: error instanceof Error ? error.message : "任务结果解析失败",
+      error: buildTaskParseError(input, raw, error),
     };
   }
 }
@@ -1396,6 +1481,141 @@ function buildUnfinishedResult(input: RunGoalTaskInput, options: {
   };
 }
 
+function readGeneratedWorkspaceArtifacts(input: RunGoalTaskInput): TaskRunArtifact[] {
+  if (!input.taskWorkspaceDir) return [];
+  try {
+    const entries = fs.readdirSync(input.taskWorkspaceDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && /\.(md|markdown|txt|html)$/i.test(entry.name))
+      .slice(0, 8)
+      .map((entry, index) => {
+        const filePath = path.join(input.taskWorkspaceDir!, entry.name);
+        const content = fs.readFileSync(filePath, "utf8");
+        const extension = path.extname(entry.name).toLowerCase();
+        const kind: TaskRunArtifact["kind"] =
+          extension === ".md" || extension === ".markdown" ? "markdown" : extension === ".txt" ? "text" : "code";
+        return {
+          id: `workspace-artifact-${index + 1}`,
+          label: entry.name,
+          kind,
+          content,
+          href: filePath,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function buildRecoveryBlocks(input: RunGoalTaskInput, content: string): ResultBlock[] {
+  const blocks: ResultBlock[] = [
+    { kind: "heading", text: input.task.title, level: 2 },
+    {
+      kind: "callout",
+      tone: "warn",
+      text: "结构化 JSON 解析失败，但系统检测到任务已写入本地文件产物，已保留产物供验收和修复使用。",
+    },
+    { kind: "markdown", content },
+  ];
+  for (const kind of input.task.expectedResult?.requiredBlocks ?? []) {
+    if (blocks.some((block) => block.kind === kind)) continue;
+    if (kind === "key_value") {
+      blocks.push({
+        kind,
+        entries: [
+          { label: "恢复来源", value: "本地文件产物", emphasis: true },
+          { label: "任务", value: input.task.title },
+        ],
+      });
+    } else if (kind === "comparison_table") {
+      blocks.push({
+        kind,
+        columns: ["项目", "状态"],
+        rows: [
+          { 项目: "本地文件产物", 状态: "已检测" },
+          { 项目: "结构化 JSON", 状态: "待修复" },
+        ],
+      });
+    } else if (kind === "list") {
+      blocks.push({
+        kind,
+        items: ["查看已生成文件", "继续验收产物内容", "必要时重新结构化结果"],
+      });
+    } else if (kind === "paragraph") {
+      blocks.push({ kind, text: "系统已从任务工作目录恢复文件产物，避免因 JSON 包装失败直接丢失执行结果。" });
+    } else if (kind === "decision") {
+      blocks.push({
+        kind,
+        question: "如何处理已恢复的本地文件产物？",
+        options: [
+          { id: "continue", label: "继续验收", recommended: true },
+          { id: "retry", label: "重新执行" },
+        ],
+      });
+    }
+  }
+  return blocks;
+}
+
+function buildWorkspaceArtifactRecoveryResult(input: RunGoalTaskInput, options: {
+  reason: string;
+  localValidationReport?: LocalValidationReport;
+  acceptanceRuntime: TaskAcceptanceRuntimeState;
+}): ParsedTaskRunnerResult | null {
+  const artifacts = readGeneratedWorkspaceArtifacts(input);
+  if (!artifacts.length) return null;
+  const primaryArtifact = artifacts[0];
+  const content = primaryArtifact.content?.trim() || `已生成文件：${primaryArtifact.label}`;
+  const taskResult: TaskResult = {
+    schemaVersion: 1,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    title: input.task.expectedOutcome || input.task.title,
+    status: "done",
+    blocks: buildRecoveryBlocks(input, content),
+    meta: {
+      producedAt: new Date().toISOString(),
+      surfaces: ["interactive", "files"],
+      presentation: "document",
+      primaryFormat: primaryArtifact.kind === "markdown" ? "markdown" : "text",
+      exportableFormats: input.task.expectedResult?.exportableFormats,
+    },
+  };
+  const deliverableCheck = buildFallbackDeliverableCheck(input, options.reason);
+  return {
+    summary: "已恢复本地文件产物，等待系统继续验收。",
+    finalMessage: "任务执行结果 JSON 未能解析，但已检测并保留本地文件产物。",
+    resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    awaitingUser: false,
+    awaitingReason: "",
+    suggestedActions: ["查看已生成文件", "继续验收", "重新结构化结果"],
+    artifacts,
+    taskResult,
+    deliverableCheck: {
+      ...deliverableCheck,
+      deliveredArtifacts: artifacts.map((artifact) => artifact.label),
+      gapReason: options.reason,
+    },
+    interactionRequirement: {
+      type: "none",
+      timing: "not_required",
+      reason: "",
+      question: "",
+      options: [],
+      suggestedActions: [],
+      shouldNotifyUser: false,
+    },
+    blocker: null,
+    structuredOutput: {
+      recoveredFromWorkspaceArtifacts: true,
+      taskResult,
+      artifacts,
+      localValidationReport: options.localValidationReport,
+      acceptanceRuntime: options.acceptanceRuntime,
+    },
+  };
+}
+
 async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport, runtime: TaskAcceptanceRuntimeState) {
   const userBlockers = uniqueStrings(report.userBlockers.length ? report.userBlockers : [report.summary]);
   const reason = userBlockers.length ? userBlockers.join("；") : report.summary;
@@ -1576,11 +1796,12 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   });
 
   for (let attempt = 1; attempt <= 2 && !lastReport.passed; attempt += 1) {
+    const isFormatRepair = lastReport.issues.length === 1 && lastReport.issues[0]?.code === "json_parse_failed";
     state.runtime.localValidationReports.push(lastReport);
     state.runtime.repairAttempts.push({
       type: "local_validation",
       attempt,
-      promptKind: "local_validation_repair",
+      promptKind: isFormatRepair ? "json_character_repair" : "local_validation_repair",
       startedAt: new Date().toISOString(),
       status: "running",
       issueCodes: lastReport.issues.map((item) => item.code),
@@ -1588,18 +1809,20 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
     state.appendTrajectory({
       type: "system",
       status: "running",
-      title: `本地校验未通过，开始第 ${attempt} 次结构修复`,
+      title: isFormatRepair ? `JSON 解析失败，开始第 ${attempt} 次字符级修复` : `本地校验未通过，开始第 ${attempt} 次结构修复`,
       thought: lastReport.issues.map((item) => `${item.code}: ${item.message}`).join("\n"),
     });
-    const repairPrompt = buildLocalValidationRepairPrompt({
-      goal: input.goal,
-      subGoal: input.subGoal,
-      task: input.task,
-      instance: input.instance,
-      rawAgentOutput: rawOutput,
-      parsedResult,
-      report: lastReport,
-    });
+    const repairPrompt = isFormatRepair
+      ? buildJsonRepairPrompt(rawOutput)
+      : buildLocalValidationRepairPrompt({
+          goal: input.goal,
+          subGoal: input.subGoal,
+          task: input.task,
+          instance: input.instance,
+          rawAgentOutput: rawOutput,
+          parsedResult,
+          report: lastReport,
+        });
     rawOutput = await runClaudePrompt(input, repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
     const parsed = tryParseTaskRunnerResult(input, rawOutput, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
     parsedResult = parsed.result;
@@ -1635,6 +1858,32 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
   };
 
   let local = await runLocalRepairCycle(input, { ...state, runtime });
+  if (!local.localValidationReport.passed || !local.parsedResult) {
+    const recovered = buildWorkspaceArtifactRecoveryResult(input, {
+      reason: "本地校验失败，任务结果 JSON 未通过解析，但检测到本地文件产物。",
+      localValidationReport: local.localValidationReport,
+      acceptanceRuntime: runtime,
+    });
+    if (recovered) {
+      local = {
+        ...local,
+        parsedResult: recovered,
+        localValidationReport: validateTaskResultLocally({
+          task: input.task,
+          rawOutput: local.rawOutput,
+          parsedResult: recovered,
+        }),
+      };
+      if (local.localValidationReport.passed) {
+        state.appendTrajectory({
+          type: "system",
+          status: "completed",
+          title: "已从本地文件产物恢复结果",
+          thought: "任务结果 JSON 解析失败，但系统检测到已写入的本地文件，并转换为可验收的结构化结果。",
+        });
+      }
+    }
+  }
   if (!local.localValidationReport.passed || !local.parsedResult) {
     const failed = buildUnfinishedResult(input, {
       currentResult: local.parsedResult,
@@ -1775,6 +2024,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
 
 async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   let finalMessage = "";
+  let fallbackFinalMessage = "";
   let pendingAssistantProcessOutput = "";
   let lastAssistantProcessFlushAt = 0;
   let assistantProcessFlushCount = 0;
@@ -1937,6 +2187,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
         }
         if (event.type === "message") {
           finalMessage = event.content;
+          fallbackFinalMessage = event.fallbackContent ?? "";
         }
         if (event.type === "status") {
           if (event.status === lastStatus) return;
@@ -2090,7 +2341,20 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
-  const parsed = tryParseTaskRunnerResult(input, finalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+  let parsed = tryParseTaskRunnerResult(input, finalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+  if (!parsed.result && fallbackFinalMessage.trim()) {
+    const fallbackParsed = tryParseTaskRunnerResult(input, fallbackFinalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+    if (fallbackParsed.result) {
+      appendTrajectory({
+        type: "system",
+        status: "completed",
+        title: "已从流式事件回填最终结果",
+        thought: "result.result 解析失败，系统已使用 Claude stream 中聚合的 assistant 内容恢复结构化结果。",
+      });
+      finalMessage = fallbackFinalMessage;
+      parsed = fallbackParsed;
+    }
+  }
   let result = await completeWithAcceptance(input, {
     rawOutput: finalMessage,
     parsedResult: parsed.result,

@@ -8,6 +8,7 @@ type InboxStore = {
   items: InboxItem[];
   historyItems: InboxItem[];
   markRead: (id: string) => void;
+  markTaskRead: (taskId: string) => void;
   removeItem: (id: string) => void;
   archiveItem: (id: string) => void;
   addItem: (item: InboxItem) => void;
@@ -18,6 +19,12 @@ export const useInboxStore = create<InboxStore>((set) => ({
   items: [],
   historyItems: [],
   markRead: (id) => set((state) => ({ items: state.items.map((item) => (item.id === id ? { ...item, unreadCount: 0 } : item)) })),
+  markTaskRead: (taskId) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.linkTo.match(/tasks\/([^?]+)/)?.[1] === taskId ? { ...item, unreadCount: 0 } : item,
+      ),
+    })),
   removeItem: (id) => set((state) => ({ items: state.items.filter((item) => item.id !== id) })),
   archiveItem: (id) =>
     set((state) => {

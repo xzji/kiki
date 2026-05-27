@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KiKi 当前项目整体架构</title>
+  <style>
+    :root {
+      --text: #171717;
+      --muted: #6b7280;
+      --subtle: #f7f7f5;
+      --line: #e7e5df;
+      --accent: #2563eb;
+      --accent-soft: #eff6ff;
+      --warn-soft: #fff7ed;
+      --ok-soft: #f0fdf4;
+      --max: 1120px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: #fff;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.72;
+    }
+    a { color: inherit; }
+    .hero {
+      padding: 72px 28px 44px;
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: var(--max); margin: 0 auto; }
+    .eyebrow { margin: 0 0 16px; color: var(--muted); font-size: 14px; letter-spacing: .06em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(36px, 6vw, 76px); line-height: .98; letter-spacing: -.06em; max-width: 900px; }
+    .lead { margin: 28px 0 0; max-width: 760px; color: #404040; font-size: 19px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .pill { display: inline-flex; align-items: center; min-height: 30px; padding: 3px 10px; border-radius: 999px; background: var(--subtle); color: #44403c; font-size: 13px; }
+    nav { position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,.94); backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); }
+    nav .wrap { display: flex; gap: 18px; overflow-x: auto; padding: 12px 28px; }
+    nav a { white-space: nowrap; text-decoration: none; color: var(--muted); font-size: 14px; }
+    nav a:hover { color: var(--text); }
+    main { padding: 48px 28px 88px; }
+    section { max-width: var(--max); margin: 0 auto 64px; }
+    h2 { margin: 0 0 18px; font-size: 30px; line-height: 1.15; letter-spacing: -.035em; }
+    h3 { margin: 34px 0 10px; font-size: 20px; letter-spacing: -.02em; }
+    p { margin: 0 0 16px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card { padding: 18px; background: var(--subtle); border-radius: 18px; }
+    .card h3 { margin: 0 0 6px; font-size: 16px; }
+    .card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
+    .node { min-height: 92px; padding: 14px; display: flex; align-items: center; justify-content: center; text-align: center; background: var(--subtle); border-radius: 18px; font-size: 14px; line-height: 1.45; }
+    .node.primary { background: var(--accent-soft); color: #1d4ed8; }
+    .node.ok { background: var(--ok-soft); color: #166534; }
+    .node.warn { background: var(--warn-soft); color: #9a3412; }
+    .lane { display: grid; grid-template-columns: 180px 1fr; gap: 18px; align-items: start; padding: 18px 0; border-top: 1px solid var(--line); }
+    .lane:first-of-type { border-top: 0; }
+    .lane strong { display: block; letter-spacing: -.02em; }
+    .lane ul { margin: 0; padding-left: 20px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 0; font-size: 14px; }
+    th, td { padding: 12px 10px; vertical-align: top; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: #44403c; font-weight: 650; background: #fbfbfa; }
+    code { padding: 2px 5px; border-radius: 6px; background: var(--subtle); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+    pre { overflow: auto; padding: 18px; border-radius: 18px; background: #111827; color: #f9fafb; line-height: 1.55; }
+    pre code { padding: 0; background: transparent; color: inherit; }
+    .callout { padding: 18px 20px; border-radius: 20px; background: var(--accent-soft); color: #1e3a8a; }
+    .callout.warn { background: var(--warn-soft); color: #7c2d12; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .checklist { columns: 2; padding-left: 20px; }
+    .footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 22px; }
+    @media (max-width: 880px) {
+      .grid, .grid.two, .split, .flow { grid-template-columns: 1fr; }
+      .lane { grid-template-columns: 1fr; gap: 8px; }
+      .checklist { columns: 1; }
+      .hero { padding-top: 52px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Architecture Overview · 2026-05-20</p>
+      <h1>KiKi 当前项目整体架构</h1>
+      <p class="lead">KiKi 是面向长期目标管理与自主执行的本地 Agent 产品原型。当前架构已经形成“前端投影 + 服务端权威 + 事件回灌 + daemon 执行”的闭环。</p>
+      <div class="meta">
+        <span class="pill">Next.js 14</span>
+        <span class="pill">TypeScript</span>
+        <span class="pill">Zustand Projection</span>
+        <span class="pill">SQLite Snapshot</span>
+        <span class="pill">SSE Event Bridge</span>
+        <span class="pill">Claude CLI Runtime</span>
+      </div>
+    </div>
+  </header>
+
+  <nav>
+    <div class="wrap">
+      <a href="#layers">总体分层</a>
+      <a href="#frontend">前端</a>
+      <a href="#authority">服务端权威</a>
+      <a href="#runtime">Daemon</a>
+      <a href="#api">API</a>
+      <a href="#constraints">约束</a>
+      <a href="#status">进度</a>
+    </div>
+  </nav>
+
+  <main>
+    <section id="layers">
+      <h2>总体分层</h2>
+      <p class="muted">当前项目从用户界面到本地运行时可以拆为六层，每层职责尽量单向流动。</p>
+      <div class="flow">
+        <div class="node primary">Next.js 页面与组件</div>
+        <div class="node">Zustand 投影与 Overlay</div>
+        <div class="node">API Client / Routes</div>
+        <div class="node">Server Services / Domain</div>
+        <div class="node ok">SQLite Snapshot / Event Log</div>
+        <div class="node warn">Daemon / Worker / Claude CLI</div>
+      </div>
+      <h3>目录职责</h3>
+      <table>
+        <thead><tr><th>目录</th><th>职责</th></tr></thead>
+        <tbody>
+          <tr><td><code>src/app/</code></td><td>Next.js 页面路由与 API Route，覆盖收件箱、会话、目标、任务、日程及 runtime API。</td></tr>
+          <tr><td><code>src/components/</code></td><td>按业务域组织 UI 与交互容器，包括 layout、conversation、goal、task、execution、settings。</td></tr>
+          <tr><td><code>src/stores/</code></td><td>Zustand 前端状态。<code>goalStore</code> 当前只承接服务端投影与 optimistic overlay。</td></tr>
+          <tr><td><code>src/lib/api/</code></td><td>浏览器侧 fetch helper，封装 command、runtime、event、Claude 与 artifact 请求。</td></tr>
+          <tr><td><code>src/lib/server/</code></td><td>服务端核心业务层，包括目标规划、任务执行、领域规则、repositories、worker 和 services。</td></tr>
+          <tr><td><code>src/lib/daemon/</code></td><td>本地 runtime daemon 配置、状态与循环执行器。</td></tr>
+          <tr><td><code>scripts/</code></td><td>架构约束与回归校验脚本。</td></tr>
+          <tr><td><code>data/</code></td><td>SQLite 与 workspace 运行态文件，不应提交。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="frontend">
+      <h2>前端架构</h2>
+      <div class="grid">
+        <div class="card"><h3>App Shell</h3><p><code>layout.tsx</code> 与 <code>AppShell</code> 负责全局壳层、导航、助手、抽屉和沉浸式页面切换。</p></div>
+        <div class="card"><h3>领域组件</h3><p>组件按 conversation、goal、task、execution、inbox、schedule、settings 分域，避免页面级巨石继续膨胀。</p></div>
+        <div class="card"><h3>Runtime Bridge</h3><p><code>RuntimeEventBridge</code> 常驻浏览器，消费 SSE / snapshot 并替换 store 投影。</p></div>
+      </div>
+      <h3>Store 分工</h3>
+      <table>
+        <thead><tr><th>Store</th><th>当前职责</th></tr></thead>
+        <tbody>
+          <tr><td><code>goalStore.ts</code></td><td>goals snapshot 投影、实例状态 / progress / notification 回灌、optimistic overlay 合成。</td></tr>
+          <tr><td><code>conversationStore.ts</code></td><td>会话列表、消息、目标信息收集状态、Claude session 与 runtime env 关联。</td></tr>
+          <tr><td><code>assistantStore.ts</code></td><td>右侧助手消息流、发送态、中断与权限请求。</td></tr>
+          <tr><td><code>runtimeEnvStore.ts</code></td><td>本地运行环境列表、默认环境和健康状态。</td></tr>
+          <tr><td><code>inboxStore.ts</code> / <code>scheduleStore.ts</code></td><td>收件箱和日程事件的前端投影。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>关键变化：</strong> canonical goals 不再由浏览器本地持久化。用户操作只写 pending overlay，并通过命令 API 等待服务端确认。
+      </div>
+    </section>
+
+    <section id="authority">
+      <h2>服务端权威模型</h2>
+      <p>当前核心不变量是：服务端是 Goal 与运行态事实源，浏览器只负责提交命令和展示投影。</p>
+      <div class="lane"><strong>用户操作</strong><ul><li>组件写入 pending overlay，界面立即显示“保存中”。</li><li>提交 <code>command + Idempotency-Key + baseRevision</code> 到 <code>/api/goals/commands</code>。</li></ul></div>
+      <div class="lane"><strong>服务端命令</strong><ul><li><code>goalCommandService</code> 校验结构、幂等键和 revision。</li><li>先 append <code>goal_event_log</code>，再写 <code>runtime_state_snapshots.goals</code>。</li></ul></div>
+      <div class="lane"><strong>事件回灌</strong><ul><li>SSE 推送 goal events，snapshot API 提供兜底全量投影。</li><li><code>RuntimeEventBridge</code> 更新 <code>goalStore</code> 并清理已确认 overlay。</li></ul></div>
+      <h3>关键文件</h3>
+      <table>
+        <thead><tr><th>文件</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>src/app/api/goals/commands/route.ts</code></td><td>命令 API 入口，强制幂等键，解析 baseRevision，返回冲突或校验错误。</td></tr>
+          <tr><td><code>src/lib/server/services/goalCommandService.ts</code></td><td>用户结构命令的单点应用层。</td></tr>
+          <tr><td><code>src/lib/server/services/goalRuntimeService.ts</code></td><td>运行时写入门面，集中处理 snapshot、实例状态、progress、通知和 job。</td></tr>
+          <tr><td><code>src/lib/server/repositories/goalEventLogRepository.ts</code></td><td>append-only goal event log，支持 idempotency key 去重。</td></tr>
+          <tr><td><code>src/lib/server/runtime/stateSnapshot.ts</code></td><td>runtime snapshot 读写，维护 revision 与 expectedRevision 冲突检测。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="runtime">
+      <h2>Daemon / Worker</h2>
+      <p>本地运行时入口是 <code>pnpm daemon</code> / <code>pnpm worker</code>，最终进入 <code>runRuntimeDaemonLoop()</code>。</p>
+      <div class="grid two">
+        <div class="card"><h3>每轮循环</h3><p>读取 runtime env 与 goals snapshot，运行 scheduler，执行通知与 watchdog，派发 queued job，写入 heartbeat 与日志。</p></div>
+        <div class="card"><h3>浏览器职责</h3><p>浏览器不再负责调度、通知或 watchdog，只消费 daemon / worker 产生的事件和 snapshot。</p></div>
+      </div>
+      <table>
+        <thead><tr><th>Worker</th><th>职责</th></tr></thead>
+        <tbody>
+          <tr><td><code>goalSchedulerEngine.ts</code></td><td>判断触发规则，通过 <code>startTaskAttempt</code> 创建实例与 runtime job。</td></tr>
+          <tr><td><code>taskDispatchWorker.ts</code></td><td>消费 runtime job，执行任务，更新 progress、result 和 blocker。</td></tr>
+          <tr><td><code>goalNotificationWorker.ts</code></td><td>通知投递、日程合成、超时暂停。</td></tr>
+          <tr><td><code>recoveryWorker.ts</code></td><td>异常恢复和运行态收敛。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="api">
+      <h2>API 与执行链路</h2>
+      <div class="split">
+        <div>
+          <h3>主要 API 面</h3>
+          <ul>
+            <li><code>/api/goals/commands</code>：Goal 结构变更命令面。</li>
+            <li><code>/api/goals/events</code>：goal event 增量查询与 SSE。</li>
+            <li><code>/api/runtime/state</code>：runtime snapshot 查询与同步。</li>
+            <li><code>/api/goals/instances/*</code>：实例取消、响应、迁移和 runtime 查询。</li>
+            <li><code>/api/goals/clarify|collect|plan</code>：目标澄清、信息收集和规划。</li>
+            <li><code>/api/artifacts/*</code>：产物读取、预览和交互状态。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>任务执行链路</h3>
+          <pre><code>Scheduler / 用户手动启动
+  -> startTaskAttempt
+  -> enqueueGoalRuntimeJob
+  -> taskDispatchWorker
+  -> goalTaskRunner / helpers
+  -> Claude transport
+  -> goalRuntimeService
+  -> RuntimeEventBridge</code></pre>
+        </div>
+      </div>
+      <p><code>src/lib/server/claude/transport.ts</code> 是 Claude CLI 单入口，对外提供 <code>runPromptJson</code> 与 <code>streamPrompt</code>，负责 CLI 路径、环境变量、cwd、权限模式、abort signal 和 stdin prompt 传输。</p>
+    </section>
+
+    <section id="constraints">
+      <h2>架构约束</h2>
+      <ul class="checklist">
+        <li>服务端权威：canonical goals 只能来自服务端 snapshot。</li>
+        <li>单点命令：Goal 结构变更必须通过 <code>goalCommandService</code>。</li>
+        <li>单点写入：运行时写入集中到 <code>goalRuntimeService</code>。</li>
+        <li>幂等键：状态变更命令必须带 <code>Idempotency-Key</code>。</li>
+        <li>Revision 冲突：覆盖结构命令必须传 <code>baseRevision</code>。</li>
+        <li>Overlay 隔离：pending 状态不能写入 canonical goals。</li>
+        <li>SSE cursor：维护 <code>lastGoalEventId</code> 支持断线续传和多 tab。</li>
+        <li>浏览器不调度：调度、通知、watchdog 由 daemon / worker 负责。</li>
+        <li>Claude 单入口：CLI 调用统一走 <code>claude/transport.ts</code>。</li>
+        <li>领域规则集中：任务确认、交互需求、错误分类集中到 <code>taskPolicy.ts</code>。</li>
+        <li>运行态隔离：<code>data/*.db</code>、<code>*.db-shm</code>、<code>*.db-wal</code> 不提交。</li>
+      </ul>
+      <h3>校验命令</h3>
+      <pre><code>pnpm lint
+pnpm build
+pnpm verify:architecture
+pnpm verify:goal-commands
+pnpm verify:goal-event-cursor
+pnpm verify</code></pre>
+    </section>
+
+    <section id="status">
+      <h2>当前完成度</h2>
+      <div class="grid two">
+        <div class="card"><h3>已落地</h3><p>Claude transport 单点化、服务端权威、命令 API、幂等与 revision、SSE cursor、optimistic overlay、daemon 调度下沉、legacy mutation 清理。</p></div>
+        <div class="card"><h3>仍需推进</h3><p>浏览器级 E2E、关键策略测试、可观测性产品化、<code>goalTaskRunner</code> 拆分、前端数据层长期规范。</p></div>
+      </div>
+      <h3>推荐阅读顺序</h3>
+      <ol>
+        <li><code>PROJECT_OVERVIEW.md</code></li>
+        <li><code>docs/plans/architecture-refactor-execution-plan.md</code></li>
+        <li><code>docs/plans/architecture-refactor-remaining-roadmap.md</code></li>
+        <li><code>docs/plans/goal-store-projection-refactor-plan.md</code></li>
+        <li><code>docs/plans/goal-store-mutation-migration-matrix.md</code></li>
+        <li><code>src/lib/server/services/goalCommandService.ts</code></li>
+        <li><code>src/components/providers/RuntimeEventBridge.tsx</code></li>
+      </ol>
+      <p class="footer">对应 Markdown 版本：<code>docs/architecture-overview.md</code>。本 HTML 为静态架构总览，适合浏览器预览和分享。</p>
+    </section>
+  </main>
+</body>
+</html>

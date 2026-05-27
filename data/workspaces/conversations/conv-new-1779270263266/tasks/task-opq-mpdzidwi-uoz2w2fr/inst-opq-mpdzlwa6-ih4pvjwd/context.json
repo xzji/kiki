@@ -1,0 +1,2012 @@
+{
+  "identity": {
+    "conversationId": "conv-new-1779270263266",
+    "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+    "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+    "taskId": "task-opq-mpdzidwi-uoz2w2fr",
+    "instanceId": "inst-opq-mpdzlwa6-ih4pvjwd",
+    "requestId": "goal-task-1779277036618-9lws9k"
+  },
+  "readiness": {
+    "state": "ready",
+    "blockers": [],
+    "summary": "执行当前任务所需上下文已就绪。"
+  },
+  "dependencies": [],
+  "inputs": {
+    "goal": {
+      "id": "goal-opq-mpdzidwi-ev0c8thq",
+      "title": "越南5天团建旅行规划",
+      "deadline": "2026-05-25T23:59:59+08:00",
+      "progress": 0,
+      "createdAt": "2026-05-20T11:34:33.186Z",
+      "kind": "collab",
+      "summary": "今晚20人团队从北京出发前往胡志明市和芽庄进行5天团建，机票酒店签证均已就绪。已规划6个子目标共26项任务，涵盖行前准备、两地行程、交通衔接、返程收尾及财务管理。核心推进路径为：出发前紧急确认→胡志明市游览→芽庄团建活动→安全返京。",
+      "subGoals": [
+        {
+          "id": "sg-opq-mpdzidwi-vii1353g",
+          "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+          "title": "行前紧急准备与确认",
+          "description": "今晚出发前的最后准备，确保20人全员信息同步、行李合规、集合安排清晰，包括护照签证确认、航班信息核实、紧急联系人建立、机场集合方案明确",
+          "why": "航班今晚出发，这是最紧急且不可逆的环节，任何遗漏都可能导致行程受阻",
+          "priority": "critical",
+          "weight": 0.15,
+          "dependencies": [],
+          "estimatedDurationMinutes": 120,
+          "successCriteria": [
+            "建立20人微信群，全员确认收到行程信息",
+            "确认全员护照签证有效期",
+            "明确机场集合时间和地点，分配小组负责人"
+          ],
+          "tasks": [
+            {
+              "id": "task-opq-mpdzidwi-uoz2w2fr",
+              "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+              "title": "行程信息同步包生成",
+              "description": "整理本次越南团建的核心行程信息，包括航班、酒店、行程概览、注意事项等，生成结构化的信息卡，方便用户一键转发至微信群，确保全员信息同步",
+              "expectedOutcome": "结构化行程信息同步包，包含航班信息、酒店信息、行程概览、行前提醒、联系方式等模块",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "结构化行程信息同步包，包含航班信息、酒店信息、行程概览、行前提醒、联系方式等模块",
+                "format": "json",
+                "presentation": "visual_report",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "生成包含航班、酒店、行程概览、注意事项的完整信息包，可直接复制转发"
+              },
+              "executionObjective": "整理本次越南团建的核心行程信息，包括航班、酒店、行程概览、注意事项等，生成结构化的信息卡，方便用户一键转发至微信群，确保全员信息同步",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "整理行程核心信息",
+                  "设计信息卡结构",
+                  "生成可转发格式"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看行程信息包",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "生成包含航班、酒店、行程概览、注意事项的完整信息包，可直接复制转发"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-k3y7puou",
+              "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+              "title": "护照签证有效期确认清单",
+              "description": "生成护照签证有效期核对清单模板，用于收集和确认20人的护照号码、有效期、签证状态等关键信息，确保护照有效期在6个月以上、签证有效",
+              "expectedOutcome": "护照签证确认清单模板，包含姓名、护照号、有效期、签证状态、备注等字段",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "护照签证确认清单模板，包含姓名、护照号、有效期、签证状态、备注等字段",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "callout",
+                  "comparison_table",
+                  "key_value"
+                ],
+                "completionCriteria": "生成20人护照签证确认清单模板，包含填写说明和核对要点"
+              },
+              "executionObjective": "生成护照签证有效期核对清单模板，用于收集和确认20人的护照号码、有效期、签证状态等关键信息，确保护照有效期在6个月以上、签证有效",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "设计清单模板结构",
+                  "添加核对要点提示",
+                  "生成可导出格式"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看确认清单",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "生成20人护照签证确认清单模板，包含填写说明和核对要点"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-wyrgoh67",
+              "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+              "title": "机场集合方案制定",
+              "description": "制定今晚机场集合方案，包括建议集合时间、集合地点、小组分配、负责人指派、迟到应急方案等，需用户确认后执行",
+              "expectedOutcome": "机场集合方案，包含集合时间、地点、小组划分、负责人、应急联络方式",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-1ul93ur12jxjp7"
+              ],
+              "executionMode": "interactive",
+              "expectedResult": {
+                "type": "decision",
+                "description": "机场集合方案，包含集合时间、地点、小组划分、负责人、应急联络方式",
+                "format": "json",
+                "presentation": "visual_report",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "callout",
+                  "key_value",
+                  "comparison_table"
+                ],
+                "completionCriteria": "用户确认集合方案，包括时间、地点、小组分配"
+              },
+              "executionObjective": "制定今晚机场集合方案，包括建议集合时间、集合地点、小组分配、负责人指派、迟到应急方案等，需用户确认后执行",
+              "autoRunDisabled": false,
+              "requiresConfirmation": true,
+              "collaboration": {
+                "mode": "agent_with_user_confirmation",
+                "agentResponsibilities": [
+                  "根据航班信息推算合理集合时间",
+                  "设计小组分配建议方案",
+                  "提供集合地点建议",
+                  "准备迟到应急方案"
+                ],
+                "userResponsibilities": [
+                  "确认或调整集合时间",
+                  "确认或调整集合地点",
+                  "确认小组负责人名单"
+                ],
+                "userInteractionType": "confirm",
+                "userInteractionTiming": "after_agent_output",
+                "userFacingActionLabel": "确认集合方案",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "用户确认集合方案内容后完成"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-4hdqy76o",
+              "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+              "title": "紧急联系人与分工表建立",
+              "description": "建立团建期间紧急联系人网络，包括领队、小组负责人、当地紧急电话、使馆联系方式等，同时明确各负责人分工职责",
+              "expectedOutcome": "紧急联系人网络表和人员分工表，包含姓名、角色、联系方式、职责范围",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "hybrid",
+              "priority": "high",
+              "dependencies": [
+                "task-opq-1v58b8p133wr35"
+              ],
+              "executionMode": "interactive",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "紧急联系人网络表和人员分工表，包含姓名、角色、联系方式、职责范围",
+                "format": "json",
+                "presentation": "visual_report",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "callout",
+                  "comparison_table",
+                  "key_value"
+                ],
+                "completionCriteria": "完成紧急联系人名单和分工表，信息完整可执行"
+              },
+              "executionObjective": "建立团建期间紧急联系人网络，包括领队、小组负责人、当地紧急电话、使馆联系方式等，同时明确各负责人分工职责",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_user_collaborative",
+                "agentResponsibilities": [
+                  "准备联系人模板",
+                  "提供越南当地紧急电话",
+                  "提供中国驻越南使馆联系方式",
+                  "设计分工职责模板"
+                ],
+                "userResponsibilities": [
+                  "提供领队和小组负责人联系方式",
+                  "确认各负责人分工",
+                  "补充其他紧急联系人"
+                ],
+                "userInteractionType": "provide_context",
+                "userInteractionTiming": "during_execution",
+                "userFacingActionLabel": "补充联系人信息",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "双方共同完成联系人名单和分工表后完成"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sg-opq-mpdzidwi-5m8n6j6b",
+          "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+          "title": "胡志明市行程规划与执行",
+          "description": "规划胡志明市段的行程安排，包括景点游览、餐饮选择、团队活动设计、交通协调，确保20人团队高效有序地完成胡志明市的体验",
+          "why": "胡志明市是第一站，行程安排的质量直接影响团队氛围和后续行程的顺利进行",
+          "priority": "high",
+          "weight": 0.25,
+          "dependencies": [
+            "sg-opq-mpdzidwi-vii1353g"
+          ],
+          "estimatedDurationMinutes": 720,
+          "successCriteria": [
+            "完成核心景点游览（统一宫、战争遗迹博物馆等）",
+            "组织至少1次团队晚餐活动",
+            "建立当地交通解决方案（包车/打车）"
+          ],
+          "tasks": [
+            {
+              "id": "task-opq-mpdzidwi-uoz2w2fr",
+              "subGoalId": "sg-opq-mpdzidwi-5m8n6j6b",
+              "title": "胡志明市核心景点游览攻略",
+              "description": "调研统一宫、战争遗迹博物馆等核心景点的开放时间、门票价格、游览时长、注意事项，生成结构化攻略并推荐游览顺序和时间安排",
+              "expectedOutcome": "胡志明市核心景点的完整游览攻略，包含时间安排建议",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "胡志明市核心景点的完整游览攻略，包含时间安排建议",
+                "format": "json",
+                "presentation": "visual_report",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "comparison_table",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "输出包含统一宫、战争遗迹博物馆等至少3个核心景点的详细信息，并给出推荐的游览顺序和时间安排"
+              },
+              "executionObjective": "调研统一宫、战争遗迹博物馆等核心景点的开放时间、门票价格、游览时长、注意事项，生成结构化攻略并推荐游览顺序和时间安排",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "搜索景点开放时间、门票、游览时长",
+                  "分析景点地理位置优化游览顺序",
+                  "生成结构化攻略报告"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看景点攻略",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "输出包含统一宫、战争遗迹博物馆等至少3个核心景点的详细信息，并给出推荐的游览顺序和时间安排"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-k3y7puou",
+              "subGoalId": "sg-opq-mpdzidwi-5m8n6j6b",
+              "title": "胡志明市交通方案对比与建议",
+              "description": "对比包车、打车、公共交通三种方案对20人团队的适用性，考虑成本、便利性、安全性，给出推荐方案和具体操作指引",
+              "expectedOutcome": "三种交通方案的对比分析及推荐方案，包含预订指引和联系方式",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-q9a1qa1nb2z6i"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "三种交通方案的对比分析及推荐方案，包含预订指引和联系方式",
+                "format": "json",
+                "presentation": "comparison_table",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "comparison_table",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "输出包含至少3种交通方案的对比，明确推荐方案及预订方式"
+              },
+              "executionObjective": "对比包车、打车、公共交通三种方案对20人团队的适用性，考虑成本、便利性、安全性，给出推荐方案和具体操作指引",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "调研包车公司、打车软件、公共交通信息",
+                  "对比成本、便利性、安全性",
+                  "生成对比表格和推荐方案"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看交通方案",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "输出包含至少3种交通方案的对比，明确推荐方案及预订方式"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-wyrgoh67",
+              "subGoalId": "sg-opq-mpdzidwi-5m8n6j6b",
+              "title": "团队晚餐餐厅推荐与预订方案",
+              "description": "筛选适合20人团队聚餐的餐厅，涵盖越南菜、中餐、融合菜等类型，提供价格区间、特色菜品、预订要求、地理位置对比，并给出推荐选择",
+              "expectedOutcome": "团队晚餐餐厅候选清单及对比分析，包含预订指引",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "high",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "团队晚餐餐厅候选清单及对比分析，包含预订指引",
+                "format": "json",
+                "presentation": "comparison_table",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "comparison_table",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "输出至少5家候选餐厅的详细信息对比，明确推荐选择及预订方式"
+              },
+              "executionObjective": "筛选适合20人团队聚餐的餐厅，涵盖越南菜、中餐、融合菜等类型，提供价格区间、特色菜品、预订要求、地理位置对比，并给出推荐选择",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "搜索适合团体的餐厅",
+                  "整理价格、菜品、预订要求等信息",
+                  "生成对比表格和推荐方案"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看餐厅推荐",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "输出至少5家候选餐厅的详细信息对比，明确推荐选择及预订方式"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-4hdqy76o",
+              "subGoalId": "sg-opq-mpdzidwi-5m8n6j6b",
+              "title": "胡志明市执行清单与应急手册",
+              "description": "整合景点攻略、交通方案、餐厅预订信息，生成包含时间节点、负责人分工、集合地点、应急预案的完整执行清单，确保20人团队有序出行",
+              "expectedOutcome": "可直接使用的胡志明市行程执行清单，包含时间表、分工、应急联系方式",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-q9a1qa1nb2z6i",
+                "task-opq-pzag1b1n13dhj",
+                "task-opq-ppaucc1mr3rsk"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "可直接使用的胡志明市行程执行清单，包含时间表、分工、应急联系方式",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "输出包含完整日程安排、团队分工建议、应急联系人（当地使馆、医院、报警电话）的执行清单"
+              },
+              "executionObjective": "整合景点攻略、交通方案、餐厅预订信息，生成包含时间节点、负责人分工、集合地点、应急预案的完整执行清单，确保20人团队有序出行",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "整合前序任务的景点、交通、餐厅信息",
+                  "设计时间节点和分工建议",
+                  "整理应急联系方式"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看执行清单",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "Agent完成执行清单生成，用户可直接参考使用"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sg-opq-mpdzidwi-6mtn0ym1",
+          "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+          "title": "胡志明市至芽庄交通衔接",
+          "description": "协调20人从胡志明市到芽庄的交通安排，包括机票/火车/大巴的预订确认、行李托运协调、到达后的接送安排",
+          "why": "城市间交通是行程衔接的关键节点，20人规模的转移需要周密协调",
+          "priority": "high",
+          "weight": 0.1,
+          "dependencies": [
+            "sg-opq-mpdzidwi-5m8n6j6b"
+          ],
+          "estimatedDurationMinutes": 240,
+          "successCriteria": [
+            "确认城市间交通方式并完成预订",
+            "全员安全抵达芽庄酒店"
+          ],
+          "tasks": [
+            {
+              "id": "task-opq-mpdzidwi-uoz2w2fr",
+              "subGoalId": "sg-opq-mpdzidwi-6mtn0ym1",
+              "title": "胡志明市至芽庄交通方式对比分析",
+              "description": "对比飞机、火车、大巴三种交通方式的时间、费用、舒适度、行李限制，结合20人团队需求给出最优推荐方案",
+              "expectedOutcome": "三种交通方式的详细对比报告，含最优推荐及预订链接",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "三种交通方式的详细对比报告，含最优推荐及预订链接",
+                "format": "json",
+                "presentation": "comparison_table",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "comparison_table",
+                  "key_value",
+                  "callout",
+                  "heading"
+                ],
+                "completionCriteria": "生成包含时间、费用、舒适度、行李限制的对比报告，并给出明确推荐"
+              },
+              "executionObjective": "对比飞机、火车、大巴三种交通方式的时间、费用、舒适度、行李限制，结合20人团队需求给出最优推荐方案",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "搜索并整理三种交通方式的详细信息",
+                  "制作对比表格",
+                  "给出推荐方案"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看对比结果",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "生成包含时间、费用、舒适度、行李限制的对比报告，并给出明确推荐"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-k3y7puou",
+              "subGoalId": "sg-opq-mpdzidwi-6mtn0ym1",
+              "title": "确认并完成城市间交通预订",
+              "description": "根据用户选择的交通方式，协助确认预订信息、提供预订凭证模板、提醒预订注意事项",
+              "expectedOutcome": "用户选择的交通方式及预订确认信息汇总",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "hybrid",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-1ycskw82wmdmo"
+              ],
+              "executionMode": "interactive",
+              "expectedResult": {
+                "type": "decision",
+                "description": "用户选择的交通方式及预订确认信息汇总",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "用户确认选择的交通方式，并提供预订信息或确认已预订"
+              },
+              "executionObjective": "根据用户选择的交通方式，协助确认预订信息、提供预订凭证模板、提醒预订注意事项",
+              "autoRunDisabled": false,
+              "requiresConfirmation": true,
+              "collaboration": {
+                "mode": "agent_user_collaborative",
+                "agentResponsibilities": [
+                  "提供预订注意事项清单",
+                  "汇总预订信息",
+                  "提醒关键时间节点"
+                ],
+                "userResponsibilities": [
+                  "选择交通方式",
+                  "完成实际预订",
+                  "确认预订信息"
+                ],
+                "userInteractionType": "confirm",
+                "userInteractionTiming": "core_task_step",
+                "userFacingActionLabel": "确认交通选择并填写预订信息",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "用户确认交通方式并提供预订凭证或确认已预订完成"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-wyrgoh67",
+              "subGoalId": "sg-opq-mpdzidwi-6mtn0ym1",
+              "title": "行李托运规则整理与全员通知",
+              "description": "根据选定交通方式整理行李托运规则（重量限制、尺寸要求、禁运物品），生成全员通知清单",
+              "expectedOutcome": "行李托运规则说明及全员通知清单",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "medium",
+              "dependencies": [
+                "task-opq-5nc013ql6pl"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "行李托运规则说明及全员通知清单",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "生成行李托运规则文档和全员通知模板"
+              },
+              "executionObjective": "根据选定交通方式整理行李托运规则（重量限制、尺寸要求、禁运物品），生成全员通知清单",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "整理托运规则",
+                  "生成通知文档",
+                  "提供打包建议"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看行李托运规则",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "生成行李托运规则文档和全员通知模板"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-4hdqy76o",
+              "subGoalId": "sg-opq-mpdzidwi-6mtn0ym1",
+              "title": "芽庄接送车辆安排确认",
+              "description": "确认芽庄机场/车站至酒店的接送车辆安排，包括车型、司机联系方式、集合地点",
+              "expectedOutcome": "接送车辆安排确认单，含车型、司机、联系方式、集合地点",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "hybrid",
+              "priority": "high",
+              "dependencies": [
+                "task-opq-5nc013ql6pl"
+              ],
+              "executionMode": "interactive",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "接送车辆安排确认单，含车型、司机、联系方式、集合地点",
+                "format": "json",
+                "presentation": "summary_card",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "用户确认接送车辆安排信息或提供已预订凭证"
+              },
+              "executionObjective": "确认芽庄机场/车站至酒店的接送车辆安排，包括车型、司机联系方式、集合地点",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_user_collaborative",
+                "agentResponsibilities": [
+                  "提供接送安排建议",
+                  "整理接送信息模板",
+                  "提醒关键联系人"
+                ],
+                "userResponsibilities": [
+                  "预订或确认接送车辆",
+                  "提供司机联系方式"
+                ],
+                "userInteractionType": "answer",
+                "userInteractionTiming": "core_task_step",
+                "userFacingActionLabel": "填写接送车辆信息",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "用户提供接送车辆预订确认信息"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-sps4yd1h",
+              "subGoalId": "sg-opq-mpdzidwi-6mtn0ym1",
+              "title": "全员抵达芽庄酒店确认",
+              "description": "抵达当日清点确认20人全员安全抵达芽庄酒店，处理未抵达人员跟进",
+              "expectedOutcome": "全员抵达确认报告，含抵达人员名单和异常处理",
+              "taskType": "repeat",
+              "triggerRule": "满足触发条件执行：团队抵达芽庄当日",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "user_interactive",
+              "priority": "high",
+              "dependencies": [
+                "task-opq-pmjdz4ake3j"
+              ],
+              "executionMode": "event_triggered",
+              "expectedResult": {
+                "type": "confirmation",
+                "description": "全员抵达确认报告，含抵达人员名单和异常处理",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "key_value"
+                ],
+                "completionCriteria": "用户确认20人全员抵达芽庄酒店"
+              },
+              "executionObjective": "抵达当日清点确认20人全员安全抵达芽庄酒店，处理未抵达人员跟进",
+              "autoRunDisabled": false,
+              "requiresConfirmation": true,
+              "collaboration": {
+                "mode": "user_primary_agent_assistive",
+                "agentResponsibilities": [
+                  "提供抵达确认清单模板",
+                  "跟进未抵达人员",
+                  "记录抵达状态"
+                ],
+                "userResponsibilities": [
+                  "清点抵达人数",
+                  "确认全员抵达状态",
+                  "处理异常情况"
+                ],
+                "userInteractionType": "confirm",
+                "userInteractionTiming": "core_task_step",
+                "userFacingActionLabel": "确认全员抵达状态",
+                "shouldNotifyUser": true,
+                "completionOwner": "user",
+                "completionDefinition": "用户确认全员已安全抵达芽庄酒店"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sg-opq-mpdzidwi-je3rc632",
+          "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+          "title": "芽庄行程规划与团队建设活动",
+          "description": "规划芽庄段的行程，重点安排团队建设活动，如海滩团建、珍珠岛游玩、团队游戏等，强化团队凝聚力",
+          "why": "芽庄以休闲度假为主，是开展团队建设活动的最佳场所，是团建目的的核心体现",
+          "priority": "critical",
+          "weight": 0.3,
+          "dependencies": [
+            "sg-opq-mpdzidwi-6mtn0ym1"
+          ],
+          "estimatedDurationMinutes": 960,
+          "successCriteria": [
+            "完成至少2次团队建设活动",
+            "组织海滩团队游戏或拓展活动",
+            "安排珍珠岛或其他景点游览"
+          ],
+          "tasks": [
+            {
+              "id": "task-opq-mpdzidwi-uoz2w2fr",
+              "subGoalId": "sg-opq-mpdzidwi-je3rc632",
+              "title": "芽庄海滩团建活动策划",
+              "description": "调研芽庄主要海滩资源，设计适合20人团队的团建游戏和拓展活动方案，包括活动流程、所需时间、参与方式和注意事项",
+              "expectedOutcome": "芽庄海滩团建活动完整方案，包含活动类型、流程、时间安排和注意事项",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "芽庄海滩团建活动完整方案，包含活动类型、流程、时间安排和注意事项",
+                "format": "json",
+                "presentation": "visual_report",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "comparison_table",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "产出包含至少2个海滩团建活动方案，每个方案含活动名称、时长、流程、所需物资和注意事项"
+              },
+              "executionObjective": "调研芽庄主要海滩资源，设计适合20人团队的团建游戏和拓展活动方案，包括活动流程、所需时间、参与方式和注意事项",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "调研芽庄主要海滩",
+                  "设计团建游戏方案",
+                  "制定活动流程和时间",
+                  "列出注意事项"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看团建方案",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "产出包含至少2个海滩团建活动方案，每个方案含活动名称、时长、流程、所需物资和注意事项"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-k3y7puou",
+              "subGoalId": "sg-opq-mpdzidwi-je3rc632",
+              "title": "珍珠岛游览安排",
+              "description": "调研珍珠岛的景点分布、门票价格、开放时间、岛上交通方式，制定适合20人团队的游览路线和时间安排",
+              "expectedOutcome": "珍珠岛完整游览计划，包含景点推荐、门票信息、交通方式和时间安排",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "珍珠岛完整游览计划，包含景点推荐、门票信息、交通方式和时间安排",
+                "format": "json",
+                "presentation": "visual_report",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "comparison_table",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "产出珍珠岛游览方案，含景点列表、门票价格、开放时间、推荐路线、交通方式和预计耗时"
+              },
+              "executionObjective": "调研珍珠岛的景点分布、门票价格、开放时间、岛上交通方式，制定适合20人团队的游览路线和时间安排",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "调研珍珠岛景点信息",
+                  "查询门票和交通",
+                  "设计游览路线",
+                  "制定时间安排"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看游览计划",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "产出珍珠岛游览方案，含景点列表、门票价格、开放时间、推荐路线、交通方式和预计耗时"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-wyrgoh67",
+              "subGoalId": "sg-opq-mpdzidwi-je3rc632",
+              "title": "团建活动物资准备清单",
+              "description": "根据海滩团建和珍珠岛游览方案，列出所需准备的物资清单，包括游戏道具、防晒用品、急救药品、团队标识等",
+              "expectedOutcome": "完整的团建活动物资准备清单，分类列出所有需要准备的物品",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "high",
+              "dependencies": [
+                "task-opq-t95sk51o0md4d",
+                "task-opq-sf6zh81n6nk1g"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "完整的团建活动物资准备清单，分类列出所有需要准备的物品",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "产出分类清晰的物资清单，含物品名称、数量、用途说明和采购建议"
+              },
+              "executionObjective": "根据海滩团建和珍珠岛游览方案，列出所需准备的物资清单，包括游戏道具、防晒用品、急救药品、团队标识等",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "汇总活动所需物资",
+                  "分类整理清单",
+                  "标注数量和用途",
+                  "提供采购建议"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看物资清单",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "Agent产出完整的物资准备清单"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-4hdqy76o",
+              "subGoalId": "sg-opq-mpdzidwi-je3rc632",
+              "title": "芽庄行程时间表整合",
+              "description": "将海滩团建活动、珍珠岛游览和其他景点安排整合为完整的芽庄行程时间表，明确每日活动安排和时间节点",
+              "expectedOutcome": "芽庄段完整行程时间表，明确每日活动安排和时间节点",
+              "taskType": "one_shot",
+              "triggerRule": "准备好后执行一次",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-t95sk51o0md4d",
+                "task-opq-sf6zh81n6nk1g"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "芽庄段完整行程时间表，明确每日活动安排和时间节点",
+                "format": "json",
+                "presentation": "timeline",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "产出按天划分的芽庄行程时间表，含时间段、活动内容、地点和备注"
+              },
+              "executionObjective": "将海滩团建活动、珍珠岛游览和其他景点安排整合为完整的芽庄行程时间表，明确每日活动安排和时间节点",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "整合所有活动安排",
+                  "规划时间节点",
+                  "制作行程时间表",
+                  "标注注意事项"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看行程时间表",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "Agent产出时间合理、信息完整的芽庄行程时间表"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sg-opq-mpdzidwi-i2b44nyl",
+          "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+          "title": "返程协调与行程收尾",
+          "description": "协调从芽庄返回胡志明市再飞北京的全流程，包括返程交通确认、行李整理、酒店退房、机场集合、航班确认、返京后的解散安排",
+          "why": "返程涉及20人的安全回国，任何疏漏都可能导致人员滞留或其他问题",
+          "priority": "high",
+          "weight": 0.15,
+          "dependencies": [
+            "sg-opq-mpdzidwi-je3rc632"
+          ],
+          "estimatedDurationMinutes": 360,
+          "successCriteria": [
+            "确认返程航班信息并同步全员",
+            "全员安全抵达北京并顺利解散"
+          ],
+          "tasks": [
+            {
+              "id": "task-opq-mpdzidwi-uoz2w2fr",
+              "subGoalId": "sg-opq-mpdzidwi-i2b44nyl",
+              "title": "返程交通信息确认与全员同步",
+              "description": "确认芽庄返回胡志明市的交通安排以及胡志明市飞北京的航班信息，包括航班号、起飞时间、航站楼、行李额度等，并整理成清晰的信息卡片同步给全员",
+              "expectedOutcome": "返程交通信息卡片，包含两段交通的完整信息",
+              "taskType": "repeat",
+              "triggerRule": "返程前1天 09:00 触发",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "返程交通信息卡片，包含两段交通的完整信息",
+                "format": "json",
+                "presentation": "summary_card",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "返程航班信息和境内交通信息已整理完毕并生成可视化卡片"
+              },
+              "executionObjective": "确认芽庄返回胡志明市的交通安排以及胡志明市飞北京的航班信息，包括航班号、起飞时间、航站楼、行李额度等，并整理成清晰的信息卡片同步给全员",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "整理航班信息",
+                  "整理境内交通信息",
+                  "生成信息卡片",
+                  "推送给全员"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看返程信息",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "返程航班信息和境内交通信息已整理完毕并生成可视化卡片"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-k3y7puou",
+              "subGoalId": "sg-opq-mpdzidwi-i2b44nyl",
+              "title": "行李整理与退房检查清单",
+              "description": "生成行李整理检查清单和酒店退房注意事项，帮助20人团队高效完成退房准备，避免遗漏物品",
+              "expectedOutcome": "行李整理检查清单和退房注意事项",
+              "taskType": "repeat",
+              "triggerRule": "返程前1天 20:00 触发",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "high",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "行李整理检查清单和退房注意事项",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "callout",
+                  "key_value"
+                ],
+                "completionCriteria": "行李清单和退房注意事项已生成完毕"
+              },
+              "executionObjective": "生成行李整理检查清单和酒店退房注意事项，帮助20人团队高效完成退房准备，避免遗漏物品",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "生成行李检查清单",
+                  "整理退房注意事项",
+                  "推送给全员"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看清单",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "清单生成并推送成功"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-wyrgoh67",
+              "subGoalId": "sg-opq-mpdzidwi-i2b44nyl",
+              "title": "机场集合与值机协调方案",
+              "description": "制定胡志明市机场集合方案，包括集合时间、地点、值机分组安排、特殊行李处理等，确保20人团队高效完成登机准备",
+              "expectedOutcome": "机场集合与值机协调方案",
+              "taskType": "repeat",
+              "triggerRule": "返程当天 06:00 触发",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-zm3816rvt52q"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "机场集合与值机协调方案",
+                "format": "json",
+                "presentation": "timeline",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "机场集合方案已生成完毕"
+              },
+              "executionObjective": "制定胡志明市机场集合方案，包括集合时间、地点、值机分组安排、特殊行李处理等，确保20人团队高效完成登机准备",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "制定集合时间地点",
+                  "安排值机分组",
+                  "整理登机注意事项",
+                  "推送给全员"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看集合方案",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "机场集合方案已生成完毕"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-4hdqy76o",
+              "subGoalId": "sg-opq-mpdzidwi-i2b44nyl",
+              "title": "全员返程状态跟踪与安全确认",
+              "description": "实时追踪20人团队的返程状态，确认全员安全抵达北京并完成签到",
+              "expectedOutcome": "全员抵达确认报告",
+              "taskType": "repeat",
+              "triggerRule": "每天 09:00 触发（默认时间）",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "hybrid",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-z240n8rbtxos"
+              ],
+              "executionMode": "monitoring",
+              "expectedResult": {
+                "type": "confirmation",
+                "description": "全员抵达确认报告",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value"
+                ],
+                "completionCriteria": "全员20人已确认安全抵达北京"
+              },
+              "executionObjective": "实时追踪20人团队的返程状态，确认全员安全抵达北京并完成签到",
+              "autoRunDisabled": false,
+              "requiresConfirmation": true,
+              "collaboration": {
+                "mode": "agent_user_collaborative",
+                "agentResponsibilities": [
+                  "发送抵达确认通知",
+                  "收集签到状态",
+                  "生成抵达报告"
+                ],
+                "userResponsibilities": [
+                  "线下确认每位成员抵达状态",
+                  "报告未抵达人员情况"
+                ],
+                "userInteractionType": "answer",
+                "userInteractionTiming": "core_task_step",
+                "userFacingActionLabel": "确认抵达状态",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "全员抵达状态已确认并记录"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-sps4yd1h",
+              "subGoalId": "sg-opq-mpdzidwi-i2b44nyl",
+              "title": "返京解散安排与后续事项提醒",
+              "description": "制定北京解散安排，包括解散地点、交通指引、后续报销材料提交提醒等",
+              "expectedOutcome": "解散安排与后续事项提醒",
+              "taskType": "repeat",
+              "triggerRule": "每天 09:00 触发（默认时间）",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "high",
+              "dependencies": [
+                "task-opq-zm3816rvt52q"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "information",
+                "description": "解散安排与后续事项提醒",
+                "format": "json",
+                "presentation": "summary_card",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "解散安排和后续提醒已生成完毕"
+              },
+              "executionObjective": "制定北京解散安排，包括解散地点、交通指引、后续报销材料提交提醒等",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "制定解散安排",
+                  "整理后续事项提醒",
+                  "推送给全员"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看解散安排",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "解散安排和后续提醒已生成完毕"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sg-opq-mpdzidwi-2pnmiunu",
+          "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+          "title": "行程财务管理与报销整理",
+          "description": "行程期间的费用管理、发票收集、费用分摊计算、团建费用报销准备，确保财务清晰透明",
+          "why": "团建旅行涉及多人费用支出，规范的财务管理是行程顺利的重要保障",
+          "priority": "medium",
+          "weight": 0.05,
+          "dependencies": [
+            "sg-opq-mpdzidwi-vii1353g"
+          ],
+          "estimatedDurationMinutes": 180,
+          "successCriteria": [
+            "建立费用登记表，记录行程中所有支出",
+            "收集齐全所有可报销发票"
+          ],
+          "tasks": [
+            {
+              "id": "task-opq-mpdzidwi-uoz2w2fr",
+              "subGoalId": "sg-opq-mpdzidwi-2pnmiunu",
+              "title": "创建行程费用登记表",
+              "description": "出发前创建费用登记表模板，包含日期、类别、金额、支付人、发票状态、备注等字段，支持20人团队费用追踪",
+              "expectedOutcome": "可使用的费用登记表，包含完整的字段设计和填写说明",
+              "taskType": "repeat",
+              "triggerRule": "2026-05-20 18:00 触发",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "可使用的费用登记表，包含完整的字段设计和填写说明",
+                "format": "other",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "登记表模板已创建，字段完整，可直接使用"
+              },
+              "executionObjective": "出发前创建费用登记表模板，包含日期、类别、金额、支付人、发票状态、备注等字段，支持20人团队费用追踪",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "设计费用登记表模板",
+                  "定义费用分类和字段",
+                  "提供填写说明"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看费用登记表",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "费用登记表模板已生成并可下载使用"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-k3y7puou",
+              "subGoalId": "sg-opq-mpdzidwi-2pnmiunu",
+              "title": "每日费用记录与发票收集提醒",
+              "description": "每天行程结束时提醒记录当日支出、收集发票、核对发票信息，确保费用及时登记、发票不遗漏",
+              "expectedOutcome": "当日费用已登记、发票已收集的照片/清单、发票状态已更新",
+              "taskType": "repeat",
+              "triggerRule": "每天 21:00 触发（行程第1-5天，越南时间）",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "freeform_chat",
+              "resultViewKind": "freeform_chat",
+              "executionStrategy": "hybrid",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-jmsaha1kat252"
+              ],
+              "executionMode": "interactive",
+              "expectedResult": {
+                "type": "action",
+                "description": "当日费用已登记、发票已收集的照片/清单、发票状态已更新",
+                "format": "json",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "当日费用已登记、发票收集清单已确认"
+              },
+              "executionObjective": "每天行程结束时提醒记录当日支出、收集发票、核对发票信息，确保费用及时登记、发票不遗漏",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_user_collaborative",
+                "agentResponsibilities": [
+                  "定时提醒记录费用",
+                  "核对登记完整性",
+                  "提醒发票收集要点"
+                ],
+                "userResponsibilities": [
+                  "填写当日费用明细",
+                  "确认发票收集情况",
+                  "上传发票照片或信息"
+                ],
+                "userInteractionType": "answer",
+                "userInteractionTiming": "core_task_step",
+                "userFacingActionLabel": "填写今日费用与发票情况",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "用户确认当日费用已登记、发票已收集"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-wyrgoh67",
+              "subGoalId": "sg-opq-mpdzidwi-2pnmiunu",
+              "title": "生成费用分摊方案",
+              "description": "行程结束后，根据费用登记表计算总支出、个人支出、公摊费用，生成每人应付/应收金额明细",
+              "expectedOutcome": "费用分摊方案，包含总支出汇总、分摊规则说明、每人结算金额",
+              "taskType": "repeat",
+              "triggerRule": "行程第5天 22:00 触发（返程后整理）",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "hybrid",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-jcsosb1k0tgg3"
+              ],
+              "executionMode": "interactive",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "费用分摊方案，包含总支出汇总、分摊规则说明、每人结算金额",
+                "format": "table",
+                "presentation": "comparison_table",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "comparison_table",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "分摊方案已生成，金额计算准确"
+              },
+              "executionObjective": "行程结束后，根据费用登记表计算总支出、个人支出、公摊费用，生成每人应付/应收金额明细",
+              "autoRunDisabled": false,
+              "requiresConfirmation": true,
+              "collaboration": {
+                "mode": "agent_user_collaborative",
+                "agentResponsibilities": [
+                  "汇总费用数据",
+                  "计算分摊金额",
+                  "生成分摊方案"
+                ],
+                "userResponsibilities": [
+                  "确认费用数据完整",
+                  "调整特殊分摊规则",
+                  "确认最终方案"
+                ],
+                "userInteractionType": "confirm",
+                "userInteractionTiming": "after_agent_output",
+                "userFacingActionLabel": "确认费用分摊方案",
+                "shouldNotifyUser": true,
+                "completionOwner": "shared",
+                "completionDefinition": "用户确认费用分摊方案无误"
+              }
+            },
+            {
+              "id": "task-opq-mpdzidwi-4hdqy76o",
+              "subGoalId": "sg-opq-mpdzidwi-2pnmiunu",
+              "title": "整理报销材料清单",
+              "description": "整理团建费用报销所需的全部材料，包括发票分类、报销单模板、审批流程说明，确保报销材料齐全",
+              "expectedOutcome": "报销材料清单，包含发票清单、报销单模板、材料检查清单、提交流程说明",
+              "taskType": "repeat",
+              "triggerRule": "行程第5天 22:30 触发（返程后整理）",
+              "deadline": "2026-05-25T23:59:59+08:00",
+              "progress": 0,
+              "instances": [],
+              "executionKind": "generic_result",
+              "resultViewKind": "generic_result",
+              "executionStrategy": "agent_autonomous",
+              "priority": "critical",
+              "dependencies": [
+                "task-opq-jcsosb1k0tgg3"
+              ],
+              "executionMode": "standard",
+              "expectedResult": {
+                "type": "deliverable",
+                "description": "报销材料清单，包含发票清单、报销单模板、材料检查清单、提交流程说明",
+                "format": "markdown",
+                "presentation": "checklist",
+                "primaryFormat": "structured_blocks",
+                "exportableFormats": [
+                  "html",
+                  "markdown"
+                ],
+                "requiredBlocks": [
+                  "heading",
+                  "key_value",
+                  "callout"
+                ],
+                "completionCriteria": "报销材料清单已生成，包含所有必要项"
+              },
+              "executionObjective": "整理团建费用报销所需的全部材料，包括发票分类、报销单模板、审批流程说明，确保报销材料齐全",
+              "autoRunDisabled": false,
+              "requiresConfirmation": false,
+              "collaboration": {
+                "mode": "agent_autonomous",
+                "agentResponsibilities": [
+                  "汇总发票信息",
+                  "整理报销材料清单",
+                  "提供报销模板和流程说明"
+                ],
+                "userResponsibilities": [],
+                "userInteractionType": "none",
+                "userInteractionTiming": "not_required",
+                "userFacingActionLabel": "查看报销材料清单",
+                "shouldNotifyUser": true,
+                "completionOwner": "agent",
+                "completionDefinition": "报销材料清单已生成并可供使用"
+              }
+            }
+          ]
+        }
+      ],
+      "conversationId": "conv-new-1779270263266",
+      "workflow": {
+        "phase": "presenting_plan",
+        "planDecision": "pending",
+        "collectedInfo": {
+          "collectedInfoSummary": {
+            "goalDetails": "越南5天团建旅行，覆盖胡志明市和芽庄两座城市，共20人同行",
+            "timeline": "今晚从北京出发，行程共5天",
+            "resources": "机票和酒店已预订，签证已办理，团队规模20人",
+            "constraints": "机票酒店不可更改，需协调20人行程安排",
+            "challenges": "",
+            "preferences": "团建活动为主，需考虑团队协作与互动性",
+            "summary": "20人团队今晚从北京出发进行越南5天团建游，目的地为胡志明市和芽庄。机票、酒店、签证均已安排妥当，下一步需规划具体行程安排和团队活动。"
+          },
+          "goalAnalysis": {
+            "coreIntent": "成功完成20人团队的越南5天团建旅行，在胡志明市和芽庄两地创造高质量的团队协作体验",
+            "successState": "全员安全返京，团队凝聚力提升，留下美好回忆，行程顺畅无重大事故，预算可控",
+            "assumptions": [
+              "假设1：今晚出发时间允许所有成员按时抵达机场集合",
+              "假设2：机票酒店预订信息已同步给所有团队成员",
+              "假设3：签证均已办理完成且有效期覆盖行程",
+              "假设4：团队成员对目的地有基本的了解和期待",
+              "假设5：已预留团建活动的预算空间"
+            ]
+          },
+          "executionOrder": "建议按以下顺序执行：1→2→3→4→5为主线顺序，6贯穿全程。第1项为今晚出发前的紧急任务，必须在今晚航班前完成；第2项在胡志明市期间并行执行；第3项为城市间转移的关键衔接；第4项为团建核心环节；第5项为收尾保障；第6项财务管理工作分散在行程各阶段完成。",
+          "reviewSummary": [
+            "行前紧急准备与确认：4个任务完整覆盖完成标准：行程信息同步包解决全员信息同步、护照签证确认清单解决证件核对、机场集合方案解决集合时间和小组分配、紧急联系人网络解决应急准备",
+            "胡志明市行程规划与执行：4个任务完整覆盖三个完成标准：task-hcm-01覆盖核心景点游览，task-hcm-03覆盖团队晚餐活动，task-hcm-02覆盖交通解决方案，task-hcm-04整合为可执行清单。任务依赖关系合理，信息收集任务优先，整合任务在后。",
+            "胡志明市至芽庄交通衔接：覆盖了交通方式对比、预订确认、行李托运、接送安排、抵达确认五个关键环节，形成完整闭环",
+            "芽庄行程规划与团队建设活动：任务覆盖了所有完成标准：task-1覆盖海滩团建活动策划，task-2覆盖珍珠岛游览安排，task-3确保物资准备到位，task-4整合完整行程。共设计至少2次团建活动方案，并包含具体的执行细节和物资保障。",
+            "返程协调与行程收尾：已覆盖返程交通确认、行李整理、机场集合、状态跟踪、解散安排全流程，满足两个完成标准的要求",
+            "返程协调与行程收尾：已根据 review 调整 1 个任务。",
+            "行程财务管理与报销整理：覆盖了费用登记表建立（出发前）、每日费用记录与发票收集（行程中）、费用分摊计算（行程后）、报销材料准备（行程后）四个关键环节，满足完成标准要求"
+          ]
+        },
+        "assumptions": [
+          "假设1：今晚出发时间允许所有成员按时抵达机场集合",
+          "假设2：机票酒店预订信息已同步给所有团队成员",
+          "假设3：签证均已办理完成且有效期覆盖行程",
+          "假设4：团队成员对目的地有基本的了解和期待",
+          "假设5：已预留团建活动的预算空间"
+        ],
+        "risks": [
+          "风险1：航班延误或取消 - 应对：提前关注航班动态，准备备选方案，购买航班延误险，预留缓冲时间",
+          "风险2：成员证件遗失 - 应对：出发前扫描所有护照签证存档云端，携带证件复印件，记录当地领事馆联系方式",
+          "风险3：团队成员健康问题 - 应对：准备常用药品，确认当地医院位置，购买境外旅游保险，设立紧急联络人",
+          "风险4：20人团队协调困难 - 应对：分成4-5个小组，每组指定负责人，建立实时通讯群组，制定明确的集合时间和地点",
+          "风险5：天气影响户外活动 - 应对：关注天气预报，准备室内备选活动方案，灵活调整行程顺序",
+          "风险6：语言沟通障碍 - 应对：下载翻译APP，提前准备常用越南语短句，保存酒店和司机联系方式",
+          "实际护照签证信息收集需用户线下执行，建议出发前2小时完成最终核对",
+          "微信群建立和全员确认需用户线下操作",
+          "实际预订餐厅和包车需要用户线下完成，Agent仅提供信息支持；天气变化可能影响行程，建议用户关注当地天气预报",
+          "若交通方式临时变更需重新规划",
+          "极端天气可能导致交通延误",
+          "行程实际执行时可能需要根据天气调整",
+          "团队参与者的个人需求差异可能需要微调活动安排",
+          "如遇航班延误或取消需启动应急预案",
+          "如有成员护照/签证问题可能影响登机",
+          "发票丢失或损坏的风险需通过每日检查降低",
+          "费用分摊争议可通过提前说明规则预防"
+        ],
+        "reasoning": "本次拆解采用逆向推演法，从返程安全归国倒推至今晚出发前的紧急准备。整体框架分为：出发前准备（子目标1）→第一站行程（子目标2）→城市间衔接（子目标3）→第二站核心团建（子目标4）→返程收尾（子目标5），并辅以贯穿全程的财务管理（子目标6）。关键考量：今晚出发是当前最紧急任务，优先级最高；团建活动是此次旅行的核心目的，芽庄段作为休闲度假地更适合开展团队建设，权重最高；城市间转移涉及20人协调，风险较高需重点关注；财务管理和风险应对贯穿全程，确保行程可控。",
+        "notificationStrategy": "出发前阶段（今晚）：高频提醒护照签证确认、集合安排、微信群建立等紧急任务，每2小时推送一次检查清单。行程执行阶段：每日早晚推送当日行程概览和次日安排确认，关键节点（城市间转移、团建活动）提前12小时提醒。返程阶段：航班起飞前24小时推送返程准备清单，落地后推送费用报销指引。全程设置风险预警推送，如天气变化、航班异常等触发即时通知。行程结束后3日内推送行程复盘和费用整理提醒。",
+        "startedAt": "2026-05-20T11:34:33.187Z",
+        "updatedAt": "2026-05-20T11:34:33.187Z"
+      }
+    },
+    "subGoal": {
+      "id": "sg-opq-mpdzidwi-vii1353g",
+      "goalId": "goal-opq-mpdzidwi-ev0c8thq",
+      "title": "行前紧急准备与确认",
+      "description": "今晚出发前的最后准备，确保20人全员信息同步、行李合规、集合安排清晰，包括护照签证确认、航班信息核实、紧急联系人建立、机场集合方案明确",
+      "why": "航班今晚出发，这是最紧急且不可逆的环节，任何遗漏都可能导致行程受阻",
+      "priority": "critical",
+      "weight": 0.15,
+      "dependencies": [],
+      "estimatedDurationMinutes": 120,
+      "successCriteria": [
+        "建立20人微信群，全员确认收到行程信息",
+        "确认全员护照签证有效期",
+        "明确机场集合时间和地点，分配小组负责人"
+      ],
+      "tasks": [
+        {
+          "id": "task-opq-mpdzidwi-uoz2w2fr",
+          "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+          "title": "行程信息同步包生成",
+          "description": "整理本次越南团建的核心行程信息，包括航班、酒店、行程概览、注意事项等，生成结构化的信息卡，方便用户一键转发至微信群，确保全员信息同步",
+          "expectedOutcome": "结构化行程信息同步包，包含航班信息、酒店信息、行程概览、行前提醒、联系方式等模块",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "deadline": "2026-05-25T23:59:59+08:00",
+          "progress": 0,
+          "instances": [],
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "standard",
+          "expectedResult": {
+            "type": "information",
+            "description": "结构化行程信息同步包，包含航班信息、酒店信息、行程概览、行前提醒、联系方式等模块",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "key_value",
+              "callout"
+            ],
+            "completionCriteria": "生成包含航班、酒店、行程概览、注意事项的完整信息包，可直接复制转发"
+          },
+          "executionObjective": "整理本次越南团建的核心行程信息，包括航班、酒店、行程概览、注意事项等，生成结构化的信息卡，方便用户一键转发至微信群，确保全员信息同步",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_autonomous",
+            "agentResponsibilities": [
+              "整理行程核心信息",
+              "设计信息卡结构",
+              "生成可转发格式"
+            ],
+            "userResponsibilities": [],
+            "userInteractionType": "none",
+            "userInteractionTiming": "not_required",
+            "userFacingActionLabel": "查看行程信息包",
+            "shouldNotifyUser": true,
+            "completionOwner": "agent",
+            "completionDefinition": "生成包含航班、酒店、行程概览、注意事项的完整信息包，可直接复制转发"
+          }
+        },
+        {
+          "id": "task-opq-mpdzidwi-k3y7puou",
+          "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+          "title": "护照签证有效期确认清单",
+          "description": "生成护照签证有效期核对清单模板，用于收集和确认20人的护照号码、有效期、签证状态等关键信息，确保护照有效期在6个月以上、签证有效",
+          "expectedOutcome": "护照签证确认清单模板，包含姓名、护照号、有效期、签证状态、备注等字段",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "deadline": "2026-05-25T23:59:59+08:00",
+          "progress": 0,
+          "instances": [],
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [],
+          "executionMode": "standard",
+          "expectedResult": {
+            "type": "information",
+            "description": "护照签证确认清单模板，包含姓名、护照号、有效期、签证状态、备注等字段",
+            "format": "json",
+            "presentation": "checklist",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "comparison_table",
+              "key_value"
+            ],
+            "completionCriteria": "生成20人护照签证确认清单模板，包含填写说明和核对要点"
+          },
+          "executionObjective": "生成护照签证有效期核对清单模板，用于收集和确认20人的护照号码、有效期、签证状态等关键信息，确保护照有效期在6个月以上、签证有效",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_autonomous",
+            "agentResponsibilities": [
+              "设计清单模板结构",
+              "添加核对要点提示",
+              "生成可导出格式"
+            ],
+            "userResponsibilities": [],
+            "userInteractionType": "none",
+            "userInteractionTiming": "not_required",
+            "userFacingActionLabel": "查看确认清单",
+            "shouldNotifyUser": true,
+            "completionOwner": "agent",
+            "completionDefinition": "生成20人护照签证确认清单模板，包含填写说明和核对要点"
+          }
+        },
+        {
+          "id": "task-opq-mpdzidwi-wyrgoh67",
+          "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+          "title": "机场集合方案制定",
+          "description": "制定今晚机场集合方案，包括建议集合时间、集合地点、小组分配、负责人指派、迟到应急方案等，需用户确认后执行",
+          "expectedOutcome": "机场集合方案，包含集合时间、地点、小组划分、负责人、应急联络方式",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "deadline": "2026-05-25T23:59:59+08:00",
+          "progress": 0,
+          "instances": [],
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "agent_autonomous",
+          "priority": "critical",
+          "dependencies": [
+            "task-opq-1ul93ur12jxjp7"
+          ],
+          "executionMode": "interactive",
+          "expectedResult": {
+            "type": "decision",
+            "description": "机场集合方案，包含集合时间、地点、小组划分、负责人、应急联络方式",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "key_value",
+              "comparison_table"
+            ],
+            "completionCriteria": "用户确认集合方案，包括时间、地点、小组分配"
+          },
+          "executionObjective": "制定今晚机场集合方案，包括建议集合时间、集合地点、小组分配、负责人指派、迟到应急方案等，需用户确认后执行",
+          "autoRunDisabled": false,
+          "requiresConfirmation": true,
+          "collaboration": {
+            "mode": "agent_with_user_confirmation",
+            "agentResponsibilities": [
+              "根据航班信息推算合理集合时间",
+              "设计小组分配建议方案",
+              "提供集合地点建议",
+              "准备迟到应急方案"
+            ],
+            "userResponsibilities": [
+              "确认或调整集合时间",
+              "确认或调整集合地点",
+              "确认小组负责人名单"
+            ],
+            "userInteractionType": "confirm",
+            "userInteractionTiming": "after_agent_output",
+            "userFacingActionLabel": "确认集合方案",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "用户确认集合方案内容后完成"
+          }
+        },
+        {
+          "id": "task-opq-mpdzidwi-4hdqy76o",
+          "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+          "title": "紧急联系人与分工表建立",
+          "description": "建立团建期间紧急联系人网络，包括领队、小组负责人、当地紧急电话、使馆联系方式等，同时明确各负责人分工职责",
+          "expectedOutcome": "紧急联系人网络表和人员分工表，包含姓名、角色、联系方式、职责范围",
+          "taskType": "one_shot",
+          "triggerRule": "准备好后执行一次",
+          "deadline": "2026-05-25T23:59:59+08:00",
+          "progress": 0,
+          "instances": [],
+          "executionKind": "generic_result",
+          "resultViewKind": "generic_result",
+          "executionStrategy": "hybrid",
+          "priority": "high",
+          "dependencies": [
+            "task-opq-1v58b8p133wr35"
+          ],
+          "executionMode": "interactive",
+          "expectedResult": {
+            "type": "deliverable",
+            "description": "紧急联系人网络表和人员分工表，包含姓名、角色、联系方式、职责范围",
+            "format": "json",
+            "presentation": "visual_report",
+            "primaryFormat": "structured_blocks",
+            "exportableFormats": [
+              "html",
+              "markdown"
+            ],
+            "requiredBlocks": [
+              "heading",
+              "callout",
+              "comparison_table",
+              "key_value"
+            ],
+            "completionCriteria": "完成紧急联系人名单和分工表，信息完整可执行"
+          },
+          "executionObjective": "建立团建期间紧急联系人网络，包括领队、小组负责人、当地紧急电话、使馆联系方式等，同时明确各负责人分工职责",
+          "autoRunDisabled": false,
+          "requiresConfirmation": false,
+          "collaboration": {
+            "mode": "agent_user_collaborative",
+            "agentResponsibilities": [
+              "准备联系人模板",
+              "提供越南当地紧急电话",
+              "提供中国驻越南使馆联系方式",
+              "设计分工职责模板"
+            ],
+            "userResponsibilities": [
+              "提供领队和小组负责人联系方式",
+              "确认各负责人分工",
+              "补充其他紧急联系人"
+            ],
+            "userInteractionType": "provide_context",
+            "userInteractionTiming": "during_execution",
+            "userFacingActionLabel": "补充联系人信息",
+            "shouldNotifyUser": true,
+            "completionOwner": "shared",
+            "completionDefinition": "双方共同完成联系人名单和分工表后完成"
+          }
+        }
+      ]
+    },
+    "task": {
+      "id": "task-opq-mpdzidwi-uoz2w2fr",
+      "subGoalId": "sg-opq-mpdzidwi-vii1353g",
+      "title": "行程信息同步包生成",
+      "description": "整理本次越南团建的核心行程信息，包括航班、酒店、行程概览、注意事项等，生成结构化的信息卡，方便用户一键转发至微信群，确保全员信息同步",
+      "expectedOutcome": "结构化行程信息同步包，包含航班信息、酒店信息、行程概览、行前提醒、联系方式等模块",
+      "taskType": "one_shot",
+      "triggerRule": "准备好后执行一次",
+      "deadline": "2026-05-25T23:59:59+08:00",
+      "progress": 0,
+      "instances": [],
+      "executionKind": "generic_result",
+      "resultViewKind": "generic_result",
+      "executionStrategy": "agent_autonomous",
+      "priority": "critical",
+      "dependencies": [],
+      "executionMode": "standard",
+      "expectedResult": {
+        "type": "information",
+        "description": "结构化行程信息同步包，包含航班信息、酒店信息、行程概览、行前提醒、联系方式等模块",
+        "format": "json",
+        "presentation": "visual_report",
+        "primaryFormat": "structured_blocks",
+        "exportableFormats": [
+          "html",
+          "markdown"
+        ],
+        "requiredBlocks": [
+          "heading",
+          "key_value",
+          "callout"
+        ],
+        "completionCriteria": "生成包含航班、酒店、行程概览、注意事项的完整信息包，可直接复制转发"
+      },
+      "executionObjective": "整理本次越南团建的核心行程信息，包括航班、酒店、行程概览、注意事项等，生成结构化的信息卡，方便用户一键转发至微信群，确保全员信息同步",
+      "autoRunDisabled": false,
+      "requiresConfirmation": false,
+      "collaboration": {
+        "mode": "agent_autonomous",
+        "agentResponsibilities": [
+          "整理行程核心信息",
+          "设计信息卡结构",
+          "生成可转发格式"
+        ],
+        "userResponsibilities": [],
+        "userInteractionType": "none",
+        "userInteractionTiming": "not_required",
+        "userFacingActionLabel": "查看行程信息包",
+        "shouldNotifyUser": true,
+        "completionOwner": "agent",
+        "completionDefinition": "生成包含航班、酒店、行程概览、注意事项的完整信息包，可直接复制转发"
+      }
+    },
+    "instance": {
+      "id": "inst-opq-mpdzlwa6-ih4pvjwd",
+      "taskId": "task-opq-mpdzidwi-uoz2w2fr",
+      "dateLabel": "05-20",
+      "status": "pending",
+      "intro": "用户手动发起执行“行程信息同步包生成”。",
+      "payload": {
+        "kind": "generic_result",
+        "summary": ""
+      },
+      "createdAt": "2026-05-20T11:37:16.974Z",
+      "runner": {
+        "attemptCount": 0
+      },
+      "execution": {
+        "phase": "queued",
+        "status": "pending",
+        "lastUpdatedAt": "2026-05-20T11:37:16.974Z"
+      },
+      "timeline": [
+        {
+          "id": "task-opq-mpdzidwi-uoz2w2fr-phase-queued",
+          "title": "任务进入队列",
+          "type": "phase",
+          "status": "running",
+          "detail": "调度器已生成任务实例，等待 Agent 接手。",
+          "startedAt": "2026-05-20T11:37:16.974Z"
+        },
+        {
+          "id": "task-opq-mpdzidwi-uoz2w2fr-phase-main",
+          "title": "Agent 执行暂停",
+          "type": "phase",
+          "status": "pending",
+          "detail": "等待 Agent 开始执行。",
+          "startedAt": "2026-05-20T11:37:16.974Z"
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxPromptBytes": 8192,
+    "maxKeyPoints": 8,
+    "maxArtifacts": 5
+  },
+  "workspace": {
+    "taskWorkspaceDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779270263266/tasks/task-opq-mpdzidwi-uoz2w2fr/inst-opq-mpdzlwa6-ih4pvjwd",
+    "dependenciesDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779270263266/tasks/task-opq-mpdzidwi-uoz2w2fr/inst-opq-mpdzlwa6-ih4pvjwd/dependencies",
+    "artifactsDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779270263266/tasks/task-opq-mpdzidwi-uoz2w2fr/inst-opq-mpdzlwa6-ih4pvjwd/artifacts"
+  }
+}

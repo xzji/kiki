@@ -48,13 +48,13 @@ export function GoalPlanBreadcrumb({
   );
 
   const goalPlanNode = taskTitle && onGoalPlanClick ? (
-    <button type="button" onClick={onGoalPlanClick} className="hover:text-[#111]">
+    <button type="button" onClick={onGoalPlanClick} className="font-medium text-[#1F2328] hover:text-[#111]">
       目标规划
     </button>
   ) : disableLinks ? (
-    <span>目标规划</span>
+    <span className="font-medium text-[#1F2328]">目标规划</span>
   ) : (
-    <Link href={goalDetailPath(goalId)} className="hover:text-[#111]">
+    <Link href={goalDetailPath(goalId)} className="font-medium text-[#1F2328] hover:text-[#111]">
       目标规划
     </Link>
   );
@@ -90,6 +90,7 @@ export function GoalPlanContent({
 }) {
   const router = useRouter();
   const inboxItems = useInboxStore((state) => state.items);
+  const markTaskRead = useInboxStore((state) => state.markTaskRead);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
   const pendingSubGoalCreates = useGoalStore((state) => state.pendingSubGoalCreates);
@@ -185,6 +186,7 @@ export function GoalPlanContent({
   }
 
   const handleOpenTask = (task: Task) => {
+    markTaskRead(task.id);
     if (onOpenTask) {
       onOpenTask(task);
       return;

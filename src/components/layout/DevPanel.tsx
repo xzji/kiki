@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, FileText, Sparkles } from "lucide-react";
+import { ChevronDown, FileText, Sparkles, TerminalSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -8,6 +8,7 @@ import { formatClock, formatChineseDate } from "@/lib/date";
 import { useVirtualClock } from "@/hooks/useVirtualClock";
 import { seedToeflMockGoalPlanConversation } from "@/lib/devMockSessions";
 import { BackendLogsDialog } from "@/components/settings/BackendLogsPanel";
+import { ClaudeTraceDialog } from "@/components/dev/ClaudeTracePanel";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 
 export function DevPanel() {
@@ -15,6 +16,7 @@ export function DevPanel() {
   const { currentTime, advanceHours, jumpToTomorrowEleven } = useVirtualClock();
   const [expanded, setExpanded] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [claudeTraceOpen, setClaudeTraceOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
 
@@ -22,7 +24,7 @@ export function DevPanel() {
   const leftOffset = navCollapsed ? 14 : 28;
 
   useEffect(() => {
-    if (!expanded || logsOpen) return;
+    if (!expanded || logsOpen || claudeTraceOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
@@ -33,7 +35,7 @@ export function DevPanel() {
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [expanded, logsOpen]);
+  }, [expanded, logsOpen, claudeTraceOpen]);
 
   return (
     <>
@@ -74,6 +76,14 @@ export function DevPanel() {
                 <FileText className="h-3.5 w-3.5" />
                 后端日志
               </button>
+              <button
+                type="button"
+                onClick={() => setClaudeTraceOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-dashed border-[#D0D7DE] px-3 py-2 text-xs text-[#374151] hover:border-[#111] hover:bg-[#F5F6F8] hover:text-[#111]"
+              >
+                <TerminalSquare className="h-3.5 w-3.5" />
+                Claude Trace
+              </button>
               <div className="mt-2 rounded-lg border border-dashed border-[#D0D7DE] bg-[#FAFBFC] p-3">
                 <div className="text-[11px] font-medium text-[#6B7280]">目标规划 Mock</div>
                 <div className="mt-1 text-[11px] leading-5 text-[#8C9198]">
@@ -105,6 +115,7 @@ export function DevPanel() {
         </button>
       </div>
       <BackendLogsDialog open={logsOpen} onClose={() => setLogsOpen(false)} />
+      <ClaudeTraceDialog open={claudeTraceOpen} onClose={() => setClaudeTraceOpen(false)} />
     </>
   );
 }

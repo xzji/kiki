@@ -97,6 +97,24 @@ function planningFailureMessage(error: unknown) {
   return `${message}\n\n已保留当前上下文。你可以回复“继续”“重试”或补充新的要求，KiKi 会判断是否从上次失败点恢复。`;
 }
 
+function appendPlanningFailureMessage(current: string, error: unknown) {
+  const failure = planningFailureMessage(error).trim();
+  const existing = current.trim();
+  if (!existing) return failure;
+  if (existing.includes(failure)) return current;
+  return `${current.trimEnd()}\n\n${failure}`;
+}
+
+function isScrollNearBottom(container: HTMLElement, threshold = 48) {
+  return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+}
+
+function isElementFullyVisibleInContainer(element: HTMLElement, container: HTMLElement) {
+  const elementRect = element.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  return elementRect.top >= containerRect.top && elementRect.bottom <= containerRect.bottom;
+}
+
 function appendTerminalNotice(content: string, notice: string, emptyContent: string) {
   const trimmed = content.trim();
   if (!trimmed) return emptyContent;
@@ -247,22 +265,68 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const firstUnreadId = entryUnreadIds[0] ?? null;
   const unreadCount = entryUnreadIds.length;
 
+  const refreshUnreadJumpVisibility = () => {
+    if (entryUnreadIds.length === 0) {
+      setShowUnreadJump(false);
+      return;
+    }
+
+    const container = scrollRef.current;
+    if (!container || isScrollNearBottom(container)) {
+      setShowUnreadJump(false);
+      return;
+    }
+
+    const unreadMessageElements = entryUnreadIds
+      .map((id) => document.getElementById(`conversation-message-${id}`))
+      .filter((element): element is HTMLElement => Boolean(element));
+    if (
+      unreadMessageElements.length === entryUnreadIds.length &&
+      unreadMessageElements.every((element) => isElementFullyVisibleInContainer(element, container))
+    ) {
+      setShowUnreadJump(false);
+      return;
+    }
+
+    const marker = firstUnreadMarkerRef.current;
+    if (marker && isElementFullyVisibleInContainer(marker, container)) {
+      setShowUnreadJump(false);
+      return;
+    }
+
+    setShowUnreadJump(true);
+  };
+
   useEffect(() => {
     if (!firstUnreadId) {
       setShowUnreadJump(false);
       return;
     }
     const frame = window.requestAnimationFrame(() => {
-      const container = scrollRef.current;
-      const marker = firstUnreadMarkerRef.current;
-      if (!container || !marker) return;
-      const markerVisible =
-        marker.offsetTop >= container.scrollTop &&
-        marker.offsetTop + marker.offsetHeight <= container.scrollTop + container.clientHeight;
-      setShowUnreadJump(!markerVisible);
+      refreshUnreadJumpVisibility();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [firstUnreadId, sortedMessages.length]);
+  }, [entryUnreadIds, firstUnreadId, sortedMessages.length]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || unreadCount === 0) return;
+
+    let frame: number | null = null;
+    const handleScroll = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        refreshUnreadJumpVisibility();
+        frame = null;
+      });
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [entryUnreadIds, unreadCount]);
 
   if (!conversation) {
     return (
@@ -526,7 +590,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         }
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
-          content: planningFailureMessage(error),
+          content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
         setConversationStatus(conversation.id, "error");
@@ -625,7 +689,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         }
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
-          content: planningFailureMessage(error),
+          content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
         setConversationStatus(conversation.id, "error");
@@ -702,7 +766,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         }
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
-          content: planningFailureMessage(error),
+          content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
         setConversationStatus(conversation.id, "error");
@@ -1059,7 +1123,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             ) : (
               <>
                 {sortedMessages.map((msg) => (
-                  <div key={msg.id}>
+                  <div key={msg.id} id={`conversation-message-${msg.id}`}>
                     {firstUnreadId === msg.id ? (
                       <div
                         ref={firstUnreadMarkerRef}

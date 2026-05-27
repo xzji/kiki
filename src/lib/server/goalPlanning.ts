@@ -7,6 +7,7 @@ import { normalizeConcreteTriggerRule } from "@/lib/taskTriggerTime";
 import {
   ensureConversationWorkspace,
   getPlanningCheckpointFilePath,
+  writePlanningParseFailureSnapshot,
   writeJsonFileAtomic,
 } from "@/lib/server/workspace/conversationWorkspace";
 import {
@@ -854,6 +855,7 @@ async function runClaudeJson(input: {
       abortSignal: input.signal,
       abortMessage: input.abortMessage,
       failureMessage: input.failureMessage,
+      traceContext: input.context,
     });
     if (input.context) {
       // #region debug-point goal-planning-latency-claude-finished
@@ -1049,6 +1051,19 @@ async function parseClaudeJson<T>(input: {
   }
 
   const classifiedFailure = classifyClaudeJsonFailure(input.errorMessage, lastError);
+  const parseFailureSnapshot =
+    input.conversationId
+      ? writePlanningParseFailureSnapshot({
+          conversationId: input.conversationId,
+          requestId: input.context?.requestId,
+          phase: input.context?.phase,
+          stepLabel: input.context?.stepLabel,
+          errorMessage: classifiedFailure.userMessage,
+          rawOutput: input.raw,
+          repairedOutput: repairedForLog || undefined,
+          repairedCandidate: repairedCandidateForLog || undefined,
+        })
+      : null;
 
   if (input.context) {
     appendGoalLog({
@@ -1060,6 +1075,7 @@ async function parseClaudeJson<T>(input: {
       details: [
         `error: ${classifiedFailure.logMessage}`,
         `rawChars: ${primary.length}`,
+        parseFailureSnapshot ? `snapshot: ${parseFailureSnapshot.relativePath}` : "",
         "",
         "## raw output",
         "```json",

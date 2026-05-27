@@ -4,6 +4,7 @@ import type { QuotedConversationMessageContext, RuntimeEnvironment, RuntimePermi
 
 import { buildClaudeEnv } from "@/lib/server/claudeEnv";
 import { normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimePath";
+import { createClaudeTrace } from "@/lib/server/claude/traceStore";
 
 type ClaudeCliPayload = {
   type?: string;
@@ -30,7 +31,9 @@ type ClaudeCliPayload = {
   };
   message?: {
     content?: Array<{
+      type?: string;
       text?: string;
+      thinking?: string;
     }>;
   };
 };
@@ -52,7 +55,7 @@ export type ClaudeStreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "status"; status: "checking" | "running" | "completed" }
   | { type: "delta"; text: string }
-  | { type: "message"; content: string }
+  | { type: "message"; content: string; fallbackContent?: string }
   | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
   | { type: "permission_request"; reason: string }
   | { type: "error"; message: string }
@@ -73,6 +76,12 @@ export async function runPromptJson(input: {
   permissionMode?: RuntimePermissionMode;
   abortMessage?: string;
   failureMessage?: string;
+  traceContext?: {
+    requestId?: string;
+    scope?: string;
+    phase?: string;
+    stepLabel?: string;
+  };
 }): Promise<ClaudePromptJsonResult> {
   const cwd = normalizeWorkingDirectory(input.cwd);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
@@ -84,6 +93,17 @@ export async function runPromptJson(input: {
     "--permission-mode",
     mapPermissionMode(input.permissionMode ?? input.runtimeEnv.permissionMode),
   ];
+  const trace = createClaudeTrace({
+    cwd,
+    cliPath,
+    args,
+    permissionMode: input.permissionMode ?? input.runtimeEnv.permissionMode,
+    requestId: input.traceContext?.requestId,
+    scope: input.traceContext?.scope ?? "claude_json",
+    phase: input.traceContext?.phase,
+    stepLabel: input.traceContext?.stepLabel,
+  });
+  trace?.writePrompt(input.prompt);
 
   return new Promise<ClaudePromptJsonResult>((resolve, reject) => {
     const child = spawn(cliPath, args, {
@@ -102,6 +122,7 @@ export async function runPromptJson(input: {
     const abort = () => {
       aborted = true;
       child.kill("SIGTERM");
+      trace?.finish("aborted", input.abortMessage ?? "Claude CLI 调用已中断");
       reject(new DOMException(input.abortMessage ?? "Claude CLI 调用已中断", "AbortError"));
     };
 
@@ -113,15 +134,20 @@ export async function runPromptJson(input: {
     input.abortSignal?.addEventListener("abort", abort, { once: true });
 
     child.stdout.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      output += text;
+      trace?.appendStdout(text);
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      errorOutput += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      errorOutput += text;
+      trace?.appendStderr(text);
     });
 
     child.on("error", (error) => {
       input.abortSignal?.removeEventListener("abort", abort);
+      trace?.finish("failed", error.message);
       reject(error);
     });
 
@@ -130,9 +156,13 @@ export async function runPromptJson(input: {
       if (aborted) return;
       const exitCode = code ?? 0;
       if (exitCode !== 0) {
+        trace?.finish("failed", errorOutput.trim() || input.failureMessage || "Claude CLI JSON 调用失败");
         reject(new Error(errorOutput.trim() || input.failureMessage || "Claude CLI JSON 调用失败"));
         return;
       }
+      const parsedOutput = extractClaudeOutputText(output);
+      if (parsedOutput) trace?.writeOutput(parsedOutput);
+      trace?.finish("completed");
       resolve({
         raw: output,
         exitCode,
@@ -238,6 +268,24 @@ function parseToolInput(rawInput: unknown, partialJson: string) {
   }
 }
 
+function extractClaudeOutputText(raw: string) {
+  try {
+    const parsed = JSON.parse(raw.trim()) as ClaudeCliPayload;
+    if (typeof parsed.result === "string") return parsed.result;
+    const content = parsed.message?.content?.map((item) => item.text || item.thinking || "").join("");
+    return content?.trim() || "";
+  } catch {
+    return raw.trim();
+  }
+}
+
+function extractAssistantTraceText(payload: ClaudeCliPayload) {
+  const pieces = payload.message?.content
+    ?.map((item) => item.thinking || item.text || "")
+    .filter(Boolean);
+  return pieces?.join("\n") ?? "";
+}
+
 function summarizeToolCall(toolName: string, input: unknown) {
   const normalized = toolName.toLowerCase();
   const filePath = readStringField(input, ["file_path", "path", "target_file", "file", "cwd"]);
@@ -309,6 +357,16 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     workspaceDir: cwd,
     workspacePolicy: options.workspacePolicy,
   });
+  const trace = createClaudeTrace({
+    cwd,
+    cliPath,
+    args,
+    permissionMode: options.permissionMode,
+    claudeSessionId: options.claudeSessionId,
+    scope: "conversation_chat",
+    stepLabel: "Claude 会话流式回复",
+  });
+  trace?.writePrompt(promptInput);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(cliPath, args, {
@@ -326,6 +384,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     let emittedFatalError = false;
     let aborted = false;
     let terminalResultReceived = false;
+    let aggregatedAssistantText = "";
     let callbackError: unknown = null;
     let settled = false;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
@@ -361,6 +420,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       aborted = true;
       emittedFatalError = true;
       child.kill("SIGTERM");
+      trace?.finish("aborted", "Claude CLI 流式调用已中断");
       if (emitEvent({ type: "done" })) {
         resolveOnce();
       }
@@ -384,6 +444,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
         // Ignore non-JSON lines; Claude stream-json may emit incidental text in some environments.
         return;
       }
+      trace?.appendParsedEvent(payload);
 
       const nextSessionId = payload.session_id;
       if (nextSessionId && !emitEvent({ type: "session", sessionId: nextSessionId })) return;
@@ -415,6 +476,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
           }
           const text = payload.event?.delta?.text;
           if (typeof text === "string" && text.length > 0) {
+            aggregatedAssistantText += text;
             emitEvent({ type: "delta", text });
           }
           return;
@@ -439,6 +501,9 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       if (payload.type === "assistant") {
         // Assistant messages can include intermediate reasoning/process text.
         // Only the terminal result.result is allowed to become the final protocol output.
+        const thinking = extractAssistantTraceText(payload);
+        if (thinking) aggregatedAssistantText += thinking;
+        if (thinking) trace?.appendThinking(`${thinking}\n`);
         return;
       }
 
@@ -453,7 +518,8 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
             });
             return;
           }
-          if (!emitEvent({ type: "message", content: payload.result })) return;
+          if (!emitEvent({ type: "message", content: payload.result, fallbackContent: aggregatedAssistantText.trim() || undefined })) return;
+          trace?.writeOutput(payload.result);
           emitEvent({ type: "status", status: "completed" });
         } else {
           emittedFatalError = true;
@@ -470,7 +536,9 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     };
 
     child.stdout.on("data", (chunk: Buffer) => {
-      stdoutBuffer += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stdoutBuffer += text;
+      trace?.appendStdout(text);
       let lineBreakIndex = stdoutBuffer.indexOf("\n");
       while (lineBreakIndex !== -1) {
         const line = stdoutBuffer.slice(0, lineBreakIndex);
@@ -481,11 +549,14 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      stderrBuffer += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stderrBuffer += text;
+      trace?.appendStderr(text);
     });
 
     child.on("error", (error) => {
       emittedFatalError = true;
+      trace?.finish("failed", error.message || "Claude CLI 启动失败");
       if (!emitEvent({
         type: "error",
         message: error.message || "Claude CLI 启动失败",
@@ -505,12 +576,18 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       if (callbackError) return;
 
       if (code !== 0 && !emittedFatalError) {
+        trace?.finish("failed", stderrBuffer.trim() || "Claude CLI 异常退出");
         if (!emitEvent({
           type: "error",
           message: stderrBuffer.trim() || "Claude CLI 异常退出",
         })) return;
       }
 
+      if (emittedFatalError) {
+        trace?.finish("failed", stderrBuffer.trim() || "Claude CLI 流式调用失败");
+      } else {
+        trace?.finish("completed");
+      }
       if (emitEvent({ type: "done" })) {
         resolveOnce();
       }

@@ -178,8 +178,20 @@ export function validateTaskResultLocally(input: ValidateTaskResultInput): Local
       severity: "critical",
       message: "Claude 输出不是可解析的任务结果 JSON。",
       evidence: input.parseError,
-      repairHint: "只修复 JSON 格式，并把原始输出中的有效内容整理进 task_result.blocks。",
+      repairHint: "先只修复 JSON 格式，不要重写业务内容；JSON 可解析后再做结构校验。",
     }));
+    return {
+      passed: false,
+      repairMode: "format_repair",
+      allowToolCalls: false,
+      issues,
+      reusableContent: {
+        summary: result?.summary,
+        finalMessage: result?.finalMessage,
+        artifacts: result?.artifacts,
+        taskResult: result?.taskResult ?? undefined,
+      },
+    };
   }
 
   if (!result?.taskResult && expectsInteractive) {
