@@ -21,6 +21,9 @@ import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interacti
 import { normalizeFileWriteSpecs } from "@/lib/server/fileWriteSpecs";
 import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
 import { writeTaskParseFailureSnapshot, writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
+import { markdownToWorkbook } from "@/lib/spreadsheet/adapters/markdownTables";
+import { XLSX_MIME } from "@/lib/spreadsheet/constants";
+import { buildXlsxBuffer } from "@/lib/spreadsheet/server/buildXlsx";
 import {
   buildUserConfirmationOptionsRepairPrompt,
   buildUserConfirmationOptionsPrompt,
@@ -37,12 +40,19 @@ import {
   type TaskReadinessCheck,
   type TaskReadinessInfoItem,
 } from "@/lib/server/taskReadinessPolicy";
+import {
+  compileMissingFieldQuestions,
+  fieldsSuggestedActions,
+  normalizeMissingFieldQuestions,
+  singleFieldOptions,
+} from "@/lib/server/informationRequest/compileFields";
 import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
 import { validateTaskResultLocally } from "@/lib/taskResult/localValidation";
 import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";
 import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { AgentRunPlan } from "@/types/agentOrchestration";
+import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type {
   Goal,
   InteractionRequirement,
@@ -54,6 +64,7 @@ import type {
   TaskRunErrorCategory,
 } from "@/types/kiki";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import type { ArtifactRef } from "@/types/artifact";
 import type { RuntimeEnvironment } from "@/types/runtime";
 import type { AcceptanceReport, LocalValidationReport, TaskAcceptanceRuntimeState } from "@/types/taskAcceptance";
 import type { ResultBlock, TaskResult } from "@/types/taskResult";
@@ -331,6 +342,7 @@ function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: Tas
     ],
     meta: {
       producedAt: readiness.generatedAt,
+      role: "pending_user_placeholder",
     },
   };
 }
@@ -348,15 +360,17 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
   const readinessWithOptions = shouldGenerateOptions
     ? await generateOptionsForReadinessItems(input, readiness, question)
     : readiness;
-  const options = readinessWithOptions.missingUserInfo.length === 1 ? readinessWithOptions.missingUserInfo[0].options ?? [] : [];
-  const suggestedActions = options;
+  const fields = compileMissingFieldQuestions({ readiness: readinessWithOptions, fallbackQuestion: question });
+  const options = singleFieldOptions(fields);
+  const suggestedActions = fieldsSuggestedActions(fields);
   const taskResult = buildReadinessBlockedTaskResult(input, readinessWithOptions);
   const interactionRequirement: InteractionRequirement = {
     type: hasUserMissing ? "provide_context" : "deliverable_gap",
     timing: "before_execution",
     reason: readiness.summary,
-    question,
+    question: fields.length === 1 ? "" : question,
     options,
+    fields,
     suggestedActions,
     shouldNotifyUser: true,
   };
@@ -364,7 +378,7 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
   return {
     summary: hasUserMissing ? "需要你补充关键信息后才能继续执行。" : "任务执行前置条件未满足。",
     finalMessage: readiness.summary,
-    resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    resultViewKind: normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
     awaitingUser: true,
     awaitingReason: readiness.summary,
     suggestedActions,
@@ -456,6 +470,11 @@ function normalizeInteractionRequirement(
     : Array.isArray(raw.suggestedActions)
       ? normalizeStringList(raw.suggestedActions)
       : fallback?.suggestedActions;
+  const fields = Array.isArray(raw.fields)
+    ? normalizeMissingFieldQuestions(raw.fields)
+    : Array.isArray(raw.field_questions)
+      ? normalizeMissingFieldQuestions(raw.field_questions)
+      : fallback?.fields;
   const requirement = inferInteractionRequirement({
     interactionType: type,
     timing,
@@ -465,6 +484,7 @@ function normalizeInteractionRequirement(
         : fallback?.reason || "",
     question: typeof raw.question === "string" && raw.question.trim() ? raw.question.trim() : fallback?.question,
     options: Array.isArray(raw.options) ? normalizeStringList(raw.options) : fallback?.options,
+    fields,
     suggestedActions,
     shouldNotifyUser:
       typeof raw.should_notify_user === "boolean"
@@ -876,6 +896,7 @@ function buildPendingUserTaskResult(input: RunGoalTaskInput, result: ParsedTaskR
     ],
     meta: {
       producedAt: new Date().toISOString(),
+      role: "pending_user_placeholder",
     },
   };
 }
@@ -892,8 +913,17 @@ function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: Parsed
     existingReadiness ??
     buildReadinessFromUserBlockers(result.deliverableCheck?.missingDeliverables?.length ? result.deliverableCheck.missingDeliverables : [question], reason);
   const readiness = applyInteractionOptionsToSingleMissingReadiness(baseReadiness, rawOptions, question);
-  const options = rawOptions;
-  const suggestedActions = uniqueStrings([...(options ?? []), ...(result.suggestedActions ?? [])]).slice(0, 5);
+  const fields = compileMissingFieldQuestions({
+    readiness,
+    fields: result.interactionRequirement.fields,
+    options: rawOptions,
+    fallbackQuestion: question,
+  });
+  const options = fields.length ? singleFieldOptions(fields) : rawOptions;
+  const suggestedActions = uniqueStrings([
+    ...(fields.length ? fieldsSuggestedActions(fields) : options),
+    ...(result.suggestedActions ?? []),
+  ]).slice(0, 5);
   const deliverableCheck = result.deliverableCheck ?? buildFallbackDeliverableCheck(input, reason);
   const normalizedDeliverableCheck: DeliverableCheck = {
     ...deliverableCheck,
@@ -907,8 +937,9 @@ function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: Parsed
     type: "provide_context",
     timing: result.interactionRequirement.timing === "not_required" ? "before_execution" : result.interactionRequirement.timing,
     reason,
-    question,
+    question: fields.length === 1 ? "" : question,
     options,
+    fields,
     suggestedActions,
     shouldNotifyUser: true,
   };
@@ -1058,7 +1089,7 @@ function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKin
   return {
     summary: parsed.summary?.trim() || legacyFromBlocks?.summary || "任务执行完成。",
     finalMessage: parsed.final_message?.trim() || legacyFromBlocks?.finalMessage || parsed.summary?.trim() || "任务执行完成。",
-    resultViewKind: parsed.result_view_kind || fallbackKind || "generic_result",
+    resultViewKind: normalizeTaskResultViewKind(parsed.result_view_kind ?? fallbackKind),
     awaitingUser,
     awaitingReason: parsed.awaiting_reason?.trim() || interactionRequirement.reason,
     suggestedActions,
@@ -1421,24 +1452,38 @@ function attachAgentRunPlan<T extends ParsedTaskRunnerResult>(result: T, agentRu
   };
 }
 
-async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
+async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
   let finalMessage = "";
+  let fallbackMessage = "";
   await streamClaudeCli({
     message,
     workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
     cliPath: input.runtimeEnv.cliPath,
     permissionMode,
+    filePolicy: input.runtimeEnv.filePolicy,
+    channelPolicy: { mode: "task" },
     claudeSessionId: undefined,
     signal: input.signal,
     onEvent: (event) => {
-      if (event.type === "message") finalMessage = event.content;
+      if (event.type === "message") {
+        finalMessage = event.content;
+        fallbackMessage = event.fallbackContent ?? "";
+      }
       if (event.type === "error") throw new Error(event.message);
     },
   });
   if (!finalMessage.trim()) {
     throw new Error("Claude CLI 未返回 result.result，无法提取最终任务结果。");
   }
-  return finalMessage;
+  return {
+    finalMessage,
+    fallbackMessage,
+  };
+}
+
+async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
+  const result = await runClaudePromptWithFallback(input, message, permissionMode);
+  return result.finalMessage;
 }
 
 function buildUnfinishedResult(input: RunGoalTaskInput, options: {
@@ -1459,7 +1504,9 @@ function buildUnfinishedResult(input: RunGoalTaskInput, options: {
   return {
     summary: "任务未达到完成标准。",
     finalMessage: [options.currentResult?.finalMessage, options.reason].filter(Boolean).join("\n\n"),
-    resultViewKind: options.currentResult?.resultViewKind ?? input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    resultViewKind: normalizeTaskResultViewKind(
+      options.currentResult?.resultViewKind ?? input.task.resultViewKind ?? input.task.executionKind,
+    ),
     awaitingUser: true,
     awaitingReason: options.reason,
     suggestedActions: interactionRequirement.suggestedActions,
@@ -1481,12 +1528,23 @@ function buildUnfinishedResult(input: RunGoalTaskInput, options: {
   };
 }
 
+const SYSTEM_WORKSPACE_ARTIFACT_NAMES = new Set([
+  "context.md",
+  "prompt.md",
+  "progress.md",
+]);
+
 function readGeneratedWorkspaceArtifacts(input: RunGoalTaskInput): TaskRunArtifact[] {
   if (!input.taskWorkspaceDir) return [];
   try {
     const entries = fs.readdirSync(input.taskWorkspaceDir, { withFileTypes: true });
     return entries
-      .filter((entry) => entry.isFile() && /\.(md|markdown|txt|html)$/i.test(entry.name))
+      .filter((entry) => {
+        if (!entry.isFile()) return false;
+        if (entry.name.startsWith(".")) return false;
+        if (SYSTEM_WORKSPACE_ARTIFACT_NAMES.has(entry.name.toLowerCase())) return false;
+        return /\.(md|markdown|txt|html)$/i.test(entry.name);
+      })
       .slice(0, 8)
       .map((entry, index) => {
         const filePath = path.join(input.taskWorkspaceDir!, entry.name);
@@ -1585,7 +1643,7 @@ function buildWorkspaceArtifactRecoveryResult(input: RunGoalTaskInput, options: 
   return {
     summary: "已恢复本地文件产物，等待系统继续验收。",
     finalMessage: "任务执行结果 JSON 未能解析，但已检测并保留本地文件产物。",
-    resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    resultViewKind: normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
     awaitingUser: false,
     awaitingReason: "",
     suggestedActions: ["查看已生成文件", "继续验收", "重新结构化结果"],
@@ -1622,14 +1680,17 @@ async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: Par
   const readiness = buildReadinessFromUserBlockers(userBlockers, reason);
   const question = userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason;
   const readinessWithOptions = readiness ? await generateOptionsForReadinessItems(input, readiness, question, userBlockers) : null;
-  const options = readinessWithOptions?.missingUserInfo.length === 1 ? readinessWithOptions.missingUserInfo[0].options ?? [] : [];
+  const fields = compileMissingFieldQuestions({ readiness: readinessWithOptions, fallbackQuestion: question });
+  const options = singleFieldOptions(fields);
+  const suggestedActions = fieldsSuggestedActions(fields);
   const interactionRequirement: InteractionRequirement = {
     type: "provide_context",
     timing: "after_agent_output",
     reason,
     question,
     options,
-    suggestedActions: options,
+    fields,
+    suggestedActions,
     shouldNotifyUser: true,
   };
   return coerceMissingUserContextBlocker(input, {
@@ -1731,6 +1792,7 @@ function buildAwaitingConfirmationFromRaw(input: RunGoalTaskInput, rawOutput: st
       presentation: "visual_report",
       primaryFormat: "structured_blocks",
       exportableFormats: ["markdown"],
+      role: "agent_deliverable",
     },
   };
   const deliverableCheck: DeliverableCheck = {
@@ -1750,7 +1812,7 @@ function buildAwaitingConfirmationFromRaw(input: RunGoalTaskInput, rawOutput: st
   return {
     summary: "已产出候选方案，等待用户确认。",
     finalMessage,
-    resultViewKind: input.task.resultViewKind ?? input.task.executionKind ?? "generic_result",
+    resultViewKind: normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
     awaitingUser: true,
     awaitingReason: reason,
     suggestedActions: [],
@@ -1823,8 +1885,26 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
           parsedResult,
           report: lastReport,
         });
-    rawOutput = await runClaudePrompt(input, repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
-    const parsed = tryParseTaskRunnerResult(input, rawOutput, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+    const repairedOutput = await runClaudePromptWithFallback(input, repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
+    rawOutput = repairedOutput.finalMessage;
+    let parsed = tryParseTaskRunnerResult(input, rawOutput, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
+    if (!parsed.result && repairedOutput.fallbackMessage.trim()) {
+      const fallbackParsed = tryParseTaskRunnerResult(
+        input,
+        repairedOutput.fallbackMessage,
+        normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
+      );
+      if (fallbackParsed.result) {
+        rawOutput = repairedOutput.fallbackMessage;
+        parsed = fallbackParsed;
+        state.appendTrajectory({
+          type: "system",
+          status: "completed",
+          title: "已从修复流式事件回填结果",
+          thought: "修复轮 result.result 解析失败，系统已使用 Claude stream 中聚合的 assistant 内容恢复结构化结果。",
+        });
+      }
+    }
     parsedResult = parsed.result;
     parseError = parsed.error;
     lastReport = validateTaskResultLocally({
@@ -1986,8 +2066,26 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       currentResult,
       acceptanceReport,
     });
-    const repairedRaw = await runClaudePrompt(input, repairPrompt, acceptanceReport.repairStrategy.allowNewToolCalls ? input.runtimeEnv.permissionMode : "readonly");
-    const repaired = tryParseTaskRunnerResult(input, repairedRaw, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+    const repairedOutput = await runClaudePromptWithFallback(input, repairPrompt, acceptanceReport.repairStrategy.allowNewToolCalls ? input.runtimeEnv.permissionMode : "readonly");
+    let repairedRaw = repairedOutput.finalMessage;
+    let repaired = tryParseTaskRunnerResult(input, repairedRaw, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
+    if (!repaired.result && repairedOutput.fallbackMessage.trim()) {
+      const fallbackRepaired = tryParseTaskRunnerResult(
+        input,
+        repairedOutput.fallbackMessage,
+        normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
+      );
+      if (fallbackRepaired.result) {
+        repairedRaw = repairedOutput.fallbackMessage;
+        repaired = fallbackRepaired;
+        state.appendTrajectory({
+          type: "system",
+          status: "completed",
+          title: "已从内容补齐流式事件回填结果",
+          thought: "内容补齐轮 result.result 解析失败，系统已使用 Claude stream 中聚合的 assistant 内容恢复结构化结果。",
+        });
+      }
+    }
     local = await runLocalRepairCycle(input, {
       rawOutput: repairedRaw,
       parsedResult: repaired.result,
@@ -2172,6 +2270,8 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
       workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: input.runtimeEnv.permissionMode,
+      filePolicy: input.runtimeEnv.filePolicy,
+      channelPolicy: { mode: "task" },
       claudeSessionId: undefined,
       signal: input.signal,
       onEvent: (event) => {
@@ -2341,9 +2441,13 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
-  let parsed = tryParseTaskRunnerResult(input, finalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+  let parsed = tryParseTaskRunnerResult(input, finalMessage, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
   if (!parsed.result && fallbackFinalMessage.trim()) {
-    const fallbackParsed = tryParseTaskRunnerResult(input, fallbackFinalMessage, input.task.resultViewKind ?? input.task.executionKind ?? "generic_result");
+    const fallbackParsed = tryParseTaskRunnerResult(
+      input,
+      fallbackFinalMessage,
+      normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
+    );
     if (fallbackParsed.result) {
       appendTrajectory({
         type: "system",
@@ -2491,9 +2595,53 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
         });
         return toArtifactRef(artifact);
       });
+      const derivedXlsxRefs: ArtifactRef[] = [];
+      for (const file of files) {
+        if (!file.filename.toLowerCase().endsWith(".md")) continue;
+        try {
+          const xlsxFilename = file.filename.replace(/\.md$/i, ".xlsx");
+          const workbook = markdownToWorkbook(file.content, { filename: xlsxFilename });
+          if (!workbook) continue;
+          appendTrajectory({
+            type: "system",
+            status: "running",
+            title: "正在派生 Excel 副本",
+            thought: xlsxFilename,
+          });
+          const buffer = await buildXlsxBuffer(workbook);
+          const xlsxArtifact = persistFileArtifact({
+            conversationId,
+            taskId: input.task.id,
+            instanceId: input.instance.id,
+            runtimeJobId: `job-${input.instance.id}`,
+            label: xlsxFilename,
+            summary: "自动从 Markdown 表格派生的可编辑副本",
+            filename: xlsxFilename,
+            mime: XLSX_MIME,
+            bytes: buffer,
+          });
+          derivedXlsxRefs.push(toArtifactRef(xlsxArtifact));
+          appendTrajectory({
+            type: "system",
+            status: "completed",
+            title: "已派生 Excel 副本",
+            thought: xlsxFilename,
+            endedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          appendTrajectory({
+            type: "system",
+            status: "completed",
+            title: "Excel 副本派生失败，已跳过",
+            thought: error instanceof Error ? error.message : String(error),
+            endedAt: new Date().toISOString(),
+          });
+        }
+      }
+      const allArtifactRefs = [...artifactRefs, ...derivedXlsxRefs];
       result.taskResult = {
         ...result.taskResult,
-        artifactRefs: [...(result.taskResult.artifactRefs ?? []), ...artifactRefs],
+        artifactRefs: [...(result.taskResult.artifactRefs ?? []), ...allArtifactRefs],
       };
       result.structuredOutput = {
         ...(result.structuredOutput ?? {}),
@@ -2508,7 +2656,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
         type: "system",
         status: "completed",
         title: "已生成文件产物",
-        thought: `已生成 ${artifactRefs.length} 个文件产物。`,
+        thought: `已生成 ${allArtifactRefs.length} 个文件产物。`,
         endedAt: new Date().toISOString(),
       });
     }

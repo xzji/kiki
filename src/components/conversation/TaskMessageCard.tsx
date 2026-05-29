@@ -5,24 +5,14 @@ import { buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { OptionalFeedbackSuggestions } from "@/components/task/OptionalFeedbackSuggestions";
 import { TaskInlineResultView, canRenderInlineAgentResult } from "@/components/task/TaskInlineResultView";
-import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
+import { buildAwaitingDisplayModel, stripNotificationPrefix } from "@/lib/taskInstance/awaitingDisplayModel";
 import { getOptionalResultFeedbackRequirement, hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
+import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type { Task, TaskInstance } from "@/types/kiki";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
-  flashcard: "记忆闪卡",
-  listening_qa: "听力问答",
-  reading_digest: "阅读摘要",
-  confirm_action: "确认执行",
-  draft_review: "草稿审阅",
-  freeform_chat: "补充对话",
   generic_result: "Agent 任务",
 };
-
-function stripNotificationPrefix(snippet?: string | null) {
-  if (!snippet) return snippet;
-  return snippet.replace(/^\[(需要作答|需要确认|待补充|待完成)\]\s*/, "");
-}
 
 function awaitingStatusLabel(instance: TaskInstance) {
   const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
@@ -61,6 +51,7 @@ export function TaskMessageCard({
   const submittedInteraction = hasSubmittedInteraction(instance);
   const optionalFeedback = getOptionalResultFeedbackRequirement(instance);
   const isOptionalFeedbackResult = hasOptionalResultFeedback(instance);
+  const awaitingDisplay = buildAwaitingDisplayModel(task, instance, "card");
   const statusLabel =
     isOptionalFeedbackResult
       ? "已结束"
@@ -89,7 +80,6 @@ export function TaskMessageCard({
     instance.result?.summary ||
     instance.awaitingUser?.reason ||
     instance.intro;
-  const canStop = !isOptionalFeedbackResult && canStopTaskInstance(instance);
   const hasInteractiveSurface =
     (instance.result?.taskResult?.blocks.length ?? 0) > 0 ||
     Boolean(instance.result?.taskResult?.artifactRefs?.some((ref) => ref.kind === "webapp"));
@@ -105,7 +95,7 @@ export function TaskMessageCard({
           onOpen();
         }
       }}
-      className="mt-3 w-full cursor-pointer rounded-[20px] bg-white p-6 text-left shadow-[0_1px_0_rgba(17,17,17,0.06),0_18px_50px_rgba(17,17,17,0.035)] transition hover:shadow-[0_1px_0_rgba(17,17,17,0.08),0_20px_56px_rgba(17,17,17,0.05)] focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
+      className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-6 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
     >
       <div className="flex items-start gap-3">
         <div className="block min-w-0 flex-1 text-left">
@@ -113,7 +103,7 @@ export function TaskMessageCard({
             {buildInstanceCardTitle(task, instance)}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
-            <span>{EXECUTION_KIND_LABEL[task.resultViewKind ?? task.executionKind]}</span>
+            <span>{EXECUTION_KIND_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</span>
             <span className="text-[#D0D7DE]">/</span>
             <span>{statusLabel}</span>
             {badgeLabel ? (
@@ -124,26 +114,12 @@ export function TaskMessageCard({
             ) : null}
             <ArtifactSummaryChip refs={instance.result?.taskResult?.artifactRefs} hasInteractiveSurface={hasInteractiveSurface} />
           </div>
-          <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">
-            {summaryText}
-          </div>
+          {awaitingDisplay.hideOuterSummary ? null : (
+            <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">
+              {summaryText}
+            </div>
+          )}
         </div>
-        {canStop ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              void runTaskExecutionAction(task.id, "pause", {
-                instanceId: instance.id,
-              }).catch((error) => {
-                window.alert(error instanceof Error ? error.message : "任务停止失败");
-              });
-            }}
-            className="shrink-0 bg-transparent px-0 py-1 text-[13px] text-[#B4534C]/75 hover:text-[#B4534C]"
-          >
-            停止执行
-          </button>
-        ) : null}
       </div>
       {instance.awaitingUser && !isOptionalFeedbackResult ? (
         <div className="mt-4" onClick={(event) => event.stopPropagation()}>

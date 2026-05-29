@@ -17,12 +17,6 @@ type Props = {
 
 const EXECUTION_OPTIONS: { value: Task["executionKind"]; label: string }[] = [
   { value: "generic_result", label: "Agent 执行 · KiKi 自动推进" },
-  { value: "freeform_chat", label: "补充对话 · 人工介入时使用" },
-  { value: "flashcard", label: "记忆闪卡 · 生词/概念记忆" },
-  { value: "listening_qa", label: "听力问答 · 含音频练习" },
-  { value: "reading_digest", label: "阅读摘要 · 素材快览" },
-  { value: "confirm_action", label: "确认执行 · KiKi 准备好让你拍板" },
-  { value: "draft_review", label: "草稿审阅 · 邮件/文档审核" },
 ];
 
 export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {

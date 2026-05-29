@@ -4,11 +4,12 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
-import { migrateGoalIds, normalizeGoalId } from "@/lib/opaqueIds";
+import { migrateGoalIds } from "@/lib/opaqueIds";
 import { normalizeConcreteTriggerRule, normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
+import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
 import type {
   ExecutionPayload,
   Goal,
@@ -22,7 +23,6 @@ import type {
   TaskResultNotificationDecision,
   TaskRunArtifact,
   TaskRunErrorCategory,
-  TaskResultViewKind,
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
@@ -66,7 +66,7 @@ function updateTaskInGoals(goals: Goal[], taskId: string, updater: (task: Task, 
 }
 
 function defaultResultViewKind(task: Task) {
-  return task.resultViewKind ?? task.executionKind ?? "generic_result";
+  return normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
 }
 
 function normalizeTaskType(taskType: unknown): Task["taskType"] {
@@ -79,9 +79,10 @@ function normalizeTask(task: Task): Task {
   delete taskFields["execution" + "Cycle"];
   return {
     ...taskFields,
+    executionKind: normalizeExecutionKind(task.executionKind),
     taskType: normalizedTaskType,
     triggerRule: normalizeConcreteTriggerRule(task.triggerRule, normalizedTaskType),
-    resultViewKind: task.resultViewKind ?? task.executionKind ?? "generic_result",
+    resultViewKind: normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind),
     executionStrategy: task.executionStrategy ?? "agent_autonomous",
     executionObjective: task.executionObjective ?? task.description,
     instances: task.instances.map((instance) =>
@@ -373,6 +374,7 @@ function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] |
     agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    toolInput: step.toolCall?.input,
     handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
@@ -577,6 +579,7 @@ type GoalStore = {
   addPendingConversationGoalDelete: (overlay: PendingConversationGoalDeleteOverlay) => void;
   removePendingConversationGoalDelete: (id: string) => void;
   applyInstanceStatusProjection: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
+  upsertTaskInstanceProjection: (taskId: string, instance: TaskInstance) => void;
   applyInstanceProgressProjection: (input: {
     taskId: string;
     instanceId: string;
@@ -780,6 +783,17 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
+      upsertTaskInstanceProjection: (taskId, instance) => {
+        set((state) => ({
+          goals: updateTaskInGoals(state.goals, taskId, (task) => {
+            const withoutCurrent = task.instances.filter((candidate) => candidate.id !== instance.id);
+            return {
+              ...task,
+              instances: [normalizeInstance(instance, task), ...withoutCurrent],
+            };
+          }),
+        }));
+      },
       applyInstanceProgressProjection: ({ taskId, instanceId, progress, logs, trajectory }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => {
@@ -792,7 +806,7 @@ export const useGoalStore = create<GoalStore>()(
               ...task,
               progress:
                 progress?.status === "completed" && !progress.resultPayload?.awaitingUser
-                  ? Math.min(100, Math.max(task.progress, task.progress + (defaultResultViewKind(task) === "flashcard" ? 8 : 5)))
+                  ? Math.min(100, Math.max(task.progress, task.progress + 5))
                   : task.progress,
               instances: task.instances.map((instance) => {
                 if (instance.id !== instanceId) return instance;
@@ -806,7 +820,7 @@ export const useGoalStore = create<GoalStore>()(
                       : progress?.status === "failed"
                         ? "error"
                         : "in_progress";
-                const nextKind = (progress?.resultPayload?.resultViewKind as TaskResultViewKind | undefined) ?? defaultResultViewKind(task);
+                const nextKind = normalizeTaskResultViewKind(progress?.resultPayload?.resultViewKind ?? defaultResultViewKind(task));
                 const artifacts = Array.isArray(progress?.resultPayload?.artifacts)
                   ? (progress.resultPayload.artifacts as TaskRunArtifact[])
                   : undefined;

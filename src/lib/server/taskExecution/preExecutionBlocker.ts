@@ -4,6 +4,11 @@ import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { InteractionRequirement, Task, TaskInstance } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
 
+import {
+  createInteractionRequirementFields,
+  fieldsSuggestedActions,
+  singleFieldOptions,
+} from "@/lib/server/informationRequest/compileFields";
 import type { TaskReadinessCheck } from "@/lib/server/taskReadinessPolicy";
 
 function nowIso() {
@@ -22,32 +27,30 @@ function uniqueStrings(values: string[]) {
   return next;
 }
 
-function buildQuestion(readiness: TaskReadinessCheck) {
-  const labels = readiness.missingUserInfo.map((item) => item.label);
-  if (labels.length <= 1) return labels[0] ? `请补充：${labels[0]}` : "请补充完成任务所需的关键信息。";
-  return `请一次性补充以下信息：${labels.map((label, index) => `${index + 1}. ${label}`).join("；")}`;
+function buildQuestion(readiness: TaskReadinessCheck, fields: ReturnType<typeof createInteractionRequirementFields>) {
+  if (fields.length === 1) return "";
+  if (fields.length > 1) return `请补全本轮所需的 ${fields.length} 项信息：${fields.map((field) => field.label).join("、")}。`;
+  return "请补充完成任务所需的关键信息。";
 }
 
-function buildOptions(readiness: TaskReadinessCheck) {
-  if (readiness.missingUserInfo.length !== 1) return [];
-  return readiness.missingUserInfo[0]?.options?.slice(0, 3) ?? [];
-}
-
-function buildSuggestedActions(readiness: TaskReadinessCheck, options: string[]) {
+function buildSuggestedActions(readiness: TaskReadinessCheck, fieldActions: string[]) {
   const labels = readiness.missingUserInfo.map((item) => `补充${item.label}`);
-  return uniqueStrings([...options, ...labels]).slice(0, 5);
+  return uniqueStrings([...fieldActions, ...labels]).slice(0, 5);
 }
 
 export function createPreExecutionInteractionRequirement(readiness: TaskReadinessCheck): InteractionRequirement {
-  const question = buildQuestion(readiness);
-  const options = buildOptions(readiness);
+  const fields = createInteractionRequirementFields(readiness);
+  const question = buildQuestion(readiness, fields);
+  const options = singleFieldOptions(fields);
+  const suggestedActions = buildSuggestedActions(readiness, fieldsSuggestedActions(fields));
   return {
     type: "provide_context",
     timing: "before_execution",
     reason: readiness.summary || question,
     question,
     options,
-    suggestedActions: buildSuggestedActions(readiness, options),
+    fields,
+    suggestedActions,
     shouldNotifyUser: true,
   };
 }
@@ -99,6 +102,7 @@ export function createPreExecutionTaskResult(input: {
       presentation: "summary_card",
       primaryFormat: "structured_blocks",
       exportableFormats: ["markdown"],
+      role: "pending_user_placeholder",
     },
   };
 }

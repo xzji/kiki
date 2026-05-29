@@ -2,32 +2,22 @@
 
 import { useEffect, useState } from "react";
 
-import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
-import { ConfirmActionView } from "@/components/execution/ConfirmActionView";
-import { DraftReviewView } from "@/components/execution/DraftReviewView";
-import { FlashcardView } from "@/components/execution/FlashcardView";
-import { ListeningQAView } from "@/components/execution/ListeningQAView";
-import { ReadingDigestView } from "@/components/execution/ReadingDigestView";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
 import { getTaskDependencyViews } from "@/lib/taskDependencies";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { runTaskExecutionAction } from "@/lib/taskExecution";
+import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
 import { hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import { useGoalStore } from "@/stores/goalStore";
 import type { AgentRunPlan } from "@/types/agentOrchestration";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type { Goal, InteractionSubmission, Task, TaskInstance } from "@/types/kiki";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
-  flashcard: "记忆闪卡",
-  listening_qa: "听力问答",
-  reading_digest: "阅读摘要",
-  confirm_action: "确认执行",
-  draft_review: "草稿审阅",
-  freeform_chat: "补充对话",
   generic_result: "Agent 任务",
 };
 
@@ -54,6 +44,7 @@ function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined)
     agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    toolInput: step.toolCall?.input,
     handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
@@ -153,9 +144,9 @@ export function ExecutionResultBody(props: {
 }) {
   const { goal, task, instance } = props;
   const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
-  const applyInstanceStatusProjection = useGoalStore((state) => state.applyInstanceStatusProjection);
   const [refreshTick, setRefreshTick] = useState(0);
-  const currentKind = task.resultViewKind ?? task.executionKind;
+  const awaitingDisplay = buildAwaitingDisplayModel(task, instance, "detail");
+  const currentKind = normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
   const optionalFeedbackResult = hasOptionalResultFeedback(instance);
   const displayStatus =
     optionalFeedbackResult || instance.status === "completed"
@@ -199,126 +190,29 @@ export function ExecutionResultBody(props: {
     };
   }, [applyInstanceProgressProjection, instance.id, instance.runner?.requestId, refreshTick, task.id]);
 
-  const finish = (submission: Omit<InteractionSubmission, "submittedAt">) => {
-    void transitionGoalInstance({
-      instanceId: instance.id,
-      status: "completed",
-      reason: submission.feedback || submission.action,
-    }).then(() => {
-      applyInstanceStatusProjection(task.id, instance.id, "completed");
-    });
-  };
-  const hasBuiltInDeliverable =
-    (currentKind === "flashcard" && instance.payload.kind === "flashcard") ||
-    (currentKind === "listening_qa" && instance.payload.kind === "listening_qa") ||
-    (currentKind === "reading_digest" && instance.payload.kind === "reading_digest") ||
-    (currentKind === "confirm_action" && instance.payload.kind === "confirm_action") ||
-    (currentKind === "draft_review" && instance.payload.kind === "draft_review");
+  const hasGenericResultContent =
+    Boolean(instance.result?.taskResult) ||
+    Boolean(instance.result?.summary) ||
+    Boolean(instance.result?.finalMessage) ||
+    Boolean(instance.result?.artifacts?.length);
   const shouldRenderGenericDeliverable =
-    (currentKind === "generic_result" || instance.payload.kind === "generic_result" || !instance.payload) &&
-    hasGenericDeliverableContent(instance);
+    hasGenericResultContent || hasGenericDeliverableContent(instance);
   const agentRunPlan = getAgentRunPlan(instance);
   const shouldRenderConcreteDeliverable =
-    (hasBuiltInDeliverable || shouldRenderGenericDeliverable) && !shouldDeferConcreteResultUntilUserInput(instance);
+    shouldRenderGenericDeliverable && !shouldDeferConcreteResultUntilUserInput(instance);
   const dependencyViews = getTaskDependencyViews(goal, task);
   const resultBlock = shouldRenderConcreteDeliverable ? (
     <div>
       <div className="mb-3 text-[13px] font-medium text-[#1F2328]">产出物</div>
-      {currentKind === "flashcard" && instance.payload.kind === "flashcard" ? (
-        <FlashcardView
-          cards={instance.payload.cards}
-          onComplete={() =>
-            finish({
-              type: "answer",
-              status: "completed",
-              action: "记忆练习",
-              feedback: "已完成全部闪卡",
-            })
-          }
-        />
-      ) : null}
-      {currentKind === "listening_qa" && instance.payload.kind === "listening_qa" ? (
-        <ListeningQAView
-          questions={instance.payload.questions}
-          onComplete={() =>
-            finish({
-              type: "answer",
-              status: "completed",
-              action: "听力作答",
-              feedback: "已完成全部题目",
-            })
-          }
-        />
-      ) : null}
-      {currentKind === "reading_digest" && instance.payload.kind === "reading_digest" ? (
-        <ReadingDigestView
-          articles={instance.payload.articles}
-          onComplete={() =>
-            finish({
-              type: "perform_offline_action",
-              status: "completed",
-              action: "阅读材料",
-              feedback: "已标记已读",
-            })
-          }
-        />
-      ) : null}
-      {currentKind === "confirm_action" && instance.payload.kind === "confirm_action" ? (
-        <ConfirmActionView
-          summary={instance.payload.summary}
-          onConfirm={() =>
-            finish({
-              type: "confirm",
-              status: "confirmed",
-              action: "确认执行",
-              approved: true,
-              feedback: "已确认执行",
-            })
-          }
-          onRevise={() =>
-            finish({
-              type: "confirm",
-              status: "rejected",
-              action: "要求修改",
-              approved: false,
-              feedback: "用户要求 KiKi 修改方案",
-            })
-          }
-        />
-      ) : null}
-      {currentKind === "draft_review" && instance.payload.kind === "draft_review" ? (
-        <DraftReviewView
-          drafts={instance.payload.drafts}
-          onComplete={() =>
-            finish({
-              type: "confirm",
-              status: "confirmed",
-              action: "草稿确认",
-              approved: true,
-              feedback: "已完成草稿审阅",
-            })
-          }
-          onRewrite={() =>
-            finish({
-              type: "confirm",
-              status: "rejected",
-              action: "要求重写",
-              approved: false,
-              feedback: "用户要求 KiKi 重写草稿",
-            })
-          }
-        />
-      ) : null}
-      {shouldRenderGenericDeliverable ? (
-        <GenericAgentResultView
-          summary={instance.result?.summary}
-          finalMessage={instance.result?.finalMessage}
-          taskResult={instance.result?.taskResult}
-          artifacts={instance.result?.artifacts}
-          structuredOutput={instance.result?.structuredOutput}
-          notification={instance.notification}
-        />
-      ) : null}
+      <GenericAgentResultView
+        summary={instance.result?.summary}
+        finalMessage={instance.result?.finalMessage}
+        taskResult={instance.result?.taskResult}
+        artifacts={instance.result?.artifacts}
+        structuredOutput={instance.result?.structuredOutput}
+        notification={instance.notification}
+        hidePendingUserPlaceholder={awaitingDisplay.hidePendingTaskResultBlocks}
+      />
     </div>
   ) : null;
   const interactionTurn = instance.awaitingUser && !optionalFeedbackResult ? (
@@ -398,8 +292,10 @@ export function ExecutionResultBody(props: {
               {dependencyViews.map((dependency) => (
                 <div key={dependency.id} className="space-y-1 text-[13px] leading-6">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-[#1F2328]">{dependency.title}</span>
-                    <span className="font-mono text-[11px] text-[#8C9198]">{dependency.id}</span>
+                    <span className="font-medium text-[#1F2328]">{dependency.displayTitle}</span>
+                    <span className="font-mono text-[11px] text-[#8C9198]">
+                      {dependency.missing ? `引用 ID：${dependency.taskId}` : `任务 ID：${dependency.taskId}`}
+                    </span>
                     <span
                       className={
                         dependency.missing

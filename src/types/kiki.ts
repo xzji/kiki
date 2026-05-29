@@ -11,17 +11,20 @@ export type TaskInstanceStatus =
   | "paused"
   | "error";
 
-export type TaskResultViewKind =
-  | "flashcard"
-  | "listening_qa"
-  | "reading_digest"
-  | "confirm_action"
-  | "draft_review"
-  | "freeform_chat"
-  | "generic_result";
+export type TaskResultViewKind = "generic_result";
 
 // Legacy alias kept to reduce churn while the UI migrates to resultViewKind.
 export type ExecutionKind = TaskResultViewKind;
+
+export function normalizeTaskResultViewKind(_value?: unknown): TaskResultViewKind {
+  void _value;
+  return "generic_result";
+}
+
+export function normalizeExecutionKind(value?: unknown): ExecutionKind {
+  return normalizeTaskResultViewKind(value);
+}
+
 export type TaskExecutionStrategy = "agent_autonomous" | "user_interactive" | "hybrid";
 export type TaskCollaborationMode =
   | "agent_autonomous"
@@ -51,6 +54,16 @@ export type TaskCollaborationRequirements = {
   completionOwner: "agent" | "user" | "shared";
   completionDefinition: string;
 };
+export type MissingFieldQuestion = {
+  id: string;
+  label: string;
+  question: string;
+  description: string;
+  options: string[];
+  inputPlaceholder?: string;
+  source: "user" | "agent" | "system";
+};
+
 export type InteractionRequirement = {
   type:
     | "none"
@@ -64,6 +77,7 @@ export type InteractionRequirement = {
   reason: string;
   question?: string;
   options?: string[];
+  fields?: MissingFieldQuestion[];
   suggestedActions?: string[];
   shouldNotifyUser: boolean;
 };
@@ -219,6 +233,7 @@ export type TaskExecutionStep = {
   agentRole?: AgentRole;
   detail?: string;
   toolName?: string;
+  toolInput?: unknown;
   handoff?: {
     fromRole?: AgentRole;
     toRole?: AgentRole;
@@ -316,46 +331,12 @@ export type TaskInstanceNotificationState = TaskResultNotificationDecision & {
   conversationMessageId?: string;
 };
 
-export type FlashCard = {
-  id: string;
-  word: string;
-  phonetic: string;
-  partOfSpeech: string;
-  meaning: string;
-  examples: { en: string; zh: string }[];
-};
-
-export type QA = {
-  id: string;
-  question: string;
-  options: string[];
-  answerIndex: number;
-  explanation: string;
-};
-
-export type Article = {
-  id: string;
-  title: string;
-  source: string;
+export type ExecutionPayload = {
+  kind: "generic_result";
   summary: string;
-  body: string;
+  details?: string;
+  artifacts?: TaskRunArtifact[];
 };
-
-export type EmailDraft = {
-  id: string;
-  recipient: string;
-  subject: string;
-  body: string;
-};
-
-export type ExecutionPayload =
-  | { kind: "flashcard"; cards: FlashCard[] }
-  | { kind: "listening_qa"; audioUrl: string; questions: QA[] }
-  | { kind: "reading_digest"; articles: Article[] }
-  | { kind: "confirm_action"; summary: string; options: string[] }
-  | { kind: "draft_review"; drafts: EmailDraft[] }
-  | { kind: "freeform_chat"; seed: string }
-  | { kind: "generic_result"; summary: string; details?: string; artifacts?: TaskRunArtifact[] };
 
 export type TaskInstance = {
   id: string;

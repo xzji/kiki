@@ -1,0 +1,10 @@
+{
+  "conversationId": "conv-new-1779969095899",
+  "workspaceDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779969095899",
+  "contextDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779969095899/context",
+  "planningDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779969095899/planning",
+  "goalsDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779969095899/goals",
+  "tasksDir": "/Users/bytedance/Documents/trae/long_horizon_agent/data/workspaces/conversations/conv-new-1779969095899/tasks",
+  "createdAt": "2026-05-28T11:51:36.444Z",
+  "version": 1
+}

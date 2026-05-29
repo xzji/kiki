@@ -1,4 +1,6 @@
-import { createOpaqueId, deriveOpaqueId } from "@/lib/opaqueIds";
+import { createOpaqueId } from "@/lib/opaqueIds";
+import { buildExpectedResult as expectedResultFor } from "@/lib/goalPlanning/taskCompiler";
+import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
 import type {
   ExecutionKind,
   ExecutionPayload,
@@ -7,7 +9,6 @@ import type {
   InteractionRequirement,
   Task,
   TaskCollaborationRequirements,
-  TaskExpectedResult,
   TaskExecutionStep,
   TaskInstance,
 } from "@/types/kiki";
@@ -16,52 +17,11 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function payloadFor(kind: ExecutionKind): ExecutionPayload {
-  switch (kind) {
-    case "flashcard":
-      return { kind, cards: [] };
-    case "listening_qa":
-      return { kind, audioUrl: "", questions: [] };
-    case "reading_digest":
-      return { kind, articles: [] };
-    case "confirm_action":
-      return { kind, summary: "", options: [] };
-    case "draft_review":
-      return { kind, drafts: [] };
-    case "freeform_chat":
-      return { kind, seed: "" };
-    case "generic_result":
-      return { kind, summary: "" };
-  }
+function payloadFor(): ExecutionPayload {
+  return { kind: "generic_result", summary: "" };
 }
 
-function collaborationFor(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
-  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
-    return {
-      mode: "agent_user_collaborative",
-      agentResponsibilities: [description, "准备练习内容并给出反馈"],
-      userResponsibilities: ["完成作答或互动"],
-      userInteractionType: "answer",
-      userInteractionTiming: "core_task_step",
-      userFacingActionLabel: "开始作答",
-      shouldNotifyUser: true,
-      completionOwner: "shared",
-      completionDefinition: expectedOutcome,
-    };
-  }
-  if (kind === "confirm_action" || kind === "draft_review") {
-    return {
-      mode: "agent_with_user_confirmation",
-      agentResponsibilities: [description, "生成可供用户确认或修改的方案"],
-      userResponsibilities: ["确认结果或提出修改建议"],
-      userInteractionType: "confirm",
-      userInteractionTiming: "after_agent_output",
-      userFacingActionLabel: "确认或提出修改建议",
-      shouldNotifyUser: true,
-      completionOwner: "agent",
-      completionDefinition: expectedOutcome,
-    };
-  }
+function collaborationFor(_kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
   return {
     mode: "agent_autonomous",
     agentResponsibilities: [description, "自主完成并沉淀结果"],
@@ -69,28 +29,9 @@ function collaborationFor(kind: ExecutionKind, description: string, expectedOutc
     userInteractionType: "none",
     userInteractionTiming: "not_required",
     userFacingActionLabel: "查看结果",
-    shouldNotifyUser: kind === "reading_digest",
+    shouldNotifyUser: false,
     completionOwner: "agent",
     completionDefinition: expectedOutcome,
-  };
-}
-
-function expectedResultFor(kind: ExecutionKind, expectedOutcome: string, description: string): TaskExpectedResult {
-  const text = `${expectedOutcome}\n${description}`;
-  const requiredBlocks: NonNullable<TaskExpectedResult["requiredBlocks"]> = ["heading"];
-  if (/对比|比较|表|矩阵|维度/.test(text)) requiredBlocks.push("comparison_table");
-  if (/清单|步骤|计划|训练|复盘|词汇|摘要|精读|复述|结构图/.test(text)) requiredBlocks.push("list");
-  if (!requiredBlocks.includes("comparison_table")) requiredBlocks.push("paragraph");
-  requiredBlocks.push("callout");
-  return {
-    type: kind === "confirm_action" ? "confirmation" : "deliverable",
-    description: expectedOutcome,
-    format: "markdown",
-    presentation: kind === "confirm_action" ? "summary_card" : "summary_card",
-    primaryFormat: "structured_blocks",
-    exportableFormats: ["markdown"],
-    requiredBlocks: Array.from(new Set(requiredBlocks)),
-    completionCriteria: expectedOutcome,
   };
 }
 
@@ -161,13 +102,53 @@ export function interactionRequirementFor(kind: ExecutionKind, reason: string): 
   };
 }
 
+function scopedDraftTaskKey(subGoalId: string, taskId: string) {
+  return `${subGoalId}:${taskId}`;
+}
+
+function buildTaskIdResolver(draft: GoalBreakdownDraft) {
+  const idCounts = new Map<string, number>();
+  for (const subGoal of draft.subGoals) {
+    for (const taskItem of subGoal.tasks) {
+      idCounts.set(taskItem.id, (idCounts.get(taskItem.id) ?? 0) + 1);
+    }
+  }
+
+  const taskIdMap = new Map<string, string>();
+  for (const subGoal of draft.subGoals) {
+    for (const taskItem of subGoal.tasks) {
+      const hasDuplicateDraftId = (idCounts.get(taskItem.id) ?? 0) > 1;
+      const mapKey = hasDuplicateDraftId ? scopedDraftTaskKey(subGoal.id, taskItem.id) : taskItem.id;
+      taskIdMap.set(mapKey, createOpaqueId("task"));
+    }
+  }
+
+  const resolveTaskId = (subGoalId: string, taskId: string) =>
+    taskIdMap.get(scopedDraftTaskKey(subGoalId, taskId)) ?? taskIdMap.get(taskId);
+
+  return { resolveTaskId };
+}
+
+function warnUnresolvedTaskDependency(input: {
+  draft: GoalBreakdownDraft;
+  subGoalId: string;
+  taskId: string;
+  dependencyId: string;
+}) {
+  if (process.env.NODE_ENV !== "development") return;
+  console.warn("[goalFactory] Dropped unresolved task dependency", {
+    goalTitle: input.draft.goalTitle,
+    subGoalId: input.subGoalId,
+    taskId: input.taskId,
+    dependencyId: input.dependencyId,
+  });
+}
+
 export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
   const goalId = createOpaqueId("goal");
   const createdAt = nowIso();
   const subGoalIdMap = new Map(draft.subGoals.map((subGoal) => [subGoal.id, createOpaqueId("sg")]));
-  const taskIdMap = new Map(
-    draft.subGoals.flatMap((subGoal) => subGoal.tasks.map((taskItem) => [taskItem.id, createOpaqueId("task")] as const)),
-  );
+  const { resolveTaskId } = buildTaskIdResolver(draft);
 
   return {
     id: goalId,
@@ -189,9 +170,9 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
       successCriteria: subGoal.successCriteria,
       tasks: subGoal.tasks.map((taskItem) => {
-        const executionKind = taskItem.executionKind;
+        const executionKind = normalizeExecutionKind(taskItem.executionKind);
         return {
-          id: taskIdMap.get(taskItem.id) ?? createOpaqueId("task"),
+          id: resolveTaskId(subGoal.id, taskItem.id) ?? createOpaqueId("task"),
           subGoalId: subGoalIdMap.get(subGoal.id) ?? createOpaqueId("sg"),
           title: taskItem.title,
           description: taskItem.description,
@@ -202,12 +183,23 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
           progress: 0,
           instances: [],
           executionKind,
-          resultViewKind: taskItem.resultViewKind ?? executionKind,
+          resultViewKind: normalizeTaskResultViewKind(taskItem.resultViewKind ?? executionKind),
           executionStrategy: taskItem.executionStrategy ?? "agent_autonomous",
           priority: taskItem.priority,
-          dependencies: taskItem.dependencies?.map(
-            (dependencyId) => taskIdMap.get(dependencyId) ?? deriveOpaqueId("task", dependencyId),
-          ),
+          dependencies: taskItem.dependencies
+            ?.map((dependencyId) => {
+              const resolvedDependencyId = resolveTaskId(subGoal.id, dependencyId);
+              if (!resolvedDependencyId) {
+                warnUnresolvedTaskDependency({
+                  draft,
+                  subGoalId: subGoal.id,
+                  taskId: taskItem.id,
+                  dependencyId,
+                });
+              }
+              return resolvedDependencyId;
+            })
+            .filter((dependencyId): dependencyId is string => Boolean(dependencyId)),
           executionMode: taskItem.executionMode,
           expectedResult: taskItem.expectedResult ?? expectedResultFor(executionKind, taskItem.expectedOutcome, taskItem.description),
           executionObjective: taskItem.executionObjective ?? taskItem.description,
@@ -216,7 +208,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
           requiresConfirmation: taskItem.requiresConfirmation,
           collaboration:
             taskItem.collaboration ??
-            collaborationFor(taskItem.resultViewKind ?? executionKind, taskItem.description, taskItem.expectedOutcome),
+            collaborationFor(executionKind, taskItem.description, taskItem.expectedOutcome),
         } satisfies Task;
       }),
     })),
@@ -232,7 +224,7 @@ export function createGeneratedInstance(task: Task, createdAt: string): TaskInst
     dateLabel,
     status: "pending",
     intro: `到了 ${task.triggerRule} 的触发时间，KiKi 已自动排队执行“${task.title.replace(/^任务\d+：/, "")}”。`,
-    payload: payloadFor(task.resultViewKind ?? task.executionKind),
+    payload: payloadFor(),
     createdAt,
     runner: {
       attemptCount: 0,

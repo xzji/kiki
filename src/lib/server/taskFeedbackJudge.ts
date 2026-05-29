@@ -119,6 +119,8 @@ export async function judgeTaskFeedback(input: {
     workingDirectory: input.workingDirectory,
     cliPath: input.runtimeEnv.cliPath,
     permissionMode: "readonly",
+    filePolicy: input.runtimeEnv.filePolicy,
+    channelPolicy: { mode: "conversation" },
     workspacePolicy: "conversation",
     onEvent: (event) => {
       if (event.type === "message") finalMessage = event.content;

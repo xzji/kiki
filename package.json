@@ -13,17 +13,21 @@
     "verify:architecture": "tsx scripts/verify-architecture.ts",
     "verify:goal-commands": "tsx scripts/verify-goal-command-service.ts",
     "verify:goal-event-cursor": "tsx scripts/verify-goal-event-cursor.ts",
-    "verify": "pnpm verify:architecture && pnpm verify:goal-commands && pnpm verify:goal-event-cursor"
+    "verify": "pnpm verify:architecture && pnpm verify:goal-commands && pnpm verify:goal-event-cursor",
+    "test:planning": "tsx scripts/run-planning-specs.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.5",
     "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.11.0",
     "next": "14.2.30",
     "react": "^18",
     "react-dom": "^18",
+    "server-only": "^0.0.1",
     "tailwind-merge": "^3.5.0",
+    "xlsx": "^0.18.5",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

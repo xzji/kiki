@@ -1,0 +1,65 @@
+<task index="1">
+<title>
+选股哲学与可投行业范围定义
+</title>
+<objective>
+结合用户激进收益目标（1年100%），确定选股哲学框架（成长型/动量型/事件驱动型的权重分配），并划定可投行业范围与排除清单。
+</objective>
+<deliverable>
+一份选股哲学说明与行业范围清单，附各行业的配置比例上限。
+</deliverable>
+<acceptance>
+- 明确选股哲学类型及权重（成长型、动量型、事件驱动型至少覆盖两项）
+- 列出至少 5 个优先行业和明确排除的行业及排除理由
+- 每个优先行业标注配置比例上限
+</acceptance>
+<cadence>立即触发，一次性完成</cadence>
+<user-involvement mode="answer" />
+<dependencies></dependencies>
+<priority>critical</priority>
+<duration-minutes>60</duration-minutes>
+</task>
+<task index="2">
+<title>
+仓位管理与止损止盈规则制定
+</title>
+<objective>
+基于 1 万美元本金，制定单票仓位上限、总仓位上限、止损线、分批止盈规则和最大回撤阈值，确保风控规则可量化执行。
+</objective>
+<deliverable>
+一份包含具体数值的仓位管理与风控规则表。
+</deliverable>
+<acceptance>
+- 单票仓位上限明确（百分比和金额双标注）
+- 止损规则含硬止损线和移动止损规则
+- 止盈规则含分批止盈比例和条件
+- 最大回撤阈值（组合层面）明确
+- 所有规则均为可量化的具体数值，不含主观模糊描述
+</acceptance>
+<cadence>立即触发，一次性完成</cadence>
+<user-involvement mode="answer" />
+<dependencies>选股哲学与可投行业范围定义</dependencies>
+<priority>critical</priority>
+<duration-minutes>90</duration-minutes>
+</task>
+<task index="3">
+<title>
+投资策略文档整合与风险确认
+</title>
+<objective>
+将选股哲学、行业范围、仓位管理、止损止盈规则整合为一份完整的策略手册，交由用户审阅并签署风险承受声明。
+</objective>
+<deliverable>
+一份结构完整的投资策略文档（PDF 或 Markdown），含用户签署的风险承受声明页。
+</deliverable>
+<acceptance>
+- 文档包含完整的选股哲学、行业偏好、仓位管理、止损止盈规则章节
+- 风险声明页明确标注「1年100%收益率目标为极高风险策略，可能导致本金全部亏损」
+- 用户签字确认或等效电子确认记录
+</acceptance>
+<cadence>立即触发，一次性完成</cadence>
+<user-involvement mode="confirm" />
+<dependencies>选股哲学与可投行业范围定义, 仓位管理与止损止盈规则制定</dependencies>
+<priority>critical</priority>
+<duration-minutes>60</duration-minutes>
+</task>

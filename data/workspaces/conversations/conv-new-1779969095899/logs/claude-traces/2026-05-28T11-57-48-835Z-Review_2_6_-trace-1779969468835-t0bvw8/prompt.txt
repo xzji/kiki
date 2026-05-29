@@ -1,0 +1,111 @@
+重要约束：禁止调用任何工具（Write/Edit/MultiEdit/Bash/WebSearch/WebFetch/Task 等），所有业务结果必须写在最终 JSON 回答里。
+
+请 Review 以下 TaskDraft 是否与目标和子目标对齐。
+
+目标：美股投资选标的
+子目标：数据基础设施搭建
+目标描述：筛选美股投资标的并提供交易时机提醒，以1万美元本金在1年内实现翻倍（100%收益率），由系统主导标的筛选和时机判断
+
+TaskDraft：
+[
+  {
+    "index": 1,
+    "title": "美股行情API对接与实时K线数据接入",
+    "objective": "选定并对接美股行情API，实现日线及以上级别K线数据的稳定拉取，确保数据延迟不超过15分钟。",
+    "deliverable": "完成行情API对接，输出一份数据源选型说明和可运行的K线拉取脚本/模块。",
+    "acceptanceCriteria": [
+      "至少对接一个行情API并完成鉴权",
+      "支持日线、周线、月线K线数据拉取",
+      "单次请求数据延迟不超过15分钟",
+      "拉取脚本可稳定运行24小时不中断"
+    ],
+    "cadence": "一次性执行，完成后进入维护",
+    "dependencyHints": [],
+    "priorityHint": "critical",
+    "estimatedMinutes": 240,
+    "userInvolvement": {
+      "mode": "none"
+    }
+  },
+  {
+    "index": 2,
+    "title": "基本面数据源对接与财务数据入库",
+    "objective": "对接至少一个美股基本面数据源，拉取营收、利润、PE、PB、ROE等核心财务指标并建立结构化存储。",
+    "deliverable": "基本面数据拉取模块，含数据清洗规则和数据库表结构设计文档。",
+    "acceptanceCriteria": [
+      "覆盖至少500只美股的基本面数据",
+      "数据字段包含营收、净利润、PE、PB、ROE、市值",
+      "错误数据占比不超过5%",
+      "支持按季度级更新"
+    ],
+    "cadence": "一次性执行，完成后每季度刷新",
+    "dependencyHints": [
+      "行情API对接完成后开始"
+    ],
+    "priorityHint": "high",
+    "estimatedMinutes": 180,
+    "userInvolvement": {
+      "mode": "none"
+    }
+  },
+  {
+    "index": 3,
+    "title": "技术指标计算引擎搭建",
+    "objective": "基于K线数据构建常用技术指标计算引擎，覆盖趋势、动量、波动率三类指标，支撑后续选股和时机判断。",
+    "deliverable": "技术指标计算引擎代码模块，含指标说明文档。",
+    "acceptanceCriteria": [
+      "支持均线、MACD、RSI、布林带、ATR至少5个指标",
+      "单只股票全量历史指标计算不超过30秒",
+      "计算结果与主流平台偏差不超过1%"
+    ],
+    "cadence": "一次性执行，每日收盘后自动计算",
+    "dependencyHints": [
+      "行情API对接完成后开始"
+    ],
+    "priorityHint": "high",
+    "estimatedMinutes": 240,
+    "userInvolvement": {
+      "mode": "none"
+    }
+  },
+  {
+    "index": 4,
+    "title": "数据完整性校验与监控告警",
+    "objective": "建立数据完整性校验机制，确保连续交易日数据无缺失、无错误，异常时自动告警。",
+    "deliverable": "数据校验模块和每日健康检查报告。",
+    "acceptanceCriteria": [
+      "连续5个交易日无缺失K线",
+      "连续5个交易日无错误财务数据",
+      "检测到缺失或异常时30分钟内发出告警",
+      "支持断点补录自动修复"
+    ],
+    "cadence": "每日收盘后60分钟触发",
+    "dependencyHints": [
+      "行情API和基本面数据源对接完成后开始"
+    ],
+    "priorityHint": "high",
+    "estimatedMinutes": 120,
+    "userInvolvement": {
+      "mode": "none"
+    }
+  }
+]
+
+要求：
+1. 只能输出严格 JSON 对象，不要包含 Markdown、代码块或额外解释。
+2. reviewResults 必须覆盖每个 TaskDraft，taskId 使用 TaskDraft 的 index 字符串。
+3. goalContribution/subGoalContribution 只能是 critical/high/medium/low。
+
+JSON schema：
+{
+  "reviewResults": [
+    {
+      "taskId": "1",
+      "goalContribution": "high",
+      "subGoalContribution": "high",
+      "aligned": true,
+      "reasoning": "评估理由",
+      "suggestions": ["建议"]
+    }
+  ]
+}

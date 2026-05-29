@@ -112,6 +112,9 @@ export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadines
       status: available ? "available" : "missing_user",
       reason: available ? "已在任务上下文或用户反馈中找到出发城市。" : "这是用户个人行程信息，Agent 不能自行猜测或默认选择。",
       value: userFeedback || undefined,
+      optionQuestion: "你打算从哪个城市出发？",
+      options: ["北京", "上海", "广州"],
+      inputPlaceholder: "请输入城市名，如 成都",
     });
     addItem({
       id: "flight_inventory",
@@ -131,6 +134,9 @@ export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadines
       source: "user",
       status: hasDateValue(text) ? "available" : "missing_user",
       reason: hasDateValue(text) ? "已在任务上下文中找到日期。" : "日期属于用户行程约束，缺失时不能默认假设。",
+      optionQuestion: "你计划什么时候出行？",
+      options: ["本周内", "下周出发", "时间还未确定"],
+      inputPlaceholder: "请输入日期或时间范围，如 6月10日-6月15日",
     });
   }
 
@@ -143,6 +149,9 @@ export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadines
       source: "user",
       status: budgetAvailable ? "available" : "missing_user",
       reason: budgetAvailable ? "已在任务上下文或用户反馈中找到预算信息。" : "预算是用户偏好，Agent 不能自行假设。",
+      optionQuestion: "这次预算大概是什么范围？",
+      options: ["3000 元以内", "3000-8000 元", "不设明确上限"],
+      inputPlaceholder: "请输入预算范围，如 人均 5000 元",
     });
   }
 

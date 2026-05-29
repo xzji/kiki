@@ -18,14 +18,7 @@ function buildScheduleEvent(goal: Goal, task: Task, instanceId: string, startedA
     endTime: endAt.toISOString(),
     isAllDay: false,
     attendees: [],
-    color:
-      task.executionKind === "draft_review"
-        ? "purple"
-        : task.executionKind === "confirm_action"
-          ? "orange"
-          : task.executionKind === "reading_digest"
-            ? "cyan"
-            : "blue",
+    color: "blue",
     createdByAgent: true,
     agentActions: [
       {

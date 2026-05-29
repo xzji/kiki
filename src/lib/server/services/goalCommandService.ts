@@ -9,6 +9,7 @@ import {
 import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import { writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
 import type { GoalEventRecord } from "@/types/goalEventLog";
+import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
 import type { ExecutionKind, Goal, GoalWorkflow, SubGoal, Task } from "@/types/kiki";
 
 type TaskCommandInput = {
@@ -173,6 +174,8 @@ function validateGoalEntity(goal: Goal) {
       throw new GoalCommandValidationError(400, "子目标任务结构无效");
     }
     for (const task of subGoal.tasks) {
+      task.executionKind = normalizeExecutionKind(task.executionKind);
+      task.resultViewKind = normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
       assertTitle(task.id, "任务 ID");
       assertTitle(task.title, "任务标题");
       assertTitle(task.expectedOutcome, "任务交付物");
@@ -190,6 +193,7 @@ function validateGoalEntity(goal: Goal) {
 function normalizeTaskInput(input: TaskCommandInput): TaskCommandInput {
   return {
     ...input,
+    executionKind: normalizeExecutionKind(input.executionKind),
     title: assertTitle(input.title, "任务标题"),
     description: input.description?.trim() ?? "",
     expectedOutcome: assertTitle(input.expectedOutcome, "任务交付物"),
@@ -234,7 +238,7 @@ function createTask(input: { subGoalId: string; task: TaskCommandInput; idempote
     progress: 0,
     instances: [],
     executionKind: task.executionKind,
-    resultViewKind: task.executionKind,
+    resultViewKind: normalizeTaskResultViewKind(task.executionKind),
     executionStrategy: "agent_autonomous",
     executionObjective: task.description ?? "",
   };
@@ -332,7 +336,7 @@ function applyCommandToGoals(goals: Goal[], command: GoalCommand, idempotencyKey
                     triggerRule: nextTaskInput.triggerRule,
                     deadline: nextTaskInput.deadline,
                     executionKind: nextTaskInput.executionKind,
-                    resultViewKind: task.resultViewKind ?? nextTaskInput.executionKind,
+                    resultViewKind: normalizeTaskResultViewKind(nextTaskInput.executionKind),
                     executionObjective: nextTaskInput.description ?? "",
                   }
                 : task,

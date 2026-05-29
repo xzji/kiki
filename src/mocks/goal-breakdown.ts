@@ -1,19 +1,6 @@
 import type { ExecutionKind, GoalBreakdownDraft, TaskCollaborationRequirements } from "@/types/kiki";
 
-function mockCollaboration(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
-  if (kind === "draft_review" || kind === "confirm_action") {
-    return {
-      mode: "agent_with_user_confirmation",
-      agentResponsibilities: [description, "生成可供用户确认或修改的产物"],
-      userResponsibilities: ["确认结果或提出修改建议"],
-      userInteractionType: "confirm",
-      userInteractionTiming: "after_agent_output",
-      userFacingActionLabel: "确认或提出修改建议",
-      shouldNotifyUser: true,
-      completionOwner: "agent",
-      completionDefinition: expectedOutcome,
-    };
-  }
+function mockCollaboration(_kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
   return {
     mode: "agent_autonomous",
     agentResponsibilities: [description, "自主完成并沉淀结果"],
@@ -21,7 +8,7 @@ function mockCollaboration(kind: ExecutionKind, description: string, expectedOut
     userInteractionType: "none",
     userInteractionTiming: "not_required",
     userFacingActionLabel: "查看结果",
-    shouldNotifyUser: kind === "reading_digest",
+    shouldNotifyUser: false,
     completionOwner: "agent",
     completionDefinition: expectedOutcome,
   };
@@ -42,8 +29,8 @@ export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
             expectedOutcome: "形成一份 1 页岗位画像摘要。",
             taskType: "one_shot",
             triggerRule: "今天 20:00 触发",
-            executionKind: "reading_digest",
-            collaboration: mockCollaboration("reading_digest", "梳理目标岗位的职责、能力要求和代表性公司。", "形成一份 1 页岗位画像摘要。"),
+            executionKind: "generic_result",
+            collaboration: mockCollaboration("generic_result", "梳理目标岗位的职责、能力要求和代表性公司。", "形成一份 1 页岗位画像摘要。"),
           },
           {
             id: "draft-task-2",
@@ -52,8 +39,8 @@ export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
             expectedOutcome: "每个案例都有 STAR 结构和关键指标。",
             taskType: "repeat",
             triggerRule: "每天 21:00 触发",
-            executionKind: "draft_review",
-            collaboration: mockCollaboration("draft_review", "沉淀 5 个可复用的产品项目案例。", "每个案例都有 STAR 结构和关键指标。"),
+            executionKind: "generic_result",
+            collaboration: mockCollaboration("generic_result", "沉淀 5 个可复用的产品项目案例。", "每个案例都有 STAR 结构和关键指标。"),
           },
           {
             id: "draft-task-3",
@@ -63,8 +50,8 @@ export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
             taskType: "repeat",
             executionMode: "monitoring",
             triggerRule: "每天 09:00 触发",
-            executionKind: "reading_digest",
-            collaboration: mockCollaboration("reading_digest", "跟踪 AI Agent、Copilot、workflow 新动态。", "每周输出 1 页趋势摘要。"),
+            executionKind: "generic_result",
+            collaboration: mockCollaboration("generic_result", "跟踪 AI Agent、Copilot、workflow 新动态。", "每周输出 1 页趋势摘要。"),
           },
         ],
       },
@@ -89,8 +76,8 @@ export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
             expectedOutcome: "输出 3 封可直接发送的邮件。",
             taskType: "repeat",
             triggerRule: "每天 18:00 触发",
-            executionKind: "draft_review",
-            collaboration: mockCollaboration("draft_review", "检查投递邮件、跟进邮件和感谢信。", "输出 3 封可直接发送的邮件。"),
+            executionKind: "generic_result",
+            collaboration: mockCollaboration("generic_result", "检查投递邮件、跟进邮件和感谢信。", "输出 3 封可直接发送的邮件。"),
           },
           {
             id: "draft-task-6",
@@ -99,8 +86,8 @@ export function getGoalBreakdownDraft(goalTitle: string): GoalBreakdownDraft {
             expectedOutcome: "确认 5 家优先公司。",
             taskType: "one_shot",
             triggerRule: "明天 10:00 触发",
-            executionKind: "confirm_action",
-            collaboration: mockCollaboration("confirm_action", "和 KiKi 一起决定本周要投递的公司清单。", "确认 5 家优先公司。"),
+            executionKind: "generic_result",
+            collaboration: mockCollaboration("generic_result", "和 KiKi 一起决定本周要投递的公司清单。", "确认 5 家优先公司。"),
           },
         ],
       },

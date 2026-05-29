@@ -1,0 +1,84 @@
+<task index="1">
+<title>
+纸面交易环境搭建与执行
+</title>
+<objective>
+配置1万美元虚拟组合纸面交易账户，完成信号链路联调，启动为期1个月的验证交易。
+</objective>
+<deliverable>
+信号链路验证报告，确认所有信号类型均可触发纸面交易并记录完整执行日志。
+</deliverable>
+<acceptance>
+- 纸面账户可接收并执行买入/卖出/止损三类信号
+- 信号触发到纸面成交的延迟不超过 5 分钟
+- 首周内至少完成 3 笔纸面成交，验证链路无故障
+</acceptance>
+<cadence>一次性任务，确认完成后即流转至监控阶段</cadence>
+<user-involvement mode="confirm" />
+<dependencies></dependencies>
+<priority>critical</priority>
+<duration-minutes>120</duration-minutes>
+</task>
+<task index="2">
+<title>
+信号质量监控与日终对账
+</title>
+<objective>
+每日核对信号生成与纸面执行的一致性，记录偏差并定位根因，确保匹配率>90%。
+</objective>
+<deliverable>
+每日对账清单，含信号类型、应执行时间、实际执行时间、匹配状态、偏差原因。
+</deliverable>
+<acceptance>
+- 日终对账覆盖率 100%（无遗漏交易日）
+- 整月信号-执行匹配率>90%
+- 无系统级延迟（>5 分钟）或遗漏（>0 笔未执行）
+</acceptance>
+<cadence>每个交易日 16:30（美东收盘后 30 分钟）触发</cadence>
+<user-involvement mode="none" />
+<dependencies>纸面交易环境搭建与执行</dependencies>
+<priority>high</priority>
+<duration-minutes>30</duration-minutes>
+</task>
+<task index="3">
+<title>
+实盘切换与风控上线
+</title>
+<objective>
+纸面验证通过后切换至实盘1万美元资金，部署单周回撤上限 10% 的强制风控规则。
+</objective>
+<deliverable>
+实盘运行状态报告，确认资金已切换、风控规则已生效、首月运行正常。
+</deliverable>
+<acceptance>
+- 实盘首月组合净值未出现单周回撤>10%
+- 风控规则触发时能在 1 分钟内自动执行止损
+- 实盘信号执行时延与纸面阶段一致
+</acceptance>
+<cadence>纸面验证期满后一次性切换，此后持续运行</cadence>
+<user-involvement mode="confirm" />
+<dependencies>信号质量监控与日终对账</dependencies>
+<priority>critical</priority>
+<duration-minutes>60</duration-minutes>
+</task>
+<task index="4">
+<title>
+每日复盘与策略迭代机制
+</title>
+<objective>
+建立每日复盘模板，汇总当日交易、信号表现和组合变动，输出策略调整建议并记录迭代过程。
+</objective>
+<deliverable>
+每日复盘记录，含当日成交明细、信号回顾、偏离分析、次日操作预案、策略调整记录。
+</deliverable>
+<acceptance>
+- 每个交易日完成复盘，无连续遗漏超过 2 天
+- 每次复盘含至少一条可执行的操作预案
+- 策略调整记录可追溯，含调整原因和预期效果
+</acceptance>
+<cadence>每个交易日 20:00 触发</cadence>
+<user-involvement mode="collaborate" />
+<dependencies>实盘切换与风控上线</dependencies>
+<priority>high</priority>
+<duration-minutes>45</duration-minutes>
+</task>

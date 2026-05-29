@@ -6,6 +6,18 @@ const OPTIONAL_FEEDBACK_TYPES: Array<InteractionRequirement["type"]> = [
   "confirm",
 ];
 
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
 export function getOptionalResultFeedbackRequirement(instance: TaskInstance) {
   const requirement = instance.awaitingUser?.interactionRequirement ?? instance.result?.interactionRequirement;
   const taskResult = instance.result?.taskResult;
@@ -13,10 +25,20 @@ export function getOptionalResultFeedbackRequirement(instance: TaskInstance) {
   if (!OPTIONAL_FEEDBACK_TYPES.includes(requirement.type)) return null;
   if (requirement.timing === "before_execution" || requirement.timing === "core_task_step") return null;
   const options = requirement.options?.map((option) => option.trim()).filter(Boolean) ?? [];
-  if (!options.length) return null;
+  const fields = requirement.fields
+    ?.map((field) => ({
+      ...field,
+      options: field.options.map((option) => option.trim()).filter(Boolean),
+    }))
+    .filter((field) => field.options.length > 0) ?? [];
+  if (!options.length && !fields.length) return null;
+  const flattenedOptions = options.length
+    ? options
+    : uniqueStrings(fields.flatMap((field) => field.options.map((option) => `${field.label}：${option}`)));
   return {
     ...requirement,
-    options,
+    options: flattenedOptions,
+    fields,
   };
 }
 

@@ -95,6 +95,7 @@ export async function setRuntimeDaemonAutoStart(input: {
     workingDirectory: string;
     cliPath: string;
     permissionMode: RuntimeEnvironment["permissionMode"];
+    filePolicy?: RuntimeEnvironment["filePolicy"];
   };
 }): Promise<RuntimeDaemonAutostartPayload> {
   const response = await fetch("/api/runtime/daemon/autostart", {

@@ -25,6 +25,21 @@ function getCommandPayloadPlaceholder(command: SlashCommand) {
   return command.placeholder.replace(new RegExp(`/${command.name}\\s*`), "");
 }
 
+function getSlashCommandTrigger(input: string, cursorIndex: number) {
+  const safeCursor = Math.max(0, Math.min(cursorIndex, input.length));
+  const beforeCursor = input.slice(0, safeCursor);
+  const start = beforeCursor.lastIndexOf("/");
+  if (start < 0) return null;
+  const query = beforeCursor.slice(start + 1);
+  if (/\s/.test(query)) return null;
+  return { start, end: safeCursor, query };
+}
+
+function removeSlashFragment(input: string, start: number, end: number) {
+  const next = `${input.slice(0, start)}${input.slice(end)}`;
+  return next.replace(/[ \t]{2,}/g, " ");
+}
+
 export function AssistantComposer({
   onSubmit,
   placeholder = "输入任何想法，我会帮助你，没有什么大不了的事",
@@ -42,12 +57,14 @@ export function AssistantComposer({
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
   const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
+  const [cursorIndex, setCursorIndex] = useState(0);
   const [attachments, setAttachments] = useState<string[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isEmpty = value.trim().length === 0;
-  const commandSuggestions = disabled || selectedCommand ? [] : getSlashCommandSuggestions(value);
+  const slashTrigger = disabled || selectedCommand ? null : getSlashCommandTrigger(value, cursorIndex);
+  const commandSuggestions = slashTrigger ? getSlashCommandSuggestions(`/${slashTrigger.query}`) : [];
   const showCommandMenu = commandSuggestions.length > 0 && !commandMenuDismissed;
   const inputPlaceholder = selectedCommand
     ? getCommandPayloadPlaceholder(selectedCommand)
@@ -58,14 +75,17 @@ export function AssistantComposer({
 
   const selectCommand = (index: number) => {
     const command = commandSuggestions[index];
-    if (!command) return;
+    if (!command || !slashTrigger) return;
+    const nextValue = removeSlashFragment(value, slashTrigger.start, slashTrigger.end);
+    const nextCursor = Math.min(slashTrigger.start, nextValue.length);
     setSelectedCommand(command);
-    setValue("");
+    setValue(nextValue);
     setActiveCommandIndex(0);
     setCommandMenuDismissed(true);
+    setCursorIndex(nextCursor);
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(0, 0);
+      textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
     });
   };
 
@@ -143,8 +163,19 @@ export function AssistantComposer({
             value={value}
             onChange={(event) => {
               setValue(event.target.value);
+              setCursorIndex(event.currentTarget.selectionStart);
               setActiveCommandIndex(0);
               setCommandMenuDismissed(Boolean(selectedCommand));
+            }}
+            onClick={(event) => {
+              setCursorIndex(event.currentTarget.selectionStart);
+              setCommandMenuDismissed(Boolean(selectedCommand));
+            }}
+            onSelect={(event) => {
+              setCursorIndex(event.currentTarget.selectionStart);
+            }}
+            onKeyUp={(event) => {
+              setCursorIndex(event.currentTarget.selectionStart);
             }}
             disabled={disabled}
             onKeyDown={(event) => {
@@ -192,7 +223,7 @@ export function AssistantComposer({
           />
         </div>
         {showCommandMenu ? (
-          <div className="absolute bottom-[74px] left-3 z-20 w-[300px] rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
+          <div className="absolute bottom-[96px] left-3 z-20 w-[300px] rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
             {commandSuggestions.map((command, index) => (
               <button
                 key={command.name}

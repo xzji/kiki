@@ -249,14 +249,15 @@ ${buildStepZeroPrompt(isResume)}
 4. 如果需要用户确认、作答、补充关键上下文或完成线下动作，请根据协作要求设置 interaction_requirement.type，不要把所有场景都写成 confirm。
 5. 如果缺少用户才能提供的关键输入（例如出发城市、账号信息、个人偏好、预算上限、目标选择等），必须立即停止产出最终完成态交付物：
    - awaiting_user 必须为 true。
-   - interaction_requirement.question 必须一次性列出本轮所有已知缺失项，不能只问第一个。
-   - interaction_requirement.options 必须给出恰好 3 个可直接点击的候选项，而且必须与问题本身直接对应。
+   - interaction_requirement.question 只用于多字段总问题；如果本轮只有 1 个 field，不要把该 field.question 复制到顶层 question。
+   - interaction_requirement.fields 必须为每个缺失字段各输出 1 个对象，包含 id、label、question、description、options、inputPlaceholder。
+   - 每个 field.options 必须给出恰好 3 个可直接点击的候选项，而且必须与该字段 question 直接对应。
    - 候选项必须是“答案”，不是“动作”：禁止写“补充具体信息 / 补充约束或偏好 / 说明暂时无法提供 / 填写其他信息”。
    - 候选项之间要互斥，并覆盖常见主流分支；每项必须自带区分参数（时长、价格、适用场景、条件等），控制在 8-25 字。
      例如：问“偏好的住宿区域和酒店类型”时，应给“海滩区+度假酒店（放松） / 市中心+四星酒店（便利） / 度假区+五星酒店（省心）”。
      例如：问“选哪种越南签证”时，应给“电子签 e-Visa（90天） / 落地签（需邀请函） / 贴纸签（使馆办理）”。
-   - UI 会自动补 1 个“都不是，我自己描述”，你不要把这个兜底项放进 interaction_requirement.options。
-   - task_result.status 必须为 pending_user 或 blocked；如果要求交互渲染区，blocks 只呈现“需要补充的信息”和“为什么需要”，不要输出基于猜测的方案。
+   - UI 会为每个 field 自动补 1 个“都不是，我自己描述”，你不要把这个兜底项放进 options。
+   - task_result.status 必须为 pending_user 或 blocked；如果要求交互渲染区，blocks 只呈现“需要补充的信息”和“为什么需要”，不要输出基于猜测的方案；UI 在等待用户态会隐藏这类归档占位 blocks，避免和表单重复。
    - deliverable_check.matched 必须为 false，missing_deliverables 必须包含本轮全部缺失用户输入。
    - artifacts 必须为空数组；如果 awaiting_user=true，顶层 suggested_actions 默认也应为空数组，除非确有必要给出补充行动建议。
 6. 禁止猜测或幻想关键事实。可以说明“缺少信息，无法继续”，但不能用默认城市、默认预算、默认偏好代替用户输入。
@@ -279,7 +280,7 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 {
   "summary": "本轮执行结果摘要",
   "final_message": "面向用户的一段自然语言总结",
-  "result_view_kind": "generic_result|reading_digest|draft_review|confirm_action|flashcard|listening_qa",
+  "result_view_kind": "generic_result",
   "awaiting_user": false,
   "awaiting_reason": "",
   "interaction_requirement": {
@@ -288,6 +289,7 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
     "reason": "为什么需要用户或 Agent 继续处理；无需介入时留空",
     "question": "",
     "options": [],
+    "fields": [],
     "suggested_actions": [],
     "should_notify_user": false
   },
@@ -341,13 +343,15 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 }
 
 输出模板 B（等待用户，适用于执行前提不足）：
-说明：当 awaiting_user=true 时，interaction_requirement.options 必须恰好给 3 个候选项。候选项生成模板如下：
-1. 每个候选项必须是待确认问题的具体答案，不是“补充信息/提供偏好/说明暂时无法提供”这类动作。
-2. 候选项之间应互斥，覆盖 2-3 个主流答案。
-3. 每项自带关键参数（时长 / 价格 / 适用场景 / 条件），让用户不点开也能判断。
-4. 每项 8-25 字，口语化，不要写“方案 A / 选项一”。
-5. UI 会自动追加“都不是，我自己描述”，interaction_requirement.options 只输出前 3 个具体答案。
-提交前自检：如果 options 中仍有“补充 XX / 提供 XX / 填写其他信息”等元操作描述，必须重写后再输出。
+说明：当 awaiting_user=true 时，interaction_requirement.fields 是权威结构；每个缺失字段必须给 1 个 field，每个 field.options 必须恰好给 3 个候选项。候选项生成模板如下：
+1. 每个 field.question 必须是完整自然问句，不要只写字段名。
+2. 每个 field.description 必须说明为什么这个信息会影响任务结果。
+3. 每个 field.options 必须是该问题的具体答案，不是“补充信息/提供偏好/说明暂时无法提供”这类动作。
+4. 同一 field 内候选项之间应互斥，覆盖 2-3 个主流答案。
+5. 每项自带关键参数（时长 / 价格 / 适用场景 / 条件），让用户不点开也能判断。
+6. 每项 8-25 字，口语化，不要写“方案 A / 选项一”。
+7. UI 会为每个 field 自动追加“都不是，我自己描述”，不要把该兜底项写进 options。
+提交前自检：如果任一 field.options 中仍有“补充 XX / 提供 XX / 填写其他信息”等元操作描述，必须重写后再输出。
 {
   "summary": "需要用户补充关键信息后才能继续",
   "final_message": "请用户补充本轮全部缺失信息，并说明为什么这些信息会影响主交付物。",
@@ -359,7 +363,18 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
     "timing": "before_execution|during_execution|after_agent_output|core_task_step",
     "reason": "缺少用户输入，暂时无法完成主交付物",
     "question": "请一次性列出本轮所有缺失字段，用自然语言提问。",
-    "options": ["候选项1", "候选项2", "候选项3"],
+    "options": [],
+    "fields": [
+      {
+        "id": "departure_city",
+        "label": "出发城市",
+        "question": "你打算从哪个城市出发？",
+        "description": "查询交通、住宿或行程安排需要明确出发地。",
+        "options": ["北京", "上海", "广州"],
+        "inputPlaceholder": "请输入城市名，如 成都",
+        "source": "user"
+      }
+    ],
     "suggested_actions": [],
     "should_notify_user": true
   },
@@ -408,8 +423,8 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 
 示例 2：等待用户补充信息
 - 如果缺少用户才能提供的关键输入，awaiting_user=true。
-- interaction_requirement.options 必须是 3 个具体答案，例如“海滩区+度假酒店（放松）/ 市中心+四星酒店（便利）/ 度假区+五星酒店（省心）”。
-- 禁止把 options 写成“补充信息 / 提供偏好 / 填写其他内容”这类动作。
+- interaction_requirement.fields 必须按缺失字段分组；每个 field.options 必须是 3 个具体答案，例如“海滩区+度假酒店（放松）/ 市中心+四星酒店（便利）/ 度假区+五星酒店（省心）”。
+- 禁止把任一 field.options 写成“补充信息 / 提供偏好 / 填写其他内容”这类动作。
 
 示例 3：information 类型任务已完成
 - 如果任务只是生成报告、调研、对比、分析或清单，且完成标准已经满足，awaiting_user=false。

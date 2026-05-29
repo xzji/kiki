@@ -3,35 +3,8 @@
 import { useMemo, useState } from "react";
 
 import { respondGoalInstance } from "@/lib/api/goal-commands";
-import type { Task, TaskInstance } from "@/types/kiki";
-
-type ReadinessItem = {
-  id: string;
-  label: string;
-  description: string;
-  source: "user" | "agent" | "system";
-  status: "available" | "missing_user" | "agent_retrievable" | "not_required";
-  reason: string;
-  options?: string[];
-  optionQuestion?: string;
-  inputPlaceholder?: string;
-};
-
-type TaskReadiness = {
-  status: "ready" | "blocked";
-  summary: string;
-  items: ReadinessItem[];
-};
-
-function titleFor(instance: TaskInstance) {
-  const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
-  if (type === "answer") return "等待你作答";
-  if (type === "provide_context") return "等待你补充信息";
-  if (type === "perform_offline_action") return "等待你完成线下动作";
-  if (type === "agent_revision_required") return "等待 Agent 补齐";
-  if (type === "deliverable_gap") return "未通过验收";
-  return "等待你确认";
-}
+import { buildAwaitingDisplayModel, questionForField } from "@/lib/taskInstance/awaitingDisplayModel";
+import type { MissingFieldQuestion, Task, TaskInstance } from "@/types/kiki";
 
 function primaryLabelFor(instance: TaskInstance) {
   const type = instance.awaitingUser?.interactionRequirement?.type;
@@ -131,7 +104,9 @@ function pickFieldAnswerOptions(values: string[]) {
   return pickThreeOptions(values.filter((option) => !isActionLikeOption(option)));
 }
 
-function optionTextForSubmit(option: string, instance: TaskInstance, item?: ReadinessItem) {
+type PromptField = MissingFieldQuestion;
+
+function optionTextForSubmit(option: string, instance: TaskInstance, item?: Pick<PromptField, "label">) {
   if (item) return `${item.label}：${option}`;
   const type = instance.awaitingUser?.interactionRequirement?.type;
   if (type === "confirm" && option === "确认继续") return "我确认当前结果，可以继续。";
@@ -147,25 +122,6 @@ function extractFeedbackFields(feedback: string) {
       .filter((match): match is RegExpMatchArray => Boolean(match?.[1] && match[2]))
       .map((match) => [match[1].trim(), match[2].trim()]),
   );
-}
-
-function isTaskReadiness(value: unknown): value is TaskReadiness {
-  if (!value || typeof value !== "object") return false;
-  const record = value as { status?: unknown; summary?: unknown; items?: unknown };
-  return (
-    (record.status === "ready" || record.status === "blocked") &&
-    typeof record.summary === "string" &&
-    Array.isArray(record.items)
-  );
-}
-
-function readinessFromInstance(instance: TaskInstance) {
-  const readiness = instance.result?.structuredOutput?.taskReadiness;
-  return isTaskReadiness(readiness) ? readiness : null;
-}
-
-function missingItemsFrom(readiness: TaskReadiness | null) {
-  return readiness?.items.filter((item) => item.status === "missing_user" && item.source === "user") ?? [];
 }
 
 function optionRowClass(selected: boolean) {
@@ -201,26 +157,20 @@ export function AwaitingUserResumePanel({
   const [error, setError] = useState<string | null>(null);
   const blocker = instance.awaitingUser?.blocker ?? instance.blocker;
   const requirement = instance.awaitingUser?.interactionRequirement;
-  const readiness = readinessFromInstance(instance);
-  const missingItems = useMemo(() => missingItemsFrom(readiness), [readiness]);
+  const displayModel = useMemo(() => buildAwaitingDisplayModel(task, instance, "card"), [task, instance]);
+  const promptFields = useMemo(
+    () => displayModel.fields.map((field) => ({ ...field, options: pickFieldAnswerOptions(field.options ?? []) })),
+    [displayModel.fields],
+  );
   const type = requirement?.type;
   const showReviseButton = type === "confirm";
   const options = useMemo(() => {
-    if (missingItems.length > 0) return [];
+    if (promptFields.length > 0) return [];
     const raw = requirement?.options?.length ? requirement.options : [];
     return pickThreeOptions(raw);
-  }, [missingItems.length, requirement?.options]);
-  const requirementFieldOptions = useMemo(() => {
-    const raw = requirement?.options?.length ? requirement.options : [];
-    return pickFieldAnswerOptions(raw);
-  }, [requirement?.options]);
+  }, [promptFields.length, requirement?.options]);
 
-  const optionsForMissingItem = (item: ReadinessItem) => {
-    if (missingItems.length === 1 && requirementFieldOptions.length > 0) return requirementFieldOptions;
-    return item.options?.length ? pickThreeOptions(item.options) : [];
-  };
-
-  const chooseOption = (option: string, item?: ReadinessItem) => {
+  const chooseOption = (option: string, item?: PromptField) => {
     setError(null);
     if (item) {
       setSelectedItemOptions((current) => ({ ...current, [item.id]: option }));
@@ -231,7 +181,7 @@ export function AwaitingUserResumePanel({
     setCustomMode(false);
   };
 
-  const chooseCustom = (item?: ReadinessItem) => {
+  const chooseCustom = (item?: PromptField) => {
     setError(null);
     if (item) {
       setCustomItemModes((current) => ({ ...current, [item.id]: true }));
@@ -240,7 +190,7 @@ export function AwaitingUserResumePanel({
     setCustomMode(true);
   };
 
-  const updateCustomValue = (value: string, item?: ReadinessItem) => {
+  const updateCustomValue = (value: string, item?: PromptField) => {
     setError(null);
     if (item) {
       setCustomItemModes((current) => ({ ...current, [item.id]: true }));
@@ -251,14 +201,14 @@ export function AwaitingUserResumePanel({
     setCustomText(value);
   };
 
-  const feedbackValueForItem = (item: ReadinessItem) => {
+  const feedbackValueForItem = (item: PromptField) => {
     if (customItemModes[item.id]) return customFields[item.id]?.trim() ?? "";
     return selectedItemOptions[item.id]?.trim() ?? "";
   };
 
   const buildFeedback = () => {
-    if (missingItems.length > 0) {
-      return missingItems
+    if (promptFields.length > 0) {
+      return promptFields
         .map((item) => {
           const value = feedbackValueForItem(item);
           return value ? `${item.label}：${value}` : "";
@@ -278,8 +228,8 @@ export function AwaitingUserResumePanel({
       return;
     }
     const feedbackFields = extractFeedbackFields(normalizedFeedback);
-    if (missingItems.length > 0) {
-      const unresolvedItems = missingItems.filter((item) => !feedbackValueForItem(item));
+    if (promptFields.length > 0) {
+      const unresolvedItems = promptFields.filter((item) => !feedbackValueForItem(item));
       if (unresolvedItems.length) {
         setError(`请在本次提交中补全：${unresolvedItems.map((item) => item.label).join("、")}。`);
         return;
@@ -311,30 +261,28 @@ export function AwaitingUserResumePanel({
 
   if (!instance.awaitingUser) return null;
 
-  const headline =
-    requirement?.question?.trim() ||
-    (missingItems.length === 1
-      ? `请补充：${missingItems[0].label}`
-      : missingItems.length > 1
-        ? `请补充：${missingItems.map((item) => item.label).join("、")}`
-        : instance.awaitingUser.reason);
+  const headline = displayModel.headline || instance.awaitingUser.reason;
 
   return (
     <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[#1F2328]">
         <span className="h-1.5 w-1.5 rounded-full bg-[#8C9198]" />
-        <span>{titleFor(instance)}</span>
+        <span>{displayModel.panelTitle}</span>
       </div>
       <div className="mt-4 text-[14px] leading-6 text-[#374151]">{headline}</div>
-      {missingItems.length ? (
+      {promptFields.length ? (
         <div className="mt-3 space-y-3">
-          {missingItems.map((item) => {
-            const itemOptions = optionsForMissingItem(item);
+          {promptFields.map((item) => {
+            const itemOptions = pickFieldAnswerOptions(item.options);
             const customSelected = Boolean(customItemModes[item.id]);
+            const itemQuestion = questionForField(item);
+            const hideItemQuestion = displayModel.hideFieldQuestions.has(item.id);
             return (
               <div key={item.id}>
-                <div className="text-[12px] font-medium text-[#6B7280]">{item.optionQuestion?.trim() || `请选择${item.label}`}</div>
-                <div className="mt-2 space-y-1.5">
+                {hideItemQuestion ? null : (
+                  <div className="text-[12px] font-medium text-[#6B7280]">{itemQuestion}</div>
+                )}
+                <div className={`${hideItemQuestion ? "" : "mt-2"} space-y-1.5`}>
                   {itemOptions.map((option) => {
                     const selected = selectedItemOptions[item.id] === option && !customItemModes[item.id];
                     return (
@@ -368,7 +316,7 @@ export function AwaitingUserResumePanel({
                       onClick={() => chooseCustom(item)}
                       className="shrink-0 text-left text-[13px] text-inherit"
                     >
-                      都不是，我自己描述
+                      {itemOptions.length ? "都不是，我自己描述" : "我来填写"}
                     </button>
                     <input
                       value={customFields[item.id] ?? ""}
@@ -419,10 +367,10 @@ export function AwaitingUserResumePanel({
                 onClick={() => chooseCustom()}
                 className="shrink-0 text-left text-[13px] text-inherit"
               >
-                都不是，我自己描述
+                {options.length ? "都不是，我自己描述" : "我来填写"}
               </button>
               <input
-                value={customMode && missingItems.length === 0 ? customText : ""}
+                value={customMode && promptFields.length === 0 ? customText : ""}
                 onFocus={() => chooseCustom()}
                 onChange={(event) => updateCustomValue(event.target.value)}
                 placeholder={options.length ? "请输入你的选择" : "请输入需要补充的信息"}

@@ -2,7 +2,12 @@ import fs from "fs";
 import path from "path";
 
 import { getRuntimeConfigFilePath } from "@/lib/server/storage/paths";
-import type { RuntimePermissionMode } from "@/types/runtime";
+import {
+  DEFAULT_RUNTIME_FILE_POLICY,
+  type RuntimeFilePolicy,
+  type RuntimePermissionMode,
+} from "@/types/runtime";
+import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 
 export type RuntimeDaemonConfig = {
   deviceId: string;
@@ -10,6 +15,7 @@ export type RuntimeDaemonConfig = {
   cliPath: string;
   workingDirectory: string;
   permissionMode: RuntimePermissionMode;
+  filePolicy: RuntimeFilePolicy;
   autoStart: boolean;
   authorizedDirectories: string[];
   schedulerIntervalMs: number;
@@ -23,6 +29,7 @@ const DEFAULT_CONFIG: RuntimeDaemonConfig = {
   cliPath: "claude",
   workingDirectory: process.cwd(),
   permissionMode: "execute",
+  filePolicy: DEFAULT_RUNTIME_FILE_POLICY,
   autoStart: false,
   authorizedDirectories: [process.cwd()],
   schedulerIntervalMs: 60_000,
@@ -46,6 +53,7 @@ export function readRuntimeDaemonConfig() {
     return {
       ...DEFAULT_CONFIG,
       ...parsed,
+      filePolicy: normalizeRuntimeFilePolicy(parsed.filePolicy),
       authorizedDirectories:
         parsed.authorizedDirectories?.filter((item): item is string => Boolean(item?.trim())) ??
         DEFAULT_CONFIG.authorizedDirectories,

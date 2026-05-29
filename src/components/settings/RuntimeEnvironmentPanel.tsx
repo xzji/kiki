@@ -9,9 +9,16 @@ import {
   type RuntimeDaemonStatusPayload,
 } from "@/lib/api/runtime-daemon";
 import { getRuntimeEnvStatus } from "@/lib/api/runtime-envs";
+import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { cn } from "@/lib/utils";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
-import type { LocalRuntimeKind, RuntimeEnvironment, RuntimePermissionMode } from "@/types/runtime";
+import type {
+  LocalRuntimeKind,
+  RuntimeEnvironment,
+  RuntimeFilePolicyMode,
+  RuntimePermissionMode,
+  RuntimeToolCapability,
+} from "@/types/runtime";
 
 import { LocalRuntimeWizard } from "./LocalRuntimeWizard";
 import { RuntimeStatusBadge } from "./RuntimeStatusBadge";
@@ -27,6 +34,62 @@ const runtimeKindLabels: Record<LocalRuntimeKind, string> = {
   codex: "Codex CLI",
   gemini: "Gemini CLI",
 };
+
+const filePolicyModeLabels: Record<RuntimeFilePolicyMode, string> = {
+  all_on: "全部开启",
+  all_off: "全部关闭",
+  custom: "自定义勾选",
+};
+
+const toolCapabilityOptions: Array<{
+  key: RuntimeToolCapability;
+  label: string;
+  description: string;
+  tools: string[];
+}> = [
+  {
+    key: "web",
+    label: "联网",
+    description: "允许 KiKi 搜索互联网和读取网页内容。",
+    tools: ["WebFetch", "WebSearch"],
+  },
+  {
+    key: "fileRead",
+    label: "读取文件",
+    description: "允许读取当前调用 workspace 内的文件和目录。",
+    tools: ["Read", "Glob", "Grep"],
+  },
+  {
+    key: "fileWrite",
+    label: "写入文件",
+    description: "允许在当前调用 workspace 内创建或修改文件。",
+    tools: ["Write", "Edit", "NotebookEdit"],
+  },
+  {
+    key: "shell",
+    label: "终端命令",
+    description: "允许在当前调用 workspace 内执行终端命令。",
+    tools: ["Bash"],
+  },
+  {
+    key: "subagent",
+    label: "子代理",
+    description: "允许派发子代理或调用已安装 skill 处理复杂任务。",
+    tools: ["Task", "TaskOutput", "TaskStop", "Skill"],
+  },
+  {
+    key: "schedule",
+    label: "定时任务",
+    description: "允许创建、删除或查看定时唤醒任务。",
+    tools: ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup"],
+  },
+  {
+    key: "planMode",
+    label: "Plan Mode",
+    description: "允许使用 Claude CLI 内置 plan/worktree 能力。",
+    tools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree"],
+  },
+];
 
 function formatLocalDateTime(value?: string) {
   if (!value) return "暂无";
@@ -49,6 +112,8 @@ export function RuntimeEnvironmentPanel() {
   const setEnvironmentHealth = useRuntimeEnvStore((state) => state.setEnvironmentHealth);
   const setActiveEnvironment = useRuntimeEnvStore((state) => state.setActiveEnvironment);
   const setPermissionMode = useRuntimeEnvStore((state) => state.setPermissionMode);
+  const setFilePolicyMode = useRuntimeEnvStore((state) => state.setFilePolicyMode);
+  const setFilePolicyCustomCapability = useRuntimeEnvStore((state) => state.setFilePolicyCustomCapability);
   const removeEnvironment = useRuntimeEnvStore((state) => state.removeEnvironment);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [daemonStatus, setDaemonStatus] = useState<RuntimeDaemonStatusPayload | null>(null);
@@ -151,6 +216,7 @@ export function RuntimeEnvironmentPanel() {
                 workingDirectory: activeLocalEnvironment?.workingDirectory || "",
                 cliPath: activeLocalEnvironment?.cliPath || "claude",
                 permissionMode: activeLocalEnvironment?.permissionMode || "execute",
+                filePolicy: activeLocalEnvironment?.filePolicy,
               },
             }
           : { enabled: false },
@@ -333,7 +399,7 @@ export function RuntimeEnvironmentPanel() {
 
             <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
               <div>
-                <div className="text-[12px] text-[#6B7280]">权限模式</div>
+                <div className="text-[12px] text-[#6B7280]">执行权限模式</div>
                 <div className="mt-1 text-[13px] text-[#111]">
                   {permissionLabels[environment.permissionMode]}
                 </div>
@@ -358,6 +424,16 @@ export function RuntimeEnvironmentPanel() {
                 </div>
               ) : null}
             </div>
+
+            {environment.type === "local" ? (
+              <ToolPolicySection
+                environment={environment}
+                onModeChange={(mode) => setFilePolicyMode(environment.id, mode)}
+                onCapabilityChange={(capability, enabled) =>
+                  setFilePolicyCustomCapability(environment.id, capability, enabled)
+                }
+              />
+            ) : null}
 
             {environment.type === "local" ? (
               environment.isDefault ? (
@@ -502,6 +578,103 @@ export function RuntimeEnvironmentPanel() {
           void applyDaemonToggle(true);
         }}
       />
+    </div>
+  );
+}
+
+function capabilityConstraint(
+  capability: RuntimeToolCapability,
+  permissionMode: RuntimePermissionMode,
+) {
+  if (capability === "shell" && permissionMode !== "execute") return "需要执行权限模式 = 项目内可执行";
+  if (capability === "fileWrite" && permissionMode === "readonly") return "只读聊天下不会生效";
+  return "";
+}
+
+function ToolPolicySection({
+  environment,
+  onModeChange,
+  onCapabilityChange,
+}: {
+  environment: RuntimeEnvironment;
+  onModeChange: (mode: RuntimeFilePolicyMode) => void;
+  onCapabilityChange: (capability: RuntimeToolCapability, enabled: boolean) => void;
+}) {
+  const filePolicy = normalizeRuntimeFilePolicy(environment.filePolicy);
+
+  return (
+    <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
+      <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="min-w-0">
+          <div className="text-[12px] font-medium text-[#111]">工具权限策略</div>
+          <div className="mt-1 max-w-[620px] text-[12px] leading-5 text-[#6B7280]">
+            控制这个 Runtime 允许哪些工具能力。全部会话、目标模式、任务执行都会先遵循这里的设置。写入文件和终端命令还会受到「执行权限模式」约束；例如只读聊天下即使勾选，也不会真正生效。
+          </div>
+        </div>
+        <div className="flex flex-nowrap items-center justify-end gap-2">
+          {(["all_on", "all_off", "custom"] as RuntimeFilePolicyMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onModeChange(mode)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-[12px] transition",
+                mode === filePolicy.mode
+                  ? "border-[#111] bg-white text-[#111]"
+                  : "border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#111]",
+              )}
+            >
+              {filePolicyModeLabels[mode]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filePolicy.mode === "custom" ? (
+        <div className="mt-3 grid gap-2">
+          {toolCapabilityOptions.map((option) => {
+            const checked = filePolicy.custom[option.key];
+            const constraint = capabilityConstraint(option.key, environment.permissionMode);
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => onCapabilityChange(option.key, !checked)}
+                className={cn(
+                  "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition",
+                  checked ? "border-[#111] bg-white" : "border-[#E5E7EB] bg-white hover:border-[#D0D5DD]",
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border text-[12px] leading-none",
+                    checked ? "border-[#111] bg-[#111] text-white" : "border-[#D0D5DD] text-transparent",
+                  )}
+                >
+                  ✓
+                </span>
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-[12px] font-medium text-[#111]">{option.label}</span>
+                    <span className="text-[11px] leading-5 text-[#6B7280]">{option.description}</span>
+                    {option.tools.map((tool) => (
+                      <span
+                        key={tool}
+                        className="inline-flex h-5 items-center rounded-full border border-[#E5E7EB] px-2 font-mono text-[10px] text-[#6B7280]"
+                      >
+                        {tool}
+                      </span>
+                    ))}
+                  </span>
+                  {constraint ? (
+                    <span className="mt-1 block text-[10px] leading-4 text-[#B42318]">{constraint}</span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

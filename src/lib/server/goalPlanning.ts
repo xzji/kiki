@@ -3,7 +3,6 @@ import fs from "fs";
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { DEFAULT_EASTER_EGG_SETTINGS, normalizeEasterEggSettings } from "@/lib/goalSystemConfig";
 import { appendGoalLog } from "@/lib/server/goalTelemetry";
-import { normalizeConcreteTriggerRule } from "@/lib/taskTriggerTime";
 import {
   ensureConversationWorkspace,
   getPlanningCheckpointFilePath,
@@ -11,19 +10,34 @@ import {
   writeJsonFileAtomic,
 } from "@/lib/server/workspace/conversationWorkspace";
 import {
-  inferUserInteractionType as inferPolicyUserInteractionType,
-  requiresUserConfirmationToComplete,
-  shouldNotifyUser,
-} from "@/lib/server/domain/taskPolicy";
-import {
   buildJsonParseCandidates,
   buildJsonRepairPrompt,
   normalizeClaudeJsonText,
   parseJsonWithCandidates,
   parseRepairedJsonText,
 } from "@/lib/server/claude/jsonRepair";
-import { runPromptJson } from "@/lib/server/claude/transport";
-import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, Task, TaskExpectedResult } from "@/types/kiki";
+import {
+  recoverJsonArtifactsFromClaudeOutput,
+  type RecoveredJsonArtifact,
+} from "@/lib/server/claude/artifactRecovery";
+import { runPromptJson, runPromptText } from "@/lib/server/claude/transport";
+import { parseTaskDraftBatch } from "@/lib/server/goalPlanning/blockProtocol";
+import { buildSingleTaskDraftRepairPrompt, buildTaskDraftPrompt } from "@/lib/server/goalPlanning/taskDraftPrompt";
+import {
+  TaskDraftBatchEmptyError,
+  type TaskDraft,
+  type TaskDraftBatch,
+  type TaskDraftDropReason,
+} from "@/lib/server/goalPlanning/taskDraftSchema";
+import {
+  applyDraftReview,
+  buildTaskDraftReviewPrompt,
+  type DecompositionSubGoalContext,
+  type TaskDraftReviewPayload,
+} from "@/lib/server/goalPlanning/taskDraftReview";
+import { compileTaskDraftsToDraftTasks } from "@/lib/server/goalPlanning/taskCompiler";
+import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
+import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/types/kiki";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -67,69 +81,6 @@ type DecompositionPayload = {
   reasoning: string;
 };
 
-type TaskGenerationPayload = {
-  sub_goal_analysis?: {
-    core_deliverable?: string;
-    work_categories?: string[];
-    completion_checklist?: string[];
-  };
-  tasks: Array<{
-    id: string;
-    title: string;
-    description: string;
-    task_type: "repeat" | "one_shot";
-    execution_mode: "standard" | "interactive" | "monitoring" | "event_triggered";
-    execution_kind?: string;
-    recurrence?: string;
-    trigger_condition?: string;
-    hierarchy_level?: "task" | "sub_task" | "action";
-    parent_id?: string;
-    priority: "critical" | "high" | "medium" | "low";
-    dependencies: string[];
-    expected_output: {
-      type: "information" | "deliverable" | "decision" | "action" | "confirmation";
-      description: string;
-      format: "json" | "markdown" | "table" | "text" | "code" | "other";
-      presentation?: NonNullable<TaskExpectedResult["presentation"]>;
-      primary_format?: NonNullable<TaskExpectedResult["primaryFormat"]>;
-      exportable_formats?: NonNullable<TaskExpectedResult["exportableFormats"]>;
-      required_blocks?: NonNullable<TaskExpectedResult["requiredBlocks"]>;
-      completion_criteria?: string;
-    };
-    collaboration?: {
-      mode?:
-        | "agent_autonomous"
-        | "agent_with_user_confirmation"
-        | "agent_user_collaborative"
-        | "user_primary_agent_assistive";
-      agent_responsibilities?: string[];
-      user_responsibilities?: string[];
-      user_interaction_type?: "none" | "confirm" | "answer" | "provide_context" | "perform_offline_action";
-      user_interaction_timing?:
-        | "not_required"
-        | "before_execution"
-        | "during_execution"
-        | "after_agent_output"
-        | "core_task_step";
-      user_facing_action_label?: string;
-      should_notify_user?: boolean;
-      completion_owner?: "agent" | "user" | "shared";
-      completion_definition?: string;
-    };
-    estimated_duration_minutes?: number;
-  }>;
-  execution_plan?: {
-    suggested_order?: string[];
-    critical_path?: string[];
-    total_estimated_hours?: number;
-  };
-  coverage_validation?: {
-    is_sufficient?: boolean;
-    explanation?: string;
-    uncovered_risks?: string[];
-  };
-};
-
 type TaskReviewPayload = {
   reviewResults: Array<{
     taskId: string;
@@ -157,9 +108,9 @@ type TaskPlanningSummaryItem = {
 };
 
 type GoalPlanningCheckpoint = {
-  version: 1;
+  version: 2;
   goalText: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "partial";
   stage: "collecting_info" | "decomposing" | "generating_tasks" | "reviewing_tasks" | "presenting_plan";
   requestId?: string;
   collectedInfo?: string;
@@ -173,7 +124,24 @@ type GoalPlanningCheckpoint = {
   nextSubGoalIndex: number;
   activeSubGoal?: {
     index: number;
-    generatedTasks?: TaskGenerationPayload;
+    generatedDrafts?: TaskDraftBatch;
+  };
+  subGoalTaskGeneration?: Array<{
+    subGoalId: number;
+    subGoalName: string;
+    status: "ok" | "task_generation_failed";
+    taskCount?: number;
+    failedTaskIndices?: number[];
+    recoveredTaskCount?: number;
+    droppedReasons?: TaskDraftDropReason[];
+    lastError?: string;
+    lastRawSnapshot?: string;
+    updatedAt: string;
+  }>;
+  partialFailure?: {
+    failedSubGoalIds: number[];
+    recoverable: boolean;
+    message: string;
   };
   presentation?: PlanPresentationPayload;
   draft?: GoalBreakdownDraft;
@@ -193,48 +161,16 @@ export type GoalPlanningCheckpointStatus = {
   nextSubGoalIndex?: number;
   updatedAt?: string;
   hasCollectedInfo?: boolean;
+  failedTaskCount?: number;
+  recoveredTaskCount?: number;
+  schemaVersion?: number;
+  discarded?: boolean;
 };
 
 const DEFAULT_DEADLINE = "2026-06-30T23:59:59+08:00";
 
-const allowedExecutionKinds = [
-  "flashcard",
-  "listening_qa",
-  "reading_digest",
-  "confirm_action",
-  "draft_review",
-  "freeform_chat",
-  "generic_result",
-] as const;
-const allowedPresentations: NonNullable<TaskExpectedResult["presentation"]>[] = [
-  "summary_card",
-  "visual_report",
-  "comparison_table",
-  "checklist",
-  "timeline",
-  "document",
-  "dashboard",
-  "handoff_package",
-];
-const allowedPrimaryFormats: NonNullable<TaskExpectedResult["primaryFormat"]>[] = [
-  "structured_blocks",
-  "json",
-  "markdown",
-  "html",
-  "text",
-  "code",
-];
-const allowedExportFormats: NonNullable<TaskExpectedResult["exportableFormats"]> = ["html", "markdown", "json", "text"];
-const allowedRequiredBlocks: NonNullable<TaskExpectedResult["requiredBlocks"]> = [
-  "heading",
-  "paragraph",
-  "markdown",
-  "list",
-  "key_value",
-  "comparison_table",
-  "decision",
-  "callout",
-];
+const JSON_NO_TOOL_INSTRUCTION =
+  "重要约束：禁止调用任何工具（Write/Edit/MultiEdit/Bash/WebSearch/WebFetch/Task 等），所有业务结果必须写在最终 JSON 回答里。";
 
 type GoalStageProgressHandler = (progress: {
   phase: GoalWorkflowPhase;
@@ -248,6 +184,22 @@ type ClaudeRunContext = {
   phase: GoalWorkflowPhase;
   stepLabel: string;
 };
+
+class ClaudeJsonParseError extends Error {
+  snapshotPath?: string;
+  rootCause?: unknown;
+
+  constructor(message: string, input: { snapshotPath?: string; rootCause?: unknown }) {
+    super(message);
+    this.name = "ClaudeJsonParseError";
+    this.snapshotPath = input.snapshotPath;
+    this.rootCause = input.rootCause;
+  }
+}
+
+function getClaudeJsonParseSnapshotPath(error: unknown) {
+  return error instanceof ClaudeJsonParseError ? error.snapshotPath : undefined;
+}
 
 function formatTimingDetails(input: Record<string, string | number | boolean | undefined>) {
   return Object.entries(input)
@@ -263,7 +215,7 @@ function createEmptyCheckpoint(input: {
 }): GoalPlanningCheckpoint {
   const now = new Date().toISOString();
   return {
-    version: 1,
+    version: 2,
     goalText: input.goalText,
     status: "running",
     stage: "collecting_info",
@@ -279,6 +231,23 @@ function createEmptyCheckpoint(input: {
   };
 }
 
+function upsertSubGoalTaskGenerationStatus(
+  checkpoint: GoalPlanningCheckpoint,
+  entry: NonNullable<GoalPlanningCheckpoint["subGoalTaskGeneration"]>[number],
+) {
+  const existing = checkpoint.subGoalTaskGeneration ?? [];
+  const next = existing.filter((item) => item.subGoalId !== entry.subGoalId);
+  next.push(entry);
+  next.sort((a, b) => a.subGoalId - b.subGoalId);
+  return next;
+}
+
+function getFailedSubGoalIds(checkpoint: GoalPlanningCheckpoint) {
+  return (checkpoint.subGoalTaskGeneration ?? [])
+    .filter((item) => item.status === "task_generation_failed")
+    .map((item) => item.subGoalId);
+}
+
 function getCheckpointPath(conversationId?: string) {
   if (!conversationId) return null;
   ensureConversationWorkspace(conversationId);
@@ -290,7 +259,7 @@ function readGoalPlanningCheckpoint(conversationId?: string) {
   if (!filePath || !fs.existsSync(filePath)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
-    if (!isObject(raw) || raw.version !== 1 || typeof raw.goalText !== "string") return null;
+    if (!isObject(raw) || raw.version !== 2 || typeof raw.goalText !== "string") return null;
     if (!Array.isArray(raw.completedSubGoals)) return null;
     if (!Array.isArray(raw.taskPlanningSummary)) return null;
     if (!Array.isArray(raw.reviewSummary)) return null;
@@ -304,8 +273,20 @@ function readGoalPlanningCheckpoint(conversationId?: string) {
 export function getGoalPlanningCheckpointStatus(conversationId?: string): GoalPlanningCheckpointStatus {
   const checkpoint = readGoalPlanningCheckpoint(conversationId);
   if (!checkpoint || checkpoint.status === "completed") {
+    const filePath = getCheckpointPath(conversationId);
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+        if (isObject(raw) && typeof raw.version === "number" && raw.version !== 2) {
+          return { available: false, schemaVersion: raw.version, discarded: true };
+        }
+      } catch {
+        // Invalid checkpoint is treated as unavailable.
+      }
+    }
     return { available: false };
   }
+  const taskGeneration = checkpoint.subGoalTaskGeneration ?? [];
   return {
     available: true,
     goalText: checkpoint.goalText,
@@ -316,6 +297,9 @@ export function getGoalPlanningCheckpointStatus(conversationId?: string): GoalPl
     nextSubGoalIndex: checkpoint.nextSubGoalIndex,
     updatedAt: checkpoint.updatedAt,
     hasCollectedInfo: Boolean(checkpoint.collectedInfo?.trim()),
+    failedTaskCount: taskGeneration.reduce((sum, item) => sum + (item.failedTaskIndices?.length ?? 0), 0),
+    recoveredTaskCount: taskGeneration.reduce((sum, item) => sum + (item.recoveredTaskCount ?? 0), 0),
+    schemaVersion: checkpoint.version,
   };
 }
 
@@ -367,7 +351,7 @@ function emitCheckpointResumeProgress(input: {
   const completedCount = input.checkpoint.completedSubGoals.length;
   const totalCount = input.checkpoint.decomposition?.subGoals.length;
   const suffix = totalCount ? `${completedCount}/${totalCount}` : String(completedCount);
-  if (input.checkpoint.activeSubGoal?.generatedTasks) {
+  if (input.checkpoint.activeSubGoal?.generatedDrafts) {
     const subGoal = input.checkpoint.decomposition?.subGoals[input.checkpoint.activeSubGoal.index];
     input.onProgress?.({
       phase: "reviewing_tasks",
@@ -612,169 +596,6 @@ ${JSON.stringify({
 ${input.rawOutput}`;
 }
 
-function buildTaskGenerationPrompt(input: {
-  goalTitle: string;
-  goalDescription: string;
-  userContext: Record<string, unknown>;
-  subGoalName: string;
-  subGoalDescription: string;
-  successCriteria: string[];
-  config: EasterEggSettings;
-}) {
-  return `# Role
-你是 KiKi 的目标规划任务生成 Agent。你的职责是把子目标转化为具体、可执行、可验收的任务。
-
-# Dynamic Context
-子目标: ${input.subGoalName}
-描述: ${input.subGoalDescription}
-完成标准:
-${input.successCriteria.length > 0 ? input.successCriteria.map((item) => `- ${item}`).join("\n") : "无明确标准"}
-所属目标: ${input.goalTitle}
-目标补充说明: ${input.goalDescription}
-用户背景: ${JSON.stringify(input.userContext, null, 2)}
-
-# Instructions
-1. 每个任务应该是具体可执行的
-2. 明确每个任务的预期产出
-3. 任务优先级要合理
-4. task_type 只能是 repeat(重复任务) | one_shot(一次性任务)
-5. execution_mode 只能是 standard(标准) | interactive(需用户交互) | monitoring(持续监控) | event_triggered(事件触发)
-6. hierarchy_level 只能是 task | sub_task | action
-7. execution_kind 只能是 ${allowedExecutionKinds.join("、")}
-8. 覆盖所有关键完成标准，同时避免冗余任务
-9. 每个子目标尽量生成 ${input.config.minTasksPerSubGoal}-${input.config.maxTasksPerSubGoal} 个任务，过少会导致执行不可落地，过多会导致管理成本过高
-10. 必须明确每个任务的 Agent / 用户职责分工，写入 collaboration
-11. 必须明确交付形式：expected_output.presentation、primary_format、exportable_formats、required_blocks 都必须填写
-12. 信息类任务（type=information）默认使用 presentation=visual_report、primary_format=structured_blocks、exportable_formats 至少包含 html，避免只交付 markdown 长文
-13. 对比/研究/攻略/方案类任务必须优先要求 comparison_table、callout、key_value 等 blocks，形成可视化报告
-14. 信息类任务如果完成标准只是“生成报告/调研/对比/分析/清单”，用户查看、确认是否满意、选择下一步或圈定偏好只属于产出反馈/下游任务输入，不能写成当前任务的完成条件
-15. 只有 expected_output.type 是 decision/confirmation，或 completion_criteria 明确要求“必须由用户确认/审批/选择后才完成”，才允许把 user_interaction_type 设为 confirm
-16. 重复任务的 recurrence 必须包含具体触发时机，例如“每天 07:30 触发”“每周日 20:00 触发”“每 3 个小时触发”。一次性任务如果不是立即触发，也必须给出具体触发时机，例如“2026-06-01 10:00 触发”“明天 10:00 触发”或“满足触发条件执行：价格低于 1800 元”。禁止使用“早上/出发前/晚上/固定时间”等没有时分、日期或间隔的模糊触发描述；如果用户没有提供出发时间，必须自行给出明确默认时间并在文案中说明假设，例如“每天 07:30 触发（默认出发前检查）”
-
-协作模式规则:
-- agent_autonomous: Agent 可自主完成，用户只需知悉结果
-- agent_with_user_confirmation: Agent 自主产出，但当前任务的完成标准明确要求用户确认、采纳或提出修改建议
-- agent_user_collaborative: Agent 与用户共同完成，用户作答、选择或补充是任务完成的一部分
-- user_primary_agent_assistive: 用户主要完成，Agent 负责建议、提醒、检查和记录
-
-# Examples
-信息类任务示例：
-- 如果任务是“生成调研报告 / 城市对比 / 攻略 / 分析清单”，且完成标准只是产出信息结果，应设置：
-  - expected_output.type="information"
-  - collaboration.mode="agent_autonomous"
-  - collaboration.user_interaction_type="none"
-  - collaboration.user_interaction_timing="not_required"
-  - collaboration.completion_owner="agent"
-- 用户查看结果、提出反馈、选择下一步，只属于产出后的反馈或下游任务输入，不是当前任务完成条件。
-
-# Output Format
-请按 JSON 格式返回：
-{
-  "sub_goal_analysis": {
-    "core_deliverable": "核心交付物描述",
-    "work_categories": ["分类1", "分类2"],
-    "completion_checklist": ["检查项1", "检查项2"]
-  },
-  "tasks": [
-    {
-      "id": "task-1",
-      "title": "任务标题",
-      "description": "详细描述",
-      "task_type": "repeat|one_shot",
-      "execution_mode": "standard|interactive|monitoring|event_triggered",
-      "execution_kind": "generic_result",
-      "recurrence": "触发时机(重复任务必填；一次性任务如非立即触发也可填写，例如 每天 07:30 触发、每周日 20:00 触发、每 3 个小时触发、2026-06-01 10:00 触发、明天 10:00 触发)",
-      "trigger_condition": "触发条件描述(仅 event_triggered 需要，例如 价格低于 1800 元)",
-      "hierarchy_level": "task|sub_task|action",
-      "parent_id": "父任务ID(可选)",
-      "priority": "critical|high|medium|low",
-      "dependencies": ["依赖任务ID"],
-      "expected_output": {
-        "type": "information|deliverable|decision|action|confirmation",
-        "description": "预期产出描述",
-        "format": "json|markdown|table|text|code|other",
-        "presentation": "summary_card|visual_report|comparison_table|checklist|timeline|document|dashboard|handoff_package",
-        "primary_format": "structured_blocks|json|markdown|html|text|code",
-        "exportable_formats": ["html", "markdown"],
-        "required_blocks": ["heading", "callout", "comparison_table", "key_value"],
-        "completion_criteria": "完成判定标准"
-      },
-      "collaboration": {
-        "mode": "agent_autonomous|agent_with_user_confirmation|agent_user_collaborative|user_primary_agent_assistive",
-        "agent_responsibilities": ["Agent 负责准备、分析、生成或提醒的事项"],
-        "user_responsibilities": ["用户需要确认、作答、补充或线下完成的事项；如不需要则为空数组"],
-        "user_interaction_type": "none|confirm|answer|provide_context|perform_offline_action",
-        "user_interaction_timing": "not_required|before_execution|during_execution|after_agent_output|core_task_step",
-        "user_facing_action_label": "给用户看的动作文案，例如 查看结果 / 确认结果 / 开始作答 / 补充信息",
-        "should_notify_user": true,
-        "completion_owner": "agent|user|shared",
-        "completion_definition": "这个任务如何才算完成"
-      },
-      "estimated_duration_minutes": 60
-    }
-  ],
-  "execution_plan": {
-    "suggested_order": ["task-1", "task-2"],
-    "critical_path": ["task-1"],
-    "total_estimated_hours": 8
-  },
-  "coverage_validation": {
-    "is_sufficient": true,
-    "explanation": "覆盖度说明",
-    "uncovered_risks": ["未覆盖风险1"]
-  }
-}
-
-# Critical Reminders
-1. 只能输出一个严格合法的 JSON 对象，不要输出 Markdown、代码块或额外解释。
-2. 信息类任务默认使用结构化 blocks，不要只交付 Markdown 长文。
-3. 信息类任务完成标准如果只是生成报告/调研/对比/分析/清单，不要把用户确认满意写成当前任务完成条件。
-4. 只有 expected_output.type 是 decision/confirmation，或 completion_criteria 明确要求用户确认/审批/选择后才完成，才允许 user_interaction_type=confirm。
-5. 每个任务都必须明确 Agent / 用户职责分工和完成归属。`;
-}
-
-function buildTaskReviewPrompt(input: {
-  goalTitle: string;
-  subGoalTitle: string;
-  goalDescription: string;
-  tasksJson: string;
-}) {
-  return `请 Review 以下任务是否与目标对齐：
-
-目标: ${input.goalTitle}
-子目标: ${input.subGoalTitle}
-目标描述: ${input.goalDescription}
-
-待 Review 任务:
-${input.tasksJson}
-
-请评估每个任务：
-1. 与最终目标的对齐程度（critical/high/medium/low）
-2. 与子目标的对齐程度（critical/high/medium/low）
-3. 是否需要调整或删除
-
-要求：
-1. 只能输出严格 JSON 对象，不要包含 Markdown、代码块、前后解释或自然语言前导。
-2. 必须使用英文双引号包裹所有 key 和字符串值。
-3. 不允许尾随逗号，不允许注释，不允许省略逗号。
-4. reviewResults 必须覆盖上方每个待 Review 任务，taskId 必须使用原始任务 id。
-5. goalContribution 和 subGoalContribution 只能取 critical、high、medium、low 之一。
-
-JSON schema：
-{
-  "reviewResults": [
-    {
-      "taskId": "task-id",
-      "goalContribution": "critical|high|medium|low",
-      "subGoalContribution": "critical|high|medium|low",
-      "aligned": true,
-      "reasoning": "评估理由",
-      "suggestions": ["建议1", "建议2"]
-    }
-  ]
-}`;
-}
-
 function buildPlanPresentationPrompt(input: {
   goalText: string;
   collectedInfoSummary: CollectedInfoSummaryPayload;
@@ -830,7 +651,8 @@ async function runClaudeJson(input: {
     throw new Error("目标规划缺少 conversationId，无法进入隔离 conversation workspace");
   }
   const startedAt = Date.now();
-  const promptChars = input.prompt.length;
+  const effectivePrompt = `${JSON_NO_TOOL_INSTRUCTION}\n\n${input.prompt}`;
+  const promptChars = effectivePrompt.length;
   if (input.context) {
     // #region debug-point goal-planning-latency-claude-start
     appendGoalLog({
@@ -849,9 +671,11 @@ async function runClaudeJson(input: {
 
   try {
     const result = await runPromptJson({
-      prompt: input.prompt,
+      prompt: effectivePrompt,
       runtimeEnv: input.runtimeEnv,
       cwd,
+      filePolicy: input.runtimeEnv.filePolicy,
+      channelPolicy: { mode: "readonly_json" },
       abortSignal: input.signal,
       abortMessage: input.abortMessage,
       failureMessage: input.failureMessage,
@@ -894,6 +718,79 @@ async function runClaudeJson(input: {
   }
 }
 
+async function runClaudeText(input: {
+  runtimeEnv: RuntimeEnvironment;
+  prompt: string;
+  conversationId?: string;
+  workspaceDir?: string;
+  signal?: AbortSignal;
+  abortMessage: string;
+  failureMessage: string;
+  context?: ClaudeRunContext;
+}) {
+  const cwd = input.workspaceDir ?? (input.conversationId ? ensureConversationWorkspace(input.conversationId).workspaceDir : null);
+  if (!cwd) {
+    throw new Error("目标规划缺少 conversationId，无法进入隔离 conversation workspace");
+  }
+  const startedAt = Date.now();
+  const effectivePrompt = `重要约束：禁止调用任何工具（Write/Edit/MultiEdit/Bash/WebSearch/WebFetch/Task 等），所有业务结果必须直接写在最终回答文本里。\n\n${input.prompt}`;
+  const promptChars = effectivePrompt.length;
+  if (input.context) {
+    appendGoalLog({
+      requestId: input.context.requestId,
+      scope: input.context.scope,
+      level: "info",
+      phase: input.context.phase,
+      message: `Claude 开始执行：${input.context.stepLabel}`,
+      details: formatTimingDetails({ promptChars, cwd }),
+    });
+  }
+
+  try {
+    const result = await runPromptText({
+      prompt: effectivePrompt,
+      runtimeEnv: input.runtimeEnv,
+      cwd,
+      filePolicy: input.runtimeEnv.filePolicy,
+      channelPolicy: { mode: "readonly_json" },
+      abortSignal: input.signal,
+      abortMessage: input.abortMessage,
+      failureMessage: input.failureMessage,
+      traceContext: input.context,
+    });
+    if (input.context) {
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: "info",
+        phase: input.context.phase,
+        message: `Claude 执行完成：${input.context.stepLabel}`,
+        details: formatTimingDetails({
+          elapsedMs: Date.now() - startedAt,
+          promptChars,
+          outputChars: result.raw.length,
+        }),
+      });
+    }
+    return result.raw;
+  } catch (error) {
+    if (input.context) {
+      appendGoalLog({
+        requestId: input.context.requestId,
+        scope: input.context.scope,
+        level: error instanceof DOMException && error.name === "AbortError" ? "warn" : "error",
+        phase: input.context.phase,
+        message:
+          error instanceof DOMException && error.name === "AbortError"
+            ? `Claude 执行被中断：${input.context.stepLabel}`
+            : `Claude 执行异常：${input.context.stepLabel}`,
+        details: error instanceof Error ? error.message : input.failureMessage,
+      });
+    }
+    throw error;
+  }
+}
+
 async function repairMalformedJsonWithClaude(input: {
   runtimeEnv: RuntimeEnvironment;
   malformedJson: string;
@@ -924,44 +821,17 @@ function classifyClaudeJsonFailure(errorMessage: string, lastError: unknown) {
     userMessage: `${errorMessage}：${reason}`,
     logMessage: detail || reason,
   });
-
   if (isJsonSyntaxLikeError(lastError)) {
     return build("Claude 输出不是合法 JSON，可能混入了解释文字、代码块，或缺少逗号/引号。");
   }
-  if (/缺少 tasks/i.test(detail)) {
-    return build("Claude 输出缺少 tasks 字段，无法生成任务列表。");
-  }
-  if (/结果为空|tasks.*为空/i.test(detail)) {
-    return build("Claude 输出里的任务列表为空，无法继续规划。");
-  }
-  if (/字段不完整/i.test(detail)) {
-    return build("Claude 输出的任务字段不完整，缺少标题、描述或交付要求。");
-  }
-  if (/缺少 reviewResults/i.test(detail)) {
-    return build("Claude 输出缺少 reviewResults 字段，无法完成任务 review。");
-  }
-  if (/不是 JSON 对象/i.test(detail)) {
-    return build("Claude 输出不是系统要求的 JSON 对象结构。");
-  }
-  if (/缺少 questions/i.test(detail)) {
-    return build("Claude 输出缺少 questions 字段，无法生成澄清问题。");
-  }
-  if (/缺少 subGoals/i.test(detail)) {
-    return build("Claude 输出缺少 subGoals 字段，无法完成目标拆解。");
-  }
-  if (/缺少 goalTitle/i.test(detail)) {
-    return build("Claude 输出缺少 goalTitle，无法生成完整规划。");
-  }
-  if (/缺少 title 或 tasks/i.test(detail)) {
-    return build("Claude 输出的子目标结构不完整，缺少标题或任务列表。");
-  }
-  if (detail) {
-    return build(`Claude 输出结构不符合系统要求（${detail}）。`);
-  }
-  return {
-    userMessage: errorMessage,
-    logMessage: errorMessage,
-  };
+  if (/缺少 reviewResults/i.test(detail)) return build("Claude 输出缺少 reviewResults 字段，无法完成任务 review。");
+  if (/不是 JSON 对象/i.test(detail)) return build("Claude 输出不是系统要求的 JSON 对象结构。");
+  if (/缺少 questions/i.test(detail)) return build("Claude 输出缺少 questions 字段，无法生成澄清问题。");
+  if (/缺少 subGoals/i.test(detail)) return build("Claude 输出缺少 subGoals 字段，无法完成目标拆解。");
+  if (/缺少 goalTitle/i.test(detail)) return build("Claude 输出缺少 goalTitle，无法生成完整规划。");
+  if (/缺少 title 或 tasks/i.test(detail)) return build("Claude 输出的子目标结构不完整，缺少标题或任务列表。");
+  if (detail) return build(`Claude 输出结构不符合系统要求（${detail}）。`);
+  return { userMessage: errorMessage, logMessage: errorMessage };
 }
 
 async function parseClaudeJson<T>(input: {
@@ -975,13 +845,24 @@ async function parseClaudeJson<T>(input: {
 }) {
   const parseStartedAt = Date.now();
   const primary = normalizeClaudeJsonText(input.raw);
-  const attempt = parseJsonWithCandidates(buildJsonParseCandidates(primary), input.validator);
+  const artifactCandidates = recoverJsonArtifactsFromClaudeOutput({
+    conversationId: input.conversationId,
+    outputText: primary,
+  });
+  const attempt = parseJsonWithCandidates(
+    [
+      ...buildJsonParseCandidates(primary),
+      ...artifactCandidates.map((artifact) => ({ label: artifact.label, value: artifact.value })),
+    ],
+    input.validator,
+  );
   let repairedForLog = "";
   let repairedCandidateForLog = "";
+  let recoveredArtifact: RecoveredJsonArtifact | undefined;
 
   if (attempt.ok) {
+    recoveredArtifact = artifactCandidates.find((artifact) => artifact.label === attempt.strategy);
     if (input.context) {
-      // #region debug-point goal-planning-latency-parse-hit
       appendGoalLog({
         requestId: input.context.requestId,
         scope: input.context.scope,
@@ -992,9 +873,9 @@ async function parseClaudeJson<T>(input: {
           strategy: attempt.strategy,
           elapsedMs: Date.now() - parseStartedAt,
           rawChars: primary.length,
+          recoveredFromArtifact: Boolean(recoveredArtifact),
         }),
       });
-      // #endregion
     }
     return attempt.parsed;
   }
@@ -1002,19 +883,14 @@ async function parseClaudeJson<T>(input: {
   let lastError: unknown = attempt.error;
   try {
     if (input.context) {
-      // #region debug-point goal-planning-latency-parse-repair-start
       appendGoalLog({
         requestId: input.context.requestId,
         scope: input.context.scope,
         level: "warn",
         phase: input.context.phase,
         message: `JSON 解析进入 Claude 修复：${input.context.stepLabel}`,
-        details: formatTimingDetails({
-          elapsedMs: Date.now() - parseStartedAt,
-          rawChars: primary.length,
-        }),
+        details: formatTimingDetails({ elapsedMs: Date.now() - parseStartedAt, rawChars: primary.length }),
       });
-      // #endregion
     }
     const repaired = await repairMalformedJsonWithClaude({
       runtimeEnv: input.runtimeEnv,
@@ -1029,7 +905,6 @@ async function parseClaudeJson<T>(input: {
       throw repairedAttempt.error instanceof Error ? repairedAttempt.error : new Error(input.errorMessage);
     }
     if (input.context) {
-      // #region debug-point goal-planning-latency-parse-repair-finished
       appendGoalLog({
         requestId: input.context.requestId,
         scope: input.context.scope,
@@ -1043,7 +918,6 @@ async function parseClaudeJson<T>(input: {
           repairedChars: repaired.length,
         }),
       });
-      // #endregion
     }
     return repairedAttempt.parsed;
   } catch (error) {
@@ -1051,19 +925,20 @@ async function parseClaudeJson<T>(input: {
   }
 
   const classifiedFailure = classifyClaudeJsonFailure(input.errorMessage, lastError);
-  const parseFailureSnapshot =
-    input.conversationId
-      ? writePlanningParseFailureSnapshot({
-          conversationId: input.conversationId,
-          requestId: input.context?.requestId,
-          phase: input.context?.phase,
-          stepLabel: input.context?.stepLabel,
-          errorMessage: classifiedFailure.userMessage,
-          rawOutput: input.raw,
-          repairedOutput: repairedForLog || undefined,
-          repairedCandidate: repairedCandidateForLog || undefined,
-        })
-      : null;
+  const parseFailureSnapshot = input.conversationId
+    ? writePlanningParseFailureSnapshot({
+        conversationId: input.conversationId,
+        requestId: input.context?.requestId,
+        phase: input.context?.phase,
+        stepLabel: input.context?.stepLabel,
+        errorMessage: classifiedFailure.userMessage,
+        rawOutput: input.raw,
+        repairedOutput: repairedForLog || undefined,
+        repairedCandidate: repairedCandidateForLog || undefined,
+        artifactCandidates: artifactCandidates.map((artifact) => artifact.relativePath),
+        recoveredArtifactPath: recoveredArtifact?.relativePath,
+      })
+    : null;
 
   if (input.context) {
     appendGoalLog({
@@ -1081,28 +956,15 @@ async function parseClaudeJson<T>(input: {
         "```json",
         primary,
         "```",
-        repairedForLog
-          ? [
-              "",
-              `## repaired output`,
-              "```json",
-              repairedForLog,
-              "```",
-            ].join("\n")
-          : "",
-        repairedCandidateForLog
-          ? [
-              "",
-              `## repaired candidate`,
-              "```json",
-              repairedCandidateForLog,
-              "```",
-            ].join("\n")
-          : "",
+        repairedForLog ? ["", "## repaired output", "```json", repairedForLog, "```"].join("\n") : "",
+        repairedCandidateForLog ? ["", "## repaired candidate", "```json", repairedCandidateForLog, "```"].join("\n") : "",
       ].filter(Boolean).join("\n"),
     });
   }
-  throw new Error(classifiedFailure.userMessage);
+  throw new ClaudeJsonParseError(classifiedFailure.userMessage, {
+    snapshotPath: parseFailureSnapshot?.relativePath,
+    rootCause: lastError,
+  });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1223,146 +1085,6 @@ function validateDecomposition(value: unknown): DecompositionPayload {
   };
 }
 
-function validateTaskGeneration(value: unknown): TaskGenerationPayload {
-  if (!isObject(value) || !Array.isArray(value.tasks) || value.tasks.length === 0) {
-    throw new Error("任务生成结果缺少 tasks");
-  }
-
-  const tasks: TaskGenerationPayload["tasks"] = [];
-  for (let index = 0; index < value.tasks.length; index += 1) {
-    const task = value.tasks[index];
-    if (!isObject(task)) continue;
-    const expectedOutput = isObject(task.expected_output) ? task.expected_output : null;
-    if (!expectedOutput) continue;
-    const title = typeof task.title === "string" ? task.title.trim() : "";
-    const description = typeof task.description === "string" ? task.description.trim() : "";
-    const expectedDescription =
-      typeof expectedOutput.description === "string" ? expectedOutput.description.trim() : "";
-    if (!title || !description || !expectedDescription) continue;
-    const expectedType =
-      expectedOutput.type === "deliverable" ||
-      expectedOutput.type === "decision" ||
-      expectedOutput.type === "action" ||
-      expectedOutput.type === "confirmation"
-        ? expectedOutput.type
-        : "information";
-    const expectedFormat =
-      expectedOutput.format === "json" ||
-      expectedOutput.format === "markdown" ||
-      expectedOutput.format === "table" ||
-      expectedOutput.format === "code" ||
-      expectedOutput.format === "other"
-        ? expectedOutput.format
-        : "text";
-    const presentation = normalizeEnumValue(
-      expectedOutput.presentation,
-      allowedPresentations,
-      inferPresentation({ ...expectedOutput, type: expectedType, format: expectedFormat }),
-    );
-    tasks.push({
-      id:
-        typeof task.id === "string" && task.id.trim()
-          ? task.id.trim()
-          : `task-${index + 1}`,
-      title,
-      description,
-      task_type:
-        task.task_type === "one_shot" && task.execution_mode !== "monitoring" && !task.recurrence
-          ? "one_shot"
-          : "repeat",
-      execution_mode:
-        task.execution_mode === "interactive" ||
-        task.execution_mode === "monitoring" ||
-        task.execution_mode === "event_triggered"
-          ? task.execution_mode
-          : "standard",
-      execution_kind:
-        typeof task.execution_kind === "string" ? task.execution_kind.trim() : undefined,
-      recurrence: typeof task.recurrence === "string" ? task.recurrence.trim() : undefined,
-      trigger_condition:
-        typeof task.trigger_condition === "string" ? task.trigger_condition.trim() : undefined,
-      hierarchy_level:
-        task.hierarchy_level === "sub_task" || task.hierarchy_level === "action"
-          ? task.hierarchy_level
-          : "task",
-      parent_id: typeof task.parent_id === "string" ? task.parent_id.trim() : undefined,
-      priority: normalizePriority(task.priority),
-      dependencies: extractStringArray(task.dependencies),
-      expected_output: {
-        type: expectedType,
-        description: expectedDescription,
-        format: expectedFormat,
-        presentation,
-        primary_format: normalizeEnumValue(
-          expectedOutput.primary_format,
-          allowedPrimaryFormats,
-          inferPrimaryFormat({ ...expectedOutput, format: expectedFormat }),
-        ),
-        exportable_formats: normalizeEnumArrayValue(
-          expectedOutput.exportable_formats,
-          allowedExportFormats,
-          expectedType === "information" ? ["html", "markdown"] : ["markdown"],
-        ),
-        required_blocks: normalizeEnumArrayValue(
-          expectedOutput.required_blocks,
-          allowedRequiredBlocks,
-          inferRequiredBlocks(presentation),
-        ),
-        completion_criteria:
-          typeof expectedOutput.completion_criteria === "string"
-            ? expectedOutput.completion_criteria.trim()
-            : undefined,
-      },
-      collaboration: normalizeTaskCollaborationPayload(task),
-      estimated_duration_minutes:
-        typeof task.estimated_duration_minutes === "number"
-          ? task.estimated_duration_minutes
-          : undefined,
-    });
-  }
-
-  if (tasks.length === 0) {
-    throw new Error("任务生成结果为空");
-  }
-
-  return {
-    sub_goal_analysis: isObject(value.sub_goal_analysis)
-      ? {
-          core_deliverable:
-            typeof value.sub_goal_analysis.core_deliverable === "string"
-              ? value.sub_goal_analysis.core_deliverable.trim()
-              : undefined,
-          work_categories: extractStringArray(value.sub_goal_analysis.work_categories),
-          completion_checklist: extractStringArray(value.sub_goal_analysis.completion_checklist),
-        }
-      : undefined,
-    tasks,
-    execution_plan: isObject(value.execution_plan)
-      ? {
-          suggested_order: extractStringArray(value.execution_plan.suggested_order),
-          critical_path: extractStringArray(value.execution_plan.critical_path),
-          total_estimated_hours:
-            typeof value.execution_plan.total_estimated_hours === "number"
-              ? value.execution_plan.total_estimated_hours
-              : undefined,
-        }
-      : undefined,
-    coverage_validation: isObject(value.coverage_validation)
-      ? {
-          is_sufficient:
-            typeof value.coverage_validation.is_sufficient === "boolean"
-              ? value.coverage_validation.is_sufficient
-              : undefined,
-          explanation:
-            typeof value.coverage_validation.explanation === "string"
-              ? value.coverage_validation.explanation.trim()
-              : undefined,
-          uncovered_risks: extractStringArray(value.coverage_validation.uncovered_risks),
-        }
-      : undefined,
-  };
-}
-
 function validateTaskReview(value: unknown): TaskReviewPayload {
   if (!isObject(value) || !Array.isArray(value.reviewResults)) {
     throw new Error("任务 review 结果缺少 reviewResults");
@@ -1428,270 +1150,29 @@ function extractStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function normalizeEnumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
-  return typeof value === "string" && allowed.includes(value as T) ? (value as T) : fallback;
-}
-
-function normalizeEnumArrayValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] {
-  if (!Array.isArray(value)) return fallback;
-  const items = value
-    .filter((item): item is T => typeof item === "string" && allowed.includes(item as T));
-  return items.length ? Array.from(new Set(items)) : fallback;
-}
-
-function inferPresentation(expectedOutput: Record<string, unknown>): NonNullable<TaskExpectedResult["presentation"]> {
-  if (expectedOutput.format === "table") return "comparison_table";
-  if (expectedOutput.type === "information") return "visual_report";
-  if (expectedOutput.type === "decision" || expectedOutput.type === "confirmation") return "summary_card";
-  if (expectedOutput.type === "action") return "checklist";
-  return "document";
-}
-
-function inferPrimaryFormat(expectedOutput: Record<string, unknown>): NonNullable<TaskExpectedResult["primaryFormat"]> {
-  if (expectedOutput.format === "json") return "json";
-  if (expectedOutput.format === "code") return "code";
-  return "structured_blocks";
-}
-
-function inferRequiredBlocks(presentation: NonNullable<TaskExpectedResult["presentation"]>): NonNullable<TaskExpectedResult["requiredBlocks"]> {
-  if (presentation === "visual_report") return ["heading", "callout", "comparison_table", "key_value"];
-  if (presentation === "comparison_table") return ["heading", "comparison_table", "callout"];
-  if (presentation === "checklist") return ["heading", "list", "callout"];
-  if (presentation === "timeline") return ["heading", "list", "key_value"];
-  if (presentation === "summary_card") return ["callout", "key_value"];
-  return ["heading", "paragraph"];
-}
-
-function inferUserInteractionType(task: Pick<TaskGenerationPayload["tasks"][number], "execution_mode" | "expected_output" | "execution_kind">) {
-  return inferPolicyUserInteractionType({
-    executionKind: allowedExecutionKinds.includes(task.execution_kind as DraftTask["executionKind"])
-      ? (task.execution_kind as DraftTask["executionKind"])
-      : undefined,
-    executionMode: task.execution_mode,
-    expectedOutputType: task.expected_output.type,
-  });
-}
-
-function inferCollaborationMode(
-  interactionType: NonNullable<TaskGenerationPayload["tasks"][number]["collaboration"]>["user_interaction_type"],
-) {
-  if (interactionType === "answer" || interactionType === "provide_context") return "agent_user_collaborative";
-  if (interactionType === "perform_offline_action") return "user_primary_agent_assistive";
-  if (interactionType === "confirm") return "agent_with_user_confirmation";
-  return "agent_autonomous";
-}
-
-function normalizeTaskCollaborationPayload(
-  task: Record<string, unknown> & {
-    execution_mode?: unknown;
-    execution_kind?: unknown;
-    expected_output?: unknown;
-  },
-): TaskGenerationPayload["tasks"][number]["collaboration"] {
-  const expectedOutput = isObject(task.expected_output) ? task.expected_output : {};
-  const normalizedExpectedOutputType: TaskGenerationPayload["tasks"][number]["expected_output"]["type"] =
-    expectedOutput.type === "deliverable" ||
-    expectedOutput.type === "decision" ||
-    expectedOutput.type === "action" ||
-    expectedOutput.type === "confirmation"
-      ? expectedOutput.type
-      : "information";
-  const normalizedExecutionMode: TaskGenerationPayload["tasks"][number]["execution_mode"] =
-    task.execution_mode === "interactive" ||
-    task.execution_mode === "monitoring" ||
-    task.execution_mode === "event_triggered"
-      ? task.execution_mode
-      : "standard";
-  const normalizedTask = {
-    execution_mode: normalizedExecutionMode,
-    execution_kind: typeof task.execution_kind === "string" ? task.execution_kind.trim() : undefined,
-    expected_output: {
-      type: normalizedExpectedOutputType,
-      description: typeof expectedOutput.description === "string" ? expectedOutput.description.trim() : "任务交付物",
-      format: "text" as const,
-    },
-  };
-  const completionCriteria = typeof expectedOutput.completion_criteria === "string" ? expectedOutput.completion_criteria.trim() : "";
-  const shouldTreatAsAgentOwnedInformation =
-    normalizedExpectedOutputType === "information" &&
-    !requiresUserConfirmationToComplete({
-      expectedOutputType: normalizedExpectedOutputType,
-      completionCriteria,
-    });
-  const raw = isObject(task.collaboration) ? task.collaboration : {};
-  const inferredInteractionType = inferUserInteractionType(normalizedTask);
-  const userInteractionType = shouldTreatAsAgentOwnedInformation
-    ? "none"
-    : raw.user_interaction_type === "confirm" ||
-        raw.user_interaction_type === "answer" ||
-        raw.user_interaction_type === "provide_context" ||
-        raw.user_interaction_type === "perform_offline_action"
-      ? raw.user_interaction_type
-      : inferredInteractionType;
-  const mode =
-    shouldTreatAsAgentOwnedInformation
-      ? "agent_autonomous"
-      : raw.mode === "agent_with_user_confirmation" ||
-          raw.mode === "agent_user_collaborative" ||
-          raw.mode === "user_primary_agent_assistive" ||
-          raw.mode === "agent_autonomous"
-        ? raw.mode
-        : inferCollaborationMode(userInteractionType);
-  const userInteractionTiming =
-    shouldTreatAsAgentOwnedInformation
-      ? "not_required"
-      : raw.user_interaction_timing === "before_execution" ||
-          raw.user_interaction_timing === "during_execution" ||
-          raw.user_interaction_timing === "after_agent_output" ||
-          raw.user_interaction_timing === "core_task_step"
-        ? raw.user_interaction_timing
-        : userInteractionType === "none"
-          ? "not_required"
-          : userInteractionType === "answer" || userInteractionType === "perform_offline_action"
-            ? "core_task_step"
-            : "after_agent_output";
-  const completionOwner =
-    shouldTreatAsAgentOwnedInformation
-      ? "agent"
-      : raw.completion_owner === "user" || raw.completion_owner === "shared" || raw.completion_owner === "agent"
-        ? raw.completion_owner
-        : mode === "agent_user_collaborative"
-          ? "shared"
-          : mode === "user_primary_agent_assistive"
-            ? "user"
-            : "agent";
-  const defaultActionLabel =
-    userInteractionType === "answer"
-      ? "开始作答"
-      : userInteractionType === "confirm"
-        ? "确认或提出修改建议"
-        : userInteractionType === "provide_context"
-          ? "补充信息"
-          : userInteractionType === "perform_offline_action"
-            ? "记录完成情况"
-            : "查看结果";
-
-  return {
-    mode,
-    agent_responsibilities: extractStringArray(raw.agent_responsibilities),
-    user_responsibilities: extractStringArray(raw.user_responsibilities),
-    user_interaction_type: userInteractionType,
-    user_interaction_timing: userInteractionTiming,
-    user_facing_action_label:
-      typeof raw.user_facing_action_label === "string" && raw.user_facing_action_label.trim()
-        ? raw.user_facing_action_label.trim()
-        : defaultActionLabel,
-    should_notify_user: shouldNotifyUser({
-      explicit: typeof raw.should_notify_user === "boolean" ? raw.should_notify_user : undefined,
-      interactionType: userInteractionType,
-    }),
-    completion_owner: completionOwner,
-    completion_definition:
-      shouldTreatAsAgentOwnedInformation && completionCriteria
-        ? completionCriteria
-        : typeof raw.completion_definition === "string" && raw.completion_definition.trim()
-        ? raw.completion_definition.trim()
-        : `完成「${normalizedTask.expected_output.description}」`,
-  };
-}
-
-function inferExecutionKind(task: TaskGenerationPayload["tasks"][number]): DraftTask["executionKind"] {
-  if (task.execution_kind && allowedExecutionKinds.includes(task.execution_kind as DraftTask["executionKind"])) {
-    return task.execution_kind as DraftTask["executionKind"];
-  }
-  if (task.execution_mode === "monitoring") return "reading_digest";
-  if (task.execution_mode === "interactive") {
-    return task.expected_output.type === "deliverable" ? "draft_review" : "confirm_action";
-  }
-  if (task.expected_output.type === "deliverable" && task.expected_output.format === "markdown") {
-    return "draft_review";
-  }
-  if (task.expected_output.type === "decision" || task.expected_output.type === "confirmation") {
-    return "confirm_action";
-  }
-  return "generic_result";
-}
-
-function toDraftCollaboration(task: TaskGenerationPayload["tasks"][number]): NonNullable<DraftTask["collaboration"]> {
-  const collaboration = (task.collaboration ??
-    normalizeTaskCollaborationPayload(task)) as NonNullable<TaskGenerationPayload["tasks"][number]["collaboration"]>;
-  return {
-    mode: collaboration.mode ?? "agent_autonomous",
-    agentResponsibilities: collaboration.agent_responsibilities ?? [],
-    userResponsibilities: collaboration.user_responsibilities ?? [],
-    userInteractionType: collaboration.user_interaction_type ?? "none",
-    userInteractionTiming: collaboration.user_interaction_timing ?? "not_required",
-    userFacingActionLabel: collaboration.user_facing_action_label ?? "查看结果",
-    shouldNotifyUser: collaboration.should_notify_user ?? false,
-    completionOwner: collaboration.completion_owner ?? "agent",
-    completionDefinition: collaboration.completion_definition ?? `完成「${task.expected_output.description}」`,
-  };
-}
-
 function inferDraftCollaboration(task: DraftTask): NonNullable<DraftTask["collaboration"]> {
   const userInteractionType =
-    task.resultViewKind === "flashcard" || task.resultViewKind === "listening_qa" || task.resultViewKind === "freeform_chat"
-      ? "answer"
-      : task.resultViewKind === "confirm_action" ||
-          task.resultViewKind === "draft_review" ||
-          task.expectedResult?.type === "decision" ||
-          task.expectedResult?.type === "confirmation"
-        ? "confirm"
-        : "none";
-  const mode =
-    userInteractionType === "answer"
-      ? "agent_user_collaborative"
-      : userInteractionType === "confirm"
-        ? "agent_with_user_confirmation"
-        : "agent_autonomous";
+    task.expectedResult?.type === "decision" || task.expectedResult?.type === "confirmation" ? "confirm" : "none";
+  const mode = userInteractionType === "confirm" ? "agent_with_user_confirmation" : "agent_autonomous";
   return {
     mode,
     agentResponsibilities: [task.description],
-    userResponsibilities:
-      userInteractionType === "answer"
-        ? ["完成作答或互动"]
-        : userInteractionType === "confirm"
-          ? ["确认结果或提出修改建议"]
-          : [],
+    userResponsibilities: userInteractionType === "confirm" ? ["确认结果或提出修改建议"] : [],
     userInteractionType,
-    userInteractionTiming:
-      userInteractionType === "answer" ? "core_task_step" : userInteractionType === "confirm" ? "after_agent_output" : "not_required",
-    userFacingActionLabel:
-      userInteractionType === "answer" ? "开始作答" : userInteractionType === "confirm" ? "确认或提出修改建议" : "查看结果",
+    userInteractionTiming: userInteractionType === "confirm" ? "after_agent_output" : "not_required",
+    userFacingActionLabel: userInteractionType === "confirm" ? "确认或提出修改建议" : "查看结果",
     shouldNotifyUser: userInteractionType !== "none",
-    completionOwner: userInteractionType === "answer" ? "shared" : "agent",
+    completionOwner: "agent",
     completionDefinition: task.expectedResult?.completionCriteria || task.expectedOutcome,
   };
 }
 
-function inferTaskType(task: TaskGenerationPayload["tasks"][number]): DraftTask["taskType"] {
-  if (task.task_type === "repeat" || task.execution_mode === "monitoring" || task.recurrence) return "repeat";
-  return "one_shot";
-}
-
-function inferTriggerRule(task: TaskGenerationPayload["tasks"][number]) {
-  const taskType = inferTaskType(task) as Task["taskType"];
-  let triggerRule: string;
-  if (task.execution_mode === "event_triggered") {
-    triggerRule = task.trigger_condition
-      ? `满足触发条件执行：${task.trigger_condition}`
-      : "满足触发条件执行";
-    return normalizeConcreteTriggerRule(triggerRule, taskType);
-  }
-  if (task.execution_mode === "monitoring") {
-    triggerRule = task.recurrence || "每天固定时间巡检";
-    return normalizeConcreteTriggerRule(triggerRule, taskType);
-  }
-  if (task.task_type === "repeat") {
-    triggerRule = task.recurrence || "每周固定节奏执行";
-    return normalizeConcreteTriggerRule(triggerRule, taskType);
-  }
-  triggerRule = task.trigger_condition || "准备好后执行一次";
-  return normalizeConcreteTriggerRule(triggerRule, taskType);
-}
-
 function dedupeStrings(items: Array<string | undefined>) {
   return Array.from(new Set(items.map((item) => item?.trim()).filter(Boolean) as string[]));
+}
+
+function dedupeNumbers(items: number[]) {
+  return Array.from(new Set(items));
 }
 
 function buildFallbackCollectedInfoSummary(goalText: string, collectedInfo?: string): CollectedInfoSummaryPayload {
@@ -1843,7 +1324,40 @@ async function decomposeGoalWithClaude(input: {
   }
 }
 
-async function generateTasksForSubGoalWithClaude(input: {
+async function repairSingleTaskDraftWithClaude(input: {
+  goalTitle: string;
+  subGoalName: string;
+  rawBlock: string;
+  missingFields: string[];
+  runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
+  signal?: AbortSignal;
+  requestId?: string;
+  subGoalIndex?: number;
+  totalSubGoals?: number;
+}): Promise<TaskDraft | null> {
+  const stdout = await runClaudeText({
+    runtimeEnv: input.runtimeEnv,
+    prompt: buildSingleTaskDraftRepairPrompt(input),
+    conversationId: input.conversationId,
+    signal: input.signal,
+    abortMessage: "任务草稿修复已中断",
+    failureMessage: "Claude CLI 任务草稿修复失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "generating_tasks",
+      stepLabel: `修复子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 的单个任务草稿：${input.subGoalName}`,
+    },
+  });
+  try {
+    return parseTaskDraftBatch(stdout).tasks[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateTaskDraftBatchForSubGoalWithClaude(input: {
   goalTitle: string;
   goalDescription: string;
   userContext: Record<string, unknown>;
@@ -1857,67 +1371,105 @@ async function generateTasksForSubGoalWithClaude(input: {
   requestId?: string;
   subGoalIndex?: number;
   totalSubGoals?: number;
-}) {
-  const stdout = await runClaudeJson({
+}): Promise<TaskDraftBatch> {
+  const stdout = await runClaudeText({
     runtimeEnv: input.runtimeEnv,
-    prompt: buildTaskGenerationPrompt(input),
+    prompt: buildTaskDraftPrompt(input),
     conversationId: input.conversationId,
     signal: input.signal,
-    abortMessage: "任务生成已中断",
-    failureMessage: "Claude CLI 任务生成失败",
+    abortMessage: "任务草稿生成已中断",
+    failureMessage: "Claude CLI 任务草稿生成失败",
     context: {
       requestId: input.requestId,
       scope: "goal_plan",
       phase: "generating_tasks",
-      stepLabel: `为子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 生成任务：${input.subGoalName}`,
+      stepLabel: `为子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 生成任务草稿：${input.subGoalName}`,
     },
   });
-  return parseClaudeJson({
-    raw: stdout,
-    validator: validateTaskGeneration,
-    errorMessage: "Claude 任务生成 JSON 解析失败",
-    runtimeEnv: input.runtimeEnv,
-    conversationId: input.conversationId,
-    signal: input.signal,
-    context: {
+  let batch: TaskDraftBatch;
+  try {
+    batch = parseTaskDraftBatch(stdout);
+  } catch (error) {
+    const snapshot = input.conversationId
+      ? writePlanningParseFailureSnapshot({
+          conversationId: input.conversationId,
+          requestId: input.requestId,
+          phase: "generating_tasks",
+          stepLabel: "draft_parse",
+          errorMessage: error instanceof Error ? error.message : "任务草稿解析失败",
+          rawOutput: stdout,
+          stage: "draft_parse",
+        })
+      : undefined;
+    throw new ClaudeJsonParseError("Claude 任务草稿 Block 解析失败", {
+      snapshotPath: snapshot?.relativePath,
+      rootCause: error,
+    });
+  }
+
+  const recovered: TaskDraft[] = [];
+  for (const reason of batch.droppedReasons ?? []) {
+    if (!reason.rawBlock) continue;
+    const repaired = await repairSingleTaskDraftWithClaude({
+      goalTitle: input.goalTitle,
+      subGoalName: input.subGoalName,
+      rawBlock: reason.rawBlock,
+      missingFields: reason.missingFields,
+      runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
+      signal: input.signal,
       requestId: input.requestId,
-      scope: "goal_plan",
-      phase: "generating_tasks",
-      stepLabel: `为子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 生成任务：${input.subGoalName}`,
-    },
-  });
+      subGoalIndex: input.subGoalIndex,
+      totalSubGoals: input.totalSubGoals,
+    });
+    if (repaired) recovered.push(repaired);
+  }
+
+  const remainingDroppedReasons = (batch.droppedReasons ?? []).filter((reason) => !recovered.some((draft) => draft.index === reason.index));
+  const finalTasks = [...batch.tasks, ...recovered];
+  if (finalTasks.length === 0) {
+    throw new TaskDraftBatchEmptyError("任务草稿全部不可用", remainingDroppedReasons);
+  }
+
+  return {
+    ...batch,
+    tasks: finalTasks,
+    droppedReasons: remainingDroppedReasons,
+    droppedTaskIndices: (batch.droppedTaskIndices ?? []).filter((index) => !recovered.some((draft) => draft.index === index)),
+    recoveredTaskCount: recovered.length,
+  } as TaskDraftBatch & { recoveredTaskCount: number };
 }
 
-async function reviewTasksWithClaude(input: {
+async function reviewTaskDraftsWithClaude(input: {
   goalTitle: string;
   subGoalTitle: string;
   goalDescription: string;
-  tasksJson: string;
+  drafts: TaskDraft[];
   runtimeEnv: RuntimeEnvironment;
   conversationId?: string;
   signal?: AbortSignal;
   requestId?: string;
   subGoalIndex?: number;
   totalSubGoals?: number;
-}) {
+}): Promise<TaskDraftReviewPayload> {
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
-    prompt: buildTaskReviewPrompt(input),
+    prompt: buildTaskDraftReviewPrompt(input),
     conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "任务 review 已中断",
-    failureMessage: "Claude CLI 任务 review 失败",
+    failureMessage: "Claude CLI 任务草稿 review 失败",
     context: {
       requestId: input.requestId,
       scope: "goal_plan",
       phase: "reviewing_tasks",
-      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"}：${input.subGoalTitle}`,
+      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 的任务草稿：${input.subGoalTitle}`,
     },
   });
   return parseClaudeJson({
     raw: stdout,
     validator: validateTaskReview,
-    errorMessage: "Claude 任务 review JSON 解析失败",
+    errorMessage: "Claude 任务草稿 review JSON 解析失败",
     runtimeEnv: input.runtimeEnv,
     conversationId: input.conversationId,
     signal: input.signal,
@@ -1925,7 +1477,7 @@ async function reviewTasksWithClaude(input: {
       requestId: input.requestId,
       scope: "goal_plan",
       phase: "reviewing_tasks",
-      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"}：${input.subGoalTitle}`,
+      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 的任务草稿：${input.subGoalTitle}`,
     },
   });
 }
@@ -1974,105 +1526,6 @@ async function buildPlanPresentationWithClaude(input: {
   });
 }
 
-function applyTaskReview(
-  tasks: TaskGenerationPayload["tasks"],
-  review: TaskReviewPayload,
-): DraftTask[] {
-  const reviewMap = new Map(review.reviewResults.map((item) => [item.taskId, item]));
-  const normalized = tasks
-    .map((task, index) => {
-      const reviewItem = reviewMap.get(task.id);
-      if (reviewItem && !reviewItem.aligned && reviewItem.goalContribution === "low") {
-        return null;
-      }
-      const effectivePriority = reviewItem?.subGoalContribution ?? task.priority;
-      const collaboration = toDraftCollaboration(task);
-      const normalizedTask: DraftTask = {
-        id: `draft-task-${index + 1}`,
-        title: task.title,
-        description: task.description,
-        expectedOutcome: task.expected_output.description,
-        taskType: inferTaskType(task),
-        triggerRule: inferTriggerRule(task),
-        executionKind: inferExecutionKind(task),
-        resultViewKind: inferExecutionKind(task),
-        executionStrategy:
-          collaboration.mode === "agent_user_collaborative"
-            ? "hybrid"
-            : collaboration.mode === "user_primary_agent_assistive"
-              ? "user_interactive"
-              : "agent_autonomous",
-        priority: effectivePriority,
-        dependencies: task.dependencies,
-        executionMode: task.execution_mode,
-        expectedResult: {
-          type: task.expected_output.type,
-          description: task.expected_output.description,
-          format: task.expected_output.format,
-          presentation: task.expected_output.presentation,
-          primaryFormat: task.expected_output.primary_format,
-          exportableFormats: task.expected_output.exportable_formats,
-          requiredBlocks: task.expected_output.required_blocks,
-          completionCriteria: task.expected_output.completion_criteria,
-        },
-        executionObjective: task.description,
-        recommendedWorkingDirectory: undefined,
-        autoRunDisabled: false,
-        requiresConfirmation:
-          collaboration.userInteractionType === "confirm" ||
-          task.expected_output.type === "decision" ||
-          task.expected_output.type === "confirmation",
-        collaboration,
-      };
-      return normalizedTask;
-    })
-    .filter((task): task is DraftTask => Boolean(task));
-
-  if (normalized.length > 0) return normalized;
-
-  const firstTask = tasks[0];
-  const firstCollaboration = toDraftCollaboration(firstTask);
-  return [
-    {
-      id: "draft-task-1",
-      title: firstTask.title,
-      description: firstTask.description,
-      expectedOutcome: firstTask.expected_output.description,
-      taskType: inferTaskType(firstTask),
-      triggerRule: inferTriggerRule(firstTask),
-      executionKind: inferExecutionKind(firstTask),
-      resultViewKind: inferExecutionKind(firstTask),
-      executionStrategy:
-        firstCollaboration.mode === "agent_user_collaborative"
-          ? "hybrid"
-          : firstCollaboration.mode === "user_primary_agent_assistive"
-            ? "user_interactive"
-            : "agent_autonomous",
-      priority: firstTask.priority,
-      dependencies: firstTask.dependencies,
-      executionMode: firstTask.execution_mode,
-      expectedResult: {
-        type: firstTask.expected_output.type,
-        description: firstTask.expected_output.description,
-        format: firstTask.expected_output.format,
-        presentation: firstTask.expected_output.presentation,
-        primaryFormat: firstTask.expected_output.primary_format,
-        exportableFormats: firstTask.expected_output.exportable_formats,
-        requiredBlocks: firstTask.expected_output.required_blocks,
-        completionCriteria: firstTask.expected_output.completion_criteria,
-      },
-      executionObjective: firstTask.description,
-      recommendedWorkingDirectory: undefined,
-      autoRunDisabled: false,
-      requiresConfirmation:
-        firstCollaboration.userInteractionType === "confirm" ||
-        firstTask.expected_output.type === "decision" ||
-        firstTask.expected_output.type === "confirmation",
-      collaboration: firstCollaboration,
-    },
-  ];
-}
-
 function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
   if (!value.goalTitle || typeof value.goalTitle !== "string") {
     throw new Error("规划缺少 goalTitle");
@@ -2088,14 +1541,13 @@ function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
       if (!task.title || !task.description || !task.expectedOutcome || !task.triggerRule) {
         throw new Error("规划中的任务字段不完整");
       }
-      if (!allowedExecutionKinds.includes(task.executionKind as (typeof allowedExecutionKinds)[number])) {
-        task.executionKind = "generic_result";
-      }
-      task.resultViewKind = task.resultViewKind ?? task.executionKind;
+      task.executionKind = normalizeExecutionKind(task.executionKind);
+      task.resultViewKind = normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
       task.executionStrategy = task.executionStrategy ?? "agent_autonomous";
       task.executionObjective = task.executionObjective ?? task.description;
       task.autoRunDisabled = task.autoRunDisabled ?? false;
-      task.requiresConfirmation = task.requiresConfirmation ?? task.executionKind === "confirm_action";
+      task.requiresConfirmation =
+        task.requiresConfirmation ?? (task.expectedResult?.type === "decision" || task.expectedResult?.type === "confirmation");
       task.collaboration = task.collaboration ?? inferDraftCollaboration(task);
     }
   }
@@ -2115,6 +1567,7 @@ export async function generateGoalPlanWithClaude(input: {
   onProgress?: GoalStageProgressHandler;
 }): Promise<GoalBreakdownDraft> {
   const planStartedAt = Date.now();
+  const taskIdBatchSeed = planStartedAt.toString(36);
   const config = normalizeEasterEggSettings(input.config ?? DEFAULT_EASTER_EGG_SETTINGS);
   const restoredCheckpoint = input.resumeFromCheckpoint
     ? readGoalPlanningCheckpoint(input.conversationId)
@@ -2248,14 +1701,14 @@ export async function generateGoalPlanWithClaude(input: {
     for (let subGoalIndex = checkpoint.nextSubGoalIndex; subGoalIndex < decomposition.subGoals.length; subGoalIndex += 1) {
       const subGoal = decomposition.subGoals[subGoalIndex];
       const subGoalStartedAt = Date.now();
-      let generatedTasks = checkpoint.activeSubGoal?.index === subGoalIndex
-        ? checkpoint.activeSubGoal.generatedTasks
+      let generatedDrafts = checkpoint.activeSubGoal?.index === subGoalIndex
+        ? checkpoint.activeSubGoal.generatedDrafts
         : undefined;
 
-      if (generatedTasks) {
+      if (generatedDrafts) {
         input.onProgress?.({
           phase: "reviewing_tasks",
-          message: `复用 checkpoint 中子目标 ${subGoalIndex + 1}/${totalSubGoals} 的已生成任务：${subGoal.name}`,
+          message: `复用 checkpoint 中子目标 ${subGoalIndex + 1}/${totalSubGoals} 的已生成任务草稿：${subGoal.name}`,
         });
       } else {
         input.onProgress?.({
@@ -2268,16 +1721,92 @@ export async function generateGoalPlanWithClaude(input: {
           activeSubGoal: { index: subGoalIndex },
         };
         writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
-        generatedTasks = await generateTasksForSubGoalWithClaude({
+        try {
+          generatedDrafts = await generateTaskDraftBatchForSubGoalWithClaude({
+            goalTitle: input.goalText,
+            goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
+            userContext,
+            subGoalName: subGoal.name,
+            subGoalDescription: subGoal.description,
+            successCriteria: subGoal.successCriteria.map(
+              (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+            ),
+            config,
+            runtimeEnv: input.runtimeEnv,
+            conversationId: input.conversationId,
+            signal: input.signal,
+            requestId: input.requestId,
+            subGoalIndex: subGoalIndex + 1,
+            totalSubGoals,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "任务草稿生成失败";
+          const recoverable = true;
+          const failedSubGoalIds = dedupeNumbers([
+            ...getFailedSubGoalIds(checkpoint),
+            subGoal.id,
+          ]);
+          checkpoint = {
+            ...checkpoint,
+            status: "partial",
+            stage: "generating_tasks",
+            nextSubGoalIndex: subGoalIndex,
+            activeSubGoal: { index: subGoalIndex },
+            subGoalTaskGeneration: upsertSubGoalTaskGenerationStatus(checkpoint, {
+              subGoalId: subGoal.id,
+              subGoalName: subGoal.name,
+              status: "task_generation_failed",
+              taskCount: 0,
+              lastError: errorMessage,
+              lastRawSnapshot: getClaudeJsonParseSnapshotPath(error),
+              droppedReasons: error instanceof TaskDraftBatchEmptyError ? error.droppedReasons : undefined,
+              updatedAt: new Date().toISOString(),
+            }),
+            partialFailure: {
+              failedSubGoalIds,
+              recoverable,
+              message: `子目标 ${subGoalIndex + 1}/${totalSubGoals}「${subGoal.name}」任务生成失败，已保留前序规划进度，可从该子目标继续修复。`,
+            },
+            lastError: errorMessage,
+          };
+          writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+          throw error;
+        }
+        checkpoint = {
+          ...checkpoint,
+          status: "running",
+          partialFailure: undefined,
+          activeSubGoal: {
+            index: subGoalIndex,
+              generatedDrafts,
+          },
+        };
+        writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+      }
+
+      const subGoalDraftId = `draft-subgoal-${subGoal.id}`;
+      let review: TaskDraftReviewPayload;
+      let compiled: ReturnType<typeof compileTaskDraftsToDraftTasks>;
+      let tasks: GoalBreakdownDraft["subGoals"][number]["tasks"];
+      try {
+        input.onProgress?.({
+          phase: "reviewing_tasks",
+          message: `正在 review 子目标 ${subGoalIndex + 1}/${totalSubGoals}：${subGoal.name}`,
+        });
+        checkpoint = {
+          ...checkpoint,
+          stage: "reviewing_tasks",
+          activeSubGoal: {
+            index: subGoalIndex,
+            generatedDrafts,
+          },
+        };
+        writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+        review = await reviewTaskDraftsWithClaude({
           goalTitle: input.goalText,
+          subGoalTitle: subGoal.name,
           goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
-          userContext,
-          subGoalName: subGoal.name,
-          subGoalDescription: subGoal.description,
-          successCriteria: subGoal.successCriteria.map(
-            (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
-          ),
-          config,
+          drafts: generatedDrafts.tasks,
           runtimeEnv: input.runtimeEnv,
           conversationId: input.conversationId,
           signal: input.signal,
@@ -2285,51 +1814,76 @@ export async function generateGoalPlanWithClaude(input: {
           subGoalIndex: subGoalIndex + 1,
           totalSubGoals,
         });
+
+        const reviewedDrafts = applyDraftReview(generatedDrafts.tasks, review);
+        const subGoalContext: DecompositionSubGoalContext = {
+          id: subGoal.id,
+          name: subGoal.name,
+          description: subGoal.description,
+          priority: subGoal.priority,
+          criteria: subGoal.successCriteria.map(
+            (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+          ),
+        };
+        compiled = compileTaskDraftsToDraftTasks({
+          drafts: reviewedDrafts,
+          subGoalContext,
+          taskIdBatchSeed,
+          subGoalDraftId,
+          subGoalIndex: subGoalIndex + 1,
+        });
+        tasks = compiled.tasks;
+        if (tasks.length === 0) {
+          throw new Error(`子目标「${subGoal.name}」没有可用任务草稿`);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "任务草稿 review 或编译失败";
+        const failedSubGoalIds = dedupeNumbers([
+          ...getFailedSubGoalIds(checkpoint),
+          subGoal.id,
+        ]);
         checkpoint = {
           ...checkpoint,
+          status: "partial",
+          stage: "reviewing_tasks",
+          nextSubGoalIndex: subGoalIndex,
           activeSubGoal: {
             index: subGoalIndex,
-            generatedTasks,
+            generatedDrafts,
           },
+          subGoalTaskGeneration: upsertSubGoalTaskGenerationStatus(checkpoint, {
+            subGoalId: subGoal.id,
+            subGoalName: subGoal.name,
+            status: "task_generation_failed",
+            taskCount: 0,
+            failedTaskIndices: generatedDrafts.droppedTaskIndices,
+            recoveredTaskCount: generatedDrafts.recoveredTaskCount,
+            droppedReasons: generatedDrafts.droppedReasons,
+            lastError: errorMessage,
+            lastRawSnapshot: getClaudeJsonParseSnapshotPath(error),
+            updatedAt: new Date().toISOString(),
+          }),
+          partialFailure: {
+            failedSubGoalIds,
+            recoverable: true,
+            message: `子目标 ${subGoalIndex + 1}/${totalSubGoals}「${subGoal.name}」任务 review 或编译失败，已保留任务草稿，可从该子目标继续修复。`,
+          },
+          lastError: errorMessage,
         };
         writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+        throw error;
       }
+      const uncoveredRisks = generatedDrafts.risks ?? [];
+      const lowAlignmentCount = review.reviewResults.filter((item: TaskDraftReviewPayload["reviewResults"][number]) => !item.aligned).length;
 
-      input.onProgress?.({
-        phase: "reviewing_tasks",
-        message: `正在 review 子目标 ${subGoalIndex + 1}/${totalSubGoals}：${subGoal.name}`,
-      });
-      checkpoint = {
-        ...checkpoint,
-        stage: "reviewing_tasks",
-        activeSubGoal: {
-          index: subGoalIndex,
-          generatedTasks,
-        },
-      };
-      writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
-      const review = await reviewTasksWithClaude({
-        goalTitle: input.goalText,
-        subGoalTitle: subGoal.name,
-        goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
-        tasksJson: JSON.stringify(generatedTasks.tasks, null, 2),
-        runtimeEnv: input.runtimeEnv,
-        conversationId: input.conversationId,
-        signal: input.signal,
-        requestId: input.requestId,
-        subGoalIndex: subGoalIndex + 1,
-        totalSubGoals,
-      });
-
-      const tasks = applyTaskReview(generatedTasks.tasks, review);
-      const uncoveredRisks = generatedTasks.coverage_validation?.uncovered_risks ?? [];
-      const lowAlignmentCount = review.reviewResults.filter((item) => !item.aligned).length;
-
-      if (generatedTasks.coverage_validation?.explanation) {
-        reviewSummary.push(`${subGoal.name}：${generatedTasks.coverage_validation.explanation}`);
+      if (generatedDrafts.coverageNotes?.length) {
+        reviewSummary.push(`${subGoal.name}：${generatedDrafts.coverageNotes.join("；")}`);
       }
       if (lowAlignmentCount > 0) {
         reviewSummary.push(`${subGoal.name}：已根据 review 调整 ${lowAlignmentCount} 个任务。`);
+      }
+      if (compiled.warnings.length > 0) {
+        reviewSummary.push(`${subGoal.name}：编译时记录 ${compiled.warnings.length} 个非阻断提示。`);
       }
       reviewRisks.push(...uncoveredRisks);
 
@@ -2340,7 +1894,7 @@ export async function generateGoalPlanWithClaude(input: {
       });
 
       subGoals.push({
-        id: `draft-subgoal-${subGoal.id}`,
+        id: subGoalDraftId,
         title: subGoal.name,
         description: subGoal.description,
         why: subGoal.why,
@@ -2363,15 +1917,30 @@ export async function generateGoalPlanWithClaude(input: {
         details: formatTimingDetails({
           subGoalName: subGoal.name,
           elapsedMs: Date.now() - subGoalStartedAt,
-          generatedTaskCount: generatedTasks.tasks.length,
+          generatedTaskCount: generatedDrafts.tasks.length,
           finalTaskCount: tasks.length,
           uncoveredRiskCount: uncoveredRisks.length,
-          resumedFromCheckpoint: Boolean(checkpoint.activeSubGoal?.generatedTasks),
+          resumedFromCheckpoint: Boolean(checkpoint.activeSubGoal?.generatedDrafts),
+        }),
+      });
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_plan",
+        level: "info",
+        phase: "reviewing_tasks",
+        message: "task_draft_stats",
+        details: formatTimingDetails({
+          requested: generatedDrafts.rawBlocks?.length ?? generatedDrafts.tasks.length,
+          parsed: generatedDrafts.tasks.length,
+          repaired: generatedDrafts.recoveredTaskCount ?? 0,
+          dropped: generatedDrafts.droppedTaskIndices?.length ?? 0,
+          reviewMisaligned: lowAlignmentCount,
         }),
       });
 
       checkpoint = {
         ...checkpoint,
+        status: "running",
         stage: "generating_tasks",
         completedSubGoals: subGoals,
         taskPlanningSummary,
@@ -2379,6 +1948,17 @@ export async function generateGoalPlanWithClaude(input: {
         reviewRisks,
         nextSubGoalIndex: subGoalIndex + 1,
         activeSubGoal: undefined,
+        partialFailure: undefined,
+        subGoalTaskGeneration: upsertSubGoalTaskGenerationStatus(checkpoint, {
+          subGoalId: subGoal.id,
+          subGoalName: subGoal.name,
+          status: "ok",
+          taskCount: tasks.length,
+          failedTaskIndices: generatedDrafts.droppedTaskIndices,
+          recoveredTaskCount: generatedDrafts.recoveredTaskCount,
+          droppedReasons: generatedDrafts.droppedReasons,
+          updatedAt: new Date().toISOString(),
+        }),
       };
       writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
     }
@@ -2449,9 +2029,10 @@ export async function generateGoalPlanWithClaude(input: {
     writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
     return draft;
   } catch (error) {
+    const keepPartial = checkpoint.status === "partial" && checkpoint.partialFailure?.recoverable;
     checkpoint = {
       ...checkpoint,
-      status: "failed",
+      status: keepPartial ? "partial" : "failed",
       interrupted: error instanceof DOMException && error.name === "AbortError",
       lastError: error instanceof Error ? error.message : "目标规划生成失败",
     };

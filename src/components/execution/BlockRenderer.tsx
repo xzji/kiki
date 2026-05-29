@@ -1,7 +1,10 @@
 "use client";
 
-import type { ResultBlock, ResultCell, TaskResult } from "@/types/taskResult";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
+import { TablePreview } from "@/components/spreadsheet/TablePreview";
+import { cellClassName, cellText } from "@/lib/spreadsheet/adapters/cell";
+import { comparisonTableBlockToTable } from "@/lib/spreadsheet/adapters/comparisonTableBlock";
+import type { ResultBlock, TaskResult } from "@/types/taskResult";
 
 const PRESENTATION_LABEL: Record<NonNullable<TaskResult["meta"]["presentation"]>, string> = {
   summary_card: "摘要卡片",
@@ -14,19 +17,6 @@ const PRESENTATION_LABEL: Record<NonNullable<TaskResult["meta"]["presentation"]>
   handoff_package: "交付包",
 };
 
-function cellText(cell: ResultCell) {
-  if (typeof cell === "string" || typeof cell === "number" || typeof cell === "boolean") return String(cell);
-  return cell.text;
-}
-
-function cellClassName(cell: ResultCell) {
-  if (typeof cell !== "object" || cell === null || !("tone" in cell)) return "";
-  if (cell.tone === "good") return "text-[#25663A]";
-  if (cell.tone === "bad") return "text-[#B42318]";
-  if (cell.tone === "warn") return "text-[#8A6D3B]";
-  return "";
-}
-
 function BlockRenderer({ block }: { block: ResultBlock }) {
   switch (block.kind) {
     case "heading": {
@@ -36,7 +26,7 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
     case "paragraph":
       return <p className="whitespace-pre-wrap text-[14px] leading-7 text-[#374151]">{block.text}</p>;
     case "markdown":
-      return <MarkdownRenderer content={block.content} className="text-[14px] leading-7" />;
+      return <MarkdownRenderer content={block.content} className="text-[14px] leading-7" tableVariant="with-toolbar" />;
     case "list":
       return block.ordered ? (
         <ol className="list-decimal space-y-1 pl-5 text-[14px] leading-7 text-[#374151]">
@@ -60,28 +50,11 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
       );
     case "comparison_table":
       return (
-        <div className="overflow-x-auto rounded-xl border border-[#E5E7EB]">
-          <table className="min-w-full border-collapse text-left text-[13px]">
-            <thead className="bg-[#F8F9FB] text-[#6B7280]">
-              <tr>
-                {block.columns.map((column) => (
-                  <th key={column} className="border-b border-[#E5E7EB] px-3 py-2 font-medium">{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row, rowIndex) => (
-                <tr key={`row-${rowIndex}`} className={block.highlight?.includes(rowIndex) ? "bg-[#FFF9E8]" : "bg-white"}>
-                  {block.columns.map((column) => (
-                    <td key={column} className={`border-b border-[#EEF1F4] px-3 py-2 align-top ${cellClassName(row[column] ?? "")}`}>
-                      {cellText(row[column] ?? "")}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <TablePreview
+          data={comparisonTableBlockToTable(block)}
+          variant="with-toolbar"
+          cellClassName={(rowIndex, columnIndex) => cellClassName(block.rows[rowIndex]?.[block.columns[columnIndex]] ?? "")}
+        />
       );
     case "decision":
       return (

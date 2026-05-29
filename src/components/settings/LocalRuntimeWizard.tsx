@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { checkRuntimeEnv, discoverRuntimeEnvs, selectRuntimeWorkingDirectory } from "@/lib/api/runtime-envs";
 import { cn } from "@/lib/utils";
+import { DEFAULT_RUNTIME_FILE_POLICY } from "@/types/runtime";
 import type {
   LocalRuntimeKind,
   RuntimeEnvironment,
@@ -113,6 +114,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
         workingDirectory: workingDirectory.trim(),
         cliPath: selectedRuntime.cliPath,
         permissionMode,
+        filePolicy: DEFAULT_RUNTIME_FILE_POLICY,
       });
       setResult(checked);
       setStep("confirm");
@@ -140,6 +142,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
         workingDirectory: nextWorkingDirectory,
         cliPath: selectedRuntime.cliPath,
         permissionMode,
+        filePolicy: DEFAULT_RUNTIME_FILE_POLICY,
       });
       setResult(checked);
     } catch (selectError) {
@@ -309,6 +312,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                     workingDirectory: workingDirectory.trim(),
                     cliPath: result.cliPath,
                     permissionMode,
+                    filePolicy: DEFAULT_RUNTIME_FILE_POLICY,
                     health: {
                       status: "online",
                       cliPath: result.cliPath,

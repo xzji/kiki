@@ -4,12 +4,14 @@ import { promisify } from "util";
 
 import type {
   LocalRuntimeKind,
+  RuntimeFilePolicy,
   RuntimeEnvironmentCheckInput,
   RuntimeEnvironmentCheckResult,
   RuntimeDiscoveryItem,
 } from "@/types/runtime";
 
 import { runPromptJson } from "@/lib/server/claude/transport";
+import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { expandHomeDir, normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimePath";
 
 const execFileAsync = promisify(execFile);
@@ -89,7 +91,7 @@ export async function discoverLocalRuntimes() {
   return { items };
 }
 
-async function runHealthCheck(cliPath: string, workingDirectory: string) {
+async function runHealthCheck(cliPath: string, workingDirectory: string, filePolicy?: RuntimeFilePolicy) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   let stdout = "";
@@ -103,8 +105,11 @@ async function runHealthCheck(cliPath: string, workingDirectory: string) {
         workingDirectory,
         cliPath,
         permissionMode: "readonly",
+        filePolicy: normalizeRuntimeFilePolicy(filePolicy),
       },
       cwd: workingDirectory,
+      filePolicy: normalizeRuntimeFilePolicy(filePolicy),
+      channelPolicy: { mode: "readonly_json" },
       abortSignal: controller.signal,
       abortMessage: "Claude CLI 可用性检测超时",
       failureMessage: "Claude CLI 可用性检测失败",
@@ -158,7 +163,7 @@ export async function validateRuntimeEnvironment(
     const version = await getRuntimeVersion(runtimeKind, resolvedCliPath);
     const health =
       runtimeKind === "claude"
-        ? await runHealthCheck(resolvedCliPath, workingDirectory)
+        ? await runHealthCheck(resolvedCliPath, workingDirectory, input.filePolicy)
         : { authenticated: true, result: version };
 
     if (!health.authenticated) {

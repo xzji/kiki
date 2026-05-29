@@ -7,7 +7,8 @@ import {
   GoalCommandValidationError,
   type GoalCommand,
 } from "@/lib/server/services/goalCommandService";
-import type { ExecutionKind, Goal, Task } from "@/types/kiki";
+import { normalizeExecutionKind } from "@/types/kiki";
+import type { Goal, Task } from "@/types/kiki";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,8 +34,8 @@ function parseTaskInput(value: unknown) {
   const expectedOutcome = readNonEmptyString(record, "expectedOutcome");
   const taskType = readNonEmptyString(record, "taskType") as Task["taskType"] | null;
   const triggerRule = readNonEmptyString(record, "triggerRule");
-  const executionKind = readNonEmptyString(record, "executionKind") as ExecutionKind | null;
-  if (!title || !expectedOutcome || !taskType || !triggerRule || !executionKind) return null;
+  const executionKind = normalizeExecutionKind(record.executionKind);
+  if (!title || !expectedOutcome || !taskType || !triggerRule) return null;
   const description = typeof record.description === "string" ? record.description : undefined;
   const deadline = typeof record.deadline === "string" ? record.deadline : undefined;
   return {

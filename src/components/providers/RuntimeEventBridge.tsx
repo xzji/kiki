@@ -20,7 +20,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
-import type { Goal, InboxItem, Task, TaskInstance } from "@/types/kiki";
+import type { InboxItem, TaskInstance } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { GoalEventRecord } from "@/types/goalEventLog";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
@@ -69,17 +69,8 @@ function formatLocalTime(date: Date) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-function getTaskIconType(task: Task): InboxItem["iconType"] {
-  switch (task.executionKind) {
-    case "draft_review":
-      return "mail";
-    case "confirm_action":
-      return "booking";
-    case "reading_digest":
-      return "news";
-    default:
-      return "task";
-  }
+function getTaskIconType(): InboxItem["iconType"] {
+  return "task";
 }
 
 function buildTaskLink(goalId: string, taskId: string, instanceId: string) {
@@ -106,7 +97,7 @@ function buildResultInboxItem(input: NonNullable<ReturnType<typeof findTaskByEve
   if (!notification?.shouldNotify) return null;
   return {
     id: notification.inboxItemId || `inbox-${input.instance.id}`,
-    iconType: getTaskIconType(input.task),
+    iconType: getTaskIconType(),
     title: notification.title,
     snippet: notification.snippet,
     badge: notification.badge ?? null,

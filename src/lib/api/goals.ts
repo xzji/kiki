@@ -98,21 +98,35 @@ export async function generateGoalPlan(input: {
   return data.draft;
 }
 
-export type GoalPlanCheckpointStatus = {
-  available: boolean;
-  checkpoint?: {
-    available: true;
-    goalText: string;
-    status: "running" | "completed" | "failed";
-    stage: string;
-    completedSubGoalCount: number;
-    totalSubGoalCount: number;
-    nextSubGoalIndex: number;
-    updatedAt: string;
-    hasCollectedInfo: boolean;
-  };
-  reason?: string;
-};
+export type GoalPlanCheckpointStatus =
+  | {
+      available: true;
+      checkpoint: {
+        available: true;
+        goalText: string;
+        status: "running" | "completed" | "failed" | "partial";
+        stage: string;
+        completedSubGoalCount: number;
+        totalSubGoalCount: number;
+        nextSubGoalIndex: number;
+        updatedAt: string;
+        hasCollectedInfo: boolean;
+        failedTaskCount?: number;
+        recoveredTaskCount?: number;
+        schemaVersion?: number;
+        discarded?: boolean;
+      };
+      reason?: string;
+    }
+  | {
+      available: false;
+      checkpoint?: {
+        available: false;
+        schemaVersion?: number;
+        discarded?: boolean;
+      };
+      reason?: string;
+    };
 
 export async function getGoalPlanCheckpoint(conversationId: string, signal?: AbortSignal) {
   const response = await fetch(

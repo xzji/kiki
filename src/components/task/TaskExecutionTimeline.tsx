@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-import { formatToolOperationText } from "@/lib/execution/summarizeToolOperation";
+import { formatToolOperationDisplay, formatToolOperationText, type ToolOperationDisplay } from "@/lib/execution/summarizeToolOperation";
 import type { AgentRole, AgentRoleRun, AgentRunPlan } from "@/types/agentOrchestration";
 import type { TaskExecutionStep } from "@/types/kiki";
 
@@ -36,6 +36,7 @@ type ProcessStep = {
   tool?: {
     name: string;
     detail: string;
+    display: ToolOperationDisplay;
   };
 };
 
@@ -173,6 +174,7 @@ function buildProcessSteps(steps: TaskExecutionStep[]) {
       const tool = {
         name: step.toolName,
         detail: getToolDetail(step),
+        display: formatToolOperationDisplay(step.toolName, step.title, step.detail?.trim(), step.toolInput),
       };
       const previous = processSteps.at(-1);
       if (previous && !previous.tool) {
@@ -249,6 +251,41 @@ function buildGroups(steps: TaskExecutionStep[], agentRunPlan: AgentRunPlan | un
   return attachRoleRuns(groupTimelineSteps(steps), agentRunPlan);
 }
 
+function ToolActionBadge({ tool }: { tool: NonNullable<ProcessStep["tool"]> }) {
+  const paths = tool.display.paths ?? [];
+  const hasPaths = paths.length > 0;
+
+  return (
+    <div className="w-fit max-w-full rounded-2xl bg-[#EEF0F3] px-2.5 py-2 text-[12px] leading-5 text-[#374151]">
+      <div className="flex max-w-full items-center gap-2">
+        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-mono font-bold text-[#1F2328]">
+          {tool.name}
+        </span>
+        <span className="shrink-0 font-semibold text-[#1F2328]">{tool.display.action}</span>
+        {tool.display.objectText ? (
+          <span className="min-w-0 truncate text-[#4B5563]">{tool.display.objectText}</span>
+        ) : null}
+      </div>
+      {hasPaths ? (
+        <details className="group/path mt-1.5 pl-[54px]">
+          <summary className="cursor-pointer list-none text-[12px] text-[#6B7280] select-none marker:hidden hover:text-[#1F2328] [&::-webkit-details-marker]:hidden">
+            <span className="group-open/path:hidden">展开路径详情</span>
+            <span className="hidden group-open/path:inline">收起路径详情</span>
+          </summary>
+          <div className="mt-2 grid gap-1.5 rounded-xl bg-white px-3 py-2 text-[12px] leading-5 text-[#4B5563]">
+            {paths.map((path, index) => (
+              <div key={`${path}-${index}`} className="grid min-w-0 grid-cols-[48px_minmax(0,1fr)] gap-2">
+                <span className="text-[#8C9198]">{paths.length > 1 ? `文件 ${index + 1}` : "文件"}</span>
+                <span className="min-w-0 break-words">{path}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function AgentMessage({ group, verdict }: { group: TimelineGroup; verdict?: Verdict }) {
   const processSteps = buildProcessSteps(group.steps);
   const response = buildResponse(group);
@@ -276,11 +313,7 @@ function AgentMessage({ group, verdict }: { group: TimelineGroup; verdict?: Verd
                   <div className="text-[11px] font-bold tracking-[0.04em] text-[#8C9198] uppercase">Step {index + 1}</div>
                   <div className="whitespace-pre-wrap text-[13px] leading-6 text-[#374151]">{step.thought}</div>
                   {step.tool ? (
-                    <div className="inline-flex w-fit max-w-full items-start gap-1.5 rounded-full bg-[#EEF0F3] px-2 py-1 text-[12px] leading-5 text-[#374151]">
-                      <span className="shrink-0 font-mono font-bold text-[#1F2328]">{step.tool.name}</span>
-                      <span className="text-[#8C9198]">·</span>
-                      <span className="min-w-0 break-words">{step.tool.detail}</span>
-                    </div>
+                    <ToolActionBadge tool={step.tool} />
                   ) : null}
                 </div>
               )) : (

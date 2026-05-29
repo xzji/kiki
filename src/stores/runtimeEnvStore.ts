@@ -4,11 +4,15 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
+import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { makeId } from "@/lib/utils";
 import type {
+  RuntimeFilePolicy,
+  RuntimeFilePolicyMode,
   RuntimeEnvironment,
   RuntimeHealth,
   RuntimePermissionMode,
+  RuntimeToolCapability,
 } from "@/types/runtime";
 
 type RuntimeEnvState = {
@@ -22,6 +26,9 @@ type RuntimeEnvState = {
   setActiveEnvironment: (id: string) => void;
   setEnvironmentHealth: (id: string, health: RuntimeHealth) => void;
   setPermissionMode: (id: string, permissionMode: RuntimePermissionMode) => void;
+  setFilePolicyMode: (id: string, mode: RuntimeFilePolicyMode) => void;
+  setFilePolicyCustomCapability: (id: string, capability: RuntimeToolCapability, enabled: boolean) => void;
+  setFilePolicy: (id: string, policy: RuntimeFilePolicy) => void;
   getActiveEnvironment: () => RuntimeEnvironment | null;
   replaceEnvironments: (environments: RuntimeEnvironment[], activeRuntimeEnvId?: string | null) => void;
 };
@@ -33,8 +40,16 @@ export const INITIAL_ENVIRONMENTS: RuntimeEnvironment[] = INITIAL_RUNTIME_ENVIRO
 function markDefault(environments: RuntimeEnvironment[], activeId: string | null) {
   return environments.map((item) => ({
     ...item,
+    filePolicy: normalizeRuntimeFilePolicy(item.filePolicy),
     isDefault: item.id === activeId,
   }));
+}
+
+function normalizeEnvironment(environment: RuntimeEnvironment): RuntimeEnvironment {
+  return {
+    ...environment,
+    filePolicy: normalizeRuntimeFilePolicy(environment.filePolicy),
+  };
 }
 
 export const useRuntimeEnvStore = create<RuntimeEnvState>()(
@@ -53,6 +68,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
       addEnvironment: (environment) => {
         const next: RuntimeEnvironment = {
           ...environment,
+          filePolicy: normalizeRuntimeFilePolicy(environment.filePolicy),
           id: makeId("runtime-env"),
         };
         set((state) => {
@@ -65,7 +81,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
       updateEnvironment: (id, updates) => {
         set((state) => ({
           environments: state.environments.map((item) =>
-            item.id === id ? { ...item, ...updates } : item,
+            item.id === id ? normalizeEnvironment({ ...item, ...updates }) : item,
           ),
         }));
       },
@@ -104,29 +120,84 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
           ),
         }));
       },
+      setFilePolicyMode: (id, mode) => {
+        set((state) => ({
+          environments: state.environments.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  filePolicy: {
+                    ...normalizeRuntimeFilePolicy(item.filePolicy),
+                    mode,
+                  },
+                }
+              : item,
+          ),
+        }));
+      },
+      setFilePolicyCustomCapability: (id, capability, enabled) => {
+        set((state) => ({
+          environments: state.environments.map((item) => {
+            if (item.id !== id) return item;
+            const filePolicy = normalizeRuntimeFilePolicy(item.filePolicy);
+            return {
+              ...item,
+              filePolicy: {
+                ...filePolicy,
+                custom: {
+                  ...filePolicy.custom,
+                  [capability]: enabled,
+                },
+              },
+            };
+          }),
+        }));
+      },
+      setFilePolicy: (id, policy) => {
+        set((state) => ({
+          environments: state.environments.map((item) =>
+            item.id === id ? { ...item, filePolicy: normalizeRuntimeFilePolicy(policy) } : item,
+          ),
+        }));
+      },
       getActiveEnvironment: () => {
         const state = get();
         if (!state.activeRuntimeEnvId) return null;
         return state.environments.find((item) => item.id === state.activeRuntimeEnvId) ?? null;
       },
       replaceEnvironments: (environments, activeRuntimeEnvId) => {
+        const normalizedEnvironments = environments.map(normalizeEnvironment);
         const nextActiveId =
           activeRuntimeEnvId ??
-          environments.find((item) => item.isDefault)?.id ??
-          environments.find((item) => item.type === "local")?.id ??
+          normalizedEnvironments.find((item) => item.isDefault)?.id ??
+          normalizedEnvironments.find((item) => item.type === "local")?.id ??
           null;
         set({
-          environments: markDefault(environments, nextActiveId),
+          environments: markDefault(normalizedEnvironments, nextActiveId),
           activeRuntimeEnvId: nextActiveId,
         });
       },
     }),
     {
       name: STORAGE_KEY,
+      version: 2,
       partialize: (state) => ({
         environments: state.environments,
         activeRuntimeEnvId: state.activeRuntimeEnvId,
       }),
+      migrate: (persistedState) => {
+        const state = persistedState as Partial<RuntimeEnvState> | undefined;
+        const environments = (state?.environments ?? INITIAL_ENVIRONMENTS).map(normalizeEnvironment);
+        const activeRuntimeEnvId =
+          state?.activeRuntimeEnvId ??
+          environments.find((item) => item.isDefault)?.id ??
+          environments.find((item) => item.type === "local")?.id ??
+          null;
+        return {
+          environments,
+          activeRuntimeEnvId,
+        };
+      },
       onRehydrateStorage: () => (state) => {
         state?.hydrate();
       },

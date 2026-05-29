@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
 
   const checkpoint = getGoalPlanningCheckpointStatus(conversationId);
   if (!checkpoint.available) {
-    return NextResponse.json({ available: false });
+    return NextResponse.json({
+      available: false,
+      checkpoint: checkpoint.discarded ? checkpoint : undefined,
+    });
   }
   return NextResponse.json({ available: true, checkpoint });
 }

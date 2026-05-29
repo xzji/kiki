@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
           workingDirectory: workspace.workspaceDir,
           cliPath: body.runtimeEnv.cliPath,
           permissionMode: body.runtimeEnv.permissionMode,
+          filePolicy: body.runtimeEnv.filePolicy,
           claudeSessionId: body.claudeSessionId,
           quotedMessage: body.quotedMessage,
           contextPack,

@@ -6,8 +6,9 @@ import {
   unloadAndRemoveLaunchAgent,
 } from "@/lib/daemon/launchAgent";
 import { readRuntimeDaemonConfig, writeRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
+import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { getLaunchAgentPlistPath } from "@/lib/server/storage/paths";
-import type { RuntimePermissionMode } from "@/types/runtime";
+import type { RuntimeFilePolicy, RuntimePermissionMode } from "@/types/runtime";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,7 @@ type TogglePayload = {
     workingDirectory?: string;
     cliPath?: string;
     permissionMode?: RuntimePermissionMode;
+    filePolicy?: RuntimeFilePolicy;
   };
 };
 
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
         workingDirectory: body.environment.workingDirectory.trim(),
         cliPath: body.environment.cliPath.trim(),
         permissionMode: body.environment.permissionMode || currentConfig.permissionMode,
+        filePolicy: normalizeRuntimeFilePolicy(body.environment.filePolicy ?? currentConfig.filePolicy),
         autoStart: true,
       });
 

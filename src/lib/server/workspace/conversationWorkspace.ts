@@ -84,11 +84,20 @@ export function writePlanningParseFailureSnapshot(input: {
   conversationId: string;
   requestId?: string;
   phase?: string;
+  stage?: "draft_parse" | "draft_validate" | "compile" | "review" | "final_validate";
   stepLabel?: string;
   errorMessage: string;
   rawOutput: string;
   repairedOutput?: string;
   repairedCandidate?: string;
+  schemaErrors?: unknown;
+  artifactCandidates?: unknown;
+  recoveredArtifactPath?: string;
+  successDraftCount?: number;
+  failedDraftIndices?: number[];
+  droppedReasons?: unknown;
+  rawDraftBatch?: string;
+  compiledTasksPreview?: unknown;
 }) {
   const workspace = ensureConversationWorkspace(input.conversationId);
   const parseFailuresDir = ensureDir(path.join(workspace.planningDir, "raw", "parse-failures"));
@@ -100,11 +109,20 @@ export function writePlanningParseFailureSnapshot(input: {
     capturedAt: new Date().toISOString(),
     requestId: input.requestId,
     phase: input.phase,
+    stage: input.stage,
     stepLabel: input.stepLabel,
     errorMessage: input.errorMessage,
     rawOutput: input.rawOutput,
     repairedOutput: input.repairedOutput,
     repairedCandidate: input.repairedCandidate,
+    schemaErrors: input.schemaErrors,
+    artifactCandidates: input.artifactCandidates,
+    recoveredArtifactPath: input.recoveredArtifactPath,
+    successDraftCount: input.successDraftCount,
+    failedDraftIndices: input.failedDraftIndices,
+    droppedReasons: input.droppedReasons,
+    rawDraftBatch: input.rawDraftBatch,
+    compiledTasksPreview: input.compiledTasksPreview,
   });
   return {
     filePath,

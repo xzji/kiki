@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { resolveInboxTaskContext } from "@/lib/inboxItem";
+import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
 import { cn } from "@/lib/utils";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
@@ -40,6 +41,14 @@ export function InboxCard({ item }: { item: InboxItem }) {
   const [expanded, setExpanded] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);
   const taskContext = useMemo(() => resolveInboxTaskContext(item, goals), [goals, item]);
+  const awaitingDisplay = useMemo(
+    () => taskContext ? buildAwaitingDisplayModel(taskContext.task, taskContext.instance, "inbox") : null,
+    [taskContext],
+  );
+  const expandedMessage =
+    awaitingDisplay?.active
+      ? awaitingDisplay.notice
+      : taskContext?.instance.notification?.userMessage ?? taskContext?.instance.intro ?? item.snippet;
   const unread = item.unreadCount > 0;
 
   return (
@@ -80,15 +89,17 @@ export function InboxCard({ item }: { item: InboxItem }) {
 
         {expanded ? (
           <div className="mt-4 border-t border-[#E5E7EB] pt-4">
-            <div className="flex items-start gap-3">
-              <KikiAvatar size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 text-[13px] font-medium text-[#1F2328]">KiKi</div>
-                <div className="whitespace-pre-wrap text-sm leading-6 text-[#374151]">
-                  {taskContext?.instance.notification?.userMessage ?? taskContext?.instance.intro ?? item.snippet}
+            {expandedMessage ? (
+              <div className="flex items-start gap-3">
+                <KikiAvatar size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 text-[13px] font-medium text-[#1F2328]">KiKi</div>
+                  <div className="whitespace-pre-wrap text-sm leading-6 text-[#374151]">
+                    {expandedMessage}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
 
             {taskContext ? (
               <TaskMessageCard

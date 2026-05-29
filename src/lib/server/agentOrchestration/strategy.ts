@@ -7,12 +7,9 @@ export type AgentStrategyInput = {
   isResumeRun?: boolean;
 };
 
-const SIMPLE_RESULT_KINDS = new Set(["flashcard", "listening_qa", "freeform_chat"]);
-
 export function selectAgentCollaborationStrategy(input: AgentStrategyInput): AgentCollaborationStrategy {
   const { task } = input;
   if (input.isResumeRun) return "single_agent";
-  if (SIMPLE_RESULT_KINDS.has(task.resultViewKind ?? task.executionKind)) return "single_agent";
 
   const expectedSurfaces = resolveExpectedSurfaces(task.expectedResult);
   const hasFiles = expectedSurfaces.includes("files") || task.expectedResult?.fileSurface?.required === true;

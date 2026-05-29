@@ -98,6 +98,7 @@ export type TaskResult = {
     presentation?: TaskResultPresentation;
     primaryFormat?: TaskResultPrimaryFormat;
     exportableFormats?: TaskResultExportFormat[];
+    role?: "pending_user_placeholder" | "agent_deliverable";
     agentRunPlan?: AgentRunPlan;
     qualityReview?: {
       passed: boolean;

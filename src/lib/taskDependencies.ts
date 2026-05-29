@@ -3,7 +3,9 @@ import type { Goal, Task } from "@/types/kiki";
 
 export type TaskDependencyView = {
   id: string;
+  taskId: string;
   title: string;
+  displayTitle: string;
   expectedOutcome: string;
   statusLabel: string;
   reason: string;
@@ -18,7 +20,9 @@ export function getTaskDependencyViews(goal: Goal, task: Task): TaskDependencyVi
     if (!dependency) {
       return {
         id: dependencyId,
-        title: dependencyId,
+        taskId: dependencyId,
+        title: "",
+        displayTitle: "未知任务",
         expectedOutcome: "",
         statusLabel: "依赖失效",
         reason: `依赖配置引用了 ${dependencyId}，但当前目标里没有这个任务。`,
@@ -28,7 +32,9 @@ export function getTaskDependencyViews(goal: Goal, task: Task): TaskDependencyVi
     }
     return {
       id: dependencyId,
+      taskId: dependencyId,
       title: dependency.title.replace(/^任务\d+：/, ""),
+      displayTitle: dependency.title.replace(/^任务\d+：/, ""),
       expectedOutcome: dependency.expectedOutcome,
       statusLabel: dependencyStatusLabel(dependency),
       reason: dependencyStatusReason(dependency),

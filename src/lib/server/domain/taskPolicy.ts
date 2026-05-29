@@ -76,9 +76,6 @@ export function inferUserInteractionType(input: {
   executionMode?: TaskExecutionMode;
   expectedOutputType?: TaskExpectedResult["type"];
 }): UserInteractionType {
-  const kind = input.resultViewKind ?? input.executionKind;
-  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") return "answer";
-  if (kind === "confirm_action" || kind === "draft_review") return "confirm";
   if (input.expectedOutputType === "decision" || input.expectedOutputType === "confirmation") return "confirm";
   if (input.expectedOutputType === "action" && input.executionMode === "interactive") return "perform_offline_action";
   if (input.executionMode === "interactive") return "confirm";
@@ -123,6 +120,7 @@ export function inferInteractionRequirement(input: {
   reason?: string;
   question?: string;
   options?: string[];
+  fields?: InteractionRequirement["fields"];
   suggestedActions?: string[];
   shouldNotifyUser?: boolean;
   fallbackShouldNotifyUser?: boolean;
@@ -142,6 +140,7 @@ export function inferInteractionRequirement(input: {
     reason: input.reason ?? "",
     question: input.question,
     options: input.options,
+    fields: input.fields,
     suggestedActions: input.suggestedActions,
     shouldNotifyUser: shouldNotifyUser({
       explicit: input.shouldNotifyUser,

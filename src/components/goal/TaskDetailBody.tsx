@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 import { TaskAgentPromptDrawer } from "@/components/goal/TaskAgentPromptDrawer";
@@ -14,11 +15,13 @@ import { getTaskDependencyViews } from "@/lib/taskDependencies";
 import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
+import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
 import { hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import { cn } from "@/lib/utils";
 import { useGoalStore } from "@/stores/goalStore";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { AgentRunPlan } from "@/types/agentOrchestration";
+import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type { Goal, InteractionSubmission, Task, TaskExecutionStep, TaskInstance } from "@/types/kiki";
 
 const TASK_TYPE_LABEL: Record<Task["taskType"], string> = {
@@ -35,12 +38,6 @@ function formatTaskTriggerMoment(task: Task) {
 }
 
 const EXECUTION_LABEL: Record<Task["executionKind"], string> = {
-  flashcard: "记忆闪卡",
-  listening_qa: "听力问答",
-  reading_digest: "阅读摘要",
-  confirm_action: "确认执行",
-  draft_review: "草稿审阅",
-  freeform_chat: "补充对话",
   generic_result: "Agent 任务",
 };
 
@@ -111,6 +108,7 @@ function trajectoryToTimeline(trajectory: ExecutionTrajectoryStep[] | undefined)
     agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    toolInput: step.toolCall?.input,
     handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
@@ -230,7 +228,7 @@ export function TaskDetailBody({
             : taskState === "paused"
               ? "已暂停"
               : "待开始";
-  const executionAction = isPendingChange ? null : getExecutionAction();
+  const executionAction = isPendingChange ? null : getExecutionAction(task, taskState);
   const cleanTitle = task.title.replace(/^任务\d+：/, "");
 
   const sortedInstances = useMemo(
@@ -320,7 +318,7 @@ export function TaskDetailBody({
           <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium", taskStatusClassName(taskState))}>
             {pendingTaskDelete ? "删除中" : pendingTaskUpdate ? "保存中" : statusLabel}
           </span>
-          <span>{EXECUTION_LABEL[task.resultViewKind ?? task.executionKind]}</span>
+          <span>{EXECUTION_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</span>
           <span className="text-[#D0D7DE]">/</span>
           <span>{task.triggerRule}</span>
         </div>
@@ -427,7 +425,7 @@ export function TaskDetailBody({
               <MetaValue>{formatDeliverablePresentation(task)}</MetaValue>
 
               <MetaLabel>执行方式</MetaLabel>
-              <MetaValue>{EXECUTION_LABEL[task.resultViewKind ?? task.executionKind]}</MetaValue>
+              <MetaValue>{EXECUTION_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</MetaValue>
 
               {dependencyViews.length ? (
                 <>
@@ -437,8 +435,10 @@ export function TaskDetailBody({
                       {dependencyViews.map((dependency) => (
                         <div key={dependency.id} className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span>{dependency.title}</span>
-                            <span className="font-mono text-[11px] text-[#8C9198]">{dependency.id}</span>
+                            <span>{dependency.displayTitle}</span>
+                            <span className="font-mono text-[11px] text-[#8C9198]">
+                              {dependency.missing ? `引用 ID：${dependency.taskId}` : `任务 ID：${dependency.taskId}`}
+                            </span>
                             <span
                               className={cn(
                                 "rounded-md px-2 py-0.5 text-[11px]",
@@ -659,14 +659,25 @@ function InstanceCard({
     instance.execution?.waitingReason,
   );
   const agentRunPlan = getAgentRunPlan(instance);
+  const hasFinalResult = instance.status === "completed" || instance.status === "error";
+  const showInlineDetails = hasFinalResult;
+  const showOuterToggle = canExpand && !showInlineDetails;
+  const detailOpen = expanded || showInlineDetails;
+  const [resultOpen, setResultOpen] = useState(hasFinalResult);
+  const [processOpen, setProcessOpen] = useState(!hasFinalResult);
+
+  useEffect(() => {
+    setResultOpen(hasFinalResult);
+    setProcessOpen(!hasFinalResult);
+  }, [hasFinalResult, instance.id]);
 
   return (
     <div className="overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white">
       <button
         type="button"
-        onClick={canExpand ? onToggle : undefined}
-        disabled={!canExpand}
-        className={cn("w-full px-4 py-4 text-left", canExpand && "transition-colors hover:bg-[#FCFCFD]")}
+        onClick={showOuterToggle ? onToggle : undefined}
+        disabled={!canExpand && !showInlineDetails}
+        className={cn("w-full px-4 py-4 text-left", showOuterToggle && "transition-colors hover:bg-[#FCFCFD]")}
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -714,7 +725,7 @@ function InstanceCard({
               </div>
             ) : null}
           </div>
-          {canExpand ? (
+          {showOuterToggle ? (
             <div className="flex shrink-0 items-center gap-2 text-[12px] text-[#6B7280]">
               {canStop ? (
                 <button
@@ -739,7 +750,7 @@ function InstanceCard({
         </div>
       </button>
 
-      {expanded ? (
+      {detailOpen ? (
         <div className="border-t border-[#E5E7EB] bg-[#FAFAFB] px-4 py-4">
           <div className="space-y-4">
             {instance.status === "paused" ? (
@@ -759,15 +770,27 @@ function InstanceCard({
                 </button>
               </div>
             ) : null}
-            <div className="min-w-0">
-              <div className="mb-4">
-                <div className="text-[15px] font-bold text-[#1F2328]">执行过程</div>
-                <div className="mt-0.5 text-[12px] text-[#8C9198]">
-                  {agentRunPlan?.mode === "role_collaboration"
-                    ? `${agentRunPlan.strategy} · 多 Agent 协同`
-                    : "single_agent · KiKi"}
-                </div>
-              </div>
+            {instance.status === "completed" || instance.status === "error" ? (
+              <InstanceDetailSection
+                title="执行结果"
+                description={instance.status === "error" ? "失败原因与可重试信息" : "最终结论与产出物"}
+                open={resultOpen}
+                onToggle={() => setResultOpen((value) => !value)}
+              >
+                <InstanceResultPanel task={task} instance={instance} />
+              </InstanceDetailSection>
+            ) : null}
+            <InstanceDetailSection
+              title="执行过程"
+              description={
+                agentRunPlan?.mode === "role_collaboration"
+                  ? `${agentRunPlan.strategy} · 多 Agent 协同`
+                  : "single_agent · KiKi"
+              }
+              meta={executionSteps.length ? `${executionSteps.length} 条` : undefined}
+              open={processOpen}
+              onToggle={() => setProcessOpen((value) => !value)}
+            >
               <TaskExecutionTimeline
                 steps={executionSteps}
                 agentRunPlan={agentRunPlan}
@@ -783,19 +806,50 @@ function InstanceCard({
                   instance.result?.interactionSubmission?.submittedAt ?? instance.execution?.lastUpdatedAt,
                 )}
               />
-            </div>
-            {instance.status === "completed" || instance.status === "error" ? (
-              <div className="min-w-0">
-                <div className="mb-2 text-[12px] font-medium text-[#6B7280]">
-                  {instance.status === "error" ? "执行结果 / 失败原因" : "执行结果"}
-                </div>
-                <InstanceResultPanel task={task} instance={instance} />
-              </div>
-            ) : null}
+            </InstanceDetailSection>
           </div>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function InstanceDetailSection({
+  title,
+  description,
+  meta,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  description: string;
+  meta?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="min-w-0 rounded-xl bg-white px-4 py-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-3 text-left"
+      >
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-[#1F2328]">
+            {title}
+            {meta ? <span className="text-[12px] font-normal text-[#8C9198]">{meta}</span> : null}
+          </span>
+          <span className="mt-0.5 block text-[12px] text-[#8C9198]">{description}</span>
+        </span>
+        <span className="mt-0.5 shrink-0 text-[#8C9198]">
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </span>
+      </button>
+      {open ? <div className="mt-4 min-w-0">{children}</div> : null}
+    </section>
   );
 }
 
@@ -804,18 +858,19 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
     return null;
   }
 
+  const awaitingDisplay = buildAwaitingDisplayModel(task, instance, "detail");
   const resultLine = getInstanceResultLine(task, instance);
   const failed = instance.status === "error";
   const genericSummary =
     instance.result?.summary ??
-    (instance.payload.kind === "generic_result" ? instance.payload.summary : undefined) ??
+    instance.payload.summary ??
     instance.intro;
   const genericMessage =
     instance.result?.finalMessage ??
-    (instance.payload.kind === "generic_result" ? instance.payload.details : undefined);
+    instance.payload.details;
   const genericArtifacts =
     instance.result?.artifacts ??
-    (instance.payload.kind === "generic_result" ? instance.payload.artifacts : undefined);
+    instance.payload.artifacts;
   const structuredOutput = instance.result?.structuredOutput;
   const taskResult = instance.result?.taskResult;
   const resultSummary = genericSummary && genericSummary !== resultLine ? genericSummary : "";
@@ -846,6 +901,7 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
           structuredOutput={structuredOutput}
           notification={instance.notification}
           hideSummaryCard
+          hidePendingUserPlaceholder={awaitingDisplay.hidePendingTaskResultBlocks}
         />
       ) : null}
       {structuredOutput ? (
@@ -856,7 +912,7 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
           </pre>
         </div>
       ) : null}
-      {task.resultViewKind !== "generic_result" || instance.payload.kind !== "generic_result" ? (
+      {extraPayloadLines.length > 0 ? (
         <PayloadSummaryCard lines={extraPayloadLines} />
       ) : null}
     </div>
@@ -880,24 +936,9 @@ function PayloadSummaryCard({ lines }: { lines: string[] }) {
   );
 }
 
-function getPayloadSummaryLines(instance: TaskInstance) {
-  switch (instance.payload.kind) {
-    case "flashcard":
-      return [`共生成 ${instance.payload.cards.length} 张记忆卡片，可继续进入训练。`];
-    case "listening_qa":
-      return [`共准备 ${instance.payload.questions.length} 道听力问答，音频地址：${instance.payload.audioUrl}`];
-    case "reading_digest":
-      return instance.payload.articles.slice(0, 3).map((article) => `${article.title}：${article.summary}`);
-    case "confirm_action":
-      return [instance.payload.summary, `可选操作：${instance.payload.options.join(" / ")}`];
-    case "draft_review":
-      return instance.payload.drafts.slice(0, 3).map((draft) => `${draft.subject} -> ${draft.recipient}`);
-    case "freeform_chat":
-      return [instance.payload.seed];
-    case "generic_result":
-    default:
-      return [];
-  }
+function getPayloadSummaryLines(_instance: TaskInstance) {
+  void _instance;
+  return [] as string[];
 }
 
 function getInstanceResultLine(task: Task, instance: TaskInstance) {
@@ -906,7 +947,8 @@ function getInstanceResultLine(task: Task, instance: TaskInstance) {
       instance.execution?.errorMessage ||
       instance.result?.summary ||
       instance.result?.finalMessage ||
-      (instance.payload.kind === "generic_result" ? instance.payload.summary ?? instance.payload.details : undefined) ||
+      instance.payload.summary ||
+      instance.payload.details ||
       "任务执行失败，但未返回具体失败原因。"
     );
   }
@@ -915,7 +957,8 @@ function getInstanceResultLine(task: Task, instance: TaskInstance) {
     (submittedInteraction ? undefined : instance.notification?.resultSummary.headline) ??
     instance.result?.summary ??
     instance.result?.finalMessage ??
-    (instance.payload.kind === "generic_result" ? instance.payload.summary ?? instance.payload.details : undefined);
+    instance.payload.summary ??
+    instance.payload.details;
   if (directResult) return directResult;
 
   const payloadLines = getPayloadSummaryLines(instance);
@@ -945,8 +988,16 @@ function getTaskDisplayState(task: Task) {
   return task.progress > 0 ? ("in_progress" as const) : ("pending" as const);
 }
 
-function getExecutionAction() {
-  return { label: "发起执行", action: "start" as const };
+function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisplayState>) {
+  if (taskState === "completed") return { label: "重新执行", action: "rerun" as const };
+  if (taskState === "awaiting_user") return null;
+  if (taskState === "in_progress") return { label: "停止", action: "pause" as const };
+  if (taskState === "paused") return { label: "继续执行", action: "resume" as const };
+
+  const latest = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).find((instance) => instance.status !== "completed");
+  if (!latest) return { label: "发起执行", action: "start" as const };
+  if (latest.status === "pending") return { label: "发起执行", action: "start" as const };
+  return null;
 }
 
 function taskStatusClassName(state: ReturnType<typeof getTaskDisplayState>) {

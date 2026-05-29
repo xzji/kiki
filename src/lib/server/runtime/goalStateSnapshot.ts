@@ -2,6 +2,7 @@ import { createGeneratedInstance } from "@/lib/goalFactory";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type {
   Goal,
   InteractionRequirement,
@@ -14,7 +15,6 @@ import type {
   TaskInstanceNotificationState,
   TaskInstanceStatus,
   TaskResultNotificationDecision,
-  TaskResultViewKind,
   TaskRunArtifact,
   TaskRunErrorCategory,
 } from "@/types/kiki";
@@ -22,7 +22,7 @@ import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemet
 import type { TaskResult } from "@/types/taskResult";
 
 function defaultResultViewKind(task: Task) {
-  return task.resultViewKind ?? task.executionKind ?? "generic_result";
+  return normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
 }
 
 function nowIso() {
@@ -99,6 +99,7 @@ function normalizeTimelineFromTrajectory(trajectory: ExecutionTrajectoryStep[] |
     agentRole: step.agentRole,
     detail: step.thought ?? summarizeToolOperation(step.toolCall?.name, step.toolCall?.input),
     toolName: step.toolCall?.name,
+    toolInput: step.toolCall?.input,
     handoff: step.handoff,
     startedAt: step.startedAt,
     finishedAt: step.endedAt,
@@ -433,7 +434,7 @@ export function syncGoalInstanceFromProgress(
             input.progress?.status === "completed" && !input.progress.resultPayload?.awaitingUser
               ? Math.min(
                   100,
-                  Math.max(task.progress, task.progress + (defaultResultViewKind(task) === "flashcard" ? 8 : 5)),
+                  Math.max(task.progress, task.progress + 5),
                 )
               : task.progress,
           instances: task.instances.map((instance) => {
@@ -458,9 +459,9 @@ export function syncGoalInstanceFromProgress(
                     : nextStatus === "paused"
                       ? "cancelled"
                     : "running";
-            const nextKind =
-              (input.progress?.resultPayload?.resultViewKind as TaskResultViewKind | undefined) ??
-              defaultResultViewKind(task);
+            const nextKind = normalizeTaskResultViewKind(
+              input.progress?.resultPayload?.resultViewKind ?? defaultResultViewKind(task),
+            );
             const artifacts = Array.isArray(input.progress?.resultPayload?.artifacts)
               ? (input.progress.resultPayload.artifacts as TaskRunArtifact[])
               : undefined;

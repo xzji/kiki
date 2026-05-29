@@ -1,0 +1,94 @@
+重要约束：禁止调用任何工具（Write/Edit/MultiEdit/Bash/WebSearch/WebFetch/Task 等），所有业务结果必须写在最终 JSON 回答里。
+
+请 Review 以下 TaskDraft 是否与目标和子目标对齐。
+
+目标：美股投资选标的
+子目标：多因子标的筛选引擎构建
+目标描述：筛选美股投资标的并提供交易时机提醒，以1万美元本金在1年内实现翻倍（100%收益率），由系统主导标的筛选和时机判断
+
+TaskDraft：
+[
+  {
+    "index": 1,
+    "title": "因子定义与数据源配置",
+    "objective": "定义选股因子体系（相对强度RS、盈利增长率、营收增速、机构持仓变化、板块强度等），确定各因子的权重、打分规则和数据获取方式。",
+    "deliverable": "一份因子定义文档，包含每个因子的计算公式、数据来源、标准化方法、权重分配，以及因子间的相关性分析。",
+    "acceptanceCriteria": [
+      "至少定义 5 个因子并给出计算公式",
+      "每个因子明确数据源和获取频率（日频/周频/季频）",
+      "给出因子打分规则（百分位排名或Z-score标准化）",
+      "各因子权重之和为 100%，且有逻辑依据",
+      "任意两个因子的相关系数绝对值不超过 0.7"
+    ],
+    "cadence": "一次性任务，目标启动后即时触发",
+    "dependencyHints": [],
+    "priorityHint": "high",
+    "estimatedMinutes": 120,
+    "userInvolvement": {
+      "mode": "confirm"
+    }
+  },
+  {
+    "index": 2,
+    "title": "自动化筛选与排序引擎实现",
+    "objective": "基于已定义的因子体系，构建每日自动运行的筛选引擎，对全市场美股标的打分、排序，输出前 20 只候选标的及因子得分明细。",
+    "deliverable": "一套自动化脚本或管线，每日获取最新数据并输出 Top 20 候选池表格。",
+    "acceptanceCriteria": [
+      "每日至少覆盖纳斯达克 100 + 标普 500 成分股",
+      "输出前 20 只候选标的及每个标的的各因子得分明细",
+      "输出格式包含：代码、名称、综合得分、各因子分项得分、板块归属",
+      "引擎执行时间不超过 30 分钟",
+      "支持数据源异常时的重试与告警"
+    ],
+    "cadence": "每日 6:30 触发（美东收盘后）",
+    "dependencyHints": [
+      "因子定义与数据源配置"
+    ],
+    "priorityHint": "critical",
+    "estimatedMinutes": 180,
+    "userInvolvement": {
+      "mode": "none"
+    }
+  },
+  {
+    "index": 3,
+    "title": "历史回测与模型校准",
+    "objective": "基于过去 3 个月的历史数据回测引擎筛选效果，验证 Top 5 候选组合是否跑赢纳斯达克指数至少 10 个百分点，并根据回测结果校准因子权重。",
+    "deliverable": "一份回测报告，包含 Top 5 组合与纳斯达克指数的收益率对比、因子贡献度分析和权重校准建议。",
+    "acceptanceCriteria": [
+      "回测周期覆盖过去 3 个月，按周调仓模拟",
+      "Top 5 等权组合跑赢纳斯达克指数至少 10 个百分点",
+      "输出逐周收益对比表（组合 vs 纳斯达克）",
+      "输出各因子对收益的贡献度排名",
+      "若未达标，给出权重校准后的第二轮回测结果"
+    ],
+    "cadence": "一次性任务，筛选引擎构建完成后即时触发；权重校准后按需重新回测",
+    "dependencyHints": [
+      "自动化筛选与排序引擎实现"
+    ],
+    "priorityHint": "high",
+    "estimatedMinutes": 150,
+    "userInvolvement": {
+      "mode": "confirm"
+    }
+  }
+]
+
+要求：
+1. 只能输出严格 JSON 对象，不要包含 Markdown、代码块或额外解释。
+2. reviewResults 必须覆盖每个 TaskDraft，taskId 使用 TaskDraft 的 index 字符串。
+3. goalContribution/subGoalContribution 只能是 critical/high/medium/low。
+
+JSON schema：
+{
+  "reviewResults": [
+    {
+      "taskId": "1",
+      "goalContribution": "high",
+      "subGoalContribution": "high",
+      "aligned": true,
+      "reasoning": "评估理由",
+      "suggestions": ["建议"]
+    }
+  ]
+}

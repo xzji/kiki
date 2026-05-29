@@ -43,8 +43,7 @@ function computePriorityScore(task: Task) {
   const priority = task.priority ?? "medium";
   const taskTypeScore = task.taskType === "one_shot" ? 30 : 10;
   const monitoringScore = task.executionMode === "monitoring" ? 10 : 0;
-  const executionScore = task.executionKind === "confirm_action" ? 20 : task.executionKind === "draft_review" ? 15 : 0;
-  return PRIORITY_WEIGHT[priority] + taskTypeScore + monitoringScore + executionScore;
+  return PRIORITY_WEIGHT[priority] + taskTypeScore + monitoringScore;
 }
 
 function getReadyTasks(goals: Goal[]) {

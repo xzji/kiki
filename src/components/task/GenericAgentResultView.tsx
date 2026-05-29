@@ -4,6 +4,7 @@ import { ArtifactRefList } from "@/components/execution/ArtifactRenderer";
 import { TaskResultBlockView } from "@/components/execution/BlockRenderer";
 import { ExternalEmbedSurface } from "@/components/execution/ExternalEmbedSurface";
 import { SandboxedWebAppSurface } from "@/components/execution/SandboxedWebAppSurface";
+import { isPendingUserPlaceholderTaskResult } from "@/lib/taskInstance/awaitingDisplayModel";
 import { filterTaskResultForPresentation } from "@/lib/taskResult/presentationFilter";
 import type { TaskInstanceNotificationState } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
@@ -34,6 +35,7 @@ export function GenericAgentResultView({
   structuredOutput,
   notification,
   hideSummaryCard = false,
+  hidePendingUserPlaceholder = false,
 }: {
   summary?: string;
   finalMessage?: string;
@@ -42,6 +44,7 @@ export function GenericAgentResultView({
   structuredOutput?: Record<string, unknown> | null;
   notification?: TaskInstanceNotificationState;
   hideSummaryCard?: boolean;
+  hidePendingUserPlaceholder?: boolean;
 }) {
   void summary;
   void finalMessage;
@@ -51,6 +54,7 @@ export function GenericAgentResultView({
   void artifacts;
 
   if (!taskResult) return null;
+  if (hidePendingUserPlaceholder && isPendingUserPlaceholderTaskResult(taskResult)) return null;
   const presentationTaskResult = filterTaskResultForPresentation(taskResult);
 
   return (

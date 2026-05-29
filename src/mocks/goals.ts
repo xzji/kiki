@@ -1,7 +1,6 @@
-import { emailDrafts } from "@/mocks/emails";
-import { flashcards } from "@/mocks/flashcards";
-import { newsArticles } from "@/mocks/news";
-import { createOpaqueId, deriveOpaqueId, migrateGoalIds } from "@/lib/opaqueIds";
+import { createOpaqueId, migrateGoalIds } from "@/lib/opaqueIds";
+import { buildExpectedResult as expectedResultFor } from "@/lib/goalPlanning/taskCompiler";
+import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
 import type {
   ExecutionKind,
   ExecutionPayload,
@@ -10,7 +9,6 @@ import type {
   InteractionRequirement,
   Task,
   TaskCollaborationRequirements,
-  TaskExpectedResult,
   TaskExecutionStep,
   TaskInstance,
 } from "@/types/kiki";
@@ -23,51 +21,8 @@ const WEBAPP_DEMO_ID = "artifact-demo-webapp-1778950506965";
 const INTERNET_WEBAPP_DEMO_ID = "artifact-demo-internet-webapp-1778950506965";
 const YOUTUBE_EMBED_DEMO_ID = "artifact-demo-youtube-1778950506965";
 
-function payloadFor(kind: ExecutionKind): ExecutionPayload {
-  switch (kind) {
-    case "flashcard":
-      return { kind, cards: flashcards };
-    case "listening_qa":
-      return {
-        kind,
-        audioUrl: "/audio/listening.mp3",
-        questions: [
-          {
-            id: "qa-1",
-            question: "What is the man mainly doing?",
-            options: ["Driving a car", "Putting on a seatbelt", "Fixing the engine", "Washing the car"],
-            answerIndex: 1,
-            explanation: "The dialogue points to the man fastening his seatbelt before departure.",
-          },
-          {
-            id: "qa-2",
-            question: "Why does the professor mention the telescope?",
-            options: [
-              "To describe a museum exhibit",
-              "To explain how data was collected",
-              "To compare two planets",
-              "To invite students to a lab tour",
-            ],
-            answerIndex: 1,
-            explanation: "The telescope is referenced as the instrument used to gather evidence.",
-          },
-        ],
-      };
-    case "reading_digest":
-      return { kind, articles: newsArticles };
-    case "confirm_action":
-      return {
-        kind,
-        summary: "已为你选定 5 月 3 日 13:42 大阪→京都，JR 特急，¥2380，可免费改签一次。",
-        options: ["确认执行", "让 KiKi 改方案"],
-      };
-    case "draft_review":
-      return { kind, drafts: emailDrafts };
-    case "freeform_chat":
-      return { kind, seed: "我会继续基于你的长期目标，把下一步拆成更具体的行动。" };
-    case "generic_result":
-      return { kind, summary: "已生成本轮任务结果。", details: "查看执行链路获取更多上下文。" };
-  }
+function payloadFor(): ExecutionPayload {
+  return { kind: "generic_result", summary: "已生成本轮任务结果。", details: "查看执行链路获取更多上下文。" };
 }
 
 function statusToPhase(status: TaskInstance["status"]) {
@@ -79,33 +34,7 @@ function statusToPhase(status: TaskInstance["status"]) {
   return "queued" as const;
 }
 
-function collaborationFor(kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
-  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
-    return {
-      mode: "agent_user_collaborative",
-      agentResponsibilities: [description, "准备练习内容并给出反馈"],
-      userResponsibilities: ["完成作答或互动"],
-      userInteractionType: "answer",
-      userInteractionTiming: "core_task_step",
-      userFacingActionLabel: "开始作答",
-      shouldNotifyUser: true,
-      completionOwner: "shared",
-      completionDefinition: expectedOutcome,
-    };
-  }
-  if (kind === "confirm_action" || kind === "draft_review") {
-    return {
-      mode: "agent_with_user_confirmation",
-      agentResponsibilities: [description, "生成可供用户确认或修改的方案"],
-      userResponsibilities: ["确认结果或提出修改建议"],
-      userInteractionType: "confirm",
-      userInteractionTiming: "after_agent_output",
-      userFacingActionLabel: "确认或提出修改建议",
-      shouldNotifyUser: true,
-      completionOwner: "agent",
-      completionDefinition: expectedOutcome,
-    };
-  }
+function collaborationFor(_kind: ExecutionKind, description: string, expectedOutcome: string): TaskCollaborationRequirements {
   return {
     mode: "agent_autonomous",
     agentResponsibilities: [description, "自主完成并沉淀结果"],
@@ -113,7 +42,7 @@ function collaborationFor(kind: ExecutionKind, description: string, expectedOutc
     userInteractionType: "none",
     userInteractionTiming: "not_required",
     userFacingActionLabel: "查看结果",
-    shouldNotifyUser: kind === "reading_digest",
+    shouldNotifyUser: false,
     completionOwner: "agent",
     completionDefinition: expectedOutcome,
   };
@@ -138,112 +67,6 @@ function interactionFor(kind: ExecutionKind, reason: string): InteractionRequire
             ? ["补充信息"]
             : undefined,
     shouldNotifyUser: collaboration.shouldNotifyUser,
-  };
-}
-
-function inferRequiredBlocks(kind: ExecutionKind, expectedOutcome: string, description: string): NonNullable<TaskExpectedResult["requiredBlocks"]> {
-  const text = `${expectedOutcome}\n${description}`;
-  const blocks: NonNullable<TaskExpectedResult["requiredBlocks"]> = ["heading"];
-
-  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
-    return ["heading", "list", "callout"];
-  }
-  if (kind === "confirm_action") {
-    return ["heading", "decision", "callout"];
-  }
-  if (kind === "draft_review") {
-    return ["heading", "list", "callout"];
-  }
-  if (kind === "reading_digest") {
-    return ["heading", "list", "callout"];
-  }
-
-  if (/对比|比较|表|矩阵|维度/.test(text)) {
-    blocks.push("comparison_table");
-  }
-  if (/清单|步骤|计划|训练|复盘|词汇|摘要|精读|复述|结构图/.test(text)) {
-    blocks.push("list");
-  }
-  if (!blocks.includes("comparison_table")) {
-    blocks.push("paragraph");
-  }
-  blocks.push("callout");
-  return Array.from(new Set(blocks));
-}
-
-function expectedResultFor(kind: ExecutionKind, expectedOutcome: string, description: string): TaskExpectedResult {
-  if (kind === "flashcard") {
-    return {
-      type: "deliverable",
-      description: expectedOutcome,
-      format: "json",
-      presentation: "checklist",
-      primaryFormat: "structured_blocks",
-      exportableFormats: ["json", "markdown"],
-      requiredBlocks: ["heading", "list", "callout"],
-      completionCriteria: `准备好可直接开始的练习内容，并让用户能继续完成「${expectedOutcome}」。`,
-    };
-  }
-  if (kind === "listening_qa" || kind === "freeform_chat") {
-    return {
-      type: "deliverable",
-      description: expectedOutcome,
-      format: "json",
-      presentation: "document",
-      primaryFormat: "structured_blocks",
-      exportableFormats: ["json", "markdown"],
-      requiredBlocks: ["heading", "list", "callout"],
-      completionCriteria: `准备好可交互练习内容，并围绕「${expectedOutcome}」给出明确目标。`,
-    };
-  }
-  if (kind === "confirm_action") {
-    return {
-      type: "decision",
-      description: expectedOutcome,
-      format: "text",
-      presentation: "summary_card",
-      primaryFormat: "structured_blocks",
-      exportableFormats: ["markdown"],
-      requiredBlocks: ["heading", "decision", "callout"],
-      completionCriteria: `给出可确认的方案，并明确用户需要确认的下一步。`,
-    };
-  }
-  if (kind === "draft_review") {
-    return {
-      type: "deliverable",
-      description: expectedOutcome,
-      format: "markdown",
-      presentation: "document",
-      primaryFormat: "structured_blocks",
-      exportableFormats: ["markdown"],
-      requiredBlocks: ["heading", "list", "callout"],
-      completionCriteria: `生成可审阅的草稿内容，并说明需要用户重点关注什么。`,
-    };
-  }
-  if (kind === "reading_digest") {
-    return {
-      type: "information",
-      description: expectedOutcome,
-      format: "markdown",
-      presentation: "visual_report",
-      primaryFormat: "structured_blocks",
-      exportableFormats: ["html", "markdown"],
-      requiredBlocks: ["heading", "list", "callout"],
-      completionCriteria: `输出可快速阅读的摘要结果，并突出重点结论与风险。`,
-    };
-  }
-
-  return {
-    type: "deliverable",
-    description: expectedOutcome,
-    format: /表|对比|矩阵/.test(expectedOutcome) ? "table" : "markdown",
-    presentation: /表|对比|矩阵/.test(expectedOutcome) ? "visual_report" : "document",
-    primaryFormat: "structured_blocks",
-    surfaces: ["interactive"],
-    interactiveSurface: { required: true, kind: "blocks" },
-    exportableFormats: /表|对比|矩阵/.test(expectedOutcome) ? ["html", "markdown"] : ["markdown"],
-    requiredBlocks: inferRequiredBlocks(kind, expectedOutcome, description),
-    completionCriteria: `围绕任务目标「${expectedOutcome}」输出完整、可展示、可复用的结果。`,
   };
 }
 
@@ -297,7 +120,7 @@ function buildCompletedGenericTaskResult(task: Task, intro: string, createdAt: s
 function normalizeMockInstances(task: Task, instances: TaskInstance[]) {
   return instances.map((item) => {
     if (item.status !== "completed") return item;
-    if ((task.resultViewKind ?? task.executionKind) !== "generic_result") return item;
+    if (normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind) !== "generic_result") return item;
     const existingResult = item.result ?? {
       summary: item.intro,
       finalMessage: item.intro,
@@ -358,7 +181,7 @@ function instance(
     dateLabel,
     status,
     intro,
-    payload: payloadFor(kind),
+    payload: payloadFor(),
     createdAt,
     runner: {
       attemptCount: status === "pending" ? 0 : 1,
@@ -969,16 +792,15 @@ function multiAgentDemoInstance(): TaskInstance {
 }
 
 function task(data: Omit<Task, "instances"> & { instances?: TaskInstance[] }): Task {
+  const executionKind = normalizeExecutionKind(data.executionKind);
   const nextTask: Task = {
     ...data,
-    expectedResult: data.expectedResult ?? expectedResultFor(data.resultViewKind ?? data.executionKind, data.expectedOutcome, data.description),
-    collaboration: data.collaboration ?? collaborationFor(data.resultViewKind ?? data.executionKind, data.description, data.expectedOutcome),
-    executionStrategy:
-      data.executionStrategy ??
-      (data.executionKind === "flashcard" || data.executionKind === "listening_qa" || data.executionKind === "freeform_chat"
-        ? "hybrid"
-        : "agent_autonomous"),
-    requiresConfirmation: data.requiresConfirmation ?? (data.executionKind === "confirm_action" || data.executionKind === "draft_review"),
+    executionKind,
+    resultViewKind: normalizeTaskResultViewKind(data.resultViewKind ?? executionKind),
+    expectedResult: data.expectedResult ?? expectedResultFor(executionKind, data.expectedOutcome, data.description),
+    collaboration: data.collaboration ?? collaborationFor(executionKind, data.description, data.expectedOutcome),
+    executionStrategy: data.executionStrategy ?? "agent_autonomous",
+    requiresConfirmation: data.requiresConfirmation ?? false,
     instances: data.instances ?? [],
   };
   return {
@@ -1011,11 +833,11 @@ const rawInitialGoals: Goal[] = [
             triggerRule: "每天 11:00 触发",
             deadline: "2026-05-01T23:59:59+08:00",
             progress: 16,
-            executionKind: "flashcard",
+            executionKind: "generic_result",
             instances: [
-              instance("inst-vocab-0426", "task-toefl-vocab", "04-26", "2026-04-26T11:00:00+08:00", "今天先从天文场景高频词开始。我整理了 30 张卡片，先做一轮快速记忆，再把易错词标出来。", "flashcard", "pending"),
-              instance("inst-vocab-0425", "task-toefl-vocab", "04-25", "2026-04-25T11:00:00+08:00", "昨天你在天体类词汇里还不够稳定，今天的卡片我补了两条近义辨析。", "flashcard", "completed"),
-              instance("inst-vocab-0401", "task-toefl-vocab", "04-01", "2026-04-01T11:00:00+08:00", "开学第一轮词汇训练已经开始，先把 lecture 高频词建立熟悉感。", "flashcard", "completed"),
+              instance("inst-vocab-0426", "task-toefl-vocab", "04-26", "2026-04-26T11:00:00+08:00", "今天先从天文场景高频词开始。我整理了 30 张卡片，先做一轮快速记忆，再把易错词标出来。", "generic_result", "pending"),
+              instance("inst-vocab-0425", "task-toefl-vocab", "04-25", "2026-04-25T11:00:00+08:00", "昨天你在天体类词汇里还不够稳定，今天的卡片我补了两条近义辨析。", "generic_result", "completed"),
+              instance("inst-vocab-0401", "task-toefl-vocab", "04-01", "2026-04-01T11:00:00+08:00", "开学第一轮词汇训练已经开始，先把 lecture 高频词建立熟悉感。", "generic_result", "completed"),
             ],
           }),
           task({
@@ -1038,7 +860,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "repeat",
             triggerRule: "每天 11:00 触发",
             progress: 48,
-            executionKind: "listening_qa",
+            executionKind: "generic_result",
             instances: [
               multiAgentDemoInstance(),
               internetWebAppDemoInstance(),
@@ -1047,9 +869,9 @@ const rawInitialGoals: Goal[] = [
               mixedSurfaceDemoInstance(),
               fileOnlyDemoInstance(),
               interactiveOnlyDemoInstance(),
-              instance("inst-listen-0426", "task-toefl-listening", "04-26", "2026-04-26T11:00:00+08:00", "昨天听力题目，你已经答对了 9 道题（共 10 题），正确率为 90%。今天我把难度提高了一点，重点看天文类材料。", "listening_qa", "awaiting_user"),
-              instance("inst-listen-0425", "task-toefl-listening", "04-25", "2026-04-25T11:00:00+08:00", "昨天的校园场景题你做得比较稳，今天尝试跨到 lecture 场景。", "listening_qa", "completed"),
-              instance("inst-listen-0424", "task-toefl-listening", "04-24", "2026-04-24T11:00:00+08:00", "这组题里需要重点抓教授给出的转折提示词，我帮你把错题整理在最后了。", "listening_qa", "completed"),
+              instance("inst-listen-0426", "task-toefl-listening", "04-26", "2026-04-26T11:00:00+08:00", "昨天听力题目，你已经答对了 9 道题（共 10 题），正确率为 90%。今天我把难度提高了一点，重点看天文类材料。", "generic_result", "awaiting_user"),
+              instance("inst-listen-0425", "task-toefl-listening", "04-25", "2026-04-25T11:00:00+08:00", "昨天的校园场景题你做得比较稳，今天尝试跨到 lecture 场景。", "generic_result", "completed"),
+              instance("inst-listen-0424", "task-toefl-listening", "04-24", "2026-04-24T11:00:00+08:00", "这组题里需要重点抓教授给出的转折提示词，我帮你把错题整理在最后了。", "generic_result", "completed"),
             ],
           }),
         ],
@@ -1091,7 +913,7 @@ const rawInitialGoals: Goal[] = [
             executionMode: "monitoring",
             triggerRule: "每天 09:00 触发",
             progress: 51,
-            executionKind: "reading_digest",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -1134,7 +956,7 @@ const rawInitialGoals: Goal[] = [
             executionMode: "monitoring",
             triggerRule: "每天 19:00 触发",
             progress: 52,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-suv-review",
@@ -1145,7 +967,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "repeat",
             triggerRule: "每天 22:00 触发",
             progress: 40,
-            executionKind: "reading_digest",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -1163,7 +985,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "周五 10:00 触发",
             progress: 20,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-suv-testdrive-checklist",
@@ -1174,7 +996,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "试驾当天 08:30 触发",
             progress: 10,
-            executionKind: "draft_review",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -1203,7 +1025,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "成交当天 21:00 触发",
             progress: 0,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -1231,9 +1053,9 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "4 月第三周周日 20:00 触发",
             progress: 100,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
             instances: [
-              instance("inst-osaka-flight-0415", "task-osaka-flight", "04-15", "2026-04-15T20:00:00+08:00", "我比了 3 家航司的往返组合，最终选定了周六出发、次周四返程的吉祥航空直飞。", "confirm_action", "completed"),
+              instance("inst-osaka-flight-0415", "task-osaka-flight", "04-15", "2026-04-15T20:00:00+08:00", "我比了 3 家航司的往返组合，最终选定了周六出发、次周四返程的吉祥航空直飞。", "generic_result", "completed"),
             ],
           }),
           task({
@@ -1245,7 +1067,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "4 月第四周周一 20:00 触发",
             progress: 85,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-osaka-ticket",
@@ -1256,9 +1078,9 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "今天 12:00 触发",
             progress: 90,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
             instances: [
-              instance("inst-osaka-0410", "task-osaka-ticket", "04-10", "2026-04-10T09:00:00+08:00", "我筛选了 3 班从大阪到京都的车次，优先保留了换乘少、到站时间更宽松的方案。", "confirm_action", "awaiting_user"),
+              instance("inst-osaka-0410", "task-osaka-ticket", "04-10", "2026-04-10T09:00:00+08:00", "我筛选了 3 班从大阪到京都的车次，优先保留了换乘少、到站时间更宽松的方案。", "generic_result", "awaiting_user"),
             ],
           }),
         ],
@@ -1277,7 +1099,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "repeat",
             triggerRule: "出行期间每晚 21:00 触发",
             progress: 60,
-            executionKind: "reading_digest",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-osaka-food",
@@ -1289,7 +1111,7 @@ const rawInitialGoals: Goal[] = [
             executionMode: "monitoring",
             triggerRule: "每天 10:00 触发",
             progress: 70,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -1307,7 +1129,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "5 月 2 日 20:00 触发",
             progress: 10,
-            executionKind: "draft_review",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-osaka-recap",
@@ -1332,7 +1154,7 @@ const rawInitialGoals: Goal[] = [
     createdAt: "2026-04-05T10:00:00+08:00",
     kind: "digest",
     summary: "每天在你固定的写邮件时段，KiKi 把待发邮件整理好草稿，等你 10 分钟内完成审阅与发送。",
-    subGoals: [{ id: "sg-mail-1", goalId: "goal-mail", title: "子目标1：清理待发送邮件", tasks: [task({ id: "task-mail-review", subGoalId: "sg-mail-1", title: "任务1：邮件草稿审阅", description: "确认 3 封待发邮件的语气、结构和下一步动作。", expectedOutcome: "完成 3 封邮件发送。", taskType: "repeat", triggerRule: "每天 16:00 触发", progress: 70, executionKind: "draft_review", instances: [instance("inst-mail-0401", "task-mail-review", "04-01", "2026-04-01T09:00:00+08:00", "我帮你草拟了 3 封待发送邮件，先从最关键的面试确认邮件开始。", "draft_review", "awaiting_user")] })] }],
+    subGoals: [{ id: "sg-mail-1", goalId: "goal-mail", title: "子目标1：清理待发送邮件", tasks: [task({ id: "task-mail-review", subGoalId: "sg-mail-1", title: "任务1：邮件草稿审阅", description: "确认 3 封待发邮件的语气、结构和下一步动作。", expectedOutcome: "完成 3 封邮件发送。", taskType: "repeat", triggerRule: "每天 16:00 触发", progress: 70, executionKind: "generic_result", instances: [instance("inst-mail-0401", "task-mail-review", "04-01", "2026-04-01T09:00:00+08:00", "我帮你草拟了 3 封待发送邮件，先从最关键的面试确认邮件开始。", "generic_result", "awaiting_user")] })] }],
   },
   {
     id: "goal-news",
@@ -1342,7 +1164,7 @@ const rawInitialGoals: Goal[] = [
     createdAt: "2026-04-01T08:00:00+08:00",
     kind: "digest",
     summary: "每天早晨 9 点，KiKi 汇总昨晚到今早的 AI 行业重要动态，给你一份可速读的摘要。",
-    subGoals: [{ id: "sg-news-1", goalId: "goal-news", title: "子目标1：跟进 AI 方向的重要动态", tasks: [task({ id: "task-news-digest", subGoalId: "sg-news-1", title: "任务1：AI 行业新闻", description: "阅读并标记 3 篇和 Agent 相关的重要新闻。", expectedOutcome: "输出一份简短摘要供晚间复盘。", taskType: "repeat", triggerRule: "每天 09:00 触发", progress: 86, executionKind: "reading_digest", instances: [instance("inst-news-0426", "task-news-digest", "04-26", "2026-04-26T09:00:00+08:00", "整理了 4 条 AI 行业的关键信息，OpenAI 发布多智能体协作框架位列第一。", "reading_digest", "completed")] })] }],
+    subGoals: [{ id: "sg-news-1", goalId: "goal-news", title: "子目标1：跟进 AI 方向的重要动态", tasks: [task({ id: "task-news-digest", subGoalId: "sg-news-1", title: "任务1：AI 行业新闻", description: "阅读并标记 3 篇和 Agent 相关的重要新闻。", expectedOutcome: "输出一份简短摘要供晚间复盘。", taskType: "repeat", triggerRule: "每天 09:00 触发", progress: 86, executionKind: "generic_result", instances: [instance("inst-news-0426", "task-news-digest", "04-26", "2026-04-26T09:00:00+08:00", "整理了 4 条 AI 行业的关键信息，OpenAI 发布多智能体协作框架位列第一。", "generic_result", "completed")] })] }],
   },
   {
     id: "goal-job",
@@ -1366,7 +1188,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "one_shot",
             triggerRule: "今天 20:00 触发",
             progress: 80,
-            executionKind: "reading_digest",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-job-resume",
@@ -1377,7 +1199,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "repeat",
             triggerRule: "每天 21:00 触发",
             progress: 45,
-            executionKind: "draft_review",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-job-rehearsal",
@@ -1407,7 +1229,7 @@ const rawInitialGoals: Goal[] = [
             executionMode: "monitoring",
             triggerRule: "每周日 20:00 触发",
             progress: 20,
-            executionKind: "confirm_action",
+            executionKind: "generic_result",
           }),
           task({
             id: "task-job-interview",
@@ -1429,7 +1251,7 @@ const rawInitialGoals: Goal[] = [
             taskType: "repeat",
             triggerRule: "每天 18:00 触发",
             progress: 30,
-            executionKind: "draft_review",
+            executionKind: "generic_result",
           }),
         ],
       },
@@ -1506,12 +1328,37 @@ const rawInitialGoals: Goal[] = [
 
 export const initialGoals: Goal[] = rawInitialGoals.map((goal) => migrateGoalIds(goal));
 
+function scopedDraftTaskKey(subGoalId: string, taskId: string) {
+  return `${subGoalId}:${taskId}`;
+}
+
+function buildTaskIdResolver(draft: GoalBreakdownDraft) {
+  const idCounts = new Map<string, number>();
+  for (const subGoal of draft.subGoals) {
+    for (const taskItem of subGoal.tasks) {
+      idCounts.set(taskItem.id, (idCounts.get(taskItem.id) ?? 0) + 1);
+    }
+  }
+
+  const taskIdMap = new Map<string, string>();
+  for (const subGoal of draft.subGoals) {
+    for (const taskItem of subGoal.tasks) {
+      const hasDuplicateDraftId = (idCounts.get(taskItem.id) ?? 0) > 1;
+      const mapKey = hasDuplicateDraftId ? scopedDraftTaskKey(subGoal.id, taskItem.id) : taskItem.id;
+      taskIdMap.set(mapKey, createOpaqueId("task"));
+    }
+  }
+
+  const resolveTaskId = (subGoalId: string, taskId: string) =>
+    taskIdMap.get(scopedDraftTaskKey(subGoalId, taskId)) ?? taskIdMap.get(taskId);
+
+  return { resolveTaskId };
+}
+
 export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
   const goalId = createOpaqueId("goal");
   const subGoalIdMap = new Map(draft.subGoals.map((subGoal) => [subGoal.id, createOpaqueId("sg")]));
-  const taskIdMap = new Map(
-    draft.subGoals.flatMap((subGoal) => subGoal.tasks.map((taskItem) => [taskItem.id, createOpaqueId("task")] as const)),
-  );
+  const { resolveTaskId } = buildTaskIdResolver(draft);
 
   return {
     id: goalId,
@@ -1535,7 +1382,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
       successCriteria: subGoal.successCriteria,
       tasks: subGoal.tasks.map((taskItem) => ({
-        id: taskIdMap.get(taskItem.id) ?? createOpaqueId("task"),
+        id: resolveTaskId(subGoal.id, taskItem.id) ?? createOpaqueId("task"),
         subGoalId: subGoalIdMap.get(subGoal.id) ?? createOpaqueId("sg"),
         title: taskItem.title,
         description: taskItem.description,
@@ -1545,11 +1392,13 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
         deadline: draft.deadline || "2026-06-30T23:59:59+08:00",
         progress: 0,
         instances: [],
-        executionKind: taskItem.executionKind,
-        resultViewKind: taskItem.resultViewKind ?? taskItem.executionKind,
+        executionKind: normalizeExecutionKind(taskItem.executionKind),
+        resultViewKind: normalizeTaskResultViewKind(taskItem.resultViewKind ?? taskItem.executionKind),
         executionStrategy: taskItem.executionStrategy ?? "agent_autonomous",
         priority: taskItem.priority,
-        dependencies: taskItem.dependencies?.map((dependencyId) => taskIdMap.get(dependencyId) ?? deriveOpaqueId("task", dependencyId)),
+        dependencies: taskItem.dependencies
+          ?.map((dependencyId) => resolveTaskId(subGoal.id, dependencyId))
+          .filter((dependencyId): dependencyId is string => Boolean(dependencyId)),
         executionMode: taskItem.executionMode,
         expectedResult: taskItem.expectedResult,
         executionObjective: taskItem.executionObjective ?? taskItem.description,
@@ -1558,7 +1407,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
         requiresConfirmation: taskItem.requiresConfirmation,
         collaboration:
           taskItem.collaboration ??
-          collaborationFor(taskItem.resultViewKind ?? taskItem.executionKind, taskItem.description, taskItem.expectedOutcome),
+          collaborationFor(normalizeExecutionKind(taskItem.executionKind), taskItem.description, taskItem.expectedOutcome),
       })),
     })),
   };
@@ -1573,7 +1422,7 @@ export function createGeneratedInstance(task: Task, createdAt: string): TaskInst
     dateLabel,
     status: "pending",
     intro: `到了 ${task.triggerRule} 的触发时间，KiKi 已自动排队执行“${task.title.replace(/^任务\d+：/, "")}”。`,
-    payload: payloadFor(task.resultViewKind ?? task.executionKind),
+    payload: payloadFor(),
     createdAt,
     runner: {
       attemptCount: 0,

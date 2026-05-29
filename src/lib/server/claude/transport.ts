@@ -1,10 +1,20 @@
 import { spawn } from "child_process";
 
-import type { QuotedConversationMessageContext, RuntimeEnvironment, RuntimePermissionMode } from "@/types/runtime";
+import type {
+  QuotedConversationMessageContext,
+  RuntimeEnvironment,
+  RuntimeFilePolicy,
+  RuntimePermissionMode,
+} from "@/types/runtime";
 
 import { buildClaudeEnv } from "@/lib/server/claudeEnv";
 import { normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimePath";
 import { createClaudeTrace } from "@/lib/server/claude/traceStore";
+import {
+  describeRuntimeToolPolicy,
+  resolveRuntimeToolPolicy,
+  type ToolChannelPolicy,
+} from "@/lib/runtime/toolPolicy";
 
 type ClaudeCliPayload = {
   type?: string;
@@ -14,6 +24,11 @@ type ClaudeCliPayload = {
   result?: string;
   api_error_status?: string;
   errors?: string[];
+  permission_denials?: Array<{
+    tool_name?: string;
+    tool_use_id?: string;
+    tool_input?: unknown;
+  }>;
   event?: {
     type?: string;
     index?: number;
@@ -47,6 +62,8 @@ export type ClaudeStreamOptions = {
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
   quotedMessage?: QuotedConversationMessageContext | null;
+  filePolicy?: RuntimeFilePolicy;
+  channelPolicy?: ToolChannelPolicy;
   signal?: AbortSignal;
   onEvent: (event: ClaudeStreamEvent) => void;
 };
@@ -68,6 +85,53 @@ export type ClaudePromptJsonResult = {
   elapsedMs: number;
 };
 
+export type ClaudeJsonToolPolicy =
+  | {
+      mode: "deny_all";
+    }
+  | {
+      mode: "readonly_only";
+      allow?: string[];
+    };
+
+const JSON_DISALLOWED_TOOLS = [
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "Bash",
+  "WebFetch",
+  "WebSearch",
+  "Task",
+];
+
+export function buildJsonToolArgs(policy: ClaudeJsonToolPolicy = { mode: "deny_all" }) {
+  if (policy.mode === "readonly_only") {
+    const allowedTools = policy.allow && policy.allow.length > 0 ? policy.allow : ["Read", "Glob", "Grep"];
+    return ["--allowedTools", allowedTools.join(",")];
+  }
+  return ["--disallowedTools", JSON_DISALLOWED_TOOLS.join(",")];
+}
+
+export function buildTextToolArgs(policy: ClaudeJsonToolPolicy = { mode: "deny_all" }) {
+  return buildJsonToolArgs(policy);
+}
+
+function buildToolArgs(policy: { allowedTools: string[]; disallowedTools: string[] }) {
+  const args: string[] = [];
+  if (policy.allowedTools.length > 0) {
+    args.push("--allowedTools", policy.allowedTools.join(","));
+  }
+  if (policy.disallowedTools.length > 0) {
+    args.push("--disallowedTools", policy.disallowedTools.join(","));
+  }
+  return args;
+}
+
+/**
+ * JSON calls must return their business payload through stdout result.result.
+ * They never need write-capable tools; work that needs tools should use streamPrompt.
+ */
 export async function runPromptJson(input: {
   prompt: string;
   runtimeEnv: RuntimeEnvironment;
@@ -82,22 +146,35 @@ export async function runPromptJson(input: {
     phase?: string;
     stepLabel?: string;
   };
+  toolPolicy?: ClaudeJsonToolPolicy;
+  filePolicy?: RuntimeFilePolicy;
+  channelPolicy?: ToolChannelPolicy;
 }): Promise<ClaudePromptJsonResult> {
   const cwd = normalizeWorkingDirectory(input.cwd);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   const startedAt = Date.now();
+  const resolvedToolPolicy = resolveRuntimeToolPolicy({
+    filePolicy: input.filePolicy ?? input.runtimeEnv.filePolicy,
+    permissionMode: input.permissionMode ?? input.runtimeEnv.permissionMode,
+    channelPolicy: input.channelPolicy ?? {
+      mode: "readonly_json",
+      ...(input.toolPolicy?.mode === "readonly_only" ? { allow: input.toolPolicy.allow } : {}),
+    },
+  });
   const args = [
     "-p",
     "--output-format",
     "json",
     "--permission-mode",
     mapPermissionMode(input.permissionMode ?? input.runtimeEnv.permissionMode),
+    ...buildToolArgs(resolvedToolPolicy),
   ];
   const trace = createClaudeTrace({
     cwd,
     cliPath,
     args,
     permissionMode: input.permissionMode ?? input.runtimeEnv.permissionMode,
+    toolPolicy: resolvedToolPolicy,
     requestId: input.traceContext?.requestId,
     scope: input.traceContext?.scope ?? "claude_json",
     phase: input.traceContext?.phase,
@@ -173,6 +250,124 @@ export async function runPromptJson(input: {
   });
 }
 
+export async function runPromptText(input: {
+  prompt: string;
+  runtimeEnv: RuntimeEnvironment;
+  abortSignal?: AbortSignal;
+  cwd: string;
+  permissionMode?: RuntimePermissionMode;
+  abortMessage?: string;
+  failureMessage?: string;
+  traceContext?: {
+    requestId?: string;
+    scope?: string;
+    phase?: string;
+    stepLabel?: string;
+  };
+  toolPolicy?: ClaudeJsonToolPolicy;
+  filePolicy?: RuntimeFilePolicy;
+  channelPolicy?: ToolChannelPolicy;
+}): Promise<ClaudePromptJsonResult> {
+  const cwd = normalizeWorkingDirectory(input.cwd);
+  const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
+  const startedAt = Date.now();
+  const resolvedToolPolicy = resolveRuntimeToolPolicy({
+    filePolicy: input.filePolicy ?? input.runtimeEnv.filePolicy,
+    permissionMode: input.permissionMode ?? input.runtimeEnv.permissionMode,
+    channelPolicy: input.channelPolicy ?? {
+      mode: "readonly_json",
+      ...(input.toolPolicy?.mode === "readonly_only" ? { allow: input.toolPolicy.allow } : {}),
+    },
+  });
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--permission-mode",
+    mapPermissionMode(input.permissionMode ?? input.runtimeEnv.permissionMode),
+    ...buildToolArgs(resolvedToolPolicy),
+  ];
+  const trace = createClaudeTrace({
+    cwd,
+    cliPath,
+    args,
+    permissionMode: input.permissionMode ?? input.runtimeEnv.permissionMode,
+    toolPolicy: resolvedToolPolicy,
+    requestId: input.traceContext?.requestId,
+    scope: input.traceContext?.scope ?? "claude_text",
+    phase: input.traceContext?.phase,
+    stepLabel: input.traceContext?.stepLabel,
+  });
+  trace?.writePrompt(input.prompt);
+
+  return new Promise<ClaudePromptJsonResult>((resolve, reject) => {
+    const child = spawn(cliPath, args, {
+      cwd,
+      env: buildClaudeEnv(),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdin.write(input.prompt);
+    child.stdin.end();
+
+    let output = "";
+    let errorOutput = "";
+    let aborted = false;
+
+    const abort = () => {
+      aborted = true;
+      child.kill("SIGTERM");
+      trace?.finish("aborted", input.abortMessage ?? "Claude CLI 文本调用已中断");
+      reject(new DOMException(input.abortMessage ?? "Claude CLI 文本调用已中断", "AbortError"));
+    };
+
+    if (input.abortSignal?.aborted) {
+      abort();
+      return;
+    }
+
+    input.abortSignal?.addEventListener("abort", abort, { once: true });
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      output += text;
+      trace?.appendStdout(text);
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      errorOutput += text;
+      trace?.appendStderr(text);
+    });
+
+    child.on("error", (error) => {
+      input.abortSignal?.removeEventListener("abort", abort);
+      trace?.finish("failed", error.message);
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      input.abortSignal?.removeEventListener("abort", abort);
+      if (aborted) return;
+      const exitCode = code ?? 0;
+      if (exitCode !== 0) {
+        trace?.finish("failed", errorOutput.trim() || input.failureMessage || "Claude CLI 文本调用失败");
+        reject(new Error(errorOutput.trim() || input.failureMessage || "Claude CLI 文本调用失败"));
+        return;
+      }
+      const parsedOutput = extractClaudeOutputText(output);
+      if (parsedOutput) trace?.writeOutput(parsedOutput);
+      trace?.finish("completed");
+      resolve({
+        raw: parsedOutput || output,
+        exitCode,
+        stderr: errorOutput.trim(),
+        elapsedMs: Date.now() - startedAt,
+      });
+    });
+  });
+}
+
 type ToolUseBlockState = {
   name: string;
   rawInput?: unknown;
@@ -210,6 +405,7 @@ function buildWorkspaceBoundPrompt(input: {
   contextPack?: string;
   workspaceDir: string;
   workspacePolicy?: string;
+  toolSummary?: ReturnType<typeof describeRuntimeToolPolicy>;
 }) {
   const parts: string[] = [
     "你是 KiKi 当前会话助手，不是代码仓库开发助手。",
@@ -221,16 +417,20 @@ function buildWorkspaceBoundPrompt(input: {
   if (input.workspacePolicy) {
     parts.push(`workspaceMode: ${input.workspacePolicy}`);
   }
+  if (input.toolSummary) {
+    parts.push(
+      "",
+      "【当前 Runtime 工具权限策略】",
+      `已允许：${input.toolSummary.allowed.length > 0 ? input.toolSummary.allowed.join("、") : "无"}`,
+      `已禁用：${input.toolSummary.disabled.length > 0 ? input.toolSummary.disabled.join("、") : "无"}`,
+      "当工具被禁用时，请直接说明“当前运行环境已禁用对应工具”，不要建议用户输入 /allow，不要建议修改 ~/.claude/settings.json，不要声称会出现授权弹窗。",
+    );
+  }
   if (input.contextPack?.trim()) {
     parts.push("", "【当前会话上下文包】", input.contextPack.trim());
   }
   parts.push("", buildPrompt(input.message, input.quotedMessage));
   return parts.join("\n");
-}
-
-function buildAllowedTools(permissionMode: RuntimePermissionMode) {
-  if (permissionMode !== "readonly") return [];
-  return ["Read", "Glob", "Grep", "WebFetch", "WebSearch"];
 }
 
 function truncateMiddle(value: string, max = 80) {
@@ -341,27 +541,28 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
   if (options.claudeSessionId) {
     args.push("--resume", options.claudeSessionId);
   }
-  const allowedTools = buildAllowedTools(options.permissionMode);
-  if (allowedTools.length > 0) {
-    // Claude CLI 的 --allowedTools 在 Commander.js 中被定义为 variadic（<tools...>），
-    // 会贪婪吞掉所有后续位置参数。即使我们用逗号分隔成单 token，后面的 prompt argv 仍然
-    // 会被吃进 tools 列表，导致 CLI 报 "Input must be provided either through stdin or
-    // as a prompt argument when using --print"。
-    // 使用逗号分隔形式，并通过 stdin 传 prompt（见下方 spawn），双重规避。
-    args.push("--allowedTools", allowedTools.join(","));
-  }
+  const resolvedToolPolicy = resolveRuntimeToolPolicy({
+    filePolicy: options.filePolicy,
+    permissionMode: options.permissionMode,
+    channelPolicy: options.channelPolicy ?? { mode: options.workspacePolicy === "task" ? "task" : "conversation" },
+  });
+  // Claude CLI 的 --allowedTools 在 Commander.js 中被定义为 variadic（<tools...>），
+  // 使用逗号分隔形式，并通过 stdin 传 prompt，规避参数吞食问题。
+  args.push(...buildToolArgs(resolvedToolPolicy));
   const promptInput = buildWorkspaceBoundPrompt({
     message: options.message,
     quotedMessage: options.quotedMessage,
     contextPack: options.contextPack,
     workspaceDir: cwd,
     workspacePolicy: options.workspacePolicy,
+    toolSummary: describeRuntimeToolPolicy(resolvedToolPolicy),
   });
   const trace = createClaudeTrace({
     cwd,
     cliPath,
     args,
     permissionMode: options.permissionMode,
+    toolPolicy: resolvedToolPolicy,
     claudeSessionId: options.claudeSessionId,
     scope: "conversation_chat",
     stepLabel: "Claude 会话流式回复",
@@ -509,6 +710,18 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
 
       if (payload.type === "result") {
         terminalResultReceived = true;
+        if (payload.permission_denials?.length) {
+          emittedFatalError = true;
+          const tools = Array.from(
+            new Set(payload.permission_denials.map((item) => item.tool_name).filter(Boolean)),
+          ).join("、");
+          const message = tools
+            ? `当前运行环境未允许 ${tools}。请在设置里的「工具权限策略」中开启后重试。`
+            : "当前运行环境未允许本次工具调用。请在设置里的「工具权限策略」中开启后重试。";
+          if (!emitEvent({ type: "permission_request", reason: message })) return;
+          emitEvent({ type: "error", message });
+          return;
+        }
         if (payload.subtype === "success") {
           if (typeof payload.result !== "string" || !payload.result.trim()) {
             emittedFatalError = true;

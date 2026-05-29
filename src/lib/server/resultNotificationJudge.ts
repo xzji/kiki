@@ -170,8 +170,8 @@ function contextRequiredDecision(input: JudgeTaskResultInput, reason: string): T
     notificationType: "context_required",
     priority: "high",
     reason,
-    snippet: `[待补充] ${summary.headline}`,
-    userMessage: `任务「${taskTitle}」需要你补充信息后继续推进。${reason}`,
+    snippet: `[待补充] 任务「${taskTitle}」需要你补充信息`,
+    userMessage: `任务「${taskTitle}」需要你补充信息后继续推进。`,
     badge: "need_confirm",
     resultSummary: {
       ...summary,
@@ -210,27 +210,6 @@ function archiveInteractionGapDecision(input: JudgeTaskResultInput): TaskResultN
       showTimelineByDefault: true,
       showRawOutputBehindMore: true,
       showArtifactsExpanded: true,
-    },
-  });
-}
-
-function digestReadyDecision(input: JudgeTaskResultInput): TaskResultNotificationDecision {
-  const taskTitle = cleanTaskTitle(input.task);
-  const summary = buildSummary(input, `我整理好了「${taskTitle}」的摘要。`);
-  return baseDecision(input, {
-    shouldNotify: true,
-    channel: "inbox",
-    notificationType: "digest_ready",
-    priority: "normal",
-    reason: "摘要类任务完成后适合进入 Inbox 供用户查看。",
-    snippet: summary.headline,
-    userMessage: `我整理好了任务「${taskTitle}」的摘要，核心是：${summary.headline}`,
-    badge: null,
-    resultSummary: summary,
-    detailPolicy: {
-      showTimelineByDefault: false,
-      showRawOutputBehindMore: true,
-      showArtifactsExpanded: false,
     },
   });
 }
@@ -281,7 +260,6 @@ function silentArchiveDecision(input: JudgeTaskResultInput): TaskResultNotificat
 }
 
 export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotificationDecision {
-  const kind = input.result.resultViewKind || input.task.resultViewKind || input.task.executionKind;
   const interaction = input.result.interactionRequirement;
 
   if (interaction?.type === "deliverable_gap" || interaction?.type === "agent_revision_required") {
@@ -310,22 +288,6 @@ export function judgeTaskResult(input: JudgeTaskResultInput): TaskResultNotifica
 
   if (requiresUserConfirmationToComplete(input.task, { includeRequiresConfirmation: true })) {
     return actionRequiredDecision(input, "任务已完成，建议你确认结果后继续推进。");
-  }
-
-  if (kind === "confirm_action") {
-    return actionRequiredDecision(input, input.result.summary || "KiKi 已整理好可执行方案，需要你确认。");
-  }
-
-  if (kind === "draft_review") {
-    return actionRequiredDecision(input, input.result.summary || "草稿已生成，需要你确认或提出修改建议。");
-  }
-
-  if (kind === "flashcard" || kind === "listening_qa" || kind === "freeform_chat") {
-    return answerRequiredDecision(input);
-  }
-
-  if (kind === "reading_digest") {
-    return digestReadyDecision(input);
   }
 
   if (input.task.executionMode === "monitoring" && hasImportantSignal(input.result)) {

@@ -21,6 +21,7 @@ export type ClaudeTraceMetadata = {
   cliPath: string;
   args: string[];
   permissionMode?: string;
+  toolPolicy?: unknown;
   claudeSessionId?: string;
   traceDir: string;
   promptPath: string;
@@ -142,6 +143,7 @@ export function createClaudeTrace(input: {
   cliPath: string;
   args: string[];
   permissionMode?: string;
+  toolPolicy?: unknown;
   claudeSessionId?: string;
   requestId?: string;
   scope?: string;
@@ -186,6 +188,7 @@ export function createClaudeTrace(input: {
     cliPath: input.cliPath,
     args: input.args,
     permissionMode: input.permissionMode,
+    toolPolicy: input.toolPolicy,
     claudeSessionId: input.claudeSessionId,
     traceDir,
     promptPath,

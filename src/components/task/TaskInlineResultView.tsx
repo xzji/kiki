@@ -12,13 +12,9 @@ function hasCompletedAgentResult(instance: TaskInstance) {
   return instance.status === "completed" || instance.result?.taskResult?.status === "done";
 }
 
-export function canRenderInlineAgentResult(task: Task, instance: TaskInstance) {
-  const viewKind = task.resultViewKind ?? task.executionKind;
-  return (
-    hasCompletedAgentResult(instance) &&
-    hasAgentDeliverable(instance) &&
-    (viewKind === "generic_result" || instance.payload.kind === "generic_result")
-  );
+export function canRenderInlineAgentResult(_task: Task, instance: TaskInstance) {
+  void _task;
+  return hasCompletedAgentResult(instance) && hasAgentDeliverable(instance);
 }
 
 export function TaskInlineResultView({ task, instance }: { task: Task; instance: TaskInstance }) {

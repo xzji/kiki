@@ -12,9 +12,47 @@ function readStringField(input: unknown, keys: string[]) {
   return undefined;
 }
 
+function readStringArrayField(input: unknown, keys: string[]) {
+  const record = asRecord(input);
+  if (!record) return [];
+  for (const key of keys) {
+    const value = record[key];
+    if (!Array.isArray(value)) continue;
+    return value.flatMap((item) => {
+      if (typeof item === "string" && item.trim()) return [item.trim()];
+      const nested = readStringField(item, ["file_path", "path", "target_file", "file", "filename", "name"]);
+      return nested ? [nested] : [];
+    });
+  }
+  return [];
+}
+
 function truncate(value: string, max = 160) {
   if (value.length <= max) return value;
   return `${value.slice(0, max - 3)}...`;
+}
+
+function unique(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function basename(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+export type ToolOperationDisplay = {
+  action: string;
+  objectText?: string;
+  paths?: string[];
+};
+
+export function extractToolFilePaths(input: unknown) {
+  const directPath = readStringField(input, ["file_path", "path", "target_file", "file"]);
+  return unique([
+    ...(directPath ? [directPath] : []),
+    ...readStringArrayField(input, ["file_paths", "paths", "target_files", "files"]),
+  ]);
 }
 
 export function summarizeToolOperation(toolName: string | undefined, input: unknown) {
@@ -39,6 +77,8 @@ export function summarizeToolOperation(toolName: string | undefined, input: unkn
     return url ? `URL：${truncate(url)}` : undefined;
   }
   if (normalized.includes("read") || normalized.includes("write") || normalized.includes("edit") || normalized.includes("patch")) {
+    const filePaths = extractToolFilePaths(input);
+    if (filePaths.length > 1) return `文件：${filePaths.map((path) => truncate(path)).join("\n")}`;
     return filePath ? `文件：${truncate(filePath)}` : undefined;
   }
   if (normalized.includes("grep")) {
@@ -73,4 +113,50 @@ export function formatToolOperationText(title: string, summary?: string) {
     .replace(/读取文件内容/g, "读取文件")
     .replace(/编辑代码文件/g, "编辑文件");
   return `${normalizedTitle}：${stripSummaryPrefix(summary)}`;
+}
+
+function parseSummaryPaths(summary: string | undefined) {
+  if (!summary?.trim()) return [];
+  const stripped = stripSummaryPrefix(summary);
+  return unique(
+    stripped
+      .split(/\n+/)
+      .map((line) => line.trim().replace(/^文件\s*\d*[:：]\s*/, ""))
+      .filter((line) => line.includes("/") || line.includes("\\")),
+  );
+}
+
+function pathListText(paths: string[], maxVisible = 4) {
+  const visible = paths.slice(0, maxVisible).map(basename);
+  return `${visible.join(", ")}${paths.length > maxVisible ? " 等" : ""}`;
+}
+
+export function formatToolOperationDisplay(
+  toolName: string,
+  title: string,
+  summary?: string,
+  input?: unknown,
+): ToolOperationDisplay {
+  const normalizedToolName = toolName.toLowerCase();
+  const isFileMutation =
+    normalizedToolName.includes("write") ||
+    normalizedToolName.includes("edit") ||
+    normalizedToolName.includes("patch");
+  const isFileRead = normalizedToolName.includes("read");
+  const inputPaths = extractToolFilePaths(input);
+  const summaryPaths = parseSummaryPaths(summary);
+  const paths = unique([...inputPaths, ...summaryPaths]);
+
+  if ((isFileMutation || isFileRead) && paths.length) {
+    const actionPrefix = isFileMutation ? "编辑" : "读取";
+    return {
+      action: paths.length > 1 ? `${actionPrefix} ${paths.length} 个文件` : `${actionPrefix}文件`,
+      objectText: pathListText(paths),
+      paths,
+    };
+  }
+
+  return {
+    action: formatToolOperationText(title, summary),
+  };
 }

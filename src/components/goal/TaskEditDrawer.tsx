@@ -6,6 +6,7 @@ import { formatDateInput } from "@/lib/date";
 import { updateGoalTaskCommand } from "@/lib/api/goal-commands";
 import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { useGoalStore } from "@/stores/goalStore";
+import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type { Task } from "@/types/kiki";
 
 export function TaskEditDrawer({
@@ -31,7 +32,7 @@ export function TaskEditDrawer({
     taskType: task?.taskType ?? "repeat",
     triggerRule: task?.triggerRule ?? "",
     deadline: formatDateInput(task?.deadline),
-    executionKind: task?.executionKind ?? "flashcard",
+    executionKind: task?.executionKind ?? "generic_result",
   });
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export function TaskEditDrawer({
       taskType: task?.taskType ?? "repeat",
       triggerRule: task?.triggerRule ?? "",
       deadline: formatDateInput(task?.deadline),
-      executionKind: task?.executionKind ?? "flashcard",
+      executionKind: task?.executionKind ?? "generic_result",
     });
   }, [task]);
 
@@ -65,7 +66,7 @@ export function TaskEditDrawer({
             <Field label="子目标"><div className="rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#6B7280]">{task.subGoalId}</div></Field>
           </Section>
           <Section title="执行方式">
-            <Field label="执行类型"><select value={form.executionKind} onChange={(e) => setForm((prev) => ({ ...prev, executionKind: e.target.value as Task["executionKind"] }))} className="input"><option value="flashcard">flashcard</option><option value="listening_qa">listening_qa</option><option value="reading_digest">reading_digest</option><option value="confirm_action">confirm_action</option><option value="draft_review">draft_review</option><option value="freeform_chat">freeform_chat</option><option value="generic_result">generic_result</option></select></Field>
+            <Field label="执行类型"><select value={form.executionKind} onChange={(e) => setForm((prev) => ({ ...prev, executionKind: e.target.value as Task["executionKind"] }))} className="input"><option value="generic_result">generic_result</option></select></Field>
           </Section>
           <Section title="KiKi 的建议">
             <p className="rounded-lg border border-dashed border-[#D0D7DE] bg-[#F8FAFC] px-3 py-3 text-sm leading-6 text-[#6B7280]">这个任务适合保留每天 11:00 触发，因为它和你的托福训练节奏已经形成稳定习惯。若要进一步提升效率，可以把 payload 中的词汇组改成更聚焦的天文领域词汇。</p>
@@ -98,7 +99,7 @@ export function TaskEditDrawer({
                 task: {
                   ...task,
                   ...taskInput,
-                  resultViewKind: task.resultViewKind ?? taskInput.executionKind,
+                  resultViewKind: normalizeTaskResultViewKind(taskInput.executionKind),
                   executionObjective: taskInput.description,
                 },
               });

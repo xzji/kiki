@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 
+import { TablePreview } from "@/components/spreadsheet/TablePreview";
+import { looksLikeTable, splitTableRow } from "@/lib/spreadsheet/adapters/markdownTables";
 import { cn } from "@/lib/utils";
 
 type MarkdownBlock =
@@ -12,8 +14,6 @@ type MarkdownBlock =
   | { kind: "list"; ordered: boolean; items: string[] }
   | { kind: "table"; headers: string[]; rows: string[][] }
   | { kind: "hr" };
-
-const TABLE_SEPARATOR_RE = /^\s*\|?[\s:-]+\|[\s|:-]*\s*$/;
 
 function isFence(line: string) {
   return line.trimStart().startsWith("```");
@@ -35,24 +35,15 @@ function getListMatch(line: string) {
   return null;
 }
 
+function normalizeTableRow(row: string[], width: number) {
+  return Array.from({ length: width }, (_, index) => row[index] ?? "");
+}
+
 function isBlockStart(line: string, nextLine?: string) {
   if (!line.trim()) return true;
   if (isFence(line) || isHeading(line) || isHr(line) || getListMatch(line)) return true;
   if (/^\s*>\s?/.test(line)) return true;
   return Boolean(nextLine && looksLikeTable(line, nextLine));
-}
-
-function splitTableRow(line: string) {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
-}
-
-function looksLikeTable(line: string, nextLine: string) {
-  return line.includes("|") && TABLE_SEPARATOR_RE.test(nextLine);
 }
 
 function parseMarkdown(markdown: string): MarkdownBlock[] {
@@ -126,10 +117,17 @@ function parseMarkdown(markdown: string): MarkdownBlock[] {
     const nextLine = lines[index + 1] ?? "";
     if (looksLikeTable(line, nextLine)) {
       const headers = splitTableRow(line);
+      if (headers.every((header) => header.length === 0)) {
+        index += 2;
+        while (index < lines.length && (lines[index] ?? "").includes("|") && (lines[index] ?? "").trim()) {
+          index += 1;
+        }
+        continue;
+      }
       const rows: string[][] = [];
       index += 2;
       while (index < lines.length && (lines[index] ?? "").includes("|") && (lines[index] ?? "").trim()) {
-        rows.push(splitTableRow(lines[index] ?? ""));
+        rows.push(normalizeTableRow(splitTableRow(lines[index] ?? ""), headers.length));
         index += 1;
       }
       blocks.push({ kind: "table", headers, rows });
@@ -214,9 +212,11 @@ function renderInline(text: string): ReactNode[] {
 export function MarkdownRenderer({
   content,
   className,
+  tableVariant = "plain",
 }: {
   content: string;
   className?: string;
+  tableVariant?: "plain" | "with-toolbar";
 }) {
   const blocks = parseMarkdown(content);
 
@@ -272,30 +272,7 @@ export function MarkdownRenderer({
           }
           case "table":
             return (
-              <div key={key} className="overflow-x-auto rounded-xl border border-[#E5E7EB]">
-                <table className="min-w-full border-collapse text-left text-[13px]">
-                  <thead className="bg-[#F8F9FB] text-[#6B7280]">
-                    <tr>
-                      {block.headers.map((header, headerIndex) => (
-                        <th key={`${headerIndex}-${header}`} className="border-b border-[#E5E7EB] px-3 py-2 font-medium">
-                          {renderInline(header)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {block.rows.map((row, rowIndex) => (
-                      <tr key={`row-${rowIndex}`} className="bg-white">
-                        {block.headers.map((_, cellIndex) => (
-                          <td key={cellIndex} className="border-b border-[#EEF1F4] px-3 py-2 align-top">
-                            {renderInline(row[cellIndex] ?? "")}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <TablePreview key={key} data={{ headers: block.headers, rows: block.rows }} variant={tableVariant} />
             );
           case "hr":
             return <hr key={key} className="border-[#E5E7EB]" />;

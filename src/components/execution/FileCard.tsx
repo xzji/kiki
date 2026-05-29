@@ -1,7 +1,10 @@
 "use client";
 
 import { Download, ExternalLink, FileText } from "lucide-react";
+import { useState } from "react";
 
+import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
+import { XLSX_MIME } from "@/lib/spreadsheet/constants";
 import type { ArtifactRef } from "@/types/artifact";
 
 function formatBytes(size?: number) {
@@ -13,6 +16,8 @@ function formatBytes(size?: number) {
 
 export function FileCard({ artifact }: { artifact: ArtifactRef }) {
   const href = artifact.previewUrl || `/api/artifacts/${encodeURIComponent(artifact.id)}`;
+  const [showEditor, setShowEditor] = useState(false);
+  const isXlsx = artifact.mime === XLSX_MIME || artifact.label.toLowerCase().endsWith(".xlsx");
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_6px_18px_rgba(15,23,42,0.03)]">
       <div className="flex items-start gap-3">
@@ -47,7 +52,17 @@ export function FileCard({ artifact }: { artifact: ArtifactRef }) {
           <Download className="h-3.5 w-3.5" />
           下载
         </a>
+        {isXlsx ? (
+          <button
+            type="button"
+            onClick={() => setShowEditor((value) => !value)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] text-[#1F2328] hover:bg-[#F6F8FA]"
+          >
+            {showEditor ? "收起表格" : "展开为可编辑表格"}
+          </button>
+        ) : null}
       </div>
+      {isXlsx && showEditor ? <SpreadsheetEditor artifact={artifact} /> : null}
     </div>
   );
 }

@@ -140,6 +140,8 @@ async function runRole(input: MultiAgentOrchestratorInput & {
       workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: rolePermission(input.role, input.runtimeEnv),
+      filePolicy: input.runtimeEnv.filePolicy,
+      channelPolicy: { mode: "task" },
       claudeSessionId: undefined,
       signal: input.signal,
       onEvent: (event) => {

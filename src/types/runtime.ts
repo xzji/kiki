@@ -1,5 +1,42 @@
 export type RuntimePermissionMode = "readonly" | "confirm" | "execute";
 export type LocalRuntimeKind = "claude" | "codex" | "gemini";
+export type RuntimeToolCapability =
+  | "web"
+  | "fileRead"
+  | "fileWrite"
+  | "shell"
+  | "subagent"
+  | "schedule"
+  | "planMode";
+export type RuntimeFilePolicyMode = "all_on" | "all_off" | "custom";
+
+export type RuntimeFilePolicy = {
+  mode: RuntimeFilePolicyMode;
+  custom: Record<RuntimeToolCapability, boolean>;
+};
+
+export const RUNTIME_TOOL_CAPABILITIES: RuntimeToolCapability[] = [
+  "web",
+  "fileRead",
+  "fileWrite",
+  "shell",
+  "subagent",
+  "schedule",
+  "planMode",
+];
+
+export const DEFAULT_RUNTIME_FILE_POLICY: RuntimeFilePolicy = {
+  mode: "custom",
+  custom: {
+    web: true,
+    fileRead: true,
+    fileWrite: false,
+    shell: false,
+    subagent: false,
+    schedule: false,
+    planMode: false,
+  },
+};
 
 export type RuntimeHealth =
   | { status: "checking" }
@@ -15,6 +52,7 @@ export type RuntimeEnvironment = {
   workingDirectory: string;
   cliPath: string;
   permissionMode: RuntimePermissionMode;
+  filePolicy?: RuntimeFilePolicy;
   isDefault?: boolean;
   lastCheckedAt?: string;
   health?: RuntimeHealth;
@@ -26,6 +64,7 @@ export type RuntimeEnvironmentCheckInput = {
   workingDirectory: string;
   cliPath: string;
   permissionMode: RuntimePermissionMode;
+  filePolicy?: RuntimeFilePolicy;
 };
 
 export type RuntimeEnvironmentCheckResult = {
