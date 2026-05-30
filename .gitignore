@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# local runtime state and task workspaces
+/data/storage/
+/data/workspaces/
