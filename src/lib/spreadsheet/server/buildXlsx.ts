@@ -1,5 +1,3 @@
-import "server-only";
-
 import ExcelJS from "exceljs";
 
 import type { SpreadsheetWorkbook, TableData } from "@/lib/spreadsheet/types";

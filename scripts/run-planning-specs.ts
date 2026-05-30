@@ -9,8 +9,12 @@ import { runStateSnapshotSpecs } from "../src/lib/server/runtime/stateSnapshot.s
 import { runGoalDeliverableServiceSpecs } from "../src/lib/server/services/goalDeliverableService.spec";
 import { runStorageAdapterSpecs } from "../src/lib/server/adapters/storage.spec";
 import { runRuntimeEnvironmentCommandServiceSpecs } from "../src/lib/server/services/runtimeEnvironmentCommandService.spec";
+import { runTaskTriggerTimeSpecs } from "../src/lib/taskTriggerTime.spec";
+import { runGoalSchedulerEngineSpecs } from "../src/lib/server/worker/goalSchedulerEngine.spec";
 
 runStateSnapshotSpecs();
+runTaskTriggerTimeSpecs();
+runGoalSchedulerEngineSpecs();
 runBlockProtocolSpecs();
 runTaskCompilerSpecs();
 runGoalNotificationWorkerSpecs();

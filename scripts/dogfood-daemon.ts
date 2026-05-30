@@ -49,6 +49,7 @@ function buildFixtureGoal(runId: string): Goal {
     deadline: createdAt,
     progress: 0,
     createdAt,
+    conversationId: `dogfood-${runId}`,
     summary: "用于验证关闭浏览器后 daemon 调度、通知与 watchdog 是否稳定。",
     workflow: {
       phase: "executing",
@@ -160,17 +161,19 @@ function seedFixtureGoal(runId: string) {
 function parseArgs() {
   const args = new Set(process.argv.slice(2));
   const durationArg = process.argv.find((item) => item.startsWith("--hours="));
+  const runIdArg = process.argv.find((item) => item.startsWith("--run-id="));
   const hours = durationArg ? Number(durationArg.slice("--hours=".length)) : DEFAULT_DURATION_HOURS;
   return {
     seed: args.has("--seed"),
     once: args.has("--once"),
     hours: Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_DURATION_HOURS,
+    runId: runIdArg?.slice("--run-id=".length).trim(),
   };
 }
 
 async function main() {
   const input = parseArgs();
-  const runId = `dogfood-${Date.now()}`;
+  const runId = input.runId || `dogfood-${Date.now()}`;
   if (input.seed) seedFixtureGoal(runId);
   const deadline = Date.now() + input.hours * 60 * 60 * 1000;
   do {

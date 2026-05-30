@@ -103,15 +103,21 @@ export function runGoalSchedulerEngine(input: {
       skipped += 1;
       return;
     }
-    const result = startTaskAttempt({
-      goal: item.goal,
-      subGoal: latestSubGoal,
-      task: item.task,
-      instance,
-      runtimeEnv,
-      triggerSource: "scheduler",
-      requestId: `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    });
+    let result: ReturnType<typeof startTaskAttempt>;
+    try {
+      result = startTaskAttempt({
+        goal: item.goal,
+        subGoal: latestSubGoal,
+        task: item.task,
+        instance,
+        runtimeEnv,
+        triggerSource: "scheduler",
+        requestId: `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      });
+    } catch {
+      skipped += 1;
+      return;
+    }
     if (result.outcome === "queued") {
       createdJobs += 1;
       return;
