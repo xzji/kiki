@@ -12,6 +12,7 @@ import {
   activateEnvironmentCommand,
   createEnvironmentCommand,
   removeEnvironmentCommand,
+  RuntimeEnvironmentCommandError,
   setEnvironmentPermissionModeCommand,
   updateEnvironmentCommand,
 } from "@/lib/api/runtime-environment-commands";
@@ -152,6 +153,25 @@ export function RuntimeEnvironmentPanel() {
     console.error(fallback, error);
   }, []);
 
+  const persistEnvironmentPatch = useCallback(async (
+    id: string,
+    patch: Partial<RuntimeEnvironment>,
+  ) => {
+    const applyPatch = async () => {
+      const result = await updateEnvironmentCommand({ id, patch });
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    };
+    try {
+      await applyPatch();
+    } catch (error) {
+      if (error instanceof RuntimeEnvironmentCommandError && error.conflict) {
+        await applyPatch();
+        return;
+      }
+      throw error;
+    }
+  }, []);
+
   const refreshEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
     setEnvironmentHealth(environment.id, { status: "checking" });
     try {
@@ -160,25 +180,31 @@ export function RuntimeEnvironmentPanel() {
         cliPath: environment.cliPath,
         runtimeKind: environment.runtimeKind || "claude",
       });
-      setEnvironmentHealth(environment.id, {
+      const checkedAt = new Date().toISOString();
+      const health: RuntimeEnvironment["health"] = {
         status: "online",
         cliPath: result.cliPath,
         claudeVersion: result.version,
-      });
-      if (result.cliPath !== environment.cliPath) {
-        const updateResult = await updateEnvironmentCommand({
-          id: environment.id,
-          patch: { cliPath: result.cliPath },
-        });
-        useRuntimeEnvStore.getState().replaceEnvironments(updateResult.environments, null, updateResult.revision);
-      }
+      };
+      setEnvironmentHealth(environment.id, health);
+      await persistEnvironmentPatch(environment.id, {
+        cliPath: result.cliPath,
+        health,
+        lastCheckedAt: checkedAt,
+      }).catch((error) => handleRuntimeCommandError(error, "Runtime 环境状态保存失败"));
     } catch (error) {
-      setEnvironmentHealth(environment.id, {
+      const checkedAt = new Date().toISOString();
+      const health: RuntimeEnvironment["health"] = {
         status: "offline",
         reason: error instanceof Error ? error.message : "环境状态检测失败",
-      });
+      };
+      setEnvironmentHealth(environment.id, health);
+      await persistEnvironmentPatch(environment.id, {
+        health,
+        lastCheckedAt: checkedAt,
+      }).catch((persistError) => handleRuntimeCommandError(persistError, "Runtime 环境状态保存失败"));
     }
-  }, [setEnvironmentHealth]);
+  }, [handleRuntimeCommandError, persistEnvironmentPatch, setEnvironmentHealth]);
 
   const handleCreateEnvironment = useCallback(async (environment: Omit<RuntimeEnvironment, "id">) => {
     try {

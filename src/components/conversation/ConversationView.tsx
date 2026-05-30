@@ -212,7 +212,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
     setShowUnreadJump(unreadIds.length > 0);
     markConversationRead(conversation.id);
   }, [conversation, markConversationRead]);
-
   const sortedMessages = useMemo(() => {
     if (!conversation) return [] as ConversationMessage[];
     return [...conversation.messages].sort(

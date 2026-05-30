@@ -324,6 +324,7 @@ function ConversationListItem({
   onMarkUnread: () => void;
   onDelete: () => void | Promise<void>;
 }) {
+  const router = useRouter();
   const unread = getConversationUnreadCount(conversation);
   const latest = conversation.messages[conversation.messages.length - 1];
   const [menuOpen, setMenuOpen] = useState(false);
@@ -367,17 +368,32 @@ function ConversationListItem({
     setIsRenaming(false);
   };
 
+  const openConversation = () => {
+    if (isRenaming) return;
+    router.push(`/conversations/${conversation.id}`);
+  };
+
   return (
     <li>
       <div
+        role="link"
+        tabIndex={isRenaming ? -1 : 0}
+        onClick={openConversation}
+        onKeyDown={(event) => {
+          if (isRenaming) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openConversation();
+          }
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           if (isRenaming) return;
           setMenuOpen(true);
         }}
         className={cn(
-          "group flex items-start gap-2 rounded-lg pl-[34px] pr-2 py-2 transition hover:bg-white/80",
-          active && "bg-white shadow-sm",
+          "group flex cursor-pointer items-start gap-2 rounded-lg pl-[34px] pr-2 py-2 transition hover:bg-white/80 focus:outline-none",
+          active && "bg-white",
         )}
       >
         {isRenaming ? (
@@ -402,7 +418,7 @@ function ConversationListItem({
             />
           </div>
         ) : (
-          <Link href={`/conversations/${conversation.id}`} className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-[13px] text-[#1F2328]">
                 {conversation.title}
@@ -427,9 +443,9 @@ function ConversationListItem({
                 暂无消息
               </span>
             )}
-          </Link>
+          </div>
         )}
-        <div ref={menuRef} className="relative pt-0.5">
+        <div ref={menuRef} className="relative pt-0.5" onClick={(event) => event.stopPropagation()}>
           <button
             type="button"
             aria-label="更多"

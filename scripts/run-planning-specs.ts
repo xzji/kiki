@@ -11,6 +11,7 @@ import { runStorageAdapterSpecs } from "../src/lib/server/adapters/storage.spec"
 import { runRuntimeEnvironmentCommandServiceSpecs } from "../src/lib/server/services/runtimeEnvironmentCommandService.spec";
 import { runTaskTriggerTimeSpecs } from "../src/lib/taskTriggerTime.spec";
 import { runGoalSchedulerEngineSpecs } from "../src/lib/server/worker/goalSchedulerEngine.spec";
+import { runConversationCommandServiceSpecs } from "../src/lib/server/services/conversationCommandService.spec";
 
 runStateSnapshotSpecs();
 runTaskTriggerTimeSpecs();
@@ -23,6 +24,7 @@ runProtocolNormalizeSpecs();
 runPromptDuplicationGuardSpecs();
 runRuntimeStateChannelSpecs();
 runRuntimeEnvironmentCommandServiceSpecs();
+runConversationCommandServiceSpecs();
 runGoalDeliverableServiceSpecs();
 runStorageAdapterSpecs();
 console.log("planning specs passed");

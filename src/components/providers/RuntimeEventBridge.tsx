@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  fetchConversationState,
+  importLegacyConversations,
+} from "@/lib/api/conversation-commands";
 import { createGoalEventsSource, fetchGoalEvents } from "@/lib/api/goal-events";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import {
@@ -24,10 +28,11 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
-import type { InboxItem, TaskInstance } from "@/types/kiki";
+import type { Conversation, InboxItem, TaskInstance } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { GoalEventRecord } from "@/types/goalEventLog";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import type { ConversationEventRecord } from "@/types/conversationEventLog";
 
 function stableStringify(value: unknown) {
   return JSON.stringify(value);
@@ -50,9 +55,28 @@ const runtimeEventMetrics = {
   snapshotRefreshes: 0,
 };
 
+const LEGACY_BUSINESS_STATE_KEYS = [
+  "kiki.runtime.environments",
+  "kiki.schedule.events",
+  "kiki.schedule.events.reset-version",
+  "kiki.goals",
+];
+
 type RuntimeEventMetricsWindow = Window & {
   __KIKI_RUNTIME_EVENT_METRICS__?: typeof runtimeEventMetrics;
 };
+
+function readLegacyConversations(): Conversation[] {
+  try {
+    const raw = window.localStorage.getItem("kiki.conversations");
+    if (!raw || window.localStorage.getItem("kiki.conversations.migrated") === "1") return [];
+    const parsed = JSON.parse(raw) as { state?: { conversations?: Conversation[] }; conversations?: Conversation[] };
+    const conversations = parsed.state?.conversations ?? parsed.conversations ?? [];
+    return Array.isArray(conversations) ? conversations : [];
+  } catch {
+    return [];
+  }
+}
 
 function revisionFromSnapshot(snapshot: RuntimeStatePayload): RuntimeStateRevision {
   return {
@@ -308,6 +332,8 @@ export function RuntimeEventBridge() {
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const replaceEnvironments = useRuntimeEnvStore((state) => state.replaceEnvironments);
   const replaceEvents = useScheduleStore((state) => state.replaceEvents);
+  const hydrateConversations = useConversationStore((state) => state.hydrateConversations);
+  const applyConversationEvent = useConversationStore((state) => state.applyConversationEvent);
 
   const currentGoalsKey = useMemo(() => stableStringify(goals), [goals]);
   const currentGoalIdsKey = useMemo(() => goals.map((goal) => goal.id).sort().join("|"), [goals]);
@@ -318,6 +344,7 @@ export function RuntimeEventBridge() {
   const eventCursorRef = useRef<GoalEventCursorMap>(readGoalEventCursors());
   const cursorChannelRef = useRef<BroadcastChannel | null>(null);
   const runtimeStateChannelRef = useRef<BroadcastChannel | null>(null);
+  const conversationCursorRef = useRef(0);
 
   const refreshSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
@@ -354,6 +381,67 @@ export function RuntimeEventBridge() {
 
   useEffect(() => {
     let cancelled = false;
+    let source: EventSource | null = null;
+    const startSse = () => {
+      if (cancelled) return;
+      source = new EventSource(`/api/conversations/events/stream?fromId=${conversationCursorRef.current}`);
+      source.addEventListener("events", (message) => {
+        try {
+          const payload = JSON.parse((message as MessageEvent).data) as {
+            events?: ConversationEventRecord[];
+            nextCursor?: number;
+          };
+          for (const event of payload.events ?? []) {
+            if (event.id <= conversationCursorRef.current) continue;
+            applyConversationEvent(event);
+            conversationCursorRef.current = event.id;
+          }
+        } catch {
+          // ignore malformed conversation event payloads
+        }
+      });
+    };
+    const hydrateConversationsFromServer = async () => {
+      try {
+        const remote = await fetchConversationState();
+        if (cancelled) return;
+        conversationCursorRef.current = remote.latestEventId;
+        if (remote.conversations.length === 0) {
+          const legacy = readLegacyConversations();
+          if (legacy.length > 0) {
+            try {
+              const imported = await importLegacyConversations(legacy);
+              if (cancelled) return;
+              hydrateConversations(imported);
+              window.localStorage.setItem("kiki.conversations.migrated", "1");
+              window.localStorage.removeItem("kiki.conversations");
+              const after = await fetchConversationState();
+              if (cancelled) return;
+              conversationCursorRef.current = after.latestEventId;
+              startSse();
+              return;
+            } catch {
+              window.localStorage.setItem("kiki.conversations.migrated.failed_at", new Date().toISOString());
+            }
+          }
+        }
+        hydrateConversations(remote.conversations);
+        startSse();
+      } catch {
+        // 会话投影失败时保留本地乐观状态，后续 SSE/轮询继续收敛。
+        startSse();
+      }
+    };
+    void hydrateConversationsFromServer();
+
+    return () => {
+      cancelled = true;
+      source?.close();
+    };
+  }, [applyConversationEvent, hydrateConversations]);
+
+  useEffect(() => {
+    let cancelled = false;
     const hydrate = async () => {
       try {
         const snapshot = await fetchRuntimeStateSnapshot();
@@ -364,6 +452,9 @@ export function RuntimeEventBridge() {
         applyGoalsProjection(snapshot.goals, remoteRevision.goals);
         replaceEnvironments(snapshot.runtimeEnvironments, null, remoteRevision.runtimeEnvironments);
         replaceEvents(snapshot.scheduleEvents, remoteRevision.scheduleEvents);
+        for (const key of LEGACY_BUSINESS_STATE_KEYS) {
+          window.localStorage.removeItem(key);
+        }
         setBootstrapped(true);
       } catch {
         setBootstrapped(true);

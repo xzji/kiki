@@ -1,7 +1,6 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { migrateGoalIds } from "@/lib/opaqueIds";
@@ -25,8 +24,6 @@ import type {
   TaskRunErrorCategory,
 } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
-
-const LOCAL_GOAL_STORAGE_RESET_VERSION = 13;
 
 function finalizeGoal(goal: Goal): Goal {
   const tasks = goal.subGoals.flatMap((subGoal) => subGoal.tasks);
@@ -651,9 +648,7 @@ export function selectVisibleGoals(state: Pick<GoalStore, "goals" | "pendingConv
   return result;
 }
 
-export const useGoalStore = create<GoalStore>()(
-  persist(
-    (set) => ({
+export const useGoalStore = create<GoalStore>()((set) => ({
       goals: [],
       goalProjectionRevision: 0,
       pendingTaskCreates: [],
@@ -967,30 +962,7 @@ export const useGoalStore = create<GoalStore>()(
           })),
         }));
       },
-    }),
-    {
-      name: "kiki.goals",
-      version: LOCAL_GOAL_STORAGE_RESET_VERSION,
-      migrate: () => {
-        return {
-          goals: [],
-          goalProjectionRevision: 0,
-        };
-      },
-      partialize: () => ({
-        goals: [],
-        goalProjectionRevision: 0,
-      }),
-      merge: (_persisted, current) => {
-        return {
-          ...current,
-          goals: [],
-          goalProjectionRevision: 0,
-        };
-      },
-    },
-  ),
-);
+    }));
 
 export function getGoalById(goalId: string) {
   return selectVisibleGoals(useGoalStore.getState()).find((goal) => goal.id === goalId);

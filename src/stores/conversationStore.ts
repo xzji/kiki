@@ -1,13 +1,35 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
+import {
+  appendConversationMessageCommand,
+  createConversationCommand,
+  deleteConversationCommand,
+  deleteConversationMessageCommand,
+  fetchConversationState,
+  markConversationMessageReadCommand,
+  markConversationReadCommand,
+  markConversationUnreadCommand,
+  renameConversationCommand,
+  setConversationClaudeSessionCommand,
+  setConversationGoalCommand,
+  setConversationRuntimeEnvCommand,
+  setConversationStatusCommand,
+  setConversationWorkspaceCommand,
+  setGoalInfoCollectionCommand,
+  setPlanningRunStateCommand,
+  toggleConversationPinnedCommand,
+  updateConversationMessageCommand,
+} from "@/lib/api/conversation-commands";
 import { migrateConversationIds, normalizeGoalId } from "@/lib/opaqueIds";
+import type { ConversationEventRecord } from "@/types/conversationEventLog";
 import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 
 type ConversationStore = {
   conversations: Conversation[];
+  hydrateConversations: (conversations: Conversation[]) => void;
+  applyConversationEvent: (event: ConversationEventRecord) => void;
   createConversation: (title?: string) => Conversation;
   appendMessage: (conversationId: string, message: ConversationMessage) => void;
   updateMessage: (
@@ -31,7 +53,6 @@ type ConversationStore = {
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 
-const MOCK_BASELINE_RESET_VERSION = 11;
 const MOCK_GOAL_IDS = new Set(
   [
     "goal-toefl",
@@ -87,20 +108,132 @@ function mergeConversationsById(...groups: Conversation[][]) {
   return Array.from(merged.values()).sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
 }
 
-function migrateConversationState(persistedState: unknown) {
-  const persisted = persistedState as Partial<ConversationStore> | undefined;
-  const persistedConversations = Array.isArray(persisted?.conversations) ? persisted.conversations : [];
-  return {
-    conversations: sanitizeConversationHistory(
-      mergeConversationsById(persistedConversations),
-    ),
-  };
+function sendConversationCommand(task: Promise<unknown>) {
+  task.catch((error) => {
+    console.error("[conversation-command]", error);
+    void resyncConversations();
+  });
+}
+
+let resyncPending = false;
+async function resyncConversations() {
+  if (resyncPending) return;
+  resyncPending = true;
+  try {
+    const remote = await fetchConversationState();
+    useConversationStore.getState().hydrateConversations(remote.conversations);
+  } catch (error) {
+    console.error("[conversation-resync]", error);
+  } finally {
+    resyncPending = false;
+  }
+}
+
+function upsertConversation(conversations: Conversation[], next: Conversation) {
+  const found = conversations.some((item) => item.id === next.id);
+  return found
+    ? conversations.map((item) => (item.id === next.id ? { ...item, ...next } : item))
+    : [next, ...conversations];
+}
+
+type ConversationEventLoosePayload = {
+  conversation?: Conversation;
+  title?: string;
+  pinned?: boolean;
+  goalId?: string;
+  workspacePath?: string;
+  workspaceInitializedAt?: string;
+  runtimeEnvId?: string;
+  claudeSessionId?: string;
+  status?: Conversation["status"];
+  collection?: GoalInfoCollection | null;
+  state?: GoalPlanningRunState | null;
+  message?: ConversationMessage;
+  messageId?: string;
+};
+
+function applyConversationEventToList(conversations: Conversation[], event: ConversationEventRecord) {
+  const payload = event.payload as ConversationEventLoosePayload;
+  if (event.kind === "conversation.created") return upsertConversation(conversations, payload.conversation as Conversation);
+  if (event.kind === "conversation.deleted") return conversations.filter((item) => item.id !== event.conversationId);
+  return conversations.map((conversation) => {
+    if (conversation.id !== event.conversationId) return conversation;
+    switch (event.kind) {
+      case "conversation.renamed":
+        return { ...conversation, title: payload.title ?? conversation.title };
+      case "conversation.pinned_toggled":
+        return { ...conversation, pinned: payload.pinned ?? conversation.pinned };
+      case "conversation.goal_set":
+        return { ...conversation, goalId: payload.goalId };
+      case "conversation.workspace_set":
+        return {
+          ...conversation,
+          workspacePath: payload.workspacePath,
+          workspaceInitializedAt: payload.workspaceInitializedAt,
+        };
+      case "conversation.runtime_env_set":
+        return { ...conversation, runtimeEnvId: payload.runtimeEnvId };
+      case "conversation.claude_session_set":
+        return { ...conversation, claudeSessionId: payload.claudeSessionId };
+      case "conversation.status_changed":
+        return { ...conversation, status: payload.status ?? conversation.status };
+      case "conversation.goal_info_collection_updated":
+        return { ...conversation, goalInfoCollection: payload.collection ?? undefined };
+      case "conversation.planning_run_state_updated":
+        return { ...conversation, planningRunState: payload.state ?? undefined };
+      case "conversation.read":
+        return { ...conversation, messages: conversation.messages.map((message) => ({ ...message, unread: false })) };
+      case "conversation.unread": {
+        const lastIndex = conversation.messages.length - 1;
+        return {
+          ...conversation,
+          messages: conversation.messages.map((message, index) =>
+            index === lastIndex ? { ...message, unread: true } : message,
+          ),
+        };
+      }
+      case "message.appended": {
+        if (!payload.message) return conversation;
+        return conversation.messages.some((message) => message.id === payload.message?.id)
+          ? conversation
+          : { ...conversation, messages: [...conversation.messages, payload.message] };
+      }
+      case "message.updated": {
+        if (!payload.message) return conversation;
+        return {
+          ...conversation,
+          messages: conversation.messages.map((message) =>
+            message.id === payload.message?.id && payload.message ? payload.message : message,
+          ),
+        };
+      }
+      case "message.deleted":
+        return {
+          ...conversation,
+          messages: conversation.messages.filter((message) => message.id !== payload.messageId),
+        };
+      case "message.read":
+        return {
+          ...conversation,
+          messages: conversation.messages.map((message) =>
+            message.id === payload.messageId ? { ...message, unread: false } : message,
+          ),
+        };
+      default:
+        return conversation;
+    }
+  });
 }
 
 export const useConversationStore = create<ConversationStore>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       conversations: [],
+      hydrateConversations: (conversations) => {
+        set({ conversations: sanitizeConversationHistory(mergeConversationsById(conversations)) });
+      },
+      applyConversationEvent: (event) => {
+        set({ conversations: applyConversationEventToList(get().conversations, event) });
+      },
       createConversation: (title) => {
         const now = new Date().toISOString();
         const next: Conversation = {
@@ -111,6 +244,7 @@ export const useConversationStore = create<ConversationStore>()(
           status: "idle",
         };
         set({ conversations: [next, ...get().conversations] });
+        sendConversationCommand(createConversationCommand(next));
         return next;
       },
       appendMessage: (conversationId, message) => {
@@ -125,8 +259,13 @@ export const useConversationStore = create<ConversationStore>()(
               : item,
           ),
         });
+        sendConversationCommand(appendConversationMessageCommand(conversationId, message));
       },
       updateMessage: (conversationId, messageId, updater) => {
+        const currentMessage = get()
+          .conversations.find((item) => item.id === conversationId)
+          ?.messages.find((message) => message.id === messageId);
+        const nextMessage = currentMessage ? updater(currentMessage) : null;
         set({
           conversations: get().conversations.map((item) =>
             item.id === conversationId
@@ -139,6 +278,9 @@ export const useConversationStore = create<ConversationStore>()(
               : item,
           ),
         });
+        if (nextMessage) {
+          sendConversationCommand(updateConversationMessageCommand(conversationId, messageId, nextMessage));
+        }
       },
       markConversationRead: (conversationId) => {
         set({
@@ -151,6 +293,7 @@ export const useConversationStore = create<ConversationStore>()(
               : item,
           ),
         });
+        sendConversationCommand(markConversationReadCommand(conversationId));
       },
       markConversationUnread: (conversationId) => {
         set({
@@ -165,6 +308,7 @@ export const useConversationStore = create<ConversationStore>()(
             };
           }),
         });
+        sendConversationCommand(markConversationUnreadCommand(conversationId));
       },
       markMessageRead: (conversationId, messageId) => {
         set({
@@ -179,6 +323,7 @@ export const useConversationStore = create<ConversationStore>()(
               : item,
           ),
         });
+        sendConversationCommand(markConversationMessageReadCommand(conversationId, messageId));
       },
       deleteMessage: (conversationId, messageId) => {
         set({
@@ -193,11 +338,13 @@ export const useConversationStore = create<ConversationStore>()(
             };
           }),
         });
+        sendConversationCommand(deleteConversationMessageCommand(conversationId, messageId));
       },
       deleteConversation: (conversationId) => {
         set({
           conversations: get().conversations.filter((item) => item.id !== conversationId),
         });
+        sendConversationCommand(deleteConversationCommand(conversationId));
       },
       toggleConversationPinned: (conversationId) => {
         set({
@@ -205,6 +352,7 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, pinned: !item.pinned } : item,
           ),
         });
+        sendConversationCommand(toggleConversationPinnedCommand(conversationId));
       },
       setGoalForConversation: (conversationId, goalId) => {
         set({
@@ -212,6 +360,7 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, goalId } : item,
           ),
         });
+        sendConversationCommand(setConversationGoalCommand(conversationId, goalId));
       },
       setGoalInfoCollection: (conversationId, collection) => {
         set({
@@ -221,6 +370,7 @@ export const useConversationStore = create<ConversationStore>()(
               : item,
           ),
         });
+        sendConversationCommand(setGoalInfoCollectionCommand(conversationId, collection));
       },
       setPlanningRunState: (conversationId, state) => {
         set({
@@ -228,6 +378,7 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, planningRunState: state ?? undefined } : item,
           ),
         });
+        sendConversationCommand(setPlanningRunStateCommand(conversationId, state));
       },
       renameConversation: (conversationId, title) => {
         set({
@@ -235,6 +386,7 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, title } : item,
           ),
         });
+        sendConversationCommand(renameConversationCommand(conversationId, title));
       },
       setConversationWorkspace: (conversationId, workspacePath) => {
         const now = new Date().toISOString();
@@ -249,6 +401,7 @@ export const useConversationStore = create<ConversationStore>()(
               : item,
           ),
         });
+        sendConversationCommand(setConversationWorkspaceCommand(conversationId, workspacePath));
       },
       setConversationRuntimeEnv: (conversationId, runtimeEnvId) => {
         set({
@@ -256,6 +409,7 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, runtimeEnvId } : item,
           ),
         });
+        sendConversationCommand(setConversationRuntimeEnvCommand(conversationId, runtimeEnvId));
       },
       setClaudeSessionId: (conversationId, claudeSessionId) => {
         set({
@@ -263,6 +417,7 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, claudeSessionId } : item,
           ),
         });
+        sendConversationCommand(setConversationClaudeSessionCommand(conversationId, claudeSessionId));
       },
       setConversationStatus: (conversationId, status) => {
         set({
@@ -270,29 +425,9 @@ export const useConversationStore = create<ConversationStore>()(
             item.id === conversationId ? { ...item, status } : item,
           ),
         });
+        sendConversationCommand(setConversationStatusCommand(conversationId, status));
       },
     }),
-    {
-      name: "kiki.conversations",
-      version: MOCK_BASELINE_RESET_VERSION,
-      migrate: migrateConversationState,
-      partialize: (state) => ({
-        conversations: state.conversations,
-      }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<ConversationStore> | undefined;
-        return {
-          ...currentState,
-          ...persisted,
-          conversations: sanitizeConversationHistory(
-            mergeConversationsById(
-              persisted?.conversations ?? currentState.conversations,
-            ),
-          ),
-        };
-      },
-    },
-  ),
 );
 
 export function getConversationUnreadCount(conversation: Conversation) {

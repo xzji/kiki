@@ -8,6 +8,8 @@ import {
   goalHasCompletedTasks,
   materializeGoalDeliverable,
 } from "@/lib/server/services/goalDeliverableService";
+import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
+import { getConversation } from "@/lib/server/repositories/conversationsRepository";
 import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, Task } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
@@ -103,8 +105,9 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
           // 每次进入 pending 的派发都生成新的 conversationMessageId（携带递增序号），
           // 让会话流以 append-only 方式记录每一次任务通知，避免历史卡片被新内容替换。
           const inboxItemId = shouldDeliverToInbox(notification.channel) ? `inbox-${instance.id}` : undefined;
+          const conversationExists = goal.conversationId ? !!getConversation(goal.conversationId) : false;
           const conversationMessageId =
-            goal.conversationId && shouldDeliverToConversation(notification.channel)
+            goal.conversationId && conversationExists && shouldDeliverToConversation(notification.channel)
               ? `msg-task-${instance.id}-n${nextSequence}`
               : undefined;
           nextGoals = markTaskNotificationDeliveredProjection({
@@ -115,6 +118,40 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
             conversationMessageId,
             notificationSequence: nextSequence,
           });
+          if (conversationMessageId && notification.userMessage) {
+            try {
+              applyConversationCommand({
+                command: {
+                  type: "append_message",
+                  conversationId: goal.conversationId!,
+                  message: {
+                    id: conversationMessageId,
+                    kind: "task_card",
+                    role: "kiki",
+                    content: notification.userMessage,
+                    createdAt: notification.createdAt,
+                    unread: true,
+                    status: "done",
+                    source: "system",
+                    taskRef: {
+                      goalId: goal.id,
+                      subGoalId: subGoal.id,
+                      taskId: task.id,
+                      instanceId: instance.id,
+                    },
+                    taskSnapshot: {
+                      task,
+                      instance,
+                    },
+                  },
+                },
+                idempotencyKey: `conversation.message.append:${conversationMessageId}`,
+                producedBy: "worker",
+              });
+            } catch {
+              // 会话投影失败不应阻断 goal 侧通知派发；事件流仍保留 notification.delivered。
+            }
+          }
           delivered += 1;
           for (const target of [
             inboxItemId ? "inbox" : null,

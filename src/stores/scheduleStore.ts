@@ -2,41 +2,8 @@
 
 import { create } from "zustand";
 
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
-
-const STORAGE_KEY = "kiki.schedule.events";
-const RESET_VERSION_KEY = "kiki.schedule.events.reset-version";
-const MOCK_BASELINE_RESET_VERSION = "4";
-
-function loadEvents(): AgentEvent[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const resetVersion = window.localStorage.getItem(RESET_VERSION_KEY);
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
-      return [];
-    }
-    const parsed = JSON.parse(raw) as AgentEvent[];
-    if (!Array.isArray(parsed)) return [];
-    const events = resetVersion === MOCK_BASELINE_RESET_VERSION ? parsed : [];
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-    window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
-    return events;
-  } catch {
-    return [];
-  }
-}
-
-function persistEvents(events: AgentEvent[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-    window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
-  } catch {
-    // ignore
-  }
-}
 
 type ScheduleStore = {
   hydrated: boolean;
@@ -45,7 +12,7 @@ type ScheduleStore = {
   viewMode: ScheduleViewMode;
   focusDate: string;
   allDayCollapsed: boolean;
-  hydrate: () => void;
+  hydrate: () => Promise<void>;
   setViewMode: (mode: ScheduleViewMode) => void;
   setFocusDate: (date: string) => void;
   goToToday: (today: string) => void;
@@ -57,6 +24,8 @@ type ScheduleStore = {
   toggleAllDay: () => void;
   replaceEvents: (events: AgentEvent[], revision?: number) => void;
 };
+
+let hydrateRetryTimer: number | null = null;
 
 function stepDate(iso: string, direction: -1 | 1, mode: ScheduleViewMode): string {
   const date = new Date(iso);
@@ -77,11 +46,22 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
   viewMode: "week",
   focusDate: new Date().toISOString(),
   allDayCollapsed: false,
-  hydrate: () =>
-    set(() => {
-      const events = loadEvents();
-      return { events, hydrated: true };
-    }),
+  hydrate: async () => {
+    if (get().hydrated) return;
+    try {
+      const snapshot = await fetchRuntimeStateSnapshot();
+      const revision = snapshot.meta?.revisions?.scheduleEvents;
+      get().replaceEvents(snapshot.scheduleEvents, revision);
+      set({ hydrated: true });
+    } catch {
+      if (!hydrateRetryTimer && typeof window !== "undefined") {
+        hydrateRetryTimer = window.setTimeout(() => {
+          hydrateRetryTimer = null;
+          if (!get().hydrated) void get().hydrate();
+        }, 5000);
+      }
+    }
+  },
   setViewMode: (mode) => set({ viewMode: mode }),
   setFocusDate: (date) => set({ focusDate: date }),
   goToToday: (today) => set({ focusDate: today }),
@@ -97,29 +77,28 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
   addEvent: (event) =>
     set((state) => {
       const events = [...state.events, event];
-      persistEvents(events);
       return { events };
     }),
   // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
   updateEvent: (event) =>
     set((state) => {
       const events = state.events.map((item) => (item.id === event.id ? event : item));
-      persistEvents(events);
       return { events };
     }),
   // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
   deleteEvent: (id) =>
     set((state) => {
       const events = state.events.filter((item) => item.id !== id);
-      persistEvents(events);
       return { events };
     }),
   toggleAllDay: () => set((state) => ({ allDayCollapsed: !state.allDayCollapsed })),
   replaceEvents: (events, revision) => {
-    persistEvents(events);
-    set({
-      events,
-      ...(typeof revision === "number" ? { projectionRevision: revision } : {}),
+    set((state) => {
+      if (typeof revision === "number" && revision < state.projectionRevision) return state;
+      return {
+        events,
+        ...(typeof revision === "number" ? { projectionRevision: revision } : {}),
+      };
     });
   },
 }));

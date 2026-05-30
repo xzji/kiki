@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { makeId } from "@/lib/utils";
@@ -20,7 +20,7 @@ type RuntimeEnvState = {
   environments: RuntimeEnvironment[];
   activeRuntimeEnvId: string | null;
   projectionRevision: number;
-  hydrate: () => void;
+  hydrate: () => Promise<void>;
   addEnvironment: (environment: Omit<RuntimeEnvironment, "id">) => RuntimeEnvironment;
   updateEnvironment: (id: string, updates: Partial<RuntimeEnvironment>) => void;
   removeEnvironment: (id: string) => void;
@@ -34,9 +34,9 @@ type RuntimeEnvState = {
   replaceEnvironments: (environments: RuntimeEnvironment[], activeRuntimeEnvId?: string | null, revision?: number) => void;
 };
 
-const STORAGE_KEY = "kiki.runtime.environments";
-
 export const INITIAL_ENVIRONMENTS: RuntimeEnvironment[] = INITIAL_RUNTIME_ENVIRONMENTS;
+
+let hydrateRetryTimer: number | null = null;
 
 function markDefault(environments: RuntimeEnvironment[], activeId: string | null) {
   return environments.map((item) => ({
@@ -53,171 +53,146 @@ function normalizeEnvironment(environment: RuntimeEnvironment): RuntimeEnvironme
   };
 }
 
-export const useRuntimeEnvStore = create<RuntimeEnvState>()(
-  persist(
-    (set, get) => ({
-      hydrated: false,
-      environments: INITIAL_ENVIRONMENTS,
-      activeRuntimeEnvId: null,
-      projectionRevision: 0,
-      hydrate: () => {
-        if (get().hydrated) return;
-        set((state) => ({
-          hydrated: true,
-          environments: markDefault(state.environments, state.activeRuntimeEnvId),
-        }));
-      },
-      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
-      addEnvironment: (environment) => {
-        const next: RuntimeEnvironment = {
-          ...environment,
-          filePolicy: normalizeRuntimeFilePolicy(environment.filePolicy),
-          id: makeId("runtime-env"),
-        };
-        set((state) => {
-          const activeRuntimeEnvId = next.type === "local" ? next.id : state.activeRuntimeEnvId;
-          const environments = markDefault([next, ...state.environments], activeRuntimeEnvId);
-          return { environments, activeRuntimeEnvId };
-        });
-        return next;
-      },
-      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
-      updateEnvironment: (id, updates) => {
-        set((state) => ({
-          environments: state.environments.map((item) =>
-            item.id === id ? normalizeEnvironment({ ...item, ...updates }) : item,
-          ),
-        }));
-      },
-      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
-      removeEnvironment: (id) => {
-        set((state) => {
-          const environments = state.environments.filter((item) => item.id !== id);
-          const activeRuntimeEnvId =
-            state.activeRuntimeEnvId === id
-              ? environments.find((item) => item.type === "local")?.id ?? null
-              : state.activeRuntimeEnvId;
-          return {
-            environments: markDefault(environments, activeRuntimeEnvId),
-            activeRuntimeEnvId,
-          };
-        });
-      },
-      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
-      setActiveEnvironment: (id) => {
-        set((state) => ({
-          activeRuntimeEnvId: id,
-          environments: markDefault(state.environments, id),
-        }));
-      },
-      setEnvironmentHealth: (id, health) => {
-        set((state) => ({
-          environments: state.environments.map((item) =>
-            item.id === id
-              ? { ...item, health, lastCheckedAt: new Date().toISOString() }
-              : item,
-          ),
-        }));
-      },
-      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
-      setPermissionMode: (id, permissionMode) => {
-        set((state) => ({
-          environments: state.environments.map((item) =>
-            item.id === id ? { ...item, permissionMode } : item,
-          ),
-        }));
-      },
-      setFilePolicyMode: (id, mode) => {
-        set((state) => ({
-          environments: state.environments.map((item) =>
-            item.id === id
-              ? {
-                  ...item,
-                  filePolicy: {
-                    ...normalizeRuntimeFilePolicy(item.filePolicy),
-                    mode,
-                  },
-                }
-              : item,
-          ),
-        }));
-      },
-      setFilePolicyCustomCapability: (id, capability, enabled) => {
-        set((state) => ({
-          environments: state.environments.map((item) => {
-            if (item.id !== id) return item;
-            const filePolicy = normalizeRuntimeFilePolicy(item.filePolicy);
-            return {
+export const useRuntimeEnvStore = create<RuntimeEnvState>()((set, get) => ({
+  hydrated: false,
+  environments: INITIAL_ENVIRONMENTS,
+  activeRuntimeEnvId: null,
+  projectionRevision: 0,
+  hydrate: async () => {
+    if (get().hydrated) return;
+    try {
+      const snapshot = await fetchRuntimeStateSnapshot();
+      const revision = snapshot.meta?.revisions?.runtimeEnvironments;
+      get().replaceEnvironments(snapshot.runtimeEnvironments, null, revision);
+      set({ hydrated: true });
+    } catch {
+      if (!hydrateRetryTimer && typeof window !== "undefined") {
+        hydrateRetryTimer = window.setTimeout(() => {
+          hydrateRetryTimer = null;
+          if (!get().hydrated) void get().hydrate();
+        }, 5000);
+      }
+    }
+  },
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
+  addEnvironment: (environment) => {
+    const next: RuntimeEnvironment = {
+      ...environment,
+      filePolicy: normalizeRuntimeFilePolicy(environment.filePolicy),
+      id: makeId("runtime-env"),
+    };
+    set((state) => {
+      const activeRuntimeEnvId = next.type === "local" ? next.id : state.activeRuntimeEnvId;
+      const environments = markDefault([next, ...state.environments], activeRuntimeEnvId);
+      return { environments, activeRuntimeEnvId };
+    });
+    return next;
+  },
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
+  updateEnvironment: (id, updates) => {
+    set((state) => ({
+      environments: state.environments.map((item) =>
+        item.id === id ? normalizeEnvironment({ ...item, ...updates }) : item,
+      ),
+    }));
+  },
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
+  removeEnvironment: (id) => {
+    set((state) => {
+      const environments = state.environments.filter((item) => item.id !== id);
+      const activeRuntimeEnvId =
+        state.activeRuntimeEnvId === id
+          ? environments.find((item) => item.type === "local")?.id ?? null
+          : state.activeRuntimeEnvId;
+      return {
+        environments: markDefault(environments, activeRuntimeEnvId),
+        activeRuntimeEnvId,
+      };
+    });
+  },
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
+  setActiveEnvironment: (id) => {
+    set((state) => ({
+      activeRuntimeEnvId: id,
+      environments: markDefault(state.environments, id),
+    }));
+  },
+  setEnvironmentHealth: (id, health) => {
+    set((state) => ({
+      environments: state.environments.map((item) =>
+        item.id === id
+          ? { ...item, health, lastCheckedAt: new Date().toISOString() }
+          : item,
+      ),
+    }));
+  },
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
+  setPermissionMode: (id, permissionMode) => {
+    set((state) => ({
+      environments: state.environments.map((item) =>
+        item.id === id ? { ...item, permissionMode } : item,
+      ),
+    }));
+  },
+  setFilePolicyMode: (id, mode) => {
+    set((state) => ({
+      environments: state.environments.map((item) =>
+        item.id === id
+          ? {
               ...item,
               filePolicy: {
-                ...filePolicy,
-                custom: {
-                  ...filePolicy.custom,
-                  [capability]: enabled,
-                },
+                ...normalizeRuntimeFilePolicy(item.filePolicy),
+                mode,
               },
-            };
-          }),
-        }));
-      },
-      setFilePolicy: (id, policy) => {
-        set((state) => ({
-          environments: state.environments.map((item) =>
-            item.id === id ? { ...item, filePolicy: normalizeRuntimeFilePolicy(policy) } : item,
-          ),
-        }));
-      },
-      getActiveEnvironment: () => {
-        const state = get();
-        if (!state.activeRuntimeEnvId) return null;
-        return state.environments.find((item) => item.id === state.activeRuntimeEnvId) ?? null;
-      },
-      replaceEnvironments: (environments, activeRuntimeEnvId, revision) => {
-        const normalizedEnvironments = environments.map(normalizeEnvironment);
-        const nextActiveId =
-          activeRuntimeEnvId ??
-          normalizedEnvironments.find((item) => item.isDefault)?.id ??
-          normalizedEnvironments.find((item) => item.type === "local")?.id ??
-          null;
-        set({
-          environments: markDefault(normalizedEnvironments, nextActiveId),
-          activeRuntimeEnvId: nextActiveId,
-          ...(typeof revision === "number" ? { projectionRevision: revision } : {}),
-        });
-      },
-    }),
-    {
-      name: STORAGE_KEY,
-      version: 3,
-      partialize: (state) => ({
-        environments: state.environments,
-        activeRuntimeEnvId: state.activeRuntimeEnvId,
-        projectionRevision: state.projectionRevision,
-      }),
-      migrate: (persistedState, version) => {
-        if (version < 3) {
-          return {
-            environments: INITIAL_ENVIRONMENTS,
-            activeRuntimeEnvId: null,
-            projectionRevision: 0,
-          };
-        }
-        const state = persistedState as Partial<RuntimeEnvState> | undefined;
-        const environments = (state?.environments ?? INITIAL_ENVIRONMENTS).map(normalizeEnvironment);
-        const activeRuntimeEnvId =
-          state?.activeRuntimeEnvId ??
-          environments.find((item) => item.isDefault)?.id ??
-          environments.find((item) => item.type === "local")?.id ??
-          null;
+            }
+          : item,
+      ),
+    }));
+  },
+  setFilePolicyCustomCapability: (id, capability, enabled) => {
+    set((state) => ({
+      environments: state.environments.map((item) => {
+        if (item.id !== id) return item;
+        const filePolicy = normalizeRuntimeFilePolicy(item.filePolicy);
         return {
-          environments,
-          activeRuntimeEnvId,
-          projectionRevision: state?.projectionRevision ?? 0,
+          ...item,
+          filePolicy: {
+            ...filePolicy,
+            custom: {
+              ...filePolicy.custom,
+              [capability]: enabled,
+            },
+          },
         };
-      },
-      onRehydrateStorage: () => (state) => {
-        state?.hydrate();
-      },
-    },
-  ),
-);
+      }),
+    }));
+  },
+  setFilePolicy: (id, policy) => {
+    set((state) => ({
+      environments: state.environments.map((item) =>
+        item.id === id ? { ...item, filePolicy: normalizeRuntimeFilePolicy(policy) } : item,
+      ),
+    }));
+  },
+  getActiveEnvironment: () => {
+    const state = get();
+    if (!state.activeRuntimeEnvId) return null;
+    return state.environments.find((item) => item.id === state.activeRuntimeEnvId) ?? null;
+  },
+  replaceEnvironments: (environments, activeRuntimeEnvId, revision) => {
+    set((state) => {
+      if (typeof revision === "number" && revision < state.projectionRevision) return state;
+      const normalizedEnvironments = environments.map(normalizeEnvironment);
+      const nextActiveId =
+        activeRuntimeEnvId ??
+        normalizedEnvironments.find((item) => item.isDefault)?.id ??
+        normalizedEnvironments.find((item) => item.type === "local")?.id ??
+        null;
+      return {
+        environments: markDefault(normalizedEnvironments, nextActiveId),
+        activeRuntimeEnvId: nextActiveId,
+        ...(typeof revision === "number" ? { projectionRevision: revision } : {}),
+      };
+    });
+  },
+}));

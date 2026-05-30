@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, Suspense, useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { AssistantFab } from "@/components/layout/AssistantFab";
@@ -19,10 +19,22 @@ import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
+function DrawerTaskIdSyncer() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const openTaskDrawer = useTaskDrawerStore((state) => state.open);
+  const drawerTaskId = searchParams.get("drawerTaskId");
+  useEffect(() => {
+    const match = pathname.match(/^\/goals\/([^/]+)$/);
+    if (!match || !drawerTaskId) return;
+    openTaskDrawer(decodeURIComponent(match[1]), drawerTaskId);
+  }, [drawerTaskId, openTaskDrawer, pathname]);
+  return null;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   useTriggerEngine();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const isWide = pathname.startsWith("/schedule");
   const isConversation = pathname.startsWith("/conversations");
   const isFullscreenResult =
@@ -43,16 +55,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const assistantOpen = hydrated && isOpen;
   const taskDrawerOpen = useTaskDrawerStore((state) => Boolean(state.activeTaskId));
   const closeTaskDrawer = useTaskDrawerStore((state) => state.close);
-  const openTaskDrawer = useTaskDrawerStore((state) => state.open);
   useEffect(() => {
     closeTaskDrawer();
   }, [pathname, closeTaskDrawer]);
-  const drawerTaskId = searchParams.get("drawerTaskId");
-  useEffect(() => {
-    const match = pathname.match(/^\/goals\/([^/]+)$/);
-    if (!match || !drawerTaskId) return;
-    openTaskDrawer(decodeURIComponent(match[1]), drawerTaskId);
-  }, [drawerTaskId, openTaskDrawer, pathname]);
 
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
   const leftPadding = navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
@@ -76,6 +81,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </main>
       <UserMenu />
       {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
+      <Suspense fallback={null}>
+        <DrawerTaskIdSyncer />
+      </Suspense>
       <TaskDetailDrawer />
       <AssistantSidebar />
       {!taskDrawerOpen ? <AssistantFab /> : null}

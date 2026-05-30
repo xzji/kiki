@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 9;
+export const KIKI_DB_SCHEMA_VERSION = 10;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -119,6 +119,69 @@ CREATE TABLE IF NOT EXISTS goal_deliverables (
   revision INTEGER NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  goal_id TEXT,
+  workspace_path TEXT,
+  workspace_initialized_at TEXT,
+  runtime_env_id TEXT,
+  claude_session_id TEXT,
+  status TEXT NOT NULL DEFAULT 'idle',
+  pinned INTEGER NOT NULL DEFAULT 0,
+  goal_info_collection_json TEXT,
+  planning_run_state_json TEXT,
+  revision INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  user_id TEXT NOT NULL DEFAULT 'local-user'
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_updated
+  ON conversations(updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_goal
+  ON conversations(goal_id);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  role TEXT NOT NULL,
+  source TEXT,
+  status TEXT,
+  content TEXT NOT NULL,
+  unread INTEGER NOT NULL DEFAULT 0,
+  ref_json TEXT,
+  snapshot_json TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (conversation_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conv_seq
+  ON conversation_messages(conversation_id, seq);
+
+CREATE TABLE IF NOT EXISTS conversation_event_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  conversation_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  produced_by TEXT NOT NULL,
+  idempotency_key TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_event_log_conv
+  ON conversation_event_log(conversation_id, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_event_log_idem
+  ON conversation_event_log(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 `;
 
 export const KIKI_DB_MIGRATIONS: Array<{
@@ -246,6 +309,73 @@ export const KIKI_DB_MIGRATIONS: Array<{
         revision INTEGER NOT NULL,
         updated_at TEXT NOT NULL
       );
+    `,
+  },
+  {
+    version: 10,
+    sql: `
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        goal_id TEXT,
+        workspace_path TEXT,
+        workspace_initialized_at TEXT,
+        runtime_env_id TEXT,
+        claude_session_id TEXT,
+        status TEXT NOT NULL DEFAULT 'idle',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        goal_info_collection_json TEXT,
+        planning_run_state_json TEXT,
+        revision INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT 'local-user'
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_conversations_updated
+        ON conversations(updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_conversations_goal
+        ON conversations(goal_id);
+
+      CREATE TABLE IF NOT EXISTS conversation_messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        role TEXT NOT NULL,
+        source TEXT,
+        status TEXT,
+        content TEXT NOT NULL,
+        unread INTEGER NOT NULL DEFAULT 0,
+        ref_json TEXT,
+        snapshot_json TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (conversation_id, seq)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_messages_conv_seq
+        ON conversation_messages(conversation_id, seq);
+
+      CREATE TABLE IF NOT EXISTS conversation_event_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        conversation_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        produced_by TEXT NOT NULL,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_conv_event_log_conv
+        ON conversation_event_log(conversation_id, id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_event_log_idem
+        ON conversation_event_log(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
     `,
   },
 ];
