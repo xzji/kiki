@@ -19,6 +19,7 @@ type RuntimeEnvState = {
   hydrated: boolean;
   environments: RuntimeEnvironment[];
   activeRuntimeEnvId: string | null;
+  projectionRevision: number;
   hydrate: () => void;
   addEnvironment: (environment: Omit<RuntimeEnvironment, "id">) => RuntimeEnvironment;
   updateEnvironment: (id: string, updates: Partial<RuntimeEnvironment>) => void;
@@ -30,7 +31,7 @@ type RuntimeEnvState = {
   setFilePolicyCustomCapability: (id: string, capability: RuntimeToolCapability, enabled: boolean) => void;
   setFilePolicy: (id: string, policy: RuntimeFilePolicy) => void;
   getActiveEnvironment: () => RuntimeEnvironment | null;
-  replaceEnvironments: (environments: RuntimeEnvironment[], activeRuntimeEnvId?: string | null) => void;
+  replaceEnvironments: (environments: RuntimeEnvironment[], activeRuntimeEnvId?: string | null, revision?: number) => void;
 };
 
 const STORAGE_KEY = "kiki.runtime.environments";
@@ -58,6 +59,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
       hydrated: false,
       environments: INITIAL_ENVIRONMENTS,
       activeRuntimeEnvId: null,
+      projectionRevision: 0,
       hydrate: () => {
         if (get().hydrated) return;
         set((state) => ({
@@ -65,6 +67,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
           environments: markDefault(state.environments, state.activeRuntimeEnvId),
         }));
       },
+      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
       addEnvironment: (environment) => {
         const next: RuntimeEnvironment = {
           ...environment,
@@ -78,6 +81,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
         });
         return next;
       },
+      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
       updateEnvironment: (id, updates) => {
         set((state) => ({
           environments: state.environments.map((item) =>
@@ -85,6 +89,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
           ),
         }));
       },
+      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
       removeEnvironment: (id) => {
         set((state) => {
           const environments = state.environments.filter((item) => item.id !== id);
@@ -98,6 +103,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
           };
         });
       },
+      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
       setActiveEnvironment: (id) => {
         set((state) => ({
           activeRuntimeEnvId: id,
@@ -113,6 +119,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
           ),
         }));
       },
+      // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
       setPermissionMode: (id, permissionMode) => {
         set((state) => ({
           environments: state.environments.map((item) =>
@@ -165,7 +172,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
         if (!state.activeRuntimeEnvId) return null;
         return state.environments.find((item) => item.id === state.activeRuntimeEnvId) ?? null;
       },
-      replaceEnvironments: (environments, activeRuntimeEnvId) => {
+      replaceEnvironments: (environments, activeRuntimeEnvId, revision) => {
         const normalizedEnvironments = environments.map(normalizeEnvironment);
         const nextActiveId =
           activeRuntimeEnvId ??
@@ -175,17 +182,26 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
         set({
           environments: markDefault(normalizedEnvironments, nextActiveId),
           activeRuntimeEnvId: nextActiveId,
+          ...(typeof revision === "number" ? { projectionRevision: revision } : {}),
         });
       },
     }),
     {
       name: STORAGE_KEY,
-      version: 2,
+      version: 3,
       partialize: (state) => ({
         environments: state.environments,
         activeRuntimeEnvId: state.activeRuntimeEnvId,
+        projectionRevision: state.projectionRevision,
       }),
-      migrate: (persistedState) => {
+      migrate: (persistedState, version) => {
+        if (version < 3) {
+          return {
+            environments: INITIAL_ENVIRONMENTS,
+            activeRuntimeEnvId: null,
+            projectionRevision: 0,
+          };
+        }
         const state = persistedState as Partial<RuntimeEnvState> | undefined;
         const environments = (state?.environments ?? INITIAL_ENVIRONMENTS).map(normalizeEnvironment);
         const activeRuntimeEnvId =
@@ -196,6 +212,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()(
         return {
           environments,
           activeRuntimeEnvId,
+          projectionRevision: state?.projectionRevision ?? 0,
         };
       },
       onRehydrateStorage: () => (state) => {

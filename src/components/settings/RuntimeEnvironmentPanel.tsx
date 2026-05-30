@@ -8,6 +8,13 @@ import {
   setRuntimeDaemonAutoStart,
   type RuntimeDaemonStatusPayload,
 } from "@/lib/api/runtime-daemon";
+import {
+  activateEnvironmentCommand,
+  createEnvironmentCommand,
+  removeEnvironmentCommand,
+  setEnvironmentPermissionModeCommand,
+  updateEnvironmentCommand,
+} from "@/lib/api/runtime-environment-commands";
 import { getRuntimeEnvStatus } from "@/lib/api/runtime-envs";
 import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { cn } from "@/lib/utils";
@@ -108,7 +115,6 @@ function formatLocalDateTime(value?: string) {
 
 export function RuntimeEnvironmentPanel() {
   const environments = useRuntimeEnvStore((state) => state.environments);
-  const addEnvironment = useRuntimeEnvStore((state) => state.addEnvironment);
   const setEnvironmentHealth = useRuntimeEnvStore((state) => state.setEnvironmentHealth);
   const setActiveEnvironment = useRuntimeEnvStore((state) => state.setActiveEnvironment);
   const setPermissionMode = useRuntimeEnvStore((state) => state.setPermissionMode);
@@ -140,6 +146,12 @@ export function RuntimeEnvironmentPanel() {
     [localEnvironments],
   );
 
+  const handleRuntimeCommandError = useCallback((error: unknown, fallback: string) => {
+    const message = error instanceof Error ? error.message : fallback;
+    setDaemonActionError(message);
+    console.error(fallback, error);
+  }, []);
+
   const refreshEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
     setEnvironmentHealth(environment.id, { status: "checking" });
     try {
@@ -154,7 +166,11 @@ export function RuntimeEnvironmentPanel() {
         claudeVersion: result.version,
       });
       if (result.cliPath !== environment.cliPath) {
-        useRuntimeEnvStore.getState().updateEnvironment(environment.id, { cliPath: result.cliPath });
+        const updateResult = await updateEnvironmentCommand({
+          id: environment.id,
+          patch: { cliPath: result.cliPath },
+        });
+        useRuntimeEnvStore.getState().replaceEnvironments(updateResult.environments, null, updateResult.revision);
       }
     } catch (error) {
       setEnvironmentHealth(environment.id, {
@@ -163,6 +179,96 @@ export function RuntimeEnvironmentPanel() {
       });
     }
   }, [setEnvironmentHealth]);
+
+  const handleCreateEnvironment = useCallback(async (environment: Omit<RuntimeEnvironment, "id">) => {
+    try {
+      const result = await createEnvironmentCommand({ environment });
+      if (!result.environment) return;
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 环境创建失败");
+    }
+  }, [handleRuntimeCommandError]);
+
+  const handleRemoveEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
+    const ok = window.confirm(`删除本地环境「${environment.name}」？`);
+    if (!ok) return;
+    try {
+      const result = await removeEnvironmentCommand({ id: environment.id });
+      removeEnvironment(environment.id);
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 环境删除失败");
+    }
+  }, [handleRuntimeCommandError, removeEnvironment]);
+
+  const handleActivateEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
+    try {
+      const result = await activateEnvironmentCommand({ id: environment.id });
+      setActiveEnvironment(environment.id);
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 环境切换失败");
+    }
+  }, [handleRuntimeCommandError, setActiveEnvironment]);
+
+  const handlePermissionModeChange = useCallback(async (
+    environment: RuntimeEnvironment,
+    permissionMode: RuntimePermissionMode,
+  ) => {
+    try {
+      const result = await setEnvironmentPermissionModeCommand({ id: environment.id, permissionMode });
+      setPermissionMode(environment.id, permissionMode);
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 权限模式更新失败");
+    }
+  }, [handleRuntimeCommandError, setPermissionMode]);
+
+  const handleFilePolicyModeChange = useCallback(async (
+    environment: RuntimeEnvironment,
+    mode: RuntimeFilePolicyMode,
+  ) => {
+    const filePolicy = {
+      ...normalizeRuntimeFilePolicy(environment.filePolicy),
+      mode,
+    };
+    try {
+      const result = await updateEnvironmentCommand({
+        id: environment.id,
+        patch: { filePolicy },
+      });
+      setFilePolicyMode(environment.id, mode);
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 文件权限更新失败");
+    }
+  }, [handleRuntimeCommandError, setFilePolicyMode]);
+
+  const handleFilePolicyCapabilityChange = useCallback(async (
+    environment: RuntimeEnvironment,
+    capability: RuntimeToolCapability,
+    enabled: boolean,
+  ) => {
+    const normalized = normalizeRuntimeFilePolicy(environment.filePolicy);
+    const filePolicy = {
+      ...normalized,
+      custom: {
+        ...normalized.custom,
+        [capability]: enabled,
+      },
+    };
+    try {
+      const result = await updateEnvironmentCommand({
+        id: environment.id,
+        patch: { filePolicy },
+      });
+      setFilePolicyCustomCapability(environment.id, capability, enabled);
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 文件权限更新失败");
+    }
+  }, [handleRuntimeCommandError, setFilePolicyCustomCapability]);
 
   useEffect(() => {
     const localEnvironments = environments.filter((item) => item.type === "local");
@@ -308,8 +414,7 @@ export function RuntimeEnvironmentPanel() {
           open={wizardOpen}
           onClose={() => setWizardOpen(false)}
           onSave={(environment) => {
-            const next = addEnvironment(environment);
-            setActiveEnvironment(next.id);
+            void handleCreateEnvironment(environment);
           }}
         />
       ) : null}
@@ -368,9 +473,7 @@ export function RuntimeEnvironmentPanel() {
                     type="button"
                     aria-label="删除本地环境"
                     onClick={() => {
-                      const ok = window.confirm(`删除本地环境「${environment.name}」？`);
-                      if (!ok) return;
-                      removeEnvironment(environment.id);
+                      void handleRemoveEnvironment(environment);
                     }}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#B42318] hover:bg-[#FEF2F2]"
                   >
@@ -380,7 +483,7 @@ export function RuntimeEnvironmentPanel() {
                 {!environment.isDefault ? (
                   <button
                     type="button"
-                    onClick={() => setActiveEnvironment(environment.id)}
+                    onClick={() => void handleActivateEnvironment(environment)}
                     className="inline-flex h-8 items-center rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#1F2328] hover:bg-[#F8F9FB]"
                   >
                     设为当前环境
@@ -410,7 +513,7 @@ export function RuntimeEnvironmentPanel() {
                     <button
                       key={mode}
                       type="button"
-                      onClick={() => setPermissionMode(environment.id, mode)}
+                      onClick={() => void handlePermissionModeChange(environment, mode)}
                       className={cn(
                         "rounded-full border px-3 py-1.5 text-[12px] transition",
                         mode === environment.permissionMode
@@ -428,9 +531,9 @@ export function RuntimeEnvironmentPanel() {
             {environment.type === "local" ? (
               <ToolPolicySection
                 environment={environment}
-                onModeChange={(mode) => setFilePolicyMode(environment.id, mode)}
+                onModeChange={(mode) => void handleFilePolicyModeChange(environment, mode)}
                 onCapabilityChange={(capability, enabled) =>
-                  setFilePolicyCustomCapability(environment.id, capability, enabled)
+                  void handleFilePolicyCapabilityChange(environment, capability, enabled)
                 }
               />
             ) : null}

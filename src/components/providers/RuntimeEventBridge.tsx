@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createGoalEventsSource, fetchGoalEvents } from "@/lib/api/goal-events";
-import { fetchRuntimeStateSnapshot, syncRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import {
   advanceGoalEventCursor,
   GOAL_EVENT_CURSOR_CHANNEL,
@@ -14,7 +14,11 @@ import {
   readGoalEventCursors,
   writeGoalEventCursors,
 } from "@/lib/goalEventCursor";
-import type { RuntimeStatePayload, RuntimeStateRevision, RuntimeStateSyncResponse } from "@/lib/api/runtime-daemon";
+import {
+  isRuntimeStateChannelMessage,
+  RUNTIME_STATE_CHANNEL,
+} from "@/lib/runtimeStateChannel";
+import type { RuntimeStatePayload, RuntimeStateRevision } from "@/lib/api/runtime-daemon";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
@@ -54,14 +58,6 @@ function revisionFromSnapshot(snapshot: RuntimeStatePayload): RuntimeStateRevisi
   return {
     ...EMPTY_REVISION,
     ...(snapshot.meta?.revisions ?? {}),
-  };
-}
-
-function mergeSyncRevision(current: RuntimeStateRevision, response: RuntimeStateSyncResponse): RuntimeStateRevision {
-  return {
-    goals: current.goals,
-    runtimeEnvironments: response.results?.runtimeEnvironments?.revision ?? current.runtimeEnvironments,
-    scheduleEvents: response.results?.scheduleEvents?.revision ?? current.scheduleEvents,
   };
 }
 
@@ -189,7 +185,7 @@ function applyTimeoutPausedEvent(event: GoalEventRecord) {
 function refreshScheduleEventsFromSnapshot() {
   void fetchRuntimeStateSnapshot()
     .then((snapshot) => {
-      useScheduleStore.getState().replaceEvents(snapshot.scheduleEvents);
+      useScheduleStore.getState().replaceEvents(snapshot.scheduleEvents, snapshot.meta?.revisions?.scheduleEvents);
     })
     .catch(() => {
       // ignore transient schedule refresh failures
@@ -277,11 +273,16 @@ function applyGoalEvent(event: GoalEventRecord) {
   }
   if (payload.target === "conversation" && located.goal.conversationId) {
     const notification = located.instance.notification;
-    if (!notification?.userMessage) return;
-    const messageId = payload.notificationId || notification.conversationMessageId || `msg-task-${located.instance.id}`;
+    if (!notification?.userMessage) return true;
+    // 单一 append 通道：messageId 必须由 worker 透传（payload.notificationId）。
+    // 缺失则跳过，不再 fallback 到 instance 级稳定 id；避免历史卡片被新消息替换。
+    const messageId = payload.notificationId;
+    if (!messageId) return true;
     const conversationStore = useConversationStore.getState();
     const conversation = conversationStore.conversations.find((entry) => entry.id === located.goal.conversationId);
-    const nextMessage = {
+    // 幂等：同一 messageId 已存在（SSE 断线重发场景）则跳过，不做任何内容覆盖。
+    if (conversation?.messages.some((message) => message.id === messageId)) return true;
+    conversationStore.appendMessage(located.goal.conversationId, {
       id: messageId,
       kind: "task_card" as const,
       role: "kiki" as const,
@@ -296,39 +297,27 @@ function applyGoalEvent(event: GoalEventRecord) {
         taskId: located.task.id,
         instanceId: located.instance.id,
       },
-    };
-    if (conversation?.messages.some((message) => message.id === messageId)) {
-      conversationStore.updateMessage(located.goal.conversationId, messageId, (message) =>
-        message.kind === "task_card" ? { ...message, ...nextMessage } : message,
-      );
-    } else {
-      conversationStore.appendMessage(located.goal.conversationId, nextMessage);
-    }
+    });
   }
   return true;
 }
 
-// Runtime environments and schedule events still use sync as a Sprint 4-A -> 4-B bridge.
-// Goal changes are committed through /api/goals/commands and replayed here as server projections.
+// Browser state is read-only projection: writes go through command APIs and server snapshots/events.
 export function RuntimeEventBridge() {
   const goals = useGoalStore((state) => state.goals);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
-  const environments = useRuntimeEnvStore((state) => state.environments);
-  const activeRuntimeEnvId = useRuntimeEnvStore((state) => state.activeRuntimeEnvId);
   const replaceEnvironments = useRuntimeEnvStore((state) => state.replaceEnvironments);
-  const events = useScheduleStore((state) => state.events);
   const replaceEvents = useScheduleStore((state) => state.replaceEvents);
 
   const currentGoalsKey = useMemo(() => stableStringify(goals), [goals]);
   const currentGoalIdsKey = useMemo(() => goals.map((goal) => goal.id).sort().join("|"), [goals]);
-  const currentEnvironmentsKey = useMemo(() => stableStringify({ environments, activeRuntimeEnvId }), [environments, activeRuntimeEnvId]);
-  const currentEventsKey = useMemo(() => stableStringify(events), [events]);
   const isApplyingRemoteRef = useRef(false);
   const [bootstrapped, setBootstrapped] = useState(false);
   const sseDisconnectedRef = useRef(false);
   const remoteRevisionRef = useRef<RuntimeStateRevision>(EMPTY_REVISION);
   const eventCursorRef = useRef<GoalEventCursorMap>(readGoalEventCursors());
   const cursorChannelRef = useRef<BroadcastChannel | null>(null);
+  const runtimeStateChannelRef = useRef<BroadcastChannel | null>(null);
 
   const refreshSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
@@ -337,8 +326,8 @@ export function RuntimeEventBridge() {
     remoteRevisionRef.current = remoteRevision;
     isApplyingRemoteRef.current = true;
     applyGoalsProjection(snapshot.goals, remoteRevision.goals);
-    replaceEnvironments(snapshot.runtimeEnvironments);
-    replaceEvents(snapshot.scheduleEvents);
+    replaceEnvironments(snapshot.runtimeEnvironments, null, remoteRevision.runtimeEnvironments);
+    replaceEvents(snapshot.scheduleEvents, remoteRevision.scheduleEvents);
     window.setTimeout(() => {
       isApplyingRemoteRef.current = false;
     }, 0);
@@ -373,8 +362,8 @@ export function RuntimeEventBridge() {
         const remoteRevision = revisionFromSnapshot(snapshot);
         remoteRevisionRef.current = remoteRevision;
         applyGoalsProjection(snapshot.goals, remoteRevision.goals);
-        replaceEnvironments(snapshot.runtimeEnvironments);
-        replaceEvents(snapshot.scheduleEvents);
+        replaceEnvironments(snapshot.runtimeEnvironments, null, remoteRevision.runtimeEnvironments);
+        replaceEvents(snapshot.scheduleEvents, remoteRevision.scheduleEvents);
         setBootstrapped(true);
       } catch {
         setBootstrapped(true);
@@ -410,8 +399,8 @@ export function RuntimeEventBridge() {
           isApplyingRemoteRef.current = true;
           remoteRevisionRef.current = remoteRevision;
           applyGoalsProjection(snapshot.goals, remoteRevision.goals);
-          replaceEnvironments(snapshot.runtimeEnvironments);
-          replaceEvents(snapshot.scheduleEvents);
+          replaceEnvironments(snapshot.runtimeEnvironments, null, remoteRevision.runtimeEnvironments);
+          replaceEvents(snapshot.scheduleEvents, remoteRevision.scheduleEvents);
           window.setTimeout(() => {
             isApplyingRemoteRef.current = false;
           }, 0);
@@ -445,6 +434,15 @@ export function RuntimeEventBridge() {
       cursorChannelRef.current.onmessage = (event) => {
         mergeExternalCursors(normalizeGoalEventCursors(event.data));
       };
+      runtimeStateChannelRef.current = new BroadcastChannel(RUNTIME_STATE_CHANNEL);
+      runtimeStateChannelRef.current.onmessage = (event) => {
+        if (!isRuntimeStateChannelMessage(event.data)) return;
+        const currentRevision = remoteRevisionRef.current[event.data.kind];
+        if (event.data.revision <= currentRevision) return;
+        void refreshSnapshot().catch(() => {
+          // BroadcastChannel is a convergence aid; polling/SSE remain as fallback.
+        });
+      };
     }
 
     const onStorage = (event: StorageEvent) => {
@@ -460,6 +458,8 @@ export function RuntimeEventBridge() {
       window.removeEventListener("storage", onStorage);
       cursorChannelRef.current?.close();
       cursorChannelRef.current = null;
+      runtimeStateChannelRef.current?.close();
+      runtimeStateChannelRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -540,46 +540,6 @@ export function RuntimeEventBridge() {
       }
     }
   }, [bootstrapped, currentGoalsKey]);
-
-  useEffect(() => {
-    if (!bootstrapped || isApplyingRemoteRef.current) return;
-    const syncSnapshot = async () => {
-      try {
-        const result = await syncRuntimeStateSnapshot({
-          baseRevision: remoteRevisionRef.current,
-          runtimeEnvironments: environments.map((environment) => ({
-            ...environment,
-            isDefault: environment.id === activeRuntimeEnvId,
-          })),
-          scheduleEvents: events,
-        });
-        remoteRevisionRef.current = mergeSyncRevision(remoteRevisionRef.current, result);
-      } catch {
-        try {
-          const snapshot = await fetchRuntimeStateSnapshot();
-          isApplyingRemoteRef.current = true;
-          remoteRevisionRef.current = revisionFromSnapshot(snapshot);
-          replaceEnvironments(snapshot.runtimeEnvironments);
-          replaceEvents(snapshot.scheduleEvents);
-          window.setTimeout(() => {
-            isApplyingRemoteRef.current = false;
-          }, 0);
-        } catch {
-          // ignore transient sync and refresh failures
-        }
-      }
-    };
-    void syncSnapshot();
-  }, [
-    currentEnvironmentsKey,
-    currentEventsKey,
-    environments,
-    activeRuntimeEnvId,
-    events,
-    replaceEnvironments,
-    replaceEvents,
-    bootstrapped,
-  ]);
 
   return null;
 }

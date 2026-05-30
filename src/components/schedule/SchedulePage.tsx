@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  createScheduleEventCommand,
+  deleteScheduleEventCommand,
+  updateScheduleEventCommand,
+} from "@/lib/api/schedule-commands";
 import { useVirtualClock } from "@/hooks/useVirtualClock";
 import { useScheduleStore } from "@/stores/scheduleStore";
 import type { AgentEvent } from "@/types/schedule";
@@ -25,9 +30,7 @@ export function SchedulePage() {
     goToToday,
     prev,
     next,
-    addEvent,
-    updateEvent,
-    deleteEvent
+    replaceEvents,
   } = useScheduleStore();
 
   const { currentTime } = useVirtualClock();
@@ -58,17 +61,29 @@ export function SchedulePage() {
   };
 
   const handleSubmit = (event: AgentEvent) => {
-    if (formState.initial) {
-      updateEvent(event);
-    } else {
-      addEvent(event);
-    }
-    setFormState({ open: false, initial: null });
+    const submit = async () => {
+      const result = formState.initial
+        ? await updateScheduleEventCommand({ event })
+        : await createScheduleEventCommand({ event });
+      replaceEvents(result.events, result.revision);
+      setFormState({ open: false, initial: null });
+    };
+    void submit().catch((error) => {
+      console.error("日程事件保存失败", error);
+      window.alert(error instanceof Error ? error.message : "日程事件保存失败");
+    });
   };
 
   const handleDelete = (event: AgentEvent) => {
-    deleteEvent(event.id);
-    setPopoverEvent(null);
+    const remove = async () => {
+      const result = await deleteScheduleEventCommand({ id: event.id });
+      replaceEvents(result.events, result.revision);
+      setPopoverEvent(null);
+    };
+    void remove().catch((error) => {
+      console.error("日程事件删除失败", error);
+      window.alert(error instanceof Error ? error.message : "日程事件删除失败");
+    });
   };
 
   const handleSelectDay = (day: Date) => {

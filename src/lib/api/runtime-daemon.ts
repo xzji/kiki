@@ -20,11 +20,6 @@ export type RuntimeStateRevision = {
   scheduleEvents: number;
 };
 
-export type RuntimeStateSyncResponse = {
-  ok: boolean;
-  results?: Partial<Record<keyof RuntimeStateRevision, { ok: boolean; revision: number; updatedAt: string } | null>>;
-};
-
 export type RuntimeDaemonStatusPayload = {
   config: RuntimeDaemonConfig | null;
   state: RuntimeDaemonState | null;
@@ -43,20 +38,6 @@ export type RuntimeDaemonInstallPayload = {
 export type RuntimeDaemonAutostartPayload = RuntimeDaemonInstallPayload & {
   config: RuntimeDaemonConfig | null;
 };
-
-export async function syncRuntimeStateSnapshot(input: Partial<RuntimeStatePayload> & { baseRevision?: Partial<RuntimeStateRevision> }) {
-  const response = await fetch("/api/runtime/state/sync", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(response.status === 409 ? "runtime state snapshot 已更新" : "本地运行时状态同步失败");
-  }
-  return (await response.json()) as RuntimeStateSyncResponse;
-}
 
 export async function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload> {
   const response = await fetch("/api/runtime/state", { cache: "no-store" });

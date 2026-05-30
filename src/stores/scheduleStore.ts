@@ -6,21 +6,7 @@ import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 
 const STORAGE_KEY = "kiki.schedule.events";
 const RESET_VERSION_KEY = "kiki.schedule.events.reset-version";
-const MOCK_BASELINE_RESET_VERSION = "3";
-const MOCK_EVENT_IDS = new Set([
-  "evt-all-day-toefl",
-  "evt-osaka-trip",
-  "evt-focus-morning",
-  "evt-listening",
-  "evt-listening-overlap",
-  "evt-vocab",
-  "evt-interview",
-  "evt-agent-focus",
-]);
-
-function removeMockEvents(events: AgentEvent[]) {
-  return events.filter((event) => !MOCK_EVENT_IDS.has(event.id));
-}
+const MOCK_BASELINE_RESET_VERSION = "4";
 
 function loadEvents(): AgentEvent[] {
   if (typeof window === "undefined") return [];
@@ -33,7 +19,7 @@ function loadEvents(): AgentEvent[] {
     }
     const parsed = JSON.parse(raw) as AgentEvent[];
     if (!Array.isArray(parsed)) return [];
-    const events = resetVersion === MOCK_BASELINE_RESET_VERSION ? parsed : removeMockEvents(parsed);
+    const events = resetVersion === MOCK_BASELINE_RESET_VERSION ? parsed : [];
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
     window.localStorage.setItem(RESET_VERSION_KEY, MOCK_BASELINE_RESET_VERSION);
     return events;
@@ -55,6 +41,7 @@ function persistEvents(events: AgentEvent[]) {
 type ScheduleStore = {
   hydrated: boolean;
   events: AgentEvent[];
+  projectionRevision: number;
   viewMode: ScheduleViewMode;
   focusDate: string;
   allDayCollapsed: boolean;
@@ -68,7 +55,7 @@ type ScheduleStore = {
   updateEvent: (event: AgentEvent) => void;
   deleteEvent: (id: string) => void;
   toggleAllDay: () => void;
-  replaceEvents: (events: AgentEvent[]) => void;
+  replaceEvents: (events: AgentEvent[], revision?: number) => void;
 };
 
 function stepDate(iso: string, direction: -1 | 1, mode: ScheduleViewMode): string {
@@ -86,6 +73,7 @@ function stepDate(iso: string, direction: -1 | 1, mode: ScheduleViewMode): strin
 export const useScheduleStore = create<ScheduleStore>((set, get) => ({
   hydrated: false,
   events: [],
+  projectionRevision: 0,
   viewMode: "week",
   focusDate: new Date().toISOString(),
   allDayCollapsed: false,
@@ -105,18 +93,21 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
     const { focusDate, viewMode } = get();
     set({ focusDate: stepDate(focusDate, 1, viewMode) });
   },
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
   addEvent: (event) =>
     set((state) => {
       const events = [...state.events, event];
       persistEvents(events);
       return { events };
     }),
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
   updateEvent: (event) =>
     set((state) => {
       const events = state.events.map((item) => (item.id === event.id ? event : item));
       persistEvents(events);
       return { events };
     }),
+  // PROJECTION-ONLY: 服务端命令式 API 是权威，本 mutator 只用于乐观本地反馈。
   deleteEvent: (id) =>
     set((state) => {
       const events = state.events.filter((item) => item.id !== id);
@@ -124,8 +115,11 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
       return { events };
     }),
   toggleAllDay: () => set((state) => ({ allDayCollapsed: !state.allDayCollapsed })),
-  replaceEvents: (events) => {
+  replaceEvents: (events, revision) => {
     persistEvents(events);
-    set({ events });
+    set({
+      events,
+      ...(typeof revision === "number" ? { projectionRevision: revision } : {}),
+    });
   },
 }));
