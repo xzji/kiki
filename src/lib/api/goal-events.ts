@@ -18,6 +18,10 @@ export async function fetchGoalEvents(input: { goalId: string; fromId?: number; 
   return (await response.json()) as GoalEventsResponse;
 }
 
+/**
+ * @deprecated 已被 `createRuntimeEventsSource` (`/api/runtime/events/stream`) 取代。
+ * 仅作为回退/外部消费者通道；禁止在新代码中使用。
+ */
 export function createGoalEventsSource(input: { goalId: string; fromId?: number }) {
   const params = new URLSearchParams({
     goalId: input.goalId,

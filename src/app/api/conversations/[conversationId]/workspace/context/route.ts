@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { buildConversationContextPack, serializeConversationMessages } from "@/lib/server/workspace/contextPack";
+import {
+  buildConversationContextPack,
+  pickConversationForPrompt,
+  pickGoalForPrompt,
+} from "@/lib/server/workspace/contextPack";
 import {
   ensureConversationWorkspace,
   getConversationContextFilePath,
@@ -28,14 +32,20 @@ export async function POST(request: NextRequest, context: { params: Promise<{ co
     }
 
     ensureConversationWorkspace(conversationId);
-    writeJsonFileAtomic(getConversationMessagesFilePath(conversationId), serializeConversationMessages(body.conversation.messages));
+    const safeConversation = pickConversationForPrompt(body.conversation);
+    const safeGoal = body.goal ? pickGoalForPrompt(body.goal) : null;
+    // safeConversation.messages 已经过 sanitize，落盘与 contextPack 共用同一份白名单产物
+    writeJsonFileAtomic(
+      getConversationMessagesFilePath(conversationId),
+      safeConversation.messages,
+    );
     writeJsonFileAtomic(getPlanningStateFilePath(conversationId), body.conversation.planningRunState ?? null);
     writeTextFileAtomic(
       getConversationContextFilePath(conversationId),
       buildConversationContextPack({
-        conversation: body.conversation,
-        goal: body.goal,
-        recentMessages: body.conversation.messages,
+        conversation: safeConversation,
+        goal: safeGoal,
+        recentMessages: safeConversation.messages,
       }),
     );
 

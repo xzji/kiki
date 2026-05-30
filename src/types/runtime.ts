@@ -127,6 +127,7 @@ export type ClaudeChatRequest = {
 
 export type ClaudeStreamEvent =
   | { type: "session"; sessionId: string }
+  | { type: "session_invalid"; sessionId: string; message: string }
   | { type: "status"; status: "checking" | "running" | "completed" }
   | { type: "delta"; text: string }
   | { type: "message"; content: string }

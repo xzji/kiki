@@ -176,10 +176,14 @@ export function setConversationRuntimeEnvCommand(conversationId: string, runtime
   });
 }
 
-export function setConversationClaudeSessionCommand(conversationId: string, claudeSessionId: string) {
+export function setConversationClaudeSessionCommand(conversationId: string, claudeSessionId: string | undefined) {
   return postConversationCommand({
-    command: { type: "set_claude_session", conversationId, claudeSessionId },
-    idempotencyKey: createIdempotencyKey("conversation.claude_session.set", conversationId, claudeSessionId),
+    command: { type: "set_claude_session", conversationId, claudeSessionId: claudeSessionId ?? null },
+    idempotencyKey: createIdempotencyKey(
+      "conversation.claude_session.set",
+      conversationId,
+      claudeSessionId ?? "__cleared__",
+    ),
   });
 }
 

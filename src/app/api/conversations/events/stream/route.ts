@@ -14,11 +14,27 @@ export async function GET(request: NextRequest) {
   let cursor = Number(searchParams.get("fromId") ?? 0);
   if (!Number.isFinite(cursor)) cursor = 0;
   let timer: NodeJS.Timeout | null = null;
+  let disposed = false;
+  let cleanup: () => void = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      cleanup = () => {
+        if (disposed) return;
+        disposed = true;
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        try {
+          controller.close();
+        } catch {
+          // ignore double-close
+        }
+      };
       writeSseEvent(controller, "ready", { cursor });
       const tick = () => {
+        if (disposed) return;
         try {
           const events = getConversationEvents({ conversationId, fromId: cursor, limit: 100 });
           if (events.length) {
@@ -35,9 +51,14 @@ export async function GET(request: NextRequest) {
       };
       tick();
       timer = setInterval(tick, POLL_INTERVAL_MS);
+      if (request.signal.aborted) {
+        cleanup();
+        return;
+      }
+      request.signal.addEventListener("abort", cleanup, { once: true });
     },
     cancel() {
-      if (timer) clearInterval(timer);
+      cleanup();
     },
   });
 

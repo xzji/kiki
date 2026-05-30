@@ -1,7 +1,7 @@
 # KiKi 项目进展评估（产品视角）
 
 > 评估时间：2026-05-29
-> 最近更新：2026-05-30（P0 收尾 hardening 后）
+> 最近更新：2026-05-31（浏览器 Scheduler 已下线 + 命令式 API + 模型上下文边界 hardening 完成）
 > 评估视角：以最初产品立项预期为锚点，对当前实现进行差距盘点
 > 文档目的：给非工程角色（产品、决策者）一份可读的现状画像
 
@@ -50,13 +50,18 @@
 - `pnpm test:planning` 把规划/选择/展示模型做成了 CI 级回归测试
 - 自检文化已落地（每次改动后做 self-critique）
 
-### ✅ 6. P0 本地收口与云迁移预备（达成度中高）
-- runtime environment / schedule event 已切到命令式 API：浏览器不再通过 `/api/runtime/state/sync` 反向覆盖服务端快照
-- `/api/runtime/state/sync` 路由与 `syncRuntimeStateSnapshot` helper 已删除，浏览器状态定位为 projection-only
+### ✅ 6. P0 本地收口与云迁移预备（达成度高）
+- 浏览器侧 Scheduler / NotificationWorker / Watchdog 已**完全下线**：`GoalSchedulerRuntime` 仅保留 settings hydrate
+- daemon scheduler / notification worker / recovery worker 是**唯一**的状态生产者
+- runtime environment / schedule event / conversation / goal 全部切到命令式 API：浏览器不再写服务端
+- `/api/runtime/state/sync` 路由与 `syncRuntimeStateSnapshot` helper 已删除，浏览器状态彻底定位为 projection-only
+- SSE 多路聚合到 `/api/runtime/events/stream`，解决浏览器 HTTP/1.1 连接池耗尽
 - 协议归一已下推到 server 出口：`normalizeAwaitingInteraction` / `normalizeResultHeadline` 负责提前消除 question / snippet / field question 的重复
-- `awaitingDisplayModel.ts` 已降级为展示 selector，不再承担主要语义去重
-- runtime/schedule 已补齐 BroadcastChannel 跨 tab 刷新、snapshot `expectedRevision` 乐观锁、projection persist migration
-- `scripts/dogfood-daemon.ts` 已提供 12h/24h 离线验收采样脚本，指标按本次 fixture goal 过滤，避免历史任务污染
+- runtime/schedule 已补齐 `BroadcastChannel` 跨 tab 刷新、`expectedRevision` 乐观锁、projection persist migration
+- `scripts/dogfood-daemon.ts` 已提供 12h/24h 离线验收采样脚本
+- 模型上下文边界已建立：白名单 Pick 构造 LLM Payload，禁止 Spread 透传内部元数据
+- Prompt 脱敏层防止 `quotedMessage` 在 `transport.ts` 二次注入
+- Claude session ID 仅采纳 `system.subtype="init"` canonical ID，过滤 hook/error 临时 ID
 - LLM Prompt 已增加重复输出禁止规则，并纳入 `pnpm test:planning` 回归
 - 本轮修复后 `pnpm tsc --noEmit`、`pnpm test:planning`、`pnpm lint` 均通过
 
@@ -73,31 +78,34 @@
 
 ## 三、和最初预期还有差距的部分
 
-### ⚠️ 1. "脱离浏览器自动跑"——工程主链路已下沉，产品验收还没完成
+### ⚠️ 1. "脱离浏览器自动跑"——主链路完成，仍需长时间样本验证
 **最初预期**：关掉浏览器，KiKi 也能在后台推进任务，回来就看到收件箱里堆好结果。
 
 **最新现状**：
-- 浏览器侧 Scheduler 已经默认关闭，daemon scheduler / notification worker / watchdog 已成为主要执行路径
-- 事件日志、命令式 API、runtime snapshot 回灌已形成后台执行的基础闭环
-- 已补 `scripts/dogfood-daemon.ts` 采样脚本，可记录关浏览器 12h/24h 后任务完成率、通知投递率、watchdog 暂停行为
+- 浏览器侧 Scheduler 已**完全下线**（`GoalSchedulerRuntime` 仅保留 settings hydrate）
+- daemon 是 goal / task / runtime / schedule 状态的**唯一写入者**
+- 浏览器只通过 SSE 消费事件并更新 UI projection
+- 事件日志、命令式 API、runtime snapshot 已形成完整后台执行闭环
+- `scripts/dogfood-daemon.ts` 采样脚本已具备，可记录关浏览器 12h/24h 后任务完成率、通知投递率、watchdog 行为
 - 仍缺少真实 12h/24h dogfood 数据：脚本已具备，但还没有跑出长期验收样本
-- daemon 离线/崩溃后的产品兜底体验还不完整，例如用户如何知道 daemon 掉线、如何恢复、是否需要浏览器 fallback
+- daemon 离线/崩溃后的产品兜底体验还不完整，例如用户如何知道 daemon 掉线、如何恢复
 
-> **PM 视角**：这块已经从"缺验收工具"推进到"工具已具备，缺真实长时间样本"。下一步重点是跑 dogfood 和补 daemon 掉线兜底。
+> **PM 视角**：架构层面的"脱离浏览器自动跑"已成立，剩下是真实长时间样本验证 + daemon 健康可视化。
 
 ### ⚠️ 2. 状态边界——核心写路径已收口，但多端一致性还没完全产品化
 **最初预期**：服务端是事实源，前端只是视图。
 
 **最新现状**：
-- goal、runtime environment、schedule event 的关键写动作已经基本切到命令式 API
-- `/api/runtime/state/sync` 反向同步路由已删除，浏览器不再作为 runtime/schedule 的权威写入口
-- `runtimeEnvStore` / `scheduleStore` 仍保留 Zustand persist，但定位已变成 projection-only：用于本地反馈和兜底，而不是最终事实源
-- runtime/schedule 已通过 `runtimeStateChannel` 补齐浏览器多 tab 通知，写入成功后其他 tab 会触发 snapshot 刷新
-- runtime/schedule 命令 API 已接入 `expectedRevision` / `If-Match`，冲突返回 409 并回灌最新 snapshot
-- 旧 projection persist 已通过 version bump / migration 降低历史缓存污染风险
-- 仍未完成云端多设备实时同步：当前 BroadcastChannel 只覆盖同浏览器多 tab，未来还需要 Tunnel Hub / SSE 下行承接
+- conversation / goal / runtime environment / schedule event 全部走命令式 API
+- `/api/runtime/state/sync` 反向同步路由已删除，浏览器不再作为权威写入口
+- `conversationStore` 已从 `persist` 重构为 read-only projection（SSE + snapshot hydrate）
+- `runtimeEnvStore` / `scheduleStore` / `goalStore` 已彻底移除 localStorage 业务数据
+- runtime/schedule 已通过 `runtimeStateChannel` (BroadcastChannel) 补齐浏览器多 tab 通知
+- 命令 API 已接入 `expectedRevision` / `If-Match`，冲突返回 409 并回灌最新 snapshot
+- revision 防旧覆盖：旧 snapshot 不会回滚新命令结果
+- 仍未完成云端多设备实时同步：BroadcastChannel 仅覆盖同浏览器多 tab，未来还需要 Tunnel Hub / SSE 下行承接
 
-> **PM 视角**：这块已经从"本机一致性待补"推进到"本机多 tab 已闭环，云端多设备待迁移时补"。
+> **PM 视角**：本机一致性已闭环，剩余是云端多设备同步（与服务端事件序列化协议绑定）。
 
 ### ⚠️ 3. 多容器联动——回流通了，但深度不够
 **最初预期**：收件箱、会话、目标页、任务页、日程是一个"一体的目标 OS"。
@@ -149,7 +157,7 @@
 ## 四、一句话总结
 
 > **KiKi 现在是个"能从模糊目标拆出可执行计划、并把任务跑通、把结果回流到多个产品容器"的可演示 Agent 原型。**
-> **P0 收尾 hardening 后，它已经基本完成"服务端/daemon 是事实源、浏览器只是视图"的本地架构收口；但还需要真实长时间 dogfood、daemon 掉线兜底、云端多设备同步和验收闭环，才能成为稳定的目标 OS。**
+> **本轮 hardening 后，浏览器 Scheduler 已彻底下线，daemon 成为唯一生产者，命令式 API + SSE projection 架构已落地，模型上下文边界已建立；下一步重点是真实长时间 dogfood、daemon 掉线兜底、云端多设备同步和验收闭环。**
 
 ---
 
@@ -182,9 +190,9 @@
 |---|---|---|
 | 对话入口（闲聊 / `/goal`） | 🟢 高 | — |
 | 目标规划（澄清 → 拆解 → 任务） | 🟢 高 | — |
-| 任务自动执行 | 🟡 中高 | daemon 主链路已具备，缺 12h/24h 稳定性验收 |
+| 任务自动执行 | 🟢 高 | daemon 已成唯一主链路，缺 12h/24h 稳定性验收样本 |
 | 多容器结果回流 | 🟡 中高 | 本机多 tab 已补，仍缺云端多设备事件通道和深层联动语义 |
-| 本地常驻运行时 | 🟡 中高 | daemon 已成主路径，离线/崩溃兜底仍需产品化 |
+| 本地常驻运行时 | 🟡 中高 | daemon 已成唯一写入者，离线/崩溃兜底仍需产品化 |
 | 多模态可交付物 | 🔴 低 | 仅完成 Markdown/Excel 一档 |
 | 多 Agent 协同 | 🔴 低 | 仅停留在调研阶段 |
 | 验收 / 目标达成闭环 | 🟡 中低 | 目标交付包已有基础页面，缺确认完成/返修/验收闭环 |

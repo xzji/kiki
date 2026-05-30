@@ -140,6 +140,22 @@ export function getGoalEvents(input: { goalId: string; fromId?: number; limit?: 
     .slice(0, input.limit ?? 200);
 }
 
+export function getGoalEventsSince(input: { fromId?: number; limit?: number }) {
+  const db = getDatabase();
+  const limit = Math.min(Math.max(input.limit ?? 200, 1), 500);
+  const rows = db
+    .prepare(
+      `
+        SELECT * FROM goal_event_log
+        WHERE id > ?
+        ORDER BY id ASC
+        LIMIT ?
+      `,
+    )
+    .all(input.fromId ?? 0, limit) as GoalEventLogRow[];
+  return rows.map((row) => mapRow(row));
+}
+
 export function getLatestGoalEventId(goalId: string) {
   const db = getDatabase();
   const normalizedGoalId = normalizeGoalId(goalId);

@@ -35,7 +35,7 @@ export type ConversationCommand =
   | { type: "set_goal"; conversationId: string; goalId: string }
   | { type: "set_workspace"; conversationId: string; workspacePath: string; workspaceInitializedAt?: string }
   | { type: "set_runtime_env"; conversationId: string; runtimeEnvId: string }
-  | { type: "set_claude_session"; conversationId: string; claudeSessionId: string }
+  | { type: "set_claude_session"; conversationId: string; claudeSessionId: string | null }
   | { type: "set_status"; conversationId: string; status: Conversation["status"] }
   | { type: "set_goal_info_collection"; conversationId: string; collection: GoalInfoCollection | null }
   | { type: "set_planning_run_state"; conversationId: string; state: GoalPlanningRunState | null }
@@ -323,7 +323,12 @@ export function applyConversationCommand(input: {
               : command.type === "set_runtime_env"
                 ? { runtimeEnvId: requireNonEmptyString(command.runtimeEnvId, "runtimeEnvId") }
                 : command.type === "set_claude_session"
-                  ? { claudeSessionId: requireNonEmptyString(command.claudeSessionId, "claudeSessionId") }
+                  ? {
+                      claudeSessionId:
+                        command.claudeSessionId === null
+                          ? null
+                          : requireNonEmptyString(command.claudeSessionId, "claudeSessionId"),
+                    }
                   : command.type === "set_status"
                     ? { status: command.status ?? "idle" }
                     : command.type === "set_goal_info_collection"

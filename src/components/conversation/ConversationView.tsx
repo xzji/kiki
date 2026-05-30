@@ -1000,6 +1000,18 @@ export function ConversationView({ conversationId }: { conversationId: string })
               setClaudeSessionId(conversation.id, event.sessionId);
               return;
             }
+            if (event.type === "session_invalid") {
+              setClaudeSessionId(conversation.id, undefined);
+              const hint = "上一轮 Claude 会话已失效，已自动重置。请重新发送消息。";
+              setStreamError(hint);
+              updateMessage(conversation.id, assistantId, (message) => ({
+                ...message,
+                content: message.content || `（${hint}）`,
+                status: "error",
+              }));
+              setConversationStatus(conversation.id, "error");
+              return;
+            }
             if (event.type === "delta") {
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,
@@ -1023,6 +1035,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
               setStreamError(event.message);
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,
+                content: message.content || `（任务失败：${event.message}）`,
                 status: "error",
               }));
               setConversationStatus(conversation.id, "error");

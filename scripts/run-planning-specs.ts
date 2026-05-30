@@ -12,6 +12,11 @@ import { runRuntimeEnvironmentCommandServiceSpecs } from "../src/lib/server/serv
 import { runTaskTriggerTimeSpecs } from "../src/lib/taskTriggerTime.spec";
 import { runGoalSchedulerEngineSpecs } from "../src/lib/server/worker/goalSchedulerEngine.spec";
 import { runConversationCommandServiceSpecs } from "../src/lib/server/services/conversationCommandService.spec";
+import { runRuntimeEventsAggregationSpecs } from "../src/lib/api/runtime-events.spec";
+import { runClaudeTransportSessionSpecs } from "../src/lib/server/claude/transport.spec";
+import { runContextPackBoundarySpecs } from "../src/lib/server/workspace/contextPack.spec";
+import { runJsonRepairAutoCloseSpecs } from "../src/lib/server/claude/jsonRepair.spec";
+import { runTaskDraftReviewSpecs } from "../src/lib/server/goalPlanning/taskDraftReview.spec";
 
 runStateSnapshotSpecs();
 runTaskTriggerTimeSpecs();
@@ -25,6 +30,11 @@ runPromptDuplicationGuardSpecs();
 runRuntimeStateChannelSpecs();
 runRuntimeEnvironmentCommandServiceSpecs();
 runConversationCommandServiceSpecs();
+runRuntimeEventsAggregationSpecs();
 runGoalDeliverableServiceSpecs();
 runStorageAdapterSpecs();
+runJsonRepairAutoCloseSpecs();
+runTaskDraftReviewSpecs();
+runClaudeTransportSessionSpecs();
+runContextPackBoundarySpecs();
 console.log("planning specs passed");

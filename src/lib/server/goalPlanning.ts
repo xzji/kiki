@@ -31,9 +31,13 @@ import {
 } from "@/lib/server/goalPlanning/taskDraftSchema";
 import {
   applyDraftReview,
-  buildTaskDraftReviewPrompt,
+  buildDegradedReviewDecision,
+  buildTaskDraftReviewDecisionPrompt,
+  buildTaskDraftReviewPresentationPrompt,
+  getReviewLowAlignmentCount,
+  validateTaskReviewDecision,
   type DecompositionSubGoalContext,
-  type TaskDraftReviewPayload,
+  type TaskDraftReviewDecisionPayload,
 } from "@/lib/server/goalPlanning/taskDraftReview";
 import { compileTaskDraftsToDraftTasks } from "@/lib/server/goalPlanning/taskCompiler";
 import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
@@ -79,17 +83,6 @@ type DecompositionPayload = {
   executionOrder: string;
   risks: string[];
   reasoning: string;
-};
-
-type TaskReviewPayload = {
-  reviewResults: Array<{
-    taskId: string;
-    goalContribution: "critical" | "high" | "medium" | "low";
-    subGoalContribution: "critical" | "high" | "medium" | "low";
-    aligned: boolean;
-    reasoning: string;
-    suggestions?: string[];
-  }>;
 };
 
 type PlanPresentationPayload = {
@@ -1085,27 +1078,6 @@ function validateDecomposition(value: unknown): DecompositionPayload {
   };
 }
 
-function validateTaskReview(value: unknown): TaskReviewPayload {
-  if (!isObject(value) || !Array.isArray(value.reviewResults)) {
-    throw new Error("任务 review 结果缺少 reviewResults");
-  }
-  return {
-    reviewResults: value.reviewResults
-      .filter(isObject)
-      .map((result) => ({
-        taskId: typeof result.taskId === "string" ? result.taskId.trim() : "",
-        goalContribution: normalizePriority(result.goalContribution),
-        subGoalContribution: normalizePriority(result.subGoalContribution),
-        aligned: Boolean(result.aligned),
-        reasoning: typeof result.reasoning === "string" ? result.reasoning.trim() : "",
-        suggestions: Array.isArray(result.suggestions)
-          ? result.suggestions.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
-          : undefined,
-      }))
-      .filter((result) => result.taskId),
-  };
-}
-
 function validatePlanPresentation(value: unknown): PlanPresentationPayload {
   if (!isObject(value)) {
     throw new Error("计划摘要结果不是 JSON 对象");
@@ -1451,35 +1423,171 @@ async function reviewTaskDraftsWithClaude(input: {
   requestId?: string;
   subGoalIndex?: number;
   totalSubGoals?: number;
-}): Promise<TaskDraftReviewPayload> {
-  const stdout = await runClaudeJson({
-    runtimeEnv: input.runtimeEnv,
-    prompt: buildTaskDraftReviewPrompt(input),
-    conversationId: input.conversationId,
-    signal: input.signal,
-    abortMessage: "任务 review 已中断",
-    failureMessage: "Claude CLI 任务草稿 review 失败",
-    context: {
+}): Promise<TaskDraftReviewDecisionPayload> {
+  const stepLabel = `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 的任务草稿：${input.subGoalTitle}`;
+  const traceContext: ClaudeRunContext = {
+    requestId: input.requestId,
+    scope: "goal_plan",
+    phase: "reviewing_tasks",
+    stepLabel,
+  };
+  // rawStdout 提升到 try 外层，保证 catch 内 snapshot 能拿到真实模型 stdout（含截断尾部）
+  let rawStdout = "";
+  try {
+    rawStdout = await runClaudeJson({
+      runtimeEnv: input.runtimeEnv,
+      prompt: buildTaskDraftReviewDecisionPrompt(input),
+      conversationId: input.conversationId,
+      signal: input.signal,
+      abortMessage: "任务 review 已中断",
+      failureMessage: "Claude CLI 任务草稿 review 失败",
+      context: traceContext,
+    });
+    const primary = normalizeClaudeJsonText(rawStdout);
+    const attempt = parseJsonWithCandidates(buildJsonParseCandidates(primary), validateTaskReviewDecision);
+    if (!attempt.ok) {
+      throw attempt.error instanceof Error
+        ? attempt.error
+        : new Error("Claude 任务草稿 review 决策层解析失败");
+    }
+    appendGoalLog({
       requestId: input.requestId,
       scope: "goal_plan",
+      level: "info",
       phase: "reviewing_tasks",
-      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 的任务草稿：${input.subGoalTitle}`,
-    },
-  });
-  return parseClaudeJson({
-    raw: stdout,
-    validator: validateTaskReview,
-    errorMessage: "Claude 任务草稿 review JSON 解析失败",
-    runtimeEnv: input.runtimeEnv,
-    conversationId: input.conversationId,
-    signal: input.signal,
-    context: {
+      message: `Review 决策层解析命中：${stepLabel}`,
+      details: formatTimingDetails({
+        strategy: attempt.strategy,
+        rawChars: primary.length,
+        results: attempt.parsed.results.length,
+      }),
+    });
+    return attempt.parsed;
+  } catch (error) {
+    // Abort 错误直接抛出，不走降级路径
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    // 区分 CLI 失败 vs 解析失败：CLI 失败时 rawStdout 为空，runClaudeJson 内部已写过 error 日志
+    const cliFailed = !rawStdout;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const truncatedError = errorMessage.length > 500 ? `${errorMessage.slice(0, 500)}…` : errorMessage;
+    if (cliFailed) {
+      // CLI 失败：runClaudeJson 已记录详细 error 日志，此处仅追加"已降级"摘要避免重复
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_plan",
+        level: "warn",
+        phase: "reviewing_tasks",
+        message: `Review 决策层 CLI 失败，已使用保守降级（默认全部对齐）：${stepLabel}`,
+      });
+    } else {
+      // 解析失败：CLI 返回了 stdout 但 JSON 解析/校验失败，写完整 warn 含错误细节
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_plan",
+        level: "warn",
+        phase: "reviewing_tasks",
+        message: `Review 决策层解析失败，已使用保守降级（默认全部对齐）：${stepLabel}`,
+        details: `error: ${truncatedError}`,
+      });
+    }
+    if (input.conversationId) {
+      try {
+        writePlanningParseFailureSnapshot({
+          conversationId: input.conversationId,
+          requestId: input.requestId,
+          phase: "reviewing_tasks",
+          stage: "review",
+          stepLabel,
+          errorMessage: truncatedError,
+          // 解析失败时拿真实 stdout（含截断尾部，便于排查 token 截断）；CLI 失败时无 stdout，写错误信息以保证字段非空
+          rawOutput: rawStdout || errorMessage,
+        });
+      } catch {
+        // snapshot 写入失败不影响降级
+      }
+    }
+    return buildDegradedReviewDecision(input.drafts);
+  }
+}
+
+const TASK_REVIEW_EXPLANATION_TIMEOUT_MS = 30_000;
+
+/**
+ * 异步展示层：根据决策层结果生成 plain markdown 解释，**仅做 fire-and-forget 启动**。
+ * 失败/超时/abort 都不抛出，仅写 warn 日志，确保不影响主链路。
+ * 与主流程共享 abort signal；自身另叠加 30s 超时保护。
+ */
+async function generateTaskReviewExplanation(input: {
+  goalTitle: string;
+  subGoalTitle: string;
+  goalDescription: string;
+  drafts: TaskDraft[];
+  decision: TaskDraftReviewDecisionPayload;
+  runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
+  signal?: AbortSignal;
+  requestId?: string;
+  subGoalIndex?: number;
+  totalSubGoals?: number;
+}): Promise<string | null> {
+  if (input.decision._degraded) {
+    // 降级路径下决策本身已是兜底，跳过展示层避免无意义 LLM 调用
+    return null;
+  }
+  const stepLabel = `Review 展示层 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"}：${input.subGoalTitle}`;
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => timeoutController.abort(), TASK_REVIEW_EXPLANATION_TIMEOUT_MS);
+  const onParentAbort = () => timeoutController.abort();
+  if (input.signal) {
+    if (input.signal.aborted) {
+      timeoutController.abort();
+    } else {
+      input.signal.addEventListener("abort", onParentAbort, { once: true });
+    }
+  }
+  try {
+    const text = await runClaudeText({
+      runtimeEnv: input.runtimeEnv,
+      prompt: buildTaskDraftReviewPresentationPrompt({
+        goalTitle: input.goalTitle,
+        subGoalTitle: input.subGoalTitle,
+        goalDescription: input.goalDescription,
+        drafts: input.drafts,
+        decision: input.decision,
+      }),
+      conversationId: input.conversationId,
+      signal: timeoutController.signal,
+      abortMessage: "任务 review 展示层已中断",
+      failureMessage: "任务 review 展示层文本生成失败",
+      context: {
+        requestId: input.requestId,
+        scope: "goal_plan",
+        phase: "reviewing_tasks",
+        stepLabel,
+      },
+    });
+    return text || null;
+  } catch {
+    // runClaudeText 内部已写 error/warn 日志（含 abort/timeout/failure 细节），此处仅追加"已忽略"摘要避免重复
+    appendGoalLog({
       requestId: input.requestId,
       scope: "goal_plan",
+      level: "warn",
       phase: "reviewing_tasks",
-      stepLabel: `Review 子目标 ${input.subGoalIndex ?? "?"}/${input.totalSubGoals ?? "?"} 的任务草稿：${input.subGoalTitle}`,
-    },
-  });
+      message: `Review 展示层失败/超时/已中断，已忽略（不影响主链路）：${stepLabel}`,
+    });
+    return null;
+  } finally {
+    clearTimeout(timer);
+    if (input.signal) {
+      input.signal.removeEventListener("abort", onParentAbort);
+    }
+  }
 }
 
 async function buildPlanPresentationWithClaude(input: {
@@ -1785,7 +1893,7 @@ export async function generateGoalPlanWithClaude(input: {
       }
 
       const subGoalDraftId = `draft-subgoal-${subGoal.id}`;
-      let review: TaskDraftReviewPayload;
+      let review: TaskDraftReviewDecisionPayload;
       let compiled: ReturnType<typeof compileTaskDraftsToDraftTasks>;
       let tasks: GoalBreakdownDraft["subGoals"][number]["tasks"];
       try {
@@ -1816,6 +1924,22 @@ export async function generateGoalPlanWithClaude(input: {
         });
 
         const reviewedDrafts = applyDraftReview(generatedDrafts.tasks, review);
+        // §3.2.6 + §8.5：异步展示层，仅启动 + 写 trace，不阻塞主链路
+        void generateTaskReviewExplanation({
+          goalTitle: input.goalText,
+          subGoalTitle: subGoal.name,
+          goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
+          drafts: generatedDrafts.tasks,
+          decision: review,
+          runtimeEnv: input.runtimeEnv,
+          conversationId: input.conversationId,
+          signal: input.signal,
+          requestId: input.requestId,
+          subGoalIndex: subGoalIndex + 1,
+          totalSubGoals,
+        }).catch(() => {
+          // 双保险：generateTaskReviewExplanation 内部已 catch，此处仅防御 unhandled rejection
+        });
         const subGoalContext: DecompositionSubGoalContext = {
           id: subGoal.id,
           name: subGoal.name,
@@ -1874,7 +1998,7 @@ export async function generateGoalPlanWithClaude(input: {
         throw error;
       }
       const uncoveredRisks = generatedDrafts.risks ?? [];
-      const lowAlignmentCount = review.reviewResults.filter((item: TaskDraftReviewPayload["reviewResults"][number]) => !item.aligned).length;
+      const lowAlignmentCount = getReviewLowAlignmentCount(review);
 
       if (generatedDrafts.coverageNotes?.length) {
         reviewSummary.push(`${subGoal.name}：${generatedDrafts.coverageNotes.join("；")}`);

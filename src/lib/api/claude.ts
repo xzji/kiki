@@ -7,6 +7,7 @@ type StreamHandlers = {
 function parseEventType(raw: string): ClaudeStreamEvent["type"] | null {
   switch (raw) {
     case "session":
+    case "session_invalid":
     case "status":
     case "delta":
     case "message":

@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { createHash } from "crypto";
 
 import type {
   QuotedConversationMessageContext,
@@ -16,7 +17,7 @@ import {
   type ToolChannelPolicy,
 } from "@/lib/runtime/toolPolicy";
 
-type ClaudeCliPayload = {
+export type ClaudeCliPayload = {
   type?: string;
   subtype?: string;
   status?: string;
@@ -70,6 +71,7 @@ export type ClaudeStreamOptions = {
 
 export type ClaudeStreamEvent =
   | { type: "session"; sessionId: string }
+  | { type: "session_invalid"; sessionId: string; message: string }
   | { type: "status"; status: "checking" | "running" | "completed" }
   | { type: "delta"; text: string }
   | { type: "message"; content: string; fallbackContent?: string }
@@ -383,37 +385,55 @@ function mapPermissionMode(permissionMode: RuntimePermissionMode) {
   }
 }
 
+function redactInternalIdentifiersForPrompt(value: string) {
+  return value.replace(/\b(?:conv|goal|sub|task|inst)-[A-Za-z0-9_-]+\b/g, "<redacted-id>");
+}
+
 function buildPrompt(
   message: string,
   quotedMessage?: ClaudeStreamOptions["quotedMessage"],
+  redactionMode: "strict" | "passthrough" = "strict",
 ) {
   const parts: string[] = [];
   if (quotedMessage) {
+    const quotedContent =
+      redactionMode === "strict"
+        ? redactInternalIdentifiersForPrompt(quotedMessage.content)
+        : quotedMessage.content;
     parts.push(
       `以下是当前用户引用的上下文，请优先参考：`,
-      `[${quotedMessage.roleLabel}] ${quotedMessage.content}`,
+      `[${quotedMessage.roleLabel}] ${quotedContent}`,
       "",
     );
   }
-  parts.push(`当前用户消息：`, message);
+  parts.push(`当前用户消息：`, redactionMode === "strict" ? redactInternalIdentifiersForPrompt(message) : message);
   return parts.join("\n");
 }
 
-function buildWorkspaceBoundPrompt(input: {
+export function buildWorkspaceBoundPrompt(input: {
   message: string;
   quotedMessage?: ClaudeStreamOptions["quotedMessage"];
   contextPack?: string;
   workspaceDir: string;
   workspacePolicy?: string;
   toolSummary?: ReturnType<typeof describeRuntimeToolPolicy>;
+  redactionMode?: "strict" | "passthrough";
 }) {
+  const redactionMode = input.redactionMode ?? "strict";
+  const workspaceLabel =
+    redactionMode === "strict"
+      ? `isolated-session-${createHash("sha256").update(input.workspaceDir).digest("hex").slice(0, 8)}`
+      : input.workspaceDir;
   const parts: string[] = [
     "你是 KiKi 当前会话助手，不是代码仓库开发助手。",
-    `当前工作目录是隔离 workspace：${input.workspaceDir}`,
+    `当前工作目录是隔离 workspace：${workspaceLabel}`,
     "你只能依据当前上下文包、用户消息和当前工作目录内的文件回答。",
     "不得读取父目录、项目源码目录、其他会话 workspace 或 IDE 上下文。",
     "如果用户要求继续/恢复，但当前上下文包没有可恢复状态，请说明当前会话没有找到可恢复任务。",
   ];
+  if (redactionMode === "strict") {
+    parts.push("边界规则：不要在回复中复述系统字段名、内部 ID、内部路径或会话元数据。");
+  }
   if (input.workspacePolicy) {
     parts.push(`workspaceMode: ${input.workspacePolicy}`);
   }
@@ -427,10 +447,58 @@ function buildWorkspaceBoundPrompt(input: {
     );
   }
   if (input.contextPack?.trim()) {
-    parts.push("", "【当前会话上下文包】", input.contextPack.trim());
+    const contextPack =
+      redactionMode === "strict"
+        ? redactInternalIdentifiersForPrompt(input.contextPack.trim())
+        : input.contextPack.trim();
+    parts.push("", "【当前会话上下文包】", contextPack);
   }
-  parts.push("", buildPrompt(input.message, input.quotedMessage));
+  parts.push("", buildPrompt(input.message, input.quotedMessage, redactionMode));
   return parts.join("\n");
+}
+
+export type ClaudeSessionDecision =
+  | { kind: "set"; sessionId: string }
+  | { kind: "duplicate-init"; ignored: string }
+  | { kind: "ignore" };
+
+export function classifySessionFromInitPayload(
+  payload: ClaudeCliPayload,
+  currentSessionId: string | undefined,
+): ClaudeSessionDecision {
+  if (payload.type !== "system" || payload.subtype !== "init" || !payload.session_id) {
+    return { kind: "ignore" };
+  }
+  if (!currentSessionId) {
+    return { kind: "set", sessionId: payload.session_id };
+  }
+  if (payload.session_id === currentSessionId) {
+    return { kind: "ignore" };
+  }
+  return { kind: "duplicate-init", ignored: payload.session_id };
+}
+
+export type ClaudeResultErrorDecision =
+  | { kind: "session_invalid"; sessionId: string; message: string }
+  | { kind: "error"; message: string };
+
+export function classifyResultError(
+  payload: ClaudeCliPayload,
+  resumeSessionId: string | undefined,
+): ClaudeResultErrorDecision {
+  const message =
+    payload.result ||
+    payload.errors?.join("\n") ||
+    payload.api_error_status ||
+    "Claude 返回了错误结果";
+  if (resumeSessionId && /No conversation found with session ID/i.test(message)) {
+    return {
+      kind: "session_invalid",
+      sessionId: resumeSessionId,
+      message,
+    };
+  }
+  return { kind: "error", message };
 }
 
 function truncateMiddle(value: string, max = 80) {
@@ -556,6 +624,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     workspaceDir: cwd,
     workspacePolicy: options.workspacePolicy,
     toolSummary: describeRuntimeToolPolicy(resolvedToolPolicy),
+    redactionMode: options.workspacePolicy === "task" ? "passthrough" : "strict",
   });
   const trace = createClaudeTrace({
     cwd,
@@ -588,6 +657,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     let aggregatedAssistantText = "";
     let callbackError: unknown = null;
     let settled = false;
+    let canonicalSessionId = options.claudeSessionId;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
 
     const resolveOnce = () => {
@@ -647,8 +717,11 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       }
       trace?.appendParsedEvent(payload);
 
-      const nextSessionId = payload.session_id;
-      if (nextSessionId && !emitEvent({ type: "session", sessionId: nextSessionId })) return;
+      const sessionDecision = classifySessionFromInitPayload(payload, canonicalSessionId);
+      if (sessionDecision.kind === "set") {
+        canonicalSessionId = sessionDecision.sessionId;
+        if (!emitEvent({ type: "session", sessionId: sessionDecision.sessionId })) return;
+      }
 
       if (payload.type === "system" && payload.subtype === "status") {
         const status = payload.status === "requesting" ? "running" : "checking";
@@ -736,14 +809,19 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
           emitEvent({ type: "status", status: "completed" });
         } else {
           emittedFatalError = true;
-          emitEvent({
-            type: "error",
-            message:
-              payload.result ||
-              payload.errors?.join("\n") ||
-              payload.api_error_status ||
-              "Claude 返回了错误结果",
-          });
+          const decision = classifyResultError(payload, options.claudeSessionId);
+          if (decision.kind === "session_invalid") {
+            emitEvent({
+              type: "session_invalid",
+              sessionId: decision.sessionId,
+              message: decision.message,
+            });
+          } else {
+            emitEvent({
+              type: "error",
+              message: decision.message,
+            });
+          }
         }
       }
     };

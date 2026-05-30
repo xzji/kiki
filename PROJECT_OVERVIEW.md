@@ -133,7 +133,7 @@ src/
 
 ## 5. 状态管理结构
 
-项目核心状态由 Zustand 承担，且大量状态通过 `persist` 落在浏览器本地。
+项目核心状态由 Zustand 承担，但已从"前端权威"转向"服务端权威 + 前端 projection"。
 
 ### 5.1 关键 Store
 
@@ -142,35 +142,37 @@ src/
   - 支持普通 Claude 对话与 `/goal` 信息收集
 
 - `conversationStore.ts`
-  - 管理会话列表、消息、未读、置顶、重命名
-  - 维护 `goalId`、`goalInfoCollection`、`claudeSessionId`、`runtimeEnvId`
+  - 已从 `persist` 模式重构为 read-only projection
+  - 通过 `/api/conversations/state` 初始 hydrate，后续由 SSE 增量更新
+  - 写动作走 `/api/conversations/commands` 命令式 API
   - 是会话模式与目标模式的连接点
 
 - `goalStore.ts`
-  - 管理目标、子目标、任务、任务实例、目标工作流状态
-  - 承接从“目标规划草案”到“已确认执行”再到“监控中”的全过程
+  - 服务端持久化 + 命令式写入（`/api/goals/commands`）
+  - 通过 SSE event_log 增量同步
+  - 支持乐观更新失败后的 resync 回滚
 
-- `runtimeEnvStore.ts`
-  - 管理本地运行环境列表、激活环境、健康状态、权限模式
-  - 当前目标规划与普通对话均依赖这里的活动运行环境
+- `runtimeEnvStore.ts` / `scheduleStore.ts`
+  - 已彻底移除 localStorage 业务数据
+  - 服务端为事实源，前端仅作 projection
+  - 写入命令带 `expectedRevision` 防旧覆盖
 
 - `easterEggSettingsStore.ts`
-  - 管理隐藏调参项
-  - 包括信息收集轮数、任务并发数、调度周期、超时阈值、拆解阈值等
+  - 管理隐藏调参项（信息收集轮数、任务并发数、调度周期、超时阈值、拆解阈值等）
+  - 仍保留本地持久化，因为属于偏好而非业务事实
 
-- `scheduleStore.ts` / `inboxStore.ts`
-  - 分别管理日程事件与收件箱卡片
-  - 用于呈现系统主动执行后的回流结果
+- `inboxStore.ts`
+  - 收件箱卡片 projection
 
 ### 5.2 状态设计特点
 
-当前状态层有几个明显特征：
+当前状态层的特征：
 
-- 前端 store 仍然是用户可感知状态的主入口
-- 但运行时执行状态又会被后端快照覆盖和回灌
-- 因此项目不是纯前端状态，也不是纯后端状态，而是“双向同步模型”
-
-这也是后面 `RuntimeStateBridge` 存在的原因。
+- 服务端是事实源，前端 store 是 projection
+- 命令式写路径 + SSE 投影路径单向数据流
+- 多 Tab 通过 `BroadcastChannel` 同步刷新
+- 命令携带 `expectedRevision`，冲突 409 + snapshot 回灌
+- revision 防旧覆盖：旧 snapshot 不会回滚新命令结果
 
 ---
 
@@ -270,45 +272,38 @@ src/
 
 ### 8.1 当前执行模型
 
-当前项目采用“后台执行 + 前端状态回灌”的模式：
+当前项目采用“daemon 唯一生产者 + 浏览器只读 projection”的模式：
 
 - 用户确认目标规划后，目标进入可执行状态
-- Scheduler 找到可启动任务
-- 为任务生成实例 `TaskInstance`
+- 服务端 daemon scheduler 找到可启动任务并派发
+- daemon 创建实例 `TaskInstance`、写 `runtime_jobs`、生成事件
 - 任务通过本地 Claude CLI 后台执行
-- 执行中间态和最终结果写入 telemetry
-- 前端轮询拿到进度后回灌到 `goalStore`
+- 执行中间态和最终结果写入 telemetry / event log
+- 前端通过 SSE 订阅事件，更新 UI projection（不再写回服务端）
 
-因此用户在界面上看到的不是同步阻塞式 AI，而是“KiKi 在后台推进任务，然后把状态同步回来”。
+因此用户在界面上看到的不是同步阻塞式 AI，而是“daemon 在后台推进任务，浏览器只是把状态投影出来”。
 
-### 8.2 浏览器侧 Scheduler
+### 8.2 浏览器侧 Scheduler（已下线）
 
-`src/components/providers/GoalSchedulerRuntime.tsx` 提供了浏览器侧调度器。
+`src/components/providers/GoalSchedulerRuntime.tsx` 已被有意清空，仅保留 `hydrateSettings` 副作用。组件文件顶部明确注释：
 
-它会负责：
+> Browser-side scheduling, notification delivery, and watchdog logic are intentionally disabled.
+> The daemon is the only producer; RuntimeEventBridge consumes SSE events and updates UI projections.
 
-- 找到依赖已满足且到期的任务
-- 根据优先级和并发上限选择要启动的任务
-- 自动创建 inbox item
-- 自动创建日程事件
-- 在会话流中插入任务卡片消息
-- 发起任务执行请求
-- 等待进度更新并同步状态
-- 做 watchdog 处理，例如超时暂停、等待用户提醒
+历史上由浏览器侧承担的调度、通知投递、watchdog 三类职责，全部已迁移到服务端 worker。
 
-这部分说明产品上已经把“长期目标”推进到了“自动派发任务”的阶段。
+### 8.3 服务端 Scheduler / Worker（当前主链路）
 
-### 8.3 后端任务执行
+任务调度与执行已完全收口到服务端：
 
-任务执行 API 入口在：
+- `src/lib/server/worker/goalSchedulerEngine.ts`：依赖检查、到期判定、优先级排序、并发上限、实例创建
+- `src/lib/server/worker/taskDispatchWorker.ts`：派发与执行驱动
+- `src/lib/server/worker/goalNotificationWorker.ts`：通知投递、watchdog（超时暂停、提醒兜底）
+- `src/lib/server/worker/recoveryWorker.ts`：异常恢复
+- `src/lib/server/goalTaskRunner.ts`：单次任务的本地 Claude CLI 执行、telemetry 落库
+- `src/bin/kiki-runtime-daemon.ts` + `scripts/start-worker.ts`：daemon 启动入口
 
-- `src/app/api/goals/tasks/execute/route.ts`
-
-它当前是 fire-and-forget 方式，收到请求后调用：
-
-- `src/lib/server/goalTaskRunner.ts`
-
-由该模块驱动单次任务执行，并把 telemetry 写入系统。
+任务执行的 HTTP 入口（`src/app/api/goals/tasks/execute/route.ts`）当前主要供调试与重放使用，正常流程下由 daemon 自治推进，无需前端发起。
 
 ---
 
@@ -400,35 +395,45 @@ Schema 定义位于：
 
 项目现在不是单向数据流，而是前后端双向同步。
 
-### 10.1 RuntimeStateBridge
+### 10.1 RuntimeEventBridge（projection-only）
 
-`src/components/providers/RuntimeStateBridge.tsx` 负责：
+`src/components/providers/RuntimeEventBridge.tsx` 负责：
 
-- 启动时从服务端拉取快照
-- 把快照注入前端 goals / runtimeEnvironments / scheduleEvents
-- 定时轮询服务端快照
-- 当前端状态变化时，再反向同步到服务端
+- 启动时从服务端拉取 conversations / goals / runtime / schedule 的初始 snapshot
+- 订阅聚合后的 SSE 通道 `/api/runtime/events/stream`，将 daemon 写入的事件投影到前端 store
+- 在 `bootstrapped` && `conversationHydrated` 之后才连接 SSE，避免 cursor 未就绪导致的事件回放
+- 监听 `request.signal.abort`，确保连接断开时资源正确释放
 
-因此它是“前端 store”和“服务端 snapshot”之间的桥。
+它的角色已经从“双向桥”降级为单向 projection：服务端是事实源，浏览器只读。
 
-### 10.2 Snapshot 模型
+### 10.2 写路径：命令式 API + 乐观锁
 
-服务端 snapshot 读写在：
+历史上的 `/api/runtime/state/sync` 反向同步路由及 `syncRuntimeStateSnapshot` helper 已删除。所有写动作都走命令式 API：
+
+- `/api/conversations/commands`
+- `/api/goals/commands`
+- `/api/runtime/environments/[id]`
+- `/api/schedule/events`
+
+每条命令都携带 `expectedRevision` / `If-Match`，冲突返回 `409` 并回灌最新 snapshot；snapshot 通过 revision 防止旧数据回滚新结果。
+
+### 10.3 多 Tab 同步与 Snapshot
+
+服务端 snapshot 读写：
 
 - `src/lib/server/runtime/stateSnapshot.ts`
-- `src/app/api/runtime/state/sync/route.ts`
+- `src/lib/server/runtime/goalStateSnapshot.ts`
 
-当前同步对象主要包括：
+跨 Tab 同步：
 
-- `goals`
+- `src/lib/runtimeStateChannel.ts`：基于 `BroadcastChannel`，写入成功后通知同浏览器其它 Tab 触发 snapshot 刷新
+
+当前同步对象包括：
+
+- `conversations` / `messages` / `conversation_event_log`
+- `goals` / `goal_event_log`
 - `runtimeEnvironments`
 - `scheduleEvents`
-
-这套机制的价值在于：
-
-- 页面刷新后不至于完全丢状态
-- daemon/worker 可以在服务端读到更稳定的运行数据
-- 前端和后端对当前系统状态有共同视图
 
 ---
 

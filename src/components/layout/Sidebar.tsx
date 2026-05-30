@@ -34,6 +34,7 @@ export function Sidebar() {
   const router = useRouter();
   const conversations = useConversationStore((state) => state.conversations);
   const createConversation = useConversationStore((state) => state.createConversation);
+  const markConversationRead = useConversationStore((state) => state.markConversationRead);
   const markConversationUnread = useConversationStore((state) => state.markConversationUnread);
   const deleteConversation = useConversationStore((state) => state.deleteConversation);
   const renameConversation = useConversationStore((state) => state.renameConversation);
@@ -218,6 +219,7 @@ export function Sidebar() {
                   active={pathname.startsWith(`/conversations/${conv.id}`)}
                   onTogglePinned={() => toggleConversationPinned(conv.id)}
                   onRename={(title) => renameConversation(conv.id, title)}
+                  onMarkRead={() => markConversationRead(conv.id)}
                   onMarkUnread={() => markConversationUnread(conv.id)}
                   onDelete={() => setDeleteTarget(conv)}
                 />
@@ -314,6 +316,7 @@ function ConversationListItem({
   active,
   onTogglePinned,
   onRename,
+  onMarkRead,
   onMarkUnread,
   onDelete,
 }: {
@@ -321,6 +324,7 @@ function ConversationListItem({
   active: boolean;
   onTogglePinned: () => void;
   onRename: (title: string) => void;
+  onMarkRead: () => void;
   onMarkUnread: () => void;
   onDelete: () => void | Promise<void>;
 }) {
@@ -472,12 +476,16 @@ function ConversationListItem({
               <button
                 type="button"
                 onClick={() => {
-                  onMarkUnread();
+                  if (unread > 0) {
+                    onMarkRead();
+                  } else {
+                    onMarkUnread();
+                  }
                   setMenuOpen(false);
                 }}
                 className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
               >
-                标记为未读
+                {unread > 0 ? "标记为已读" : "标记为未读"}
               </button>
               <button
                 type="button"

@@ -49,7 +49,7 @@ type ConversationStore = {
   renameConversation: (conversationId: string, title: string) => void;
   setConversationWorkspace: (conversationId: string, workspacePath: string) => void;
   setConversationRuntimeEnv: (conversationId: string, runtimeEnvId: string) => void;
-  setClaudeSessionId: (conversationId: string, claudeSessionId: string) => void;
+  setClaudeSessionId: (conversationId: string, claudeSessionId: string | undefined) => void;
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 

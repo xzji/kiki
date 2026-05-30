@@ -6,8 +6,9 @@ import {
   fetchConversationState,
   importLegacyConversations,
 } from "@/lib/api/conversation-commands";
-import { createGoalEventsSource, fetchGoalEvents } from "@/lib/api/goal-events";
+import { fetchGoalEvents } from "@/lib/api/goal-events";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { createRuntimeEventsSource } from "@/lib/api/runtime-events";
 import {
   advanceGoalEventCursor,
   GOAL_EVENT_CURSOR_CHANNEL,
@@ -336,9 +337,9 @@ export function RuntimeEventBridge() {
   const applyConversationEvent = useConversationStore((state) => state.applyConversationEvent);
 
   const currentGoalsKey = useMemo(() => stableStringify(goals), [goals]);
-  const currentGoalIdsKey = useMemo(() => goals.map((goal) => goal.id).sort().join("|"), [goals]);
   const isApplyingRemoteRef = useRef(false);
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [conversationHydrated, setConversationHydrated] = useState(false);
   const sseDisconnectedRef = useRef(false);
   const remoteRevisionRef = useRef<RuntimeStateRevision>(EMPTY_REVISION);
   const eventCursorRef = useRef<GoalEventCursorMap>(readGoalEventCursors());
@@ -381,26 +382,6 @@ export function RuntimeEventBridge() {
 
   useEffect(() => {
     let cancelled = false;
-    let source: EventSource | null = null;
-    const startSse = () => {
-      if (cancelled) return;
-      source = new EventSource(`/api/conversations/events/stream?fromId=${conversationCursorRef.current}`);
-      source.addEventListener("events", (message) => {
-        try {
-          const payload = JSON.parse((message as MessageEvent).data) as {
-            events?: ConversationEventRecord[];
-            nextCursor?: number;
-          };
-          for (const event of payload.events ?? []) {
-            if (event.id <= conversationCursorRef.current) continue;
-            applyConversationEvent(event);
-            conversationCursorRef.current = event.id;
-          }
-        } catch {
-          // ignore malformed conversation event payloads
-        }
-      });
-    };
     const hydrateConversationsFromServer = async () => {
       try {
         const remote = await fetchConversationState();
@@ -418,7 +399,7 @@ export function RuntimeEventBridge() {
               const after = await fetchConversationState();
               if (cancelled) return;
               conversationCursorRef.current = after.latestEventId;
-              startSse();
+              setConversationHydrated(true);
               return;
             } catch {
               window.localStorage.setItem("kiki.conversations.migrated.failed_at", new Date().toISOString());
@@ -426,19 +407,19 @@ export function RuntimeEventBridge() {
           }
         }
         hydrateConversations(remote.conversations);
-        startSse();
+        setConversationHydrated(true);
       } catch {
-        // 会话投影失败时保留本地乐观状态，后续 SSE/轮询继续收敛。
-        startSse();
+        // 会话投影失败时保留本地乐观状态，后续聚合 SSE/轮询继续收敛；
+        // 仍标记 hydrated，让聚合 SSE 至少以本地 cursor=0 起步，并由 30s 快照兜底收敛。
+        setConversationHydrated(true);
       }
     };
     void hydrateConversationsFromServer();
 
     return () => {
       cancelled = true;
-      source?.close();
     };
-  }, [applyConversationEvent, hydrateConversations]);
+  }, [hydrateConversations]);
 
   useEffect(() => {
     let cancelled = false;
@@ -566,12 +547,26 @@ export function RuntimeEventBridge() {
   }, []);
 
   useEffect(() => {
-    if (!bootstrapped || goals.length === 0) return;
-    const sources: EventSource[] = [];
+    if (!bootstrapped || !conversationHydrated) return;
     let cancelled = false;
-    const goalIds = currentGoalIdsKey.split("|").filter(Boolean);
-    const bootstrapEvents = async () => {
+    let source: EventSource | null = null;
+
+    const computeAggregateGoalCursor = () => {
+      const cursors = eventCursorRef.current;
+      let max = 0;
+      for (const value of Object.values(cursors)) {
+        if (typeof value === "number" && value > max) max = value;
+      }
+      return max;
+    };
+
+    const start = async () => {
+      const goalIds = useGoalStore
+        .getState()
+        .goals.map((goal) => goal.id);
+      // 串行 await，避免一次性打开 N 个并发 HTTP 再次占满浏览器连接池。
       for (const goalId of goalIds) {
+        if (cancelled) return;
         try {
           const response = await fetchGoalEvents({
             goalId,
@@ -588,40 +583,61 @@ export function RuntimeEventBridge() {
         }
       }
       if (cancelled) return;
-      for (const goalId of goalIds) {
-        const source = createGoalEventsSource({
-          goalId,
-          fromId: eventCursorRef.current[goalId] ?? 0,
-        });
-        source.addEventListener("events", (message) => {
-          try {
-            const payload = JSON.parse((message as MessageEvent).data) as {
-              events?: GoalEventRecord[];
-              nextCursor?: number;
-            };
-            for (const event of payload.events ?? []) {
-              if (!applyGoalEventAndAdvance(event)) break;
-            }
-          } catch {
-            // ignore malformed event payloads
+
+      let aggregateGoalCursor = computeAggregateGoalCursor();
+      source = createRuntimeEventsSource({
+        goalCursor: aggregateGoalCursor,
+        conversationCursor: conversationCursorRef.current,
+      });
+      source.addEventListener("goal-events", (message) => {
+        try {
+          const payload = JSON.parse((message as MessageEvent).data) as {
+            events?: GoalEventRecord[];
+            nextCursor?: number;
+          };
+          for (const event of payload.events ?? []) {
+            if (!applyGoalEventAndAdvance(event)) break;
           }
-        });
-        source.addEventListener("open", () => {
-          sseDisconnectedRef.current = false;
-        });
-        source.addEventListener("error", () => {
-          runtimeEventMetrics.sseErrors += 1;
-          sseDisconnectedRef.current = true;
-        });
-        sources.push(source);
-      }
+          if (typeof payload.nextCursor === "number" && payload.nextCursor > aggregateGoalCursor) {
+            aggregateGoalCursor = payload.nextCursor;
+          }
+        } catch {
+          // ignore malformed goal event payloads
+        }
+      });
+      source.addEventListener("conversation-events", (message) => {
+        try {
+          const payload = JSON.parse((message as MessageEvent).data) as {
+            events?: ConversationEventRecord[];
+            nextCursor?: number;
+          };
+          for (const event of payload.events ?? []) {
+            if (event.id <= conversationCursorRef.current) continue;
+            applyConversationEvent(event);
+            conversationCursorRef.current = event.id;
+          }
+        } catch {
+          // ignore malformed conversation event payloads
+        }
+      });
+      source.addEventListener("open", () => {
+        sseDisconnectedRef.current = false;
+      });
+      source.addEventListener("error", () => {
+        runtimeEventMetrics.sseErrors += 1;
+        sseDisconnectedRef.current = true;
+      });
     };
-    void bootstrapEvents();
+
+    void start();
+
     return () => {
       cancelled = true;
-      sources.forEach((source) => source.close());
+      source?.close();
+      source = null;
     };
-  }, [bootstrapped, currentGoalIdsKey, goals.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrapped, conversationHydrated]);
 
   useEffect(() => {
     if (!bootstrapped || pendingGoalEvents.size === 0) return;

@@ -64,12 +64,85 @@ export function repairCommonJsonIssues(text: string) {
 
 export function buildJsonParseCandidates(primary: string): JsonParseCandidate[] {
   const balanced = extractBalancedJsonSnippet(primary);
+  const autoClosed = autoCloseTruncatedJson(primary);
   return [
     { label: "primary", value: primary },
     { label: "balanced", value: balanced },
     { label: "common_repair", value: repairCommonJsonIssues(primary) },
     { label: "balanced_common_repair", value: repairCommonJsonIssues(balanced) },
+    { label: "auto_closed", value: autoClosed },
+    { label: "auto_closed_common_repair", value: autoClosed ? repairCommonJsonIssues(autoClosed) : "" },
   ];
+}
+
+/**
+ * 当模型输出在 token 上限处被截断（末尾缺 `}` / `]`）时，按栈反向追加缺失的闭合符。
+ * 仅在末尾不在字符串内时尝试；若末尾仍在字符串中则返回空候选（避免补 `"` 后产生看起来合法但语义残缺的 JSON）。
+ * 同时剥离悬空 token（如末尾 `,`、未闭合的 `"key":`）后再闭合。
+ */
+export function autoCloseTruncatedJson(raw: string): string {
+  const text = raw.trim();
+  if (!text) return "";
+
+  const startIndex = text.search(/[\{\[]/);
+  if (startIndex < 0) return "";
+
+  const stack: Array<"{" | "["> = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      const expected = char === "}" ? "{" : "[";
+      const top = stack[stack.length - 1];
+      if (top === expected) stack.pop();
+    }
+  }
+
+  // 字符串内截断：放弃自动闭合
+  if (inString) return "";
+  // 没有未闭合 → 与原文等价，无意义
+  if (stack.length === 0) return "";
+
+  // 剥离悬空 token：末尾的 `,`、空白、未闭合的 `"key":` 片段
+  let body = text.slice(startIndex);
+  // 移除末尾空白
+  body = body.replace(/\s+$/, "");
+  // 移除末尾悬空 `"key":` 或 `"key": ` 这类 dangling property
+  body = body.replace(/,?\s*"[^"\\]*"\s*:\s*$/, "");
+  // 移除尾随逗号
+  body = body.replace(/,\s*$/, "");
+
+  // 按栈 LIFO 追加闭合符
+  const closers = stack
+    .slice()
+    .reverse()
+    .map((opener) => (opener === "{" ? "}" : "]"))
+    .join("");
+  return `${body}${closers}`;
 }
 
 export function parseJsonWithCandidates<T>(
