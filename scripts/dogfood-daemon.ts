@@ -116,28 +116,30 @@ function countInstancesByStatus(goals: Goal[]) {
   return { tasks, instances, counts };
 }
 
-function countGoalEvents(kind: string) {
+function countGoalEvents(goalId: string, kind: string) {
   const row = getDatabase()
-    .prepare(`SELECT COUNT(*) AS count FROM goal_event_log WHERE kind = ?`)
-    .get(kind) as { count: number } | undefined;
+    .prepare(`SELECT COUNT(*) AS count FROM goal_event_log WHERE goal_id = ? AND kind = ?`)
+    .get(goalId, kind) as { count: number } | undefined;
   return row?.count ?? 0;
 }
 
 function collectMetrics(runId: string): DogfoodMetrics {
+  const goalId = normalizeGoalId(`dogfood-${runId}`);
   const snapshot = readGoalsSnapshotMeta([]);
-  const { tasks, instances, counts } = countInstancesByStatus(snapshot.value);
+  const dogfoodGoals = snapshot.value.filter((goal) => goal.id === goalId);
+  const { tasks, instances, counts } = countInstancesByStatus(dogfoodGoals);
   return {
     runId,
     sampledAt: nowIso(),
-    goals: snapshot.value.length,
+    goals: dogfoodGoals.length,
     tasks,
     instances,
     completedInstances: counts.completed,
     awaitingUserInstances: counts.awaiting_user,
     pausedInstances: counts.paused,
     errorInstances: counts.error,
-    notificationDeliveredEvents: countGoalEvents("notification.delivered"),
-    timeoutPausedEvents: countGoalEvents("instance.timeout_paused"),
+    notificationDeliveredEvents: countGoalEvents(goalId, "notification.delivered"),
+    timeoutPausedEvents: countGoalEvents(goalId, "instance.timeout_paused"),
     completionRate: instances === 0 ? 0 : counts.completed / instances,
   };
 }

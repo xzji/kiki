@@ -5,9 +5,8 @@ import {
   transitionTaskInstanceProjection,
 } from "@/lib/server/services/goalRuntimeService";
 import {
-  composeGoalDeliverable,
   goalHasCompletedTasks,
-  saveGoalDeliverable,
+  materializeGoalDeliverable,
 } from "@/lib/server/services/goalDeliverableService";
 import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, Task } from "@/types/kiki";
@@ -205,7 +204,7 @@ export function runGoalDaemonSideEffects(goals: Goal[]) {
   const notifications = runGoalNotificationDeliveryWorker(readGoalsSnapshot(goals));
   const deliverables = readGoalsSnapshot(goals)
     .filter(goalHasCompletedTasks)
-    .map((goal) => saveGoalDeliverable(composeGoalDeliverable(goal.id))).length;
+    .filter((goal) => materializeGoalDeliverable(goal.id).changed).length;
   return {
     schedule,
     watchdog,

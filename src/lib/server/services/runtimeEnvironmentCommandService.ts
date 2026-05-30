@@ -127,8 +127,15 @@ export function applyRuntimeEnvironmentCommand(
       ...command.environment,
       id: "id" in command.environment && command.environment.id ? command.environment.id : makeId("runtime-env"),
     });
+    if (current.some((item) => item.id === environment.id)) {
+      throw new RuntimeEnvironmentCommandError(409, "Runtime 环境已存在，请通过更新流程修改", {
+        conflict: true,
+        currentRevision: undefined,
+        duplicateId: environment.id,
+      });
+    }
     const activeId = environment.type === "local" ? environment.id : activeEnvironmentId(current);
-    const next = markDefault([environment, ...current.filter((item) => item.id !== environment.id)], activeId);
+    const next = markDefault([environment, ...current], activeId);
     return writeEnvironments(next, next.find((item) => item.id === environment.id), options.expectedRevision);
   }
 

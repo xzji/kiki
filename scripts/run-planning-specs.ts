@@ -5,7 +5,12 @@ import { runAwaitingDisplayModelSpecs } from "../src/lib/taskInstance/awaitingDi
 import { runProtocolNormalizeSpecs } from "../src/lib/server/protocol/protocolNormalize.spec";
 import { runPromptDuplicationGuardSpecs } from "../src/lib/planning/specs/promptDuplicationGuardSpec";
 import { runRuntimeStateChannelSpecs } from "../src/lib/runtimeStateChannel.spec";
+import { runStateSnapshotSpecs } from "../src/lib/server/runtime/stateSnapshot.spec";
+import { runGoalDeliverableServiceSpecs } from "../src/lib/server/services/goalDeliverableService.spec";
+import { runStorageAdapterSpecs } from "../src/lib/server/adapters/storage.spec";
+import { runRuntimeEnvironmentCommandServiceSpecs } from "../src/lib/server/services/runtimeEnvironmentCommandService.spec";
 
+runStateSnapshotSpecs();
 runBlockProtocolSpecs();
 runTaskCompilerSpecs();
 runGoalNotificationWorkerSpecs();
@@ -13,4 +18,7 @@ runAwaitingDisplayModelSpecs();
 runProtocolNormalizeSpecs();
 runPromptDuplicationGuardSpecs();
 runRuntimeStateChannelSpecs();
+runRuntimeEnvironmentCommandServiceSpecs();
+runGoalDeliverableServiceSpecs();
+runStorageAdapterSpecs();
 console.log("planning specs passed");

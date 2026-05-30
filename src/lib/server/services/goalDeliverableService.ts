@@ -2,6 +2,7 @@ import { getDatabaseAdapter } from "@/lib/server/adapters/database";
 import type { StorageRef } from "@/lib/server/adapters/storage";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, Task, TaskInstance, TaskRunArtifact } from "@/types/kiki";
+import type { ResultBlock } from "@/types/taskResult";
 
 export type GoalDeliverableSection = {
   taskId: string;
@@ -9,6 +10,7 @@ export type GoalDeliverableSection = {
   instanceId: string;
   headline: string;
   summary: string;
+  blocks: ResultBlock[];
   artifactRefs: StorageRef[];
   agentRoleId?: string;
 };
@@ -49,9 +51,21 @@ function artifactStorageRef(goalId: string, taskId: string, artifact: TaskRunArt
   return { adapter: "local-fs", key: `goal-deliverables/${goalId}/${taskId}/${artifact.id}` };
 }
 
+function mergeArtifacts(instance: TaskInstance) {
+  const merged = [...(instance.result?.artifacts ?? []), ...(instance.payload.artifacts ?? [])];
+  const seen = new Set<string>();
+  return merged.filter((artifact) => {
+    const key = `${artifact.id}:${artifact.href ?? ""}:${artifact.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function summarizeInstance(task: Task, instance: TaskInstance) {
   return (
     instance.result?.summary ||
+    instance.result?.taskResult?.title ||
     instance.payload.summary ||
     instance.payload.details ||
     task.expectedOutcome ||
@@ -60,7 +74,7 @@ function summarizeInstance(task: Task, instance: TaskInstance) {
 }
 
 function buildSection(goalId: string, task: Task, instance: TaskInstance): GoalDeliverableSection {
-  const artifacts = instance.payload.artifacts ?? [];
+  const artifacts = mergeArtifacts(instance);
   const summary = summarizeInstance(task, instance);
   return {
     taskId: task.id,
@@ -68,6 +82,7 @@ function buildSection(goalId: string, task: Task, instance: TaskInstance): GoalD
     instanceId: instance.id,
     headline: normalizeTaskTitle(task.title),
     summary,
+    blocks: instance.result?.taskResult?.blocks ?? [],
     artifactRefs: artifacts.map((artifact) => artifactStorageRef(goalId, task.id, artifact)),
   };
 }
@@ -103,9 +118,7 @@ export function composeGoalDeliverable(goalId: string): GoalDeliverable {
       .filter((entry): entry is { task: Task; instance: TaskInstance } => Boolean(entry.instance)),
   );
   const sections = completed.map(({ task, instance }) => buildSection(goal.id, task, instance));
-  const attachments = completed.flatMap(({ task, instance }) =>
-    buildAttachments(goal.id, task, instance.payload.artifacts ?? []),
-  );
+  const attachments = completed.flatMap(({ task, instance }) => buildAttachments(goal.id, task, mergeArtifacts(instance)));
   const revision = getStoredRevision(goalId) + 1;
   return {
     goalId: goal.id,
@@ -134,6 +147,16 @@ export function saveGoalDeliverable(deliverable: GoalDeliverable) {
   return deliverable;
 }
 
+function comparableDeliverable(deliverable: GoalDeliverable) {
+  return {
+    goalId: deliverable.goalId,
+    title: deliverable.title,
+    summary: deliverable.summary,
+    sections: deliverable.sections,
+    attachments: deliverable.attachments,
+  };
+}
+
 export function readGoalDeliverable(goalId: string) {
   const row = getDatabaseAdapter()
     .prepare(`SELECT payload_json FROM goal_deliverables WHERE goal_id = ? LIMIT 1`)
@@ -144,6 +167,15 @@ export function readGoalDeliverable(goalId: string) {
 
 export function getOrComposeGoalDeliverable(goalId: string) {
   return readGoalDeliverable(goalId) ?? saveGoalDeliverable(composeGoalDeliverable(goalId));
+}
+
+export function materializeGoalDeliverable(goalId: string) {
+  const existing = readGoalDeliverable(goalId);
+  const next = composeGoalDeliverable(goalId);
+  if (existing && JSON.stringify(comparableDeliverable(existing)) === JSON.stringify(comparableDeliverable(next))) {
+    return { deliverable: existing, changed: false };
+  }
+  return { deliverable: saveGoalDeliverable(next), changed: true };
 }
 
 export function goalHasCompletedTasks(goal: Goal) {

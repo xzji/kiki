@@ -20,7 +20,8 @@ export class LocalFsStorageAdapter implements StorageAdapter {
 
   private resolveKey(key: string) {
     const resolved = path.resolve(this.rootDir, key);
-    if (!resolved.startsWith(this.rootDir)) {
+    const relativePath = path.relative(this.rootDir, resolved);
+    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
       throw new Error("非法 storage key");
     }
     return resolved;

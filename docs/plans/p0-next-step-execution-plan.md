@@ -6,11 +6,11 @@
 > - **P0-A**：调度真正下沉到 daemon（即《方案 A：调度下沉与事件流》）
 > - **P0-B**：协议层去重 + 服务端事实源
 > 已有底稿：[方案A-调度下沉与事件流.md](file:///Users/bytedance/Documents/trae/long_horizon_agent/docs/plans/方案A-调度下沉与事件流.md)（v2）
-> 最近更新：2026-05-29（P0 本地收口实现后）
+> 最近更新：2026-05-30（P0 收尾 hardening 后）
 
 ---
 
-## 最新状态（2026-05-29）
+## 最新状态（2026-05-30）
 
 | 事项 | 当前状态 | 说明 |
 |---|---|---|
@@ -20,10 +20,31 @@
 | `/api/runtime/state/sync` 反向写路径 | ✅ 已删除 | `syncRuntimeStateSnapshot` helper 同步删除 |
 | server 协议归一 | ✅ 已完成首轮 | `normalizeAwaitingInteraction` / `normalizeResultHeadline` 已接入，`pnpm test:planning` 已覆盖 |
 | UI selector 化 | ✅ 已完成首轮 | `awaitingDisplayModel.ts` 不再承担主要语义去重 |
-| 多端实时同步 | ⚠️ 未完成 | runtime/schedule 跨 tab 仍需 BroadcastChannel 或专用事件通道 |
-| snapshot 乐观锁 | ⚠️ 未完成 | `expectedRevision` 能力存在，但新命令 service 尚未启用 |
-| 旧 persist 数据迁移 | ⚠️ 未完成 | 历史缓存数据仍可能绕过 server 归一 |
-| LLM Prompt 禁止重复输出 | ⚠️ 未完成 | 当前主要依赖 server 出口兜底 |
+| 多端实时同步 | ✅ 本机多 tab 已完成 | `runtimeStateChannel` 已接入 runtime/schedule 写入后的 snapshot 刷新；云端多设备仍待 Tunnel Hub / WSS |
+| snapshot 乐观锁 | ✅ 已完成 | runtime/schedule 命令 API 已带 `expectedRevision` / `If-Match`，冲突返回 409 并回灌 snapshot |
+| 旧 persist 数据迁移 | ✅ 已完成首轮 | runtime/schedule projection store 已 version bump / migration，降低旧缓存污染 |
+| LLM Prompt 禁止重复输出 | ✅ 已完成首轮 | awaiting/result prompt 增加重复输出禁令，并有 `promptDuplicationGuardSpec` 覆盖 |
+| daemon dogfood 工具 | ✅ 已完成 | 新增 `scripts/dogfood-daemon.ts`，指标按本次 fixture goal 过滤，避免历史任务污染 |
+| 目标级交付包 | ✅ 基础版已完成 | 新增 `goal_deliverables`、交付包 API/页面，聚合 taskResult blocks 与 artifacts |
+| 云迁移 adapter 种子 | ✅ 已完成 | 新增 Database / Storage / Runtime adapter 接口种子；后续再逐步替换全仓调用 |
+
+---
+
+## 收尾修复记录（2026-05-30）
+
+| 问题 | 修复结果 | 回归保护 |
+|---|---|---|
+| 交付包只聚合摘要，不展示真实任务结果块 | `goalDeliverableService` 已聚合 `taskResult.blocks`、`result.artifacts`、`payload.artifacts`；交付页已渲染通用结果块 | `goalDeliverableService.spec.ts` |
+| daemon 每轮无变化也重写交付包，revision 空转 | 新增 `materializeGoalDeliverable`，内容无变化时不写库 | `goalDeliverableService.spec.ts` |
+| runtime environment create 遇到重复 id 会覆盖旧环境 | duplicate create 返回 409，前端创建时先生成稳定请求内 id | `runtimeEnvironmentCommandService.spec.ts` |
+| storage path escape 判断依赖 `startsWith` | 改用 `path.relative` 判断越界 | `storage.spec.ts` |
+| dogfood 指标被历史任务污染 | 指标按本次 `runId` 对应的 fixture goal 过滤 | 脚本逻辑收口 |
+| `stateSnapshot` / deliverable / storage 缺少最小 spec | 已补齐并注册进 `run-planning-specs.ts` | `pnpm test:planning` |
+
+验证结果：
+- `pnpm test:planning` 通过
+- `pnpm tsc --noEmit` 通过
+- `pnpm lint` 通过（仅剩既有 hook dependency warning）
 
 ---
 

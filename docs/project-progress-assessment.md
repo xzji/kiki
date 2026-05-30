@@ -1,7 +1,7 @@
 # KiKi 项目进展评估（产品视角）
 
 > 评估时间：2026-05-29
-> 最近更新：2026-05-29（P0 本地收口实现后）
+> 最近更新：2026-05-30（P0 收尾 hardening 后）
 > 评估视角：以最初产品立项预期为锚点，对当前实现进行差距盘点
 > 文档目的：给非工程角色（产品、决策者）一份可读的现状画像
 
@@ -55,9 +55,18 @@
 - `/api/runtime/state/sync` 路由与 `syncRuntimeStateSnapshot` helper 已删除，浏览器状态定位为 projection-only
 - 协议归一已下推到 server 出口：`normalizeAwaitingInteraction` / `normalizeResultHeadline` 负责提前消除 question / snippet / field question 的重复
 - `awaitingDisplayModel.ts` 已降级为展示 selector，不再承担主要语义去重
+- runtime/schedule 已补齐 BroadcastChannel 跨 tab 刷新、snapshot `expectedRevision` 乐观锁、projection persist migration
+- `scripts/dogfood-daemon.ts` 已提供 12h/24h 离线验收采样脚本，指标按本次 fixture goal 过滤，避免历史任务污染
+- LLM Prompt 已增加重复输出禁止规则，并纳入 `pnpm test:planning` 回归
 - 本轮修复后 `pnpm tsc --noEmit`、`pnpm test:planning`、`pnpm lint` 均通过
 
-### ✅ 7. 产物可交互（达成度中）
+### ✅ 7. 目标级交付物（达成度中）
+- 已新增 `goal_deliverables` 物化表、`goalDeliverableService`、目标交付包 API 和交付页
+- 交付包已从"任务摘要列表"升级为聚合 `taskResult.blocks`、`result.artifacts`、`payload.artifacts`
+- daemon 只在交付包内容变化时写库，避免 revision 无意义增长
+- 交付页已支持 heading / paragraph / markdown / list / key-value / table / callout 等通用结果块
+
+### ✅ 8. 产物可交互（达成度中）
 - Markdown 表格 → `.xlsx` 自动派生 + 在线编辑器 + 下载导出，已经接近"小应用"的雏形
 
 ---
@@ -70,10 +79,11 @@
 **最新现状**：
 - 浏览器侧 Scheduler 已经默认关闭，daemon scheduler / notification worker / watchdog 已成为主要执行路径
 - 事件日志、命令式 API、runtime snapshot 回灌已形成后台执行的基础闭环
-- 仍缺少长时间 dogfood 验收：需要证明关浏览器 12h/24h 后任务完成率、通知投递率、watchdog 暂停行为都稳定
+- 已补 `scripts/dogfood-daemon.ts` 采样脚本，可记录关浏览器 12h/24h 后任务完成率、通知投递率、watchdog 暂停行为
+- 仍缺少真实 12h/24h dogfood 数据：脚本已具备，但还没有跑出长期验收样本
 - daemon 离线/崩溃后的产品兜底体验还不完整，例如用户如何知道 daemon 掉线、如何恢复、是否需要浏览器 fallback
 
-> **PM 视角**：这块已经从"还没主导执行"推进到"主链路已具备，但缺真实长期运行验收"。下一步重点不是再重写，而是压测和兜底。
+> **PM 视角**：这块已经从"缺验收工具"推进到"工具已具备，缺真实长时间样本"。下一步重点是跑 dogfood 和补 daemon 掉线兜底。
 
 ### ⚠️ 2. 状态边界——核心写路径已收口，但多端一致性还没完全产品化
 **最初预期**：服务端是事实源，前端只是视图。
@@ -82,9 +92,12 @@
 - goal、runtime environment、schedule event 的关键写动作已经基本切到命令式 API
 - `/api/runtime/state/sync` 反向同步路由已删除，浏览器不再作为 runtime/schedule 的权威写入口
 - `runtimeEnvStore` / `scheduleStore` 仍保留 Zustand persist，但定位已变成 projection-only：用于本地反馈和兜底，而不是最终事实源
-- 仍缺少完整的多端实时同步闭环：runtime env / schedule event 写入后，其他 tab 主要依赖 snapshot 拉取或未来补 BroadcastChannel / 专用事件通道
+- runtime/schedule 已通过 `runtimeStateChannel` 补齐浏览器多 tab 通知，写入成功后其他 tab 会触发 snapshot 刷新
+- runtime/schedule 命令 API 已接入 `expectedRevision` / `If-Match`，冲突返回 409 并回灌最新 snapshot
+- 旧 projection persist 已通过 version bump / migration 降低历史缓存污染风险
+- 仍未完成云端多设备实时同步：当前 BroadcastChannel 只覆盖同浏览器多 tab，未来还需要 Tunnel Hub / SSE 下行承接
 
-> **PM 视角**：这块已经从"架构性风险"降级为"一致性体验待补"。单机本地使用已经更稳，但云端/多设备场景还没完全准备好。
+> **PM 视角**：这块已经从"本机一致性待补"推进到"本机多 tab 已闭环，云端多设备待迁移时补"。
 
 ### ⚠️ 3. 多容器联动——回流通了，但深度不够
 **最初预期**：收件箱、会话、目标页、任务页、日程是一个"一体的目标 OS"。
@@ -109,8 +122,8 @@
 - 长命令 / 长路径换行已修复
 
 剩余风险：
-- 浏览器 persist 里的旧数据如果没有经过 server 归一，仍可能短期出现旧格式重复
-- LLM Prompt 还没有显式禁止重复输出，目前主要靠 server 出口兜底
+- 历史任务运行产物里仍有旧格式内容，重新展示时可能需要 server 归一兜底
+- LLM Prompt 已显式禁止重复输出，但仍需要 dogfood 观察模型是否稳定遵守
 - 需要至少一段 dogfood 周期观察"重复显示 Bug 复发率"
 
 ### ⚠️ 5. 多模态产物落地——只走了第一步
@@ -127,7 +140,7 @@
 
 ### ⚠️ 7. 结果质量与"可交付感"
 任务跑完出的是一份 Markdown / 表格，**用户视角的"这件事真的被搞定了"还差一口气**：
-- 缺少跨任务成果聚合（一个目标 6 个任务跑完，没有统一交付物）
+- 目标级交付包已经有基础模型和页面，但仍偏"聚合展示"，还没有完整验收、返修、确认完成流程
 - 缺少质量校验（任务自评 / 用户验收闭环虽然有 `task-acceptance-repair-plan.md`，但还没闭环到产品上）
 - 任务完成 ≠ 目标达成，这层语义还没建模
 
@@ -136,7 +149,7 @@
 ## 四、一句话总结
 
 > **KiKi 现在是个"能从模糊目标拆出可执行计划、并把任务跑通、把结果回流到多个产品容器"的可演示 Agent 原型。**
-> **P0 本地收口后，它已经更接近"服务端/daemon 是事实源、浏览器只是视图"的形态；但还没完全成为"关掉浏览器也稳定替你工作、跨设备一致、目标级交付闭环清晰"的目标 OS。**
+> **P0 收尾 hardening 后，它已经基本完成"服务端/daemon 是事实源、浏览器只是视图"的本地架构收口；但还需要真实长时间 dogfood、daemon 掉线兜底、云端多设备同步和验收闭环，才能成为稳定的目标 OS。**
 
 ---
 
@@ -144,9 +157,9 @@
 
 | 优先级 | 事项 | 为什么 |
 |---|---|---|
-| P0-收尾 | **多端一致性与事件通道补齐** | runtime/schedule 已切命令式 API，但其他 tab/未来云端还需要更确定的刷新机制 |
-| P0-收尾 | **daemon 离线执行验收** | 需要用 12h/24h dogfood 验证关浏览器后任务、通知、watchdog 是否稳定 |
-| P1 | **可交付物聚合 + 验收闭环** | 让"目标完成"有一个明确的产品出口，而不只是"任务跑完了" |
+| P0-验收 | **跑 12h/24h daemon dogfood** | 工具已具备，需要真实数据验证关浏览器后任务、通知、watchdog 是否稳定 |
+| P0-验收 | **daemon 掉线/恢复兜底体验** | 用户需要知道本地 agent 是否在线、如何恢复、是否需要 fallback |
+| P1 | **验收闭环产品化** | 交付包已有基础页面，下一步要让用户能确认完成、要求返修、追踪目标达成 |
 
 ---
 
@@ -154,15 +167,12 @@
 
 | 优先级 | 未完成项 | 当前缺口 | 建议下一步 |
 |---|---|---|---|
-| P0-收尾 | daemon 长时间离线执行验收 | 工程链路已下沉，但缺 12h/24h dogfood 数据证明 | 建立一组固定目标，记录任务完成率、通知投递率、watchdog 暂停率 |
-| P0-收尾 | runtime/schedule 多 tab 实时同步 | 写入已走命令式 API，但其他 tab 主要依赖 snapshot 收敛 | 加 BroadcastChannel 触发 `refreshSnapshot()`，或补 runtime/schedule 事件流 |
-| P0-收尾 | snapshot 乐观锁 | `stateSnapshot.ts` 支持 `expectedRevision`，但新 service 未使用，仍是 last-write-wins | 命令 API 带 revision，冲突返回 409 并提示刷新 |
-| P0-收尾 | 旧 persist 数据迁移 | 历史浏览器缓存未必经过 server 协议归一 | 增加一次性 hydrate migration 或清理提示 |
-| P1 | LLM Prompt 显式禁止重复输出 | 当前主要靠 server 出口兜底 | 在任务结果 / awaiting 协议 prompt 中加入"同一问题只填一个字段"硬规则并加 spec |
-| P1 | 目标级交付物聚合 | 单任务有结果，但目标完成后缺统一交付页/交付包 | 设计 goal deliverable 汇总模型，跑通一个端到端目标 |
+| P0-验收 | daemon 长时间离线执行验收 | dogfood 脚本已补，但缺真实 12h/24h 运行样本 | 建立固定验收目标，跑 12h/24h，记录完成率、通知投递率、watchdog 暂停率 |
+| P0-体验 | daemon 掉线/恢复兜底 | 后台主链路已成立，但用户还缺"agent 是否在线"的明确感知 | 增加 daemon health 状态、掉线提示、重启引导和必要 fallback |
+| P1 | 云端多设备同步 | 本机多 tab 已靠 BroadcastChannel 闭环，跨设备还没有 Tunnel Hub / WSS 下行 | 等本地稳定后接入 Reverse Tunnel 控制面事件通道 |
 | P1 | 验收闭环产品化 | 有任务验收/修复计划，但没有形成稳定用户流程 | 把验收状态、返修、确认完成串成明确 UI 流程 |
 | P2 | 多 Agent 协同 | 仍是单 Agent 顺序执行 | 先做只读 researcher / executor 分工试点，再考虑并行编排 |
-| P2 | 云迁移抽象层 | 已有 service 边界，但 DB/Storage/Runner adapter 还没抽 | 等本地形态稳定后再抽 Database / Storage / Runtime 三层接口 |
+| P2 | 云迁移抽象层深化 | Database / Storage / Runtime adapter 已有种子接口，但全仓还没完全替换到接口层 | 本地形态稳定后逐步把 DB/Storage/Runner 调用迁移到 adapter |
 
 ---
 
@@ -173,8 +183,8 @@
 | 对话入口（闲聊 / `/goal`） | 🟢 高 | — |
 | 目标规划（澄清 → 拆解 → 任务） | 🟢 高 | — |
 | 任务自动执行 | 🟡 中高 | daemon 主链路已具备，缺 12h/24h 稳定性验收 |
-| 多容器结果回流 | 🟡 中 | 通而不深，缺联动语义与多端实时同步 |
+| 多容器结果回流 | 🟡 中高 | 本机多 tab 已补，仍缺云端多设备事件通道和深层联动语义 |
 | 本地常驻运行时 | 🟡 中高 | daemon 已成主路径，离线/崩溃兜底仍需产品化 |
 | 多模态可交付物 | 🔴 低 | 仅完成 Markdown/Excel 一档 |
 | 多 Agent 协同 | 🔴 低 | 仅停留在调研阶段 |
-| 验收 / 目标达成闭环 | 🔴 低 | 任务完成 ≠ 目标完成 |
+| 验收 / 目标达成闭环 | 🟡 中低 | 目标交付包已有基础页面，缺确认完成/返修/验收闭环 |

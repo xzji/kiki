@@ -3,6 +3,7 @@
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { publishRuntimeStateChange } from "@/lib/runtimeStateChannel";
+import { makeId } from "@/lib/utils";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { RuntimeEnvironment, RuntimePermissionMode } from "@/types/runtime";
 
@@ -89,12 +90,16 @@ export async function createEnvironmentCommand(input: {
   environment: Omit<RuntimeEnvironment, "id"> | RuntimeEnvironment;
   idempotencyKey?: string;
 }) {
+  const environment: RuntimeEnvironment = {
+    ...input.environment,
+    id: "id" in input.environment && input.environment.id ? input.environment.id : makeId("runtime-env"),
+  };
   const idempotencyKey =
-    input.idempotencyKey ?? createIdempotencyKey("runtime_environment.create", input.environment.name);
+    input.idempotencyKey ?? createIdempotencyKey("runtime_environment.create", environment.id);
   return requestRuntimeEnvironmentCommand({
     url: "/api/runtime/environments",
     method: "POST",
-    body: { environment: input.environment },
+    body: { environment },
     idempotencyKey,
   });
 }
