@@ -254,16 +254,24 @@ function buildGroups(steps: TaskExecutionStep[], agentRunPlan: AgentRunPlan | un
 function ToolActionBadge({ tool }: { tool: NonNullable<ProcessStep["tool"]> }) {
   const paths = tool.display.paths ?? [];
   const hasPaths = paths.length > 0;
+  // action 形如「执行命令：ls -la /Users/...」时，把短动词前缀和长参数拆开，
+  // 让长参数走可换行通道，避免 shrink-0 + 长串导致溢出截断。
+  const actionMatch = tool.display.action.match(/^([^：:]{1,12}[：:])\s*(.+)$/);
+  const actionPrefix = actionMatch ? actionMatch[1] : tool.display.action;
+  const actionBody = actionMatch ? actionMatch[2] : "";
 
   return (
     <div className="w-fit max-w-full rounded-2xl bg-[#EEF0F3] px-2.5 py-2 text-[12px] leading-5 text-[#374151]">
-      <div className="flex max-w-full items-center gap-2">
+      <div className="flex max-w-full items-start gap-2">
         <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-mono font-bold text-[#1F2328]">
           {tool.name}
         </span>
-        <span className="shrink-0 font-semibold text-[#1F2328]">{tool.display.action}</span>
+        <span className="shrink-0 font-semibold text-[#1F2328]">{actionPrefix}</span>
+        {actionBody ? (
+          <span className="min-w-0 whitespace-pre-wrap break-all text-[#1F2328]">{actionBody}</span>
+        ) : null}
         {tool.display.objectText ? (
-          <span className="min-w-0 truncate text-[#4B5563]">{tool.display.objectText}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-all text-[#4B5563]">{tool.display.objectText}</span>
         ) : null}
       </div>
       {hasPaths ? (

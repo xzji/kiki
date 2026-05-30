@@ -9,6 +9,7 @@ import {
   fieldsSuggestedActions,
   singleFieldOptions,
 } from "@/lib/server/informationRequest/compileFields";
+import { normalizeInteractionRequirement } from "@/lib/server/protocol/normalizeAwaitingInteraction";
 import type { TaskReadinessCheck } from "@/lib/server/taskReadinessPolicy";
 
 function nowIso() {
@@ -43,7 +44,7 @@ export function createPreExecutionInteractionRequirement(readiness: TaskReadines
   const question = buildQuestion(readiness, fields);
   const options = singleFieldOptions(fields);
   const suggestedActions = buildSuggestedActions(readiness, fieldsSuggestedActions(fields));
-  return {
+  return normalizeInteractionRequirement({
     type: "provide_context",
     timing: "before_execution",
     reason: readiness.summary || question,
@@ -52,7 +53,7 @@ export function createPreExecutionInteractionRequirement(readiness: TaskReadines
     fields,
     suggestedActions,
     shouldNotifyUser: true,
-  };
+  })!;
 }
 
 export function createPreExecutionBlocker(input: {

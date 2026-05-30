@@ -250,6 +250,7 @@ ${buildStepZeroPrompt(isResume)}
 5. 如果缺少用户才能提供的关键输入（例如出发城市、账号信息、个人偏好、预算上限、目标选择等），必须立即停止产出最终完成态交付物：
    - awaiting_user 必须为 true。
    - interaction_requirement.question 只用于多字段总问题；如果本轮只有 1 个 field，不要把该 field.question 复制到顶层 question。
+   - 同一个问题只能出现在一个字段里：顶层 question、field.question、final_message、summary 不要互相复述；如果 field.question 已经完整表达问题，顶层 question 应留作总问题或留空。
    - interaction_requirement.fields 必须为每个缺失字段各输出 1 个对象，包含 id、label、question、description、options、inputPlaceholder。
    - 每个 field.options 必须给出恰好 3 个可直接点击的候选项，而且必须与该字段 question 直接对应。
    - 候选项必须是“答案”，不是“动作”：禁止写“补充具体信息 / 补充约束或偏好 / 说明暂时无法提供 / 填写其他信息”。
@@ -351,7 +352,8 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 5. 每项自带关键参数（时长 / 价格 / 适用场景 / 条件），让用户不点开也能判断。
 6. 每项 8-25 字，口语化，不要写“方案 A / 选项一”。
 7. UI 会为每个 field 自动追加“都不是，我自己描述”，不要把该兜底项写进 options。
-提交前自检：如果任一 field.options 中仍有“补充 XX / 提供 XX / 填写其他信息”等元操作描述，必须重写后再输出。
+8. 顶层 question、每个 field.question、summary、final_message 之间禁止逐字或近义重复；summary/final_message 只说明状态，不复述具体问题。
+提交前自检：如果任一 field.options 中仍有“补充 XX / 提供 XX / 填写其他信息”等元操作描述，或同一句问题同时出现在顶层 question 与 field.question 中，必须重写后再输出。
 {
   "summary": "需要用户补充关键信息后才能继续",
   "final_message": "请用户补充本轮全部缺失信息，并说明为什么这些信息会影响主交付物。",
@@ -425,6 +427,7 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 - 如果缺少用户才能提供的关键输入，awaiting_user=true。
 - interaction_requirement.fields 必须按缺失字段分组；每个 field.options 必须是 3 个具体答案，例如“海滩区+度假酒店（放松）/ 市中心+四星酒店（便利）/ 度假区+五星酒店（省心）”。
 - 禁止把任一 field.options 写成“补充信息 / 提供偏好 / 填写其他内容”这类动作。
+- 禁止把同一句问题同时写进 interaction_requirement.question 和 fields[].question；单字段时优先保留 fields[].question，顶层 question 写“请补充以下信息”或留空。
 
 示例 3：information 类型任务已完成
 - 如果任务只是生成报告、调研、对比、分析或清单，且完成标准已经满足，awaiting_user=false。

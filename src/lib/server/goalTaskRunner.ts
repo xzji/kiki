@@ -19,6 +19,7 @@ import { extractBalancedJsonSnippet, extractJsonObject, extractParseFailureConte
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
 import { normalizeFileWriteSpecs } from "@/lib/server/fileWriteSpecs";
+import { normalizeInteractionRequirement as normalizeServerInteractionRequirement } from "@/lib/server/protocol/normalizeAwaitingInteraction";
 import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
 import { writeTaskParseFailureSnapshot, writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
 import { markdownToWorkbook } from "@/lib/spreadsheet/adapters/markdownTables";
@@ -117,6 +118,30 @@ type ParsedTaskRunnerResult = {
   blocker: ExecutionBlocker | null;
   structuredOutput: Record<string, unknown> | null;
 };
+
+function normalizeParsedAwaitingResult<T extends ParsedTaskRunnerResult>(result: T): T {
+  if (!result.awaitingUser) return result;
+  const interactionRequirement =
+    normalizeServerInteractionRequirement(result.interactionRequirement) ?? result.interactionRequirement;
+  const blocker = result.blocker
+    ? {
+        ...result.blocker,
+        interactionRequirement:
+          normalizeServerInteractionRequirement(result.blocker.interactionRequirement) ??
+          result.blocker.interactionRequirement,
+      }
+    : result.blocker;
+  return {
+    ...result,
+    interactionRequirement,
+    blocker,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      interactionRequirement,
+      ...(blocker ? { blocker } : {}),
+    },
+  };
+}
 
 type WebAppSpec = {
   title: string;
@@ -2739,7 +2764,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         endedAt: new Date().toISOString(),
       }),
     ];
-    const blockedResult = await buildReadinessBlockedResult(enhancedInput, readiness);
+    const blockedResult = normalizeParsedAwaitingResult(await buildReadinessBlockedResult(enhancedInput, readiness));
     const blocker = createExecutionBlocker(enhancedInput, blockedResult, trajectory);
     const result = {
       ...blockedResult,
@@ -2833,7 +2858,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
   const maxAttempts = 2;
   while (attemptCount <= maxAttempts) {
     try {
-      const result = await executeOnce({ ...enhancedInput, attemptCount });
+      const result = normalizeParsedAwaitingResult(await executeOnce({ ...enhancedInput, attemptCount }));
       const notificationDecision = judgeTaskResult({
         goal: input.goal,
         subGoal: input.subGoal,

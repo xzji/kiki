@@ -47,7 +47,7 @@ export function runAwaitingDisplayModelSpecs() {
           {
             id: "departure_city",
             label: "出发城市",
-            question: "你打算从哪个城市出发？",
+            question: "",
             description: "查询航班必须知道出发城市。",
             options: ["北京", "上海", "广州"],
             source: "user",
@@ -64,7 +64,7 @@ export function runAwaitingDisplayModelSpecs() {
       priority: "high",
       reason: "需要你补充关键信息后才能继续执行。",
       title: "测试通知",
-      snippet: "[待补充] 你打算从哪个城市出发？",
+      snippet: "",
       userMessage: "你打算从哪个城市出发？",
       badge: "need_confirm",
       resultSummary: { headline: "你打算从哪个城市出发？", keyPoints: [], nextActions: [] },
@@ -77,7 +77,7 @@ export function runAwaitingDisplayModelSpecs() {
   assert.equal(singleFieldModel.active, true);
   assert.equal(singleFieldModel.headline, "你打算从哪个城市出发？");
   assert.equal(singleFieldModel.notice, undefined);
-  assert.equal(singleFieldModel.hideFieldQuestions.has("departure_city"), true);
+  assert.equal(singleFieldModel.hideFieldQuestions.has("departure_city"), false);
   assert.equal(singleFieldModel.hideOuterSummary, true);
 
   const multiField = instance({

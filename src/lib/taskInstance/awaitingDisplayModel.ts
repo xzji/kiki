@@ -1,6 +1,9 @@
+import { stripNotificationPrefix } from "@/lib/protocol/displayText";
 import { hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import type { InteractionSubmission, MissingFieldQuestion, Task, TaskInstance } from "@/types/kiki";
 import type { TaskResult } from "@/types/taskResult";
+
+export { isSameDisplayText, normalizeDisplayText, stripNotificationPrefix } from "@/lib/protocol/displayText";
 
 type ReadinessItem = {
   id: string;
@@ -34,36 +37,6 @@ export type AwaitingDisplayModel = {
   hidePendingTaskResultBlocks: boolean;
   submitted?: InteractionSubmission;
 };
-
-export function stripNotificationPrefix(snippet?: string | null) {
-  if (!snippet) return "";
-  return snippet.replace(/^\[(需要作答|需要确认|待补充|待完成)\]\s*/, "").trim();
-}
-
-export function normalizeDisplayText(value: string) {
-  return value
-    .replace(/[“”"「」『』《》\[\]【】]/g, "")
-    .replace(/[，。！？；：、,.\s]/g, "")
-    .trim();
-}
-
-export function isSameDisplayText(left: string, right: string) {
-  const normalizedLeft = normalizeDisplayText(left);
-  const normalizedRight = normalizeDisplayText(right);
-  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
-}
-
-function isOverlappingDisplayText(left: string, right: string) {
-  const normalizedLeft = normalizeDisplayText(left);
-  const normalizedRight = normalizeDisplayText(right);
-  return Boolean(
-    normalizedLeft &&
-      normalizedRight &&
-      (normalizedLeft === normalizedRight ||
-        normalizedLeft.includes(normalizedRight) ||
-        normalizedRight.includes(normalizedLeft)),
-  );
-}
 
 function titleFor(instance: TaskInstance) {
   const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
@@ -127,15 +100,9 @@ function headlineFrom(instance: TaskInstance, fields: MissingFieldQuestion[]) {
   );
 }
 
-function noticeFrom(instance: TaskInstance, headline: string, fields: MissingFieldQuestion[]) {
-  const notice = stripNotificationPrefix(instance.notification?.snippet || instance.notification?.userMessage);
-  if (!notice) return undefined;
-  const panelTitle = titleFor(instance);
-  const genericAwaitingNotice = /需要.{0,8}(补充|作答|确认|完成)/.test(notice) && /等待|补充|作答|确认|完成/.test(panelTitle);
-  const repeatedWithHeadline = headline && isOverlappingDisplayText(notice, headline);
-  const repeatedWithField = fields.some((field) => isOverlappingDisplayText(notice, questionForField(field)));
-  const repeatedWithPanelTitle = isOverlappingDisplayText(notice, panelTitle);
-  return genericAwaitingNotice || repeatedWithHeadline || repeatedWithField || repeatedWithPanelTitle ? undefined : notice;
+function noticeFrom(instance: TaskInstance) {
+  const notice = stripNotificationPrefix(instance.notification?.snippet);
+  return notice || undefined;
 }
 
 export function isPendingUserPlaceholderTaskResult(taskResult?: TaskResult) {
@@ -174,15 +141,11 @@ export function buildAwaitingDisplayModel(
   const headline = active ? headlineFrom(instance, fields) : undefined;
   const hideFieldQuestions = new Set<string>();
 
-  if (headline && fields.length === 1 && isOverlappingDisplayText(headline, questionForField(fields[0]))) {
-    hideFieldQuestions.add(fields[0].id);
-  }
-
   return {
     active,
     origin,
     panelTitle: titleFor(instance),
-    notice: active && headline ? noticeFrom(instance, headline, fields) : undefined,
+    notice: active && headline ? noticeFrom(instance) : undefined,
     headline,
     fields,
     hideFieldQuestions,

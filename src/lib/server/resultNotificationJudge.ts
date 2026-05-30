@@ -10,6 +10,7 @@ import type {
   TaskRunArtifact,
 } from "@/types/kiki";
 import { requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
+import { normalizeResultHeadline } from "@/lib/server/protocol/normalizeResultHeadline";
 
 type JudgeTaskResultInput = {
   goal: Goal;
@@ -98,11 +99,19 @@ function baseDecision(
     title?: string;
   },
 ): TaskResultNotificationDecision {
-  return {
-    ...overrides,
-    title: overrides.title ?? titleFor(input),
-    createdAt: input.now ?? new Date().toISOString(),
-  };
+  const interaction = input.result.interactionRequirement;
+  const extraCanonicals = [
+    interaction?.question,
+    interaction?.fields?.[0]?.question,
+  ];
+  return normalizeResultHeadline(
+    {
+      ...overrides,
+      title: overrides.title ?? titleFor(input),
+      createdAt: input.now ?? new Date().toISOString(),
+    },
+    extraCanonicals,
+  );
 }
 
 function actionRequiredDecision(

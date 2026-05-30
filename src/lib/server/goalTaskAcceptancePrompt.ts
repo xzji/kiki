@@ -118,6 +118,7 @@ ${json(input.parsedResult)}
 2. 返回一个完整 JSON 对象，不要只返回修改片段。
 3. 必须满足任务 expectedSurfaces：interactive 按 interactiveSurfaceKind 对应 task_result.blocks 或顶层 webapp 对象，files 对应 files 数组。
 4. summary 和 final_message 只能做简短说明，不能替代被要求的结果区域。
+4.1 summary、final_message、resultSummary.headline 不要逐字或近义重复；headline 是一句标题，summary 是一段结果说明，final_message 是面向用户的行动提示。
 5. 如果只要求文件区域，可以只返回 files；如果要求双区域，必须同时返回对应 interactive surface 和 files。
 6. 如果已有 artifacts / final_message / summary 中包含有效内容，必须按 expectedSurfaces 转换或整理进对应区域。
 7. 如果 repairMode 是 format_repair、structure_repair 或 presentation_repair，不要重新调研，不要新增未经验证的事实；但如果 allowToolCalls=true 且 artifact 指向本地文件，允许只读读取该文件来转换已有产出。
@@ -248,6 +249,7 @@ export function buildSemanticRepairPrompt(input: {
 7. 必须满足 expectedSurfaces：interactive 按 interactiveSurfaceKind 使用 task_result.blocks 或 webapp，files 使用 files 数组或 artifactRefs。
 8. 不要丢失已经通过的内容。
 9. 不要只返回 summary / final_message，除非任务确实仍在等待用户输入。
+10. summary、final_message、resultSummary.headline 不要逐字或近义重复；headline 写标题，summary 写结果说明，final_message 写用户提示。
 
 # Keep
 - 保留 acceptanceReport.passedCriteria 对应的内容和证据。
