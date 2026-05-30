@@ -392,6 +392,14 @@ function isNotificationDecision(value: unknown): value is TaskResultNotification
   );
 }
 
+function notificationContentHash(decision: TaskResultNotificationDecision) {
+  return JSON.stringify({
+    snippet: decision.snippet ?? "",
+    userMessage: decision.userMessage ?? "",
+    notificationType: decision.notificationType ?? "",
+  });
+}
+
 function normalizeNotificationFromProgress(
   progress: GoalServerProgress | null,
   instance: TaskInstance,
@@ -400,8 +408,20 @@ function normalizeNotificationFromProgress(
   if (interactionSubmission && progress.resultPayload?.awaitingUser !== true) return undefined;
   const rawDecision = progress?.resultPayload?.notificationDecision;
   if (!isNotificationDecision(rawDecision)) return instance.notification;
-  const deliveryState =
-    instance.notification?.deliveryState === "delivered"
+  const previous = instance.notification;
+  const nextHash = notificationContentHash(rawDecision);
+  // 与服务端 normalizeNotificationFromProgress 保持一致：
+  // 当上一次 delivered 的 hash 与本轮决策不同时，把 deliveryState 退回 pending，
+  // 触发新一次 append-only 派发。
+  const shouldRedeliver = Boolean(
+    previous?.deliveryState === "delivered" &&
+      previous.lastDeliveredHash &&
+      previous.lastDeliveredHash !== nextHash &&
+      rawDecision.shouldNotify,
+  );
+  const deliveryState = shouldRedeliver
+    ? "pending"
+    : previous?.deliveryState === "delivered"
       ? "delivered"
       : rawDecision.shouldNotify
         ? "pending"
@@ -409,9 +429,12 @@ function normalizeNotificationFromProgress(
   return {
     ...rawDecision,
     deliveryState,
-    deliveredAt: instance.notification?.deliveredAt,
-    inboxItemId: instance.notification?.inboxItemId,
-    conversationMessageId: instance.notification?.conversationMessageId,
+    deliveredAt: previous?.deliveredAt,
+    inboxItemId: previous?.inboxItemId,
+    conversationMessageId: previous?.conversationMessageId,
+    notificationSequence: previous?.notificationSequence,
+    pushedConversationMessageIds: previous?.pushedConversationMessageIds,
+    lastDeliveredHash: previous?.lastDeliveredHash,
   };
 }
 
@@ -593,6 +616,7 @@ type GoalStore = {
     instanceId: string;
     inboxItemId?: string;
     conversationMessageId?: string;
+    notificationSequence?: number;
   }) => void;
 };
 
@@ -904,28 +928,42 @@ export const useGoalStore = create<GoalStore>()(
           }),
         }));
       },
-      applyNotificationProjection: ({ taskId, instanceId, inboxItemId, conversationMessageId }) => {
+      applyNotificationProjection: ({
+        taskId,
+        instanceId,
+        inboxItemId,
+        conversationMessageId,
+        notificationSequence,
+      }) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
             ...task,
-            instances: task.instances.map((instance) =>
-              instance.id === instanceId && instance.notification
-                ? normalizeInstance(
-                    {
-                      ...instance,
-                      notification: {
-                        ...instance.notification,
-                        deliveryState: "delivered",
-                        deliveredAt: nowIso(),
-                        inboxItemId: inboxItemId ?? instance.notification.inboxItemId,
-                        conversationMessageId:
-                          conversationMessageId ?? instance.notification.conversationMessageId,
-                      },
-                    },
-                    task,
-                  )
-                : instance,
-            ),
+            instances: task.instances.map((instance) => {
+              if (instance.id !== instanceId || !instance.notification) return instance;
+              const previousIds = instance.notification.pushedConversationMessageIds ?? [];
+              // 会话通道每次派发都生成新 messageId；前端投影时直接覆写、并把
+              // 历史 id 追加到 pushedConversationMessageIds 中，作为 append 历史轨迹。
+              const nextPushedIds = conversationMessageId
+                ? Array.from(new Set([...previousIds, conversationMessageId]))
+                : previousIds;
+              return normalizeInstance(
+                {
+                  ...instance,
+                  notification: {
+                    ...instance.notification,
+                    deliveryState: "delivered",
+                    deliveredAt: nowIso(),
+                    inboxItemId: inboxItemId ?? instance.notification.inboxItemId,
+                    conversationMessageId:
+                      conversationMessageId ?? instance.notification.conversationMessageId,
+                    notificationSequence:
+                      notificationSequence ?? instance.notification.notificationSequence,
+                    pushedConversationMessageIds: nextPushedIds,
+                  },
+                },
+                task,
+              );
+            }),
           })),
         }));
       },

@@ -117,7 +117,17 @@ function isNotificationDecision(value: unknown): value is TaskResultNotification
   );
 }
 
-function normalizeNotificationFromProgress(
+function notificationContentHash(decision: TaskResultNotificationDecision) {
+  // 内容指纹：仅在用户可见的语义字段变化时才视为「新一次通知」，
+  // 避免单纯的 channel/shouldNotify 抖动错误重置已 delivered 状态。
+  return JSON.stringify({
+    snippet: decision.snippet ?? "",
+    userMessage: decision.userMessage ?? "",
+    notificationType: decision.notificationType ?? "",
+  });
+}
+
+export function normalizeNotificationFromProgress(
   progress: GoalServerProgress | null,
   instance: TaskInstance,
 ): TaskInstanceNotificationState | undefined {
@@ -126,8 +136,18 @@ function normalizeNotificationFromProgress(
   const rawDecision = progress?.resultPayload?.notificationDecision;
   if (!isNotificationDecision(rawDecision)) return instance.notification;
   const previous = instance.notification;
-  const deliveryState =
-    previous?.deliveryState === "delivered"
+  const nextHash = notificationContentHash(rawDecision);
+  // 当上一次 delivered 的内容与本轮决策不同（且明确写过 hash），
+  // 把 deliveryState 退回 pending 触发 worker 再次派发，让会话流 push 新卡片。
+  const shouldRedeliver = Boolean(
+    previous?.deliveryState === "delivered" &&
+      previous.lastDeliveredHash &&
+      previous.lastDeliveredHash !== nextHash &&
+      rawDecision.shouldNotify,
+  );
+  const deliveryState = shouldRedeliver
+    ? "pending"
+    : previous?.deliveryState === "delivered"
       ? "delivered"
       : rawDecision.shouldNotify
         ? "pending"
@@ -138,6 +158,9 @@ function normalizeNotificationFromProgress(
     deliveredAt: previous?.deliveredAt,
     inboxItemId: previous?.inboxItemId,
     conversationMessageId: previous?.conversationMessageId,
+    notificationSequence: previous?.notificationSequence,
+    pushedConversationMessageIds: previous?.pushedConversationMessageIds,
+    lastDeliveredHash: previous?.lastDeliveredHash,
   };
 }
 
@@ -375,6 +398,7 @@ export function markGoalTaskNotificationDeliveredSnapshot(
     instanceId: string;
     inboxItemId?: string;
     conversationMessageId?: string;
+    notificationSequence?: number;
   },
 ) {
   const now = nowIso();
@@ -386,21 +410,30 @@ export function markGoalTaskNotificationDeliveredSnapshot(
         if (task.id !== input.taskId) return task;
         return {
           ...task,
-          instances: task.instances.map((instance) =>
-            instance.id === input.instanceId && instance.notification
-              ? {
-                  ...instance,
-                  notification: {
-                    ...instance.notification,
-                    deliveryState: "delivered" as const,
-                    deliveredAt: now,
-                    inboxItemId: input.inboxItemId ?? instance.notification.inboxItemId,
-                    conversationMessageId:
-                      input.conversationMessageId ?? instance.notification.conversationMessageId,
-                  },
-                }
-              : instance,
-          ),
+          instances: task.instances.map((instance) => {
+            if (instance.id !== input.instanceId || !instance.notification) return instance;
+            const previousIds = instance.notification.pushedConversationMessageIds ?? [];
+            const nextPushedIds = input.conversationMessageId
+              ? Array.from(new Set([...previousIds, input.conversationMessageId]))
+              : previousIds;
+            return {
+              ...instance,
+              notification: {
+                ...instance.notification,
+                deliveryState: "delivered" as const,
+                deliveredAt: now,
+                inboxItemId: input.inboxItemId ?? instance.notification.inboxItemId,
+                // 会话通道的 messageId 每次都用最新值（不再回退到 previous），
+                // 让前端依据 payload.notificationId 走 append-only 路径。
+                conversationMessageId:
+                  input.conversationMessageId ?? instance.notification.conversationMessageId,
+                notificationSequence:
+                  input.notificationSequence ?? instance.notification.notificationSequence,
+                pushedConversationMessageIds: nextPushedIds,
+                lastDeliveredHash: notificationContentHash(instance.notification),
+              },
+            };
+          }),
         };
       }),
     })),

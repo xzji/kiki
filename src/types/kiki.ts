@@ -329,6 +329,9 @@ export type TaskInstanceNotificationState = TaskResultNotificationDecision & {
   deliveredAt?: string;
   inboxItemId?: string;
   conversationMessageId?: string;
+  notificationSequence?: number;
+  pushedConversationMessageIds?: string[];
+  lastDeliveredHash?: string;
 };
 
 export type ExecutionPayload = {

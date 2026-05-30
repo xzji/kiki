@@ -93,12 +93,14 @@ export function markTaskNotificationDeliveredProjection(input: {
   instanceId: string;
   inboxItemId?: string;
   conversationMessageId?: string;
+  notificationSequence?: number;
 }) {
   const nextGoals = markGoalTaskNotificationDeliveredSnapshot(input.goals, {
     taskId: input.taskId,
     instanceId: input.instanceId,
     inboxItemId: input.inboxItemId,
     conversationMessageId: input.conversationMessageId,
+    notificationSequence: input.notificationSequence,
   });
   writeGoalsProjection(nextGoals);
   return nextGoals;

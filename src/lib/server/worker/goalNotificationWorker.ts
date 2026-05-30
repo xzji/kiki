@@ -4,6 +4,11 @@ import {
   markTaskNotificationDeliveredProjection,
   transitionTaskInstanceProjection,
 } from "@/lib/server/services/goalRuntimeService";
+import {
+  composeGoalDeliverable,
+  goalHasCompletedTasks,
+  saveGoalDeliverable,
+} from "@/lib/server/services/goalDeliverableService";
 import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, Task } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
@@ -94,10 +99,14 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
         for (const instance of task.instances) {
           const notification = instance.notification;
           if (!notification || !canDeliverNotification(instance)) continue;
+          const previousSequence = notification.notificationSequence ?? 0;
+          const nextSequence = previousSequence + 1;
+          // 每次进入 pending 的派发都生成新的 conversationMessageId（携带递增序号），
+          // 让会话流以 append-only 方式记录每一次任务通知，避免历史卡片被新内容替换。
           const inboxItemId = shouldDeliverToInbox(notification.channel) ? `inbox-${instance.id}` : undefined;
           const conversationMessageId =
             goal.conversationId && shouldDeliverToConversation(notification.channel)
-              ? notification.conversationMessageId || `msg-task-${instance.id}`
+              ? `msg-task-${instance.id}-n${nextSequence}`
               : undefined;
           nextGoals = markTaskNotificationDeliveredProjection({
             goals: nextGoals,
@@ -105,6 +114,7 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
             instanceId: instance.id,
             inboxItemId,
             conversationMessageId,
+            notificationSequence: nextSequence,
           });
           delivered += 1;
           for (const target of [
@@ -118,7 +128,7 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
               instanceId: instance.id,
               kind: "notification.delivered",
               producedBy: "daemon",
-              idempotencyKey: `notification.delivered:${target}:${instance.id}`,
+              idempotencyKey: `notification.delivered:${target}:${instance.id}:n${nextSequence}`,
               payload: {
                 target,
                 notificationId: target === "inbox" ? inboxItemId : conversationMessageId,
@@ -193,9 +203,13 @@ export function runGoalDaemonSideEffects(goals: Goal[]) {
   const schedule = runGoalScheduleSynthesisWorker(goals);
   const watchdog = runGoalWatchdogWorker(readGoalsSnapshot(goals));
   const notifications = runGoalNotificationDeliveryWorker(readGoalsSnapshot(goals));
+  const deliverables = readGoalsSnapshot(goals)
+    .filter(goalHasCompletedTasks)
+    .map((goal) => saveGoalDeliverable(composeGoalDeliverable(goal.id))).length;
   return {
     schedule,
     watchdog,
     notifications,
+    deliverables,
   };
 }

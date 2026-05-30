@@ -422,7 +422,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
         });
       }
       if (feedback.decision === "rerun" && feedback.taskCardMessage?.taskRef) {
-        const taskCardId = `msg-task-feedback-${feedback.taskCardMessage.taskRef.instanceId}`;
+        // 使用 `local-` 命名空间隔离本地乐观 push 的 task_card，避免与
+        // 服务端 worker 派发的 `msg-task-${instanceId}-nN` 冲突而被前端误认作同一条消息。
+        const taskCardId = `local-task-feedback-${feedback.taskCardMessage.taskRef.instanceId}`;
         if (!conversation.messages.some((message) => message.id === taskCardId)) {
           appendMessage(conversation.id, {
             id: taskCardId,
@@ -868,7 +870,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
           });
         }
         if (feedback.decision === "rerun" && feedback.taskCardMessage?.taskRef) {
-          const taskCardId = `msg-task-feedback-${feedback.taskCardMessage.taskRef.instanceId}`;
+          // 同上：本地乐观 push 的 task_card 使用独立 id 命名空间。
+          const taskCardId = `local-task-feedback-${feedback.taskCardMessage.taskRef.instanceId}`;
           if (!conversation.messages.some((message) => message.id === taskCardId)) {
             appendMessage(conversation.id, {
               id: taskCardId,
