@@ -231,6 +231,16 @@ export function GoalPlanContent({
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
           </div>
         </div>
+        {summary.completedCount > 0 ? (
+          <div className="mt-5 flex justify-end">
+            <Link
+              href={`/goals/${encodeURIComponent(goal.id)}/deliverable`}
+              className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+            >
+              查看交付包
+            </Link>
+          </div>
+        ) : null}
         {displayWorkflow ? (
           <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

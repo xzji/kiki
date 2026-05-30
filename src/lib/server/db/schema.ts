@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 8;
+export const KIKI_DB_SCHEMA_VERSION = 9;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -112,6 +112,13 @@ CREATE INDEX IF NOT EXISTS idx_goal_event_log_instance
 CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_event_log_idem
   ON goal_event_log(idempotency_key)
   WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS goal_deliverables (
+  goal_id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 export const KIKI_DB_MIGRATIONS: Array<{
@@ -228,6 +235,17 @@ export const KIKI_DB_MIGRATIONS: Array<{
       CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_event_log_idem
         ON goal_event_log(idempotency_key)
         WHERE idempotency_key IS NOT NULL;
+    `,
+  },
+  {
+    version: 9,
+    sql: `
+      CREATE TABLE IF NOT EXISTS goal_deliverables (
+        goal_id TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `,
   },
 ];
