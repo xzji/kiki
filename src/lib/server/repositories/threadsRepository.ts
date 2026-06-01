@@ -148,11 +148,12 @@ export function updateThread(
   const nextTopics = snapshot.value.slice();
   nextTopics[topicIndex] = { ...topic, threads: nextThreads };
 
-  const writeResult = upsertTopicsSnapshot(nextTopics, snapshot.revision);
+  const expectedEnvelopeRevision = snapshot.source === "topics" ? snapshot.revision : 0;
+  const writeResult = upsertTopicsSnapshot(nextTopics, expectedEnvelopeRevision);
   if (!writeResult.ok) {
     throw new ThreadRevisionMismatchError(
       threadId,
-      snapshot.revision,
+      expectedEnvelopeRevision,
       writeResult.revision,
       "envelope",
     );

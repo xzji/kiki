@@ -136,7 +136,8 @@ export function readScheduleEventsSnapshotMeta(fallback: AgentEvent[]) {
 
 // ===== Topic snapshot =====
 // §10.5 问题 25：v12 双写期 — 优先读 "topics"；缺失时从 "goals" envelope
-// 通过 legacyGoalToTopic 兜底，并保持 envelope 的 revision/updatedAt。
+// 通过 legacyGoalToTopic 兜底。source 用于区分后续写入应使用哪个 envelope 的 revision。
+export type TopicsSnapshotSource = "topics" | "goals_fallback" | "fallback";
 
 function isTopicArray(value: unknown): value is Topic[] {
   if (!Array.isArray(value)) return false;
@@ -165,7 +166,7 @@ export function readTopicsSnapshot(fallback: Topic[]): Topic[] {
 export function readTopicsSnapshotMeta(fallback: Topic[]) {
   const topics = readSnapshotWithMeta<unknown>("topics", null);
   if (isTopicArray(topics.value)) {
-    return { value: topics.value, revision: topics.revision, updatedAt: topics.updatedAt };
+    return { value: topics.value, revision: topics.revision, updatedAt: topics.updatedAt, source: "topics" as const };
   }
   const goals = readSnapshotWithMeta<Goal[]>("goals", []);
   const value = Array.isArray(goals.value)
@@ -173,7 +174,12 @@ export function readTopicsSnapshotMeta(fallback: Topic[]) {
         .map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal)))
         .map((goal) => legacyGoalToTopic({ goal }))
     : fallback;
-  return { value, revision: goals.revision, updatedAt: goals.updatedAt };
+  return {
+    value,
+    revision: goals.revision,
+    updatedAt: goals.updatedAt,
+    source: value === fallback ? ("fallback" as const) : ("goals_fallback" as const),
+  };
 }
 
 export function upsertTopicsSnapshot(topics: Topic[], expectedRevision?: number) {

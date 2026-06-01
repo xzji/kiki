@@ -13,11 +13,15 @@
 
 import assert from "node:assert/strict";
 
+import { normalizeSubGoalId } from "@/lib/opaqueIds";
+import { getDatabase } from "@/lib/server/db/client";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import {
   readTopicsSnapshotMeta,
+  upsertGoalsSnapshot,
   upsertTopicsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
+import type { Goal } from "@/types/kiki";
 import type { Thread, Topic } from "@/types/topic";
 
 import {
@@ -75,6 +79,38 @@ function seedTopics(topics: Topic[]) {
 
 export async function runThreadsRepositorySpecs() {
   ensureIsolatedPlanningSpecDataDir();
+
+  // -----------------------------------------------------------------------
+  // 0. goals fallback → first topics write
+  // -----------------------------------------------------------------------
+  {
+    getDatabase().prepare(`DELETE FROM runtime_state_snapshots WHERE key = 'topics'`).run();
+    const legacyGoal: Goal = {
+      id: "topic-fallback-goal",
+      title: "Fallback Topic",
+      deadline: "",
+      progress: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      subGoals: [
+        {
+          id: "thread-fallback",
+          goalId: "topic-fallback-goal",
+          title: "Fallback Thread",
+          tasks: [],
+        },
+      ],
+    };
+    upsertGoalsSnapshot([legacyGoal]);
+
+    const fallbackThreadId = normalizeSubGoalId("thread-fallback");
+    const threads = listThreadsByTopicStatus("active");
+    assert.equal(threads.some((thread) => thread.id === fallbackThreadId), true);
+
+    const updated = updateThread(fallbackThreadId, { silentCount: 1 }, 0);
+    assert.equal(updated.silentCount, 1);
+    assert.equal(updated.revision, 1);
+    assert.equal(readTopicsSnapshotMeta([]).source, "topics");
+  }
 
   // -----------------------------------------------------------------------
   // 1. findThreadById / listThreadsByTopicStatus
