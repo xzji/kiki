@@ -260,7 +260,7 @@ function DeleteConversationDialog({
         <div className="text-[16px] font-semibold text-[#111]">确认删除会话？</div>
         <div className="mt-3 text-[13px] leading-6 text-[#4B5563]">
           你将删除会话「<span className="font-medium text-[#111]">{conversation.title}</span>」。
-          删除后，该会话及其关联的目标规划数据会从持久化存储中移除，且无法恢复。
+          删除后，该会话及其关联的主题规划数据会从持久化存储中移除，且无法恢复。
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button

@@ -4,18 +4,18 @@ import { ChevronsRight, Maximize2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { GoalPlanBreadcrumb, GoalPlanContent } from "@/components/goal/GoalPlanContent";
-import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
-import { goalDetailPath, taskDetailPath } from "@/lib/routes";
+import { TopicPlanBreadcrumb, TopicPlanContent } from "@/components/topic/TopicPlanContent";
+import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
+import { topicDetailPath, topicTaskDetailPath } from "@/lib/routes";
 import type { Task } from "@/types/kiki";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 
 /**
- * 目标规划 Drawer：从右侧覆盖中间区域。
- * - 内容与全屏目标规划页保持一致
+ * 主题规划 Drawer：从右侧覆盖中间区域。
+ * - 内容与全屏主题规划页保持一致
  * - 点击任务后，在 Drawer 内展示同源的任务详情内容
- * - 右上角关闭 / 全屏跳转至 /goals/[goalId]
+ * - 右上角关闭 / 全屏跳转至 /topics/[topicId]
  */
 export function GoalPlanDrawer({
   goalId,
@@ -64,22 +64,22 @@ export function GoalPlanDrawer({
   if (!visible || !goal) return null;
 
   const fullscreenHref =
-    activeTask != null ? taskDetailPath(goal.id, activeTask.id) : goalDetailPath(goal.id);
+    activeTask != null ? topicTaskDetailPath(goal.id, activeTask.id) : topicDetailPath(goal.id);
 
   return (
     <>
       <button
         type="button"
-        aria-label="关闭目标规划"
+        aria-label="关闭主题规划"
         onClick={onClose}
         className="fixed inset-0 z-30 bg-transparent"
       />
       <aside
         className="fixed inset-y-0 right-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-[#E5E7EB] bg-white"
-        aria-label="目标规划"
+        aria-label="主题规划"
       >
         <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
-          <GoalPlanBreadcrumb
+          <TopicPlanBreadcrumb
             goalId={goal.id}
             goalTitle={goal.title}
             taskTitle={activeTask?.title.replace(/^任务\d+：/, "")}
@@ -99,7 +99,7 @@ export function GoalPlanDrawer({
             </button>
             <Link
               href={fullscreenHref}
-              aria-label="全屏查看目标规划"
+              aria-label="全屏查看主题规划"
               className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
             >
               <Maximize2 className="h-4 w-4" />
@@ -113,7 +113,7 @@ export function GoalPlanDrawer({
               <TaskDetailBody goal={goal} task={activeTask} onDeleted={() => setActiveTaskId(null)} />
             </div>
           ) : (
-            <GoalPlanContent
+            <TopicPlanContent
               goal={goal}
               focusSubGoalId={focusSubGoalId}
               onOpenTask={(task: Task) => {

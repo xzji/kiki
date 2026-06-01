@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 10;
+export const KIKI_DB_SCHEMA_VERSION = 12;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS runtime_jobs (
   task_instance_id TEXT,
   task_id TEXT,
   goal_id TEXT,
+  topic_id TEXT,
+  thread_id TEXT,
+  saga_instance_id TEXT,
   conversation_id TEXT,
   user_id TEXT NOT NULL DEFAULT 'local-user',
   kind TEXT NOT NULL,
@@ -40,11 +43,19 @@ CREATE INDEX IF NOT EXISTS idx_runtime_jobs_status_available
 CREATE INDEX IF NOT EXISTS idx_runtime_jobs_task_instance_id
   ON runtime_jobs(task_instance_id);
 
+CREATE INDEX IF NOT EXISTS idx_runtime_jobs_thread
+  ON runtime_jobs(thread_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_jobs_topic
+  ON runtime_jobs(topic_id);
+
 CREATE TABLE IF NOT EXISTS runtime_state_snapshots (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- v12 注：本表 envelope key 含 "goals"（旧）与 "topics"（新），双写期同时存在；
+-- value_json 内部的 Goal/SubGoal → Topic/Thread 形态映射由读路径完成。
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
@@ -182,6 +193,93 @@ CREATE INDEX IF NOT EXISTS idx_conv_event_log_conv
 CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_event_log_idem
   ON conversation_event_log(idempotency_key)
   WHERE idempotency_key IS NOT NULL;
+
+-- ========================================================================
+-- v11 终态：Topic / Thread Event Sourcing 基础设施
+-- 计划引用：.trae/documents/Topic_Thread_代码实现计划_v1.md §3.1.1 + §9.1 + §12.4
+-- ========================================================================
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  topic_id TEXT,
+  thread_id TEXT,
+  task_id TEXT,
+  saga_instance_id TEXT,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  last_event_seq INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 0,
+  idempotency_key TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_topic
+  ON agent_runs(topic_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_saga
+  ON agent_runs(saga_instance_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_thread
+  ON agent_runs(thread_id, started_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_idem
+  ON agent_runs(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agent_events (
+  id TEXT PRIMARY KEY,
+  agent_run_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  payload_ref TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(agent_run_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_run
+  ON agent_events(agent_run_id, seq);
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+  id TEXT PRIMARY KEY,
+  saga_instance_id TEXT NOT NULL,
+  from_role TEXT NOT NULL,
+  to_role TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_messages_saga
+  ON agent_messages(saga_instance_id, created_at);
+
+CREATE TABLE IF NOT EXISTS saga_instances (
+  id TEXT PRIMARY KEY,
+  topic_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  current_step TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  revision INTEGER NOT NULL DEFAULT 0,
+  idempotency_key TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_saga_instances_topic
+  ON saga_instances(topic_id, status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_saga_instances_idem
+  ON saga_instances(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agent_snapshots (
+  agent_run_id TEXT PRIMARY KEY,
+  last_event_seq INTEGER NOT NULL,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 export const KIKI_DB_MIGRATIONS: Array<{
@@ -376,6 +474,127 @@ export const KIKI_DB_MIGRATIONS: Array<{
       CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_event_log_idem
         ON conversation_event_log(idempotency_key)
         WHERE idempotency_key IS NOT NULL;
+    `,
+  },
+  {
+    // v11 — Topic / Thread Event Sourcing infrastructure
+    // Plan ref: .trae/documents/Topic_Thread_代码实现计划_v1.md §3.1.1 + §9.1
+    version: 11,
+    sql: `
+      ALTER TABLE runtime_jobs ADD COLUMN topic_id TEXT;
+      ALTER TABLE runtime_jobs ADD COLUMN thread_id TEXT;
+      ALTER TABLE runtime_jobs ADD COLUMN saga_instance_id TEXT;
+
+      -- §10.4：双写期一次性回填 goal_id → topic_id（旧任务读路径降级）
+      UPDATE runtime_jobs
+        SET topic_id = goal_id
+        WHERE topic_id IS NULL AND goal_id IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_runtime_jobs_thread
+        ON runtime_jobs(thread_id, status);
+
+      CREATE INDEX IF NOT EXISTS idx_runtime_jobs_topic
+        ON runtime_jobs(topic_id);
+
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        topic_id TEXT,
+        thread_id TEXT,
+        task_id TEXT,
+        saga_instance_id TEXT,
+        role TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        last_event_seq INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 0,
+        idempotency_key TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_topic
+        ON agent_runs(topic_id);
+
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_saga
+        ON agent_runs(saga_instance_id);
+
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_thread
+        ON agent_runs(thread_id, started_at DESC);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_idem
+        ON agent_runs(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS agent_events (
+        id TEXT PRIMARY KEY,
+        agent_run_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_ref TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(agent_run_id, seq)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_events_run
+        ON agent_events(agent_run_id, seq);
+
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id TEXT PRIMARY KEY,
+        saga_instance_id TEXT NOT NULL,
+        from_role TEXT NOT NULL,
+        to_role TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_messages_saga
+        ON agent_messages(saga_instance_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS saga_instances (
+        id TEXT PRIMARY KEY,
+        topic_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        current_step TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        revision INTEGER NOT NULL DEFAULT 0,
+        idempotency_key TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_saga_instances_topic
+        ON saga_instances(topic_id, status);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_saga_instances_idem
+        ON saga_instances(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS agent_snapshots (
+        agent_run_id TEXT PRIMARY KEY,
+        last_event_seq INTEGER NOT NULL,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    // v12 — Topic / Thread 物理迁移：复制 runtime_state_snapshots["goals"] →
+    // ["topics"] 双写期键，保留 "goals" 行 1 个版本（§10.5 问题 25）。
+    // 注意：本步骤是 SQL 行级复制（仅 envelope 层），envelope.value 内部的
+    // Goal/SubGoal → Topic/Thread 形态映射由读路径在解析时通过
+    // legacyGoalToTopic 完成（§9.4 问题 13），避免 SQL 内做 JSON 重写带来的
+    // 复杂转义。
+    version: 12,
+    sql: `
+      INSERT INTO runtime_state_snapshots (key, value_json, updated_at)
+      SELECT 'topics', value_json, updated_at
+        FROM runtime_state_snapshots
+        WHERE key = 'goals'
+          AND NOT EXISTS (
+            SELECT 1 FROM runtime_state_snapshots WHERE key = 'topics'
+          );
     `,
   },
 ];

@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Topic 详情页 · 基于现有目标详情页改造</title>
+<style>
+  /* ========== 完全对齐项目实际 token ========== */
+  :root {
+    --app-bg: #F5F6F8;
+    --canvas: #FFFFFF;
+    --text-primary: #1F2328;
+    --text-body: #4B5563;
+    --text-muted: #6B7280;
+    --text-faint: #8C9198;
+    --text-very-faint: #9AA0A6;
+    --border-1: #E5E7EB;
+    --border-2: #D0D7DE;
+    --border-3: #D8DDE4;
+    --bg-soft: #F8FAFC;
+    --bg-soft-2: #F8F9FB;
+    --bg-soft-3: #EEF2F6;
+    --bg-soft-4: #DDE1E7;
+    --bg-pill: #E9EEF5;
+    --warning-bg: #FFF3CD;
+    --warning-text: #8A6D3B;
+    --warning-border: #D9A441;
+    --danger: #D1242F;
+    --danger-bullet: #E5484D;
+    --brand-dark: #111;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro", "PingFang SC", system-ui, sans-serif;
+    background: var(--canvas);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ========== 主区（沿用 AppShell 的 max-w-5xl + px-8 pb-24 pt-8） ========== */
+  .page {
+    min-height: 100vh;
+    background: white;
+    padding: 32px 32px 96px;
+  }
+  .page-inner {
+    max-width: 920px;     /* GoalPlanContent 是 max-w-[920px] */
+    margin: 0 auto;
+  }
+
+  /* ========== 面包屑（GoalPlanBreadcrumb） ========== */
+  .breadcrumb {
+    display: flex; justify-content: flex-end; align-items: center;
+    gap: 4px; flex-wrap: wrap;
+    font-size: 12px; color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+  .breadcrumb a { color: var(--text-primary); text-decoration: none; font-weight: 500; }
+  .breadcrumb a:hover { color: var(--brand-dark); }
+  .breadcrumb .sep { color: var(--text-primary); }
+
+  /* ========== Topic 顶部卡片（去掉 ProgressRing） ========== */
+  .topic-card {
+    margin-bottom: 32px;
+    background: white;
+    border: 1px solid var(--border-1);
+    border-radius: 20px;
+    padding: 24px;
+  }
+  .topic-card-row {
+    display: flex; flex-direction: column; gap: 24px;
+  }
+  @media (min-width: 1024px) {
+    .topic-card-row { flex-direction: row; align-items: center; justify-content: space-between; }
+  }
+  .topic-card-left {
+    flex: 1; min-width: 0;
+    /* 注意：去掉了 ProgressRing，左侧只剩标题块，所以不再 gap-5 */
+  }
+
+  .topic-title {
+    font-size: 28px; font-weight: 600; letter-spacing: -0.02em;
+    color: var(--text-primary); line-height: 1.2;
+  }
+
+  /* meta：第一行 thread / task；如果有 deadline，单独第二行 */
+  .topic-meta {
+    margin-top: 12px;
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px 12px;
+    font-size: 14px; color: var(--text-muted);
+  }
+  .topic-meta + .topic-meta { margin-top: 8px; }
+  .meta-inline { display: inline-flex; align-items: center; gap: 6px; }
+  .meta-tag {
+    background: var(--bg-pill); color: var(--text-primary);
+    padding: 4px 10px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+  }
+
+  /* 4 列统计：1024 以上左侧分隔线，移动端上分隔线 */
+  .topic-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    min-width: 260px;
+    border-top: 1px solid var(--border-1);
+    padding-top: 20px;
+  }
+  @media (min-width: 1024px) {
+    .topic-stats {
+      min-width: 360px;
+      border-top: none;
+      border-left: 1px solid var(--border-1);
+      padding: 0 0 0 20px;
+    }
+  }
+  .stat { text-align: center; }
+  .stat-num { font-size: 24px; font-weight: 600; letter-spacing: -0.03em; color: var(--text-primary); }
+  .stat-num.muted { color: var(--text-very-faint); }
+  .stat-label { margin-top: 4px; font-size: 11px; color: var(--text-faint); letter-spacing: 0.08em; }
+
+  /* Workflow 状态条 */
+  .workflow {
+    margin-top: 20px;
+    border: 1px solid var(--border-1);
+    background: var(--bg-soft);
+    border-radius: 16px;
+    padding: 12px 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .workflow-label { font-size: 12px; color: var(--text-muted); }
+  .workflow-name { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-top: 2px; }
+  .btn {
+    height: 32px; padding: 0 12px; border-radius: 8px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-2);
+    background: white; color: var(--text-primary);
+  }
+  .btn:hover { border-color: var(--brand-dark); }
+  .btn.primary { background: var(--brand-dark); color: white; border-color: var(--brand-dark); }
+  .btn.primary:hover { background: #333; border-color: #333; }
+
+  /* ========== Thread 列表（沿用 SubGoalBlock） ========== */
+  .threads { display: flex; flex-direction: column; gap: 16px; }
+
+  .thread-block {
+    background: white;
+    border: 1px solid var(--border-1);
+    border-radius: 18px;
+    padding: 20px 24px;
+  }
+
+  .thread-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    margin-bottom: 20px;
+  }
+  .thread-head-left { min-width: 0; flex: 1; }
+  .thread-title-row { display: flex; align-items: center; gap: 12px; }
+  .thread-index {
+    width: 24px; height: 24px; flex-shrink: 0;
+    border-radius: 999px; background: var(--app-bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; color: var(--text-primary);
+  }
+  .thread-title {
+    font-size: 15px; font-weight: 600; color: var(--text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .pill-detail {
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid var(--border-1);
+    color: var(--text-body);
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px; font-weight: 500;
+    cursor: pointer;
+  }
+  .pill-detail:hover { border-color: var(--brand-dark); color: var(--text-primary); }
+  /* 进度条（保留，与现有 SubGoalBlock 完全一致） */
+  .progress-bar {
+    margin-top: 12px; height: 4px; border-radius: 999px;
+    background: var(--border-1); overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%; background: var(--text-primary); border-radius: 999px;
+  }
+  .thread-counter {
+    flex-shrink: 0; font-size: 12px; font-weight: 500;
+    color: var(--text-faint); font-variant-numeric: tabular-nums;
+  }
+
+  /* ========== TaskRow ========== */
+  .task-list { display: flex; flex-direction: column; gap: 6px; }
+  .task-row {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .task-row:hover { background: var(--bg-soft-2); }
+  .task-row .indicator {
+    margin-top: 2px;
+    width: 18px; height: 18px;
+    flex-shrink: 0;
+    border-radius: 999px; border: 1px solid var(--border-2);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .task-row .indicator.completed {
+    border-color: var(--brand-dark); background: var(--brand-dark);
+  }
+  .task-row .indicator.completed::after {
+    content: ""; width: 9px; height: 5px; border-left: 2px solid white; border-bottom: 2px solid white;
+    transform: rotate(-45deg); margin-top: -2px;
+  }
+  .task-row .indicator.in_progress {
+    border-color: var(--text-primary);
+  }
+  .task-row .indicator.in_progress::after {
+    content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--text-primary);
+  }
+  .task-row .indicator.awaiting_user {
+    border-color: var(--warning-border);
+  }
+  .task-row .indicator.awaiting_user::after {
+    content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--warning-border);
+  }
+  .task-row .body { min-width: 0; flex: 1; }
+  .task-row .body-row {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  }
+  .task-row .title-wrap { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; }
+  .task-row .title {
+    font-size: 14px; font-weight: 500; color: var(--text-primary);
+  }
+  .task-row .title.completed { color: var(--text-very-faint); text-decoration: line-through; }
+  .status-pill {
+    display: inline-flex; align-items: center;
+    padding: 1px 8px;
+    border-radius: 6px;
+    font-size: 11px; font-weight: 500;
+    margin-left: 8px;
+    flex-shrink: 0;
+  }
+  .status-pill.completed { background: var(--border-1); color: var(--text-muted); }
+  .status-pill.in_progress { background: var(--bg-soft-4); color: var(--text-primary); }
+  .status-pill.pending { background: var(--app-bg); color: var(--text-faint); }
+  .status-pill.awaiting_user { background: var(--warning-bg); color: var(--warning-text); }
+
+  .unread-dot {
+    margin-left: 8px; width: 10px; height: 10px; border-radius: 999px;
+    background: var(--danger-bullet); flex-shrink: 0;
+  }
+
+  .actions {
+    display: flex; align-items: center; gap: 4px;
+    width: 96px; justify-content: flex-end; flex-shrink: 0;
+  }
+  .task-row:hover .ghost-btn { opacity: 1; pointer-events: auto; }
+  .ghost-btn {
+    opacity: 0; pointer-events: none;
+    height: 26px; padding: 0 8px;
+    border: 1px solid var(--border-2); background: white;
+    border-radius: 6px; font-size: 12px; color: var(--text-muted);
+    cursor: pointer;
+  }
+  .ghost-btn:hover { border-color: var(--brand-dark); color: var(--text-primary); }
+
+  .desc {
+    margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--text-muted);
+  }
+
+  /* 添加按钮 */
+  .add-task {
+    margin-top: 4px;
+    width: 100%;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    border: 1px dashed #D4D7DD;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px; cursor: pointer;
+  }
+  .add-task:hover { border-color: var(--text-primary); color: var(--text-primary); }
+  .add-thread {
+    width: 100%;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    border: 1px dashed #D4D7DD;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 18px 24px;
+    border-radius: 18px;
+    font-size: 14px; cursor: pointer;
+  }
+  .add-thread:hover { border-color: var(--text-primary); color: var(--text-primary); }
+
+  /* lucide 风格简化图标 */
+  .icn { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .icn-sm { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .icn-xs { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-inner">
+
+    <!-- 面包屑 -->
+    <div class="breadcrumb">
+      <a href="#">美股 AI 投资助手</a>
+      <span class="sep">/</span>
+      <a href="#" style="font-weight:500;">主题规划</a>
+    </div>
+
+    <!-- ============= 顶部 Topic 卡片（已去掉 ProgressRing） ============= -->
+    <section class="topic-card">
+      <div class="topic-card-row">
+        <div class="topic-card-left">
+          <h1 class="topic-title">AI 板块情报监控与每日推送</h1>
+
+          <!-- 第一行 meta：5 个 Thread + 19 个任务（优先展示） -->
+          <div class="topic-meta">
+            <span class="meta-inline">
+              <svg class="icn" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+              5 个 Thread
+            </span>
+            <span class="meta-inline">
+              <svg class="icn" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+              19 个任务
+            </span>
+            <span class="meta-tag">持续关注型</span>
+          </div>
+
+          <!-- 第二行 meta：仅当有 deadline 时才出现。无则注释下面整个 div -->
+          <div class="topic-meta">
+            <span class="meta-inline">
+              <svg class="icn" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              截止 2026-06-30
+            </span>
+            <span class="meta-tag">剩余 30 天</span>
+          </div>
+        </div>
+
+        <!-- 4 列统计 -->
+        <div class="topic-stats">
+          <div class="stat"><div class="stat-num">2</div><div class="stat-label">已结束</div></div>
+          <div class="stat"><div class="stat-num">1</div><div class="stat-label">待确认</div></div>
+          <div class="stat"><div class="stat-num">5</div><div class="stat-label">进行中</div></div>
+          <div class="stat"><div class="stat-num muted">11</div><div class="stat-label">待开始</div></div>
+        </div>
+      </div>
+
+      <!-- 工作流条 -->
+      <div class="workflow">
+        <div>
+          <div class="workflow-label">主题工作流</div>
+          <div class="workflow-name">监控中 · 各 Thread 按节奏自循环</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn">参与度设置 · L2</button>
+          <button class="btn">
+            <svg class="icn-sm" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            暂停整个主题
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============= Threads 列表 ============= -->
+    <div class="threads">
+
+      <!-- ========== Thread 1 ========== -->
+      <section class="thread-block">
+        <div class="thread-head">
+          <div class="thread-head-left">
+            <div class="thread-title-row">
+              <div class="thread-index">1</div>
+              <div style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="thread-title">持仓个股核心事件监控</span>
+                <span class="pill-detail">
+                  <svg class="icn-xs" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+                  详情
+                </span>
+              </div>
+            </div>
+            <div class="progress-bar"><div class="progress-bar-fill" style="width: 20%"></div></div>
+          </div>
+          <div class="thread-counter">1 / 5</div>
+        </div>
+
+        <div class="task-list">
+          <div class="task-row">
+            <span class="indicator in_progress"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">持仓个股核心事件监控</span>
+                  <span class="status-pill in_progress">进行中</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">停止</button></div>
+              </div>
+              <p class="desc">针对英伟达、闪迪、Intel 三只持仓个股，建立每日批量的关键事件监控管线。</p>
+            </div>
+          </div>
+
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">AI 行业政策与监管动态追踪</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">持续追踪美国及主要市场（欧盟、中国）针对 AI 领域的政策法规、出口管制、反垄断调查及行业监管动向，评估对持仓个股的潜在影响。</p>
+            </div>
+          </div>
+
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">AI 技术突破与市场竞争周度扫描</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">扫描 AI 领域重大技术突破、模型发布、算力基础设施变化及竞争格局变动，重点覆盖芯片与硬件方向。</p>
+            </div>
+          </div>
+
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">持仓风险评估与预警</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">综合事件监控、政策动态与技术趋势信息，对三只持仓个股进行每日风险评估，发现异常信号时触发预警。</p>
+            </div>
+          </div>
+
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">每日 AI 投资简报整合与推送</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">将个股监控、政策动态、风险评估结果整合为一份结构化的每日简报，通过用户偏好渠道完成推送。</p>
+            </div>
+          </div>
+
+          <button class="add-task">
+            <svg class="icn-sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            添加任务
+          </button>
+        </div>
+      </section>
+
+      <!-- ========== Thread 2 ========== -->
+      <section class="thread-block">
+        <div class="thread-head">
+          <div class="thread-head-left">
+            <div class="thread-title-row">
+              <div class="thread-index">2</div>
+              <div style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="thread-title">AI 行业政策与监管动态追踪</span>
+                <span class="pill-detail">
+                  <svg class="icn-xs" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+                  详情
+                </span>
+              </div>
+            </div>
+            <div class="progress-bar"><div class="progress-bar-fill" style="width: 0%"></div></div>
+          </div>
+          <div class="thread-counter">0 / 3</div>
+        </div>
+
+        <div class="task-list">
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">美国监管动态情报扫描</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">每日聚合 SEC、FTC、白宫 AI 政策办公室公告，识别与 NVDA / MSFT / GOOGL 业务相关的监管动作。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">欧盟与中国 AI 政策同步</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">跟踪欧盟 AI 法案二审进度、中国 AI 安全规范与出口管制清单变动。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">政策影响报告整合</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">每周汇总两地政策对持仓的潜在影响，输出风险等级与建议关注点。</p>
+            </div>
+          </div>
+          <button class="add-task">
+            <svg class="icn-sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            添加任务
+          </button>
+        </div>
+      </section>
+
+      <!-- ========== Thread 3 ========== -->
+      <section class="thread-block">
+        <div class="thread-head">
+          <div class="thread-head-left">
+            <div class="thread-title-row">
+              <div class="thread-index">3</div>
+              <div style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="thread-title">AI 技术突破与竞争扫描</span>
+                <span class="pill-detail">
+                  <svg class="icn-xs" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+                  详情
+                </span>
+              </div>
+            </div>
+            <div class="progress-bar"><div class="progress-bar-fill" style="width: 25%"></div></div>
+          </div>
+          <div class="thread-counter">1 / 4</div>
+        </div>
+        <div class="task-list">
+          <div class="task-row">
+            <span class="indicator completed"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title completed">建立技术突破信号源（论文 / 发布会 / GitHub Trends）</span>
+                  <span class="status-pill completed">已结束</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">重新执行</button></div>
+              </div>
+              <p class="desc">已配置 8 个数据源，arXiv & HF & GitHub trending 接入完成。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator in_progress"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">芯片与硬件技术周报</span>
+                  <span class="status-pill in_progress">进行中</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">停止</button></div>
+              </div>
+              <p class="desc">本周已采集 32 条 AI 芯片相关进展，正在执行去重与影响评分。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">大模型发布与算力供给跟踪</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">监控 OpenAI / Anthropic / Google / Meta / DeepSeek 模型发布与算力扩张公告。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">竞争格局周度复盘</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">输出本周 AI 行业竞争格局变化摘要，重点是对持仓股的相对位次影响。</p>
+            </div>
+          </div>
+          <button class="add-task">
+            <svg class="icn-sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            添加任务
+          </button>
+        </div>
+      </section>
+
+      <!-- ========== Thread 4 ========== -->
+      <section class="thread-block">
+        <div class="thread-head">
+          <div class="thread-head-left">
+            <div class="thread-title-row">
+              <div class="thread-index">4</div>
+              <div style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="thread-title">财报与重大事件即时跟踪</span>
+                <span class="pill-detail">
+                  <svg class="icn-xs" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+                  详情
+                </span>
+              </div>
+            </div>
+            <div class="progress-bar"><div class="progress-bar-fill" style="width: 33%"></div></div>
+          </div>
+          <div class="thread-counter">1 / 3</div>
+        </div>
+        <div class="task-list">
+          <div class="task-row">
+            <span class="indicator completed"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title completed">拉取 90 天财报日历（NVDA / MSFT / GOOGL）</span>
+                  <span class="status-pill completed">已结束</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">重新执行</button></div>
+              </div>
+              <p class="desc">下次财报：MSFT 已于 3 天前公布；NVDA 预计 25 天后。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator awaiting_user"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">MSFT Q4 财报深度解读</span>
+                  <span class="status-pill awaiting_user">待确认</span>
+                  <span class="unread-dot"></span>
+                </div>
+                <div class="actions"><button class="ghost-btn">立即生成</button></div>
+              </div>
+              <p class="desc">财报全文与电话会议纪要已抓取，涉及 Azure AI 收入 / Capex 指引 / 持仓影响等敏感内容，按 L3 设置等候你确认。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">并购与重大公告即时捕捉</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">对接 SEC EDGAR 实时通道，捕捉 8-K 类重大公告并第一时间解读。</p>
+            </div>
+          </div>
+          <button class="add-task">
+            <svg class="icn-sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            添加任务
+          </button>
+        </div>
+      </section>
+
+      <!-- ========== Thread 5 ========== -->
+      <section class="thread-block">
+        <div class="thread-head">
+          <div class="thread-head-left">
+            <div class="thread-title-row">
+              <div class="thread-index">5</div>
+              <div style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="thread-title">每日 AI 投资简报整合</span>
+                <span class="pill-detail">
+                  <svg class="icn-xs" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+                  详情
+                </span>
+              </div>
+            </div>
+            <div class="progress-bar"><div class="progress-bar-fill" style="width: 0%"></div></div>
+          </div>
+          <div class="thread-counter">0 / 4</div>
+        </div>
+        <div class="task-list">
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">收件渠道偏好确认</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">确认推送渠道（Inbox / Email / 飞书）与时段。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">每日 21:00 ET 简报生成</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">从其他 4 条 Thread 沉淀的洞察中筛选并生成结构化日报。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">关键事件即时插播</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">遇异动 / 财报 / 政策事件由 Thread 1 / 2 / 4 触发即时插播。</p>
+            </div>
+          </div>
+          <div class="task-row">
+            <span class="indicator"></span>
+            <div class="body">
+              <div class="body-row">
+                <div class="title-wrap">
+                  <span class="title">周末复盘汇总</span>
+                  <span class="status-pill pending">待开始</span>
+                </div>
+                <div class="actions"><button class="ghost-btn">执行</button></div>
+              </div>
+              <p class="desc">每周日整合一周关键洞察，输出可消费的复盘文档。</p>
+            </div>
+          </div>
+          <button class="add-task">
+            <svg class="icn-sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            添加任务
+          </button>
+        </div>
+      </section>
+
+      <!-- 添加 Thread -->
+      <button class="add-thread">
+        <svg class="icn" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        添加 Thread
+      </button>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

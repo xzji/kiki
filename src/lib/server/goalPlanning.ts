@@ -160,8 +160,6 @@ export type GoalPlanningCheckpointStatus = {
   discarded?: boolean;
 };
 
-const DEFAULT_DEADLINE = "2026-06-30T23:59:59+08:00";
-
 const JSON_NO_TOOL_INSTRUCTION =
   "重要约束：禁止调用任何工具（Write/Edit/MultiEdit/Bash/WebSearch/WebFetch/Task 等），所有业务结果必须写在最终 JSON 回答里。";
 
@@ -358,7 +356,7 @@ function emitCheckpointResumeProgress(input: {
   });
 }
 
-function buildGoalClarificationPrompt(goalText: string, conversationContext?: string) {
+export function buildGoalClarificationPrompt(goalText: string, conversationContext?: string) {
   return `你是 KiKi 的目标澄清助手。用户刚发起一个长期目标，请先判断为了生成可靠规划，最需要补充哪些背景信息。
 
 用户目标：
@@ -380,7 +378,7 @@ JSON schema：
 }`;
 }
 
-function buildGoalFollowUpQuestionsPrompt(input: {
+export function buildGoalFollowUpQuestionsPrompt(input: {
   goalText: string;
   conversationContext?: string;
   history: GoalInfoCollectionHistoryItem[];
@@ -416,7 +414,7 @@ JSON schema：
 }`;
 }
 
-function buildCollectedInfoSummaryPrompt(
+export function buildCollectedInfoSummaryPrompt(
   goalText: string,
   collectedInfo: string,
   conversationContext?: string,
@@ -447,7 +445,7 @@ JSON schema：
 }`;
 }
 
-function buildDecomposePrompt(input: {
+export function buildDecomposePrompt(input: {
   goalTitle: string;
   goalDescription: string;
   userContext: Record<string, unknown>;
@@ -531,7 +529,7 @@ ${JSON.stringify(input.userContext, null, 2)}
 }`;
 }
 
-function buildDecompositionNormalizationPrompt(input: {
+export function buildDecompositionNormalizationPrompt(input: {
   goalTitle: string;
   goalDescription: string;
   userContext: Record<string, unknown>;
@@ -589,7 +587,7 @@ ${JSON.stringify({
 ${input.rawOutput}`;
 }
 
-function buildPlanPresentationPrompt(input: {
+export function buildPlanPresentationPrompt(input: {
   goalText: string;
   collectedInfoSummary: CollectedInfoSummaryPayload;
   decomposition: DecompositionPayload;
@@ -617,14 +615,14 @@ ${JSON.stringify(input.taskPlanningSummary, null, 2)}
 1. 只能输出严格 JSON，不要包含 Markdown、代码块或额外解释。
 2. goalTitle 适合在对话卡片和目标页展示，简洁但明确。
 3. summary 用 2-3 句概括整体推进思路。
-4. deadline 必须是 ISO 字符串；如果无法从信息中可靠判断，使用 ${DEFAULT_DEADLINE}。
+4. deadline 必须是 ISO 字符串；如果用户没有明确给出截止时间，请省略 deadline 字段（不要使用任何虚构的兜底日期）。
 5. notificationStrategy 描述后续提醒与推进策略，贴近长期任务系统。
 
 JSON schema：
 {
   "goalTitle": "适合展示的目标标题",
   "summary": "2-3 句摘要",
-  "deadline": "${DEFAULT_DEADLINE}",
+  "deadline": "可选；如确定则给 ISO 字符串，否则省略此字段",
   "notificationStrategy": "后续提醒与推进策略"
 }`;
 }
@@ -1107,11 +1105,14 @@ function normalizePriority(value: unknown): "critical" | "high" | "medium" | "lo
   return "low";
 }
 
-function normalizeDeadline(value: string) {
-  if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
-  const dateMatch = value.match(/\d{4}-\d{2}-\d{2}/);
+function normalizeDeadline(value: string): string | undefined {
+  // §9.5 问题 18：禁止虚构兜底日期。无法解析时返回 undefined，由调用方按需处理（保留可选语义）。
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) return trimmed;
+  const dateMatch = trimmed.match(/\d{4}-\d{2}-\d{2}/);
   if (dateMatch) return `${dateMatch[0]}T23:59:59+08:00`;
-  return DEFAULT_DEADLINE;
+  return undefined;
 }
 
 function extractStringArray(value: unknown): string[] {

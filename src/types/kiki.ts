@@ -359,8 +359,13 @@ export type TaskInstance = {
   notification?: TaskInstanceNotificationState;
 };
 
+/**
+ * @deprecated 旧 Task 模型，新代码请使用 Topic/Thread 体系下的 Task（threadId 替代 subGoalId）。
+ * Plan ref: §3.2.1 + §9.4 问题 13。保留原结构 1 个版本，PR15 后置清理 UI/inbox/history。
+ */
 export type Task = {
   id: string;
+  /** @deprecated 使用 threadId；§9.4 问题 14 分两批迁移。 */
   subGoalId: string;
   title: string;
   description: string;
@@ -384,6 +389,11 @@ export type Task = {
   collaboration?: TaskCollaborationRequirements;
 };
 
+/**
+ * @deprecated 改用 Thread（src/types/topic.ts）。SubGoal 字段（successCriteria/tasks）
+ * 与 Thread 不同形不能 type alias，需通过 legacySubGoalToThread() 显式转换。
+ * Plan ref: §9.4 问题 13。
+ */
 export type SubGoal = {
   id: string;
   goalId: string;
@@ -407,6 +417,11 @@ export type ChatTurn = {
   timestamp: string;
 };
 
+/**
+ * @deprecated 改用 Topic（src/types/topic.ts）。Goal.subGoals[] 与 Topic.threads[] 字段不同，
+ * 必须通过 legacyGoalToTopic() 显式转换。
+ * Plan ref: §9.4 问题 13。
+ */
 export type Goal = {
   id: string;
   title: string;

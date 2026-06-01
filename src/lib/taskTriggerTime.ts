@@ -1,4 +1,5 @@
 import type { Goal, Task } from "@/types/kiki";
+import type { Thread, ThreadLoopInterval } from "@/types/topic";
 
 export type ParsedTaskTriggerTime = {
   hour: number;
@@ -229,4 +230,87 @@ export function normalizeGoalTriggerRules(goal: Goal): Goal {
       })),
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Thread loopInterval 解析（计划 §3.4.5）
+// ---------------------------------------------------------------------------
+
+/**
+ * Thread.loopInterval 的解析结果。
+ *
+ * 设计要点：
+ *  - "realtime" 当前以 1 分钟节拍占位实现，本期不真实启用秒级心跳（计划 §3.4.5）。
+ *  - "cron" 仅透传表达式，由 ThreadLoopWorker 调用现成 cron 解析器决定下一次时间。
+ *  - "one_shot" 没有节拍，触发一次后由 ThreadRunner 显式置 thread.status = "archived"
+ *    或 "paused"，computeNextTickAt 返回 null。
+ */
+export type ParsedThreadLoopInterval =
+  | { kind: "realtime"; intervalMs: number }
+  | { kind: "hourly"; intervalMs: number }
+  | { kind: "daily"; intervalMs: number }
+  | { kind: "weekly"; intervalMs: number }
+  | { kind: "cron"; expr: string }
+  | { kind: "one_shot" };
+
+const THREAD_LOOP_INTERVAL_REALTIME_MS = 60_000;
+const THREAD_LOOP_INTERVAL_HOURLY_MS = 60 * 60_000;
+const THREAD_LOOP_INTERVAL_DAILY_MS = 24 * THREAD_LOOP_INTERVAL_HOURLY_MS;
+const THREAD_LOOP_INTERVAL_WEEKLY_MS = 7 * THREAD_LOOP_INTERVAL_DAILY_MS;
+
+export function parseThreadLoopInterval(li: ThreadLoopInterval): ParsedThreadLoopInterval {
+  if (typeof li === "string") {
+    switch (li) {
+      case "realtime":
+        return { kind: "realtime", intervalMs: THREAD_LOOP_INTERVAL_REALTIME_MS };
+      case "hourly":
+        return { kind: "hourly", intervalMs: THREAD_LOOP_INTERVAL_HOURLY_MS };
+      case "daily":
+        return { kind: "daily", intervalMs: THREAD_LOOP_INTERVAL_DAILY_MS };
+      case "weekly":
+        return { kind: "weekly", intervalMs: THREAD_LOOP_INTERVAL_WEEKLY_MS };
+      case "one_shot":
+        return { kind: "one_shot" };
+    }
+    // 运行期数据脏化（脱离类型保证）→ 兜底为 one_shot，避免静默走入 cron 分支。
+    return { kind: "one_shot" };
+  }
+  if (li && typeof li === "object" && (li as { kind?: string }).kind === "cron") {
+    const expr = typeof li.expr === "string" ? li.expr.trim() : "";
+    return { kind: "cron", expr };
+  }
+  return { kind: "one_shot" };
+}
+
+/**
+ * 计算 Thread 的下一次 tick 时间。
+ *
+ * 规则：
+ *  - one_shot：返回 null（永不再触发）。
+ *  - cron：返回 null（cron 解析交给 ThreadLoopWorker 的专用 cron 库；
+ *    本函数仅承担固定间隔类型）。
+ *  - 固定间隔：以 `thread.lastTickAt` 为锚点累加 intervalMs；缺失 lastTickAt
+ *    时直接返回 now（首次触发立即生效）。
+ *  - 若 lastTickAt + interval 仍 ≤ now（追赶场景），跳到 now 之后的最近一格，
+ *    避免 worker 单帧内连续触发同 Thread。
+ */
+export function computeNextTickAt(thread: Thread, now: Date): Date | null {
+  const parsed = parseThreadLoopInterval(thread.loopInterval);
+  if (parsed.kind === "one_shot" || parsed.kind === "cron") {
+    return null;
+  }
+  const intervalMs = parsed.intervalMs;
+  if (!thread.lastTickAt) {
+    return new Date(now.getTime());
+  }
+  const last = new Date(thread.lastTickAt);
+  if (Number.isNaN(last.getTime())) {
+    return new Date(now.getTime());
+  }
+  const elapsed = now.getTime() - last.getTime();
+  // 找到 lastTickAt 之后第一个严格 > now 的 tick：
+  //   N = floor(elapsed / intervalMs) + 1，结果 = last + N * intervalMs。
+  // 当 last 在未来（elapsed < 0），N 退化为 0 或负数；统一兜底为 1，避免返回 ≤ now。
+  const slotsAhead = Math.max(1, Math.floor(elapsed / intervalMs) + 1);
+  return new Date(last.getTime() + slotsAhead * intervalMs);
 }

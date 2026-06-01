@@ -29,6 +29,8 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
+import { useAgentRunsStore } from "@/stores/agentRunsStore";
+import { useSagaInstancesStore } from "@/stores/sagaInstancesStore";
 import type { Conversation, InboxItem, TaskInstance } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { GoalEventRecord } from "@/types/goalEventLog";
@@ -95,7 +97,7 @@ function getTaskIconType(): InboxItem["iconType"] {
 }
 
 function buildTaskLink(goalId: string, taskId: string, instanceId: string) {
-  return `/goals/${goalId}/tasks/${taskId}?view=exec&instanceId=${instanceId}`;
+  return `/topics/${goalId}/tasks/${taskId}?view=exec&instanceId=${instanceId}`;
 }
 
 function findTaskByEvent(event: GoalEventRecord) {
@@ -275,6 +277,44 @@ function applyGoalEvent(event: GoalEventRecord) {
   }
   if (event.kind === "schedule.event_synthesized") {
     refreshScheduleEventsFromSnapshot();
+    appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  // Topic/Thread runtime — Plan ref: §10.6 problem 26
+  if (
+    event.kind === "agent.run.started" ||
+    event.kind === "agent.run.event" ||
+    event.kind === "agent.run.completed"
+  ) {
+    useAgentRunsStore.getState().applyEvent({
+      kind: event.kind,
+      payload: event.payload as Record<string, unknown>,
+    });
+    appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (event.kind === "saga.step.advanced") {
+    useSagaInstancesStore.getState().advance({
+      payload: event.payload as Record<string, unknown>,
+    });
+    appliedGoalEventIds.add(event.id);
+    runtimeEventMetrics.applied += 1;
+    pendingGoalEvents.delete(event.id);
+    return true;
+  }
+  if (
+    event.kind === "topic.created" ||
+    event.kind === "topic.updated" ||
+    event.kind === "thread.tick.started" ||
+    event.kind === "thread.tick.completed"
+  ) {
+    // P0 stage: Topic/Thread stores are introduced in PR4+; until then we
+    // only acknowledge the cursor so the SSE stream keeps draining without
+    // re-queueing these kinds as pending.
     appliedGoalEventIds.add(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);

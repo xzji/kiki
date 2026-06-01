@@ -1,5 +1,7 @@
+import { normalizeGoalId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
 import type { ConversationMessage } from "@/types/kiki";
+import type { ThreadTickPostMessageSeverity } from "@/types/topic";
 
 type ConversationMessageRow = {
   id: string;
@@ -252,4 +254,84 @@ export function markLastMessageUnread(conversationId: string) {
     )
     .run(new Date().toISOString(), conversationId, row.id);
   return row.id;
+}
+
+// ---------------------------------------------------------------------------
+// PR14.4: Thread 派生消息追加（计划 §12.3.1.4）
+// ---------------------------------------------------------------------------
+
+/**
+ * Thread tick post_message 写入对话流的薄包装。
+ *
+ * 现有 conversation_messages 表无 thread_id / severity 列；本方法不扩 schema，
+ * 走以下约定：
+ *  - 通过 `conversations.goal_id === topicId` 反查 conversation（topic↔goal
+ *    双写期 goal_id 即 topicId）；找不到 conversation 抛错（thread post_message
+ *    必须挂在某个 conversation 下）。
+ *  - 消息 id 形如 `msg-thread-${threadId}-${traceId}`，在 conversationId×messageId
+ *    维度幂等（重入直接复用既有消息）。
+ *  - severity 经由 inboxRepository.appendInboxMessage 的事件 payload 透传，
+ *    本表只保留文本（warning/important 在 UI 端通过 inbox unread 状态高亮）。
+ *  - kind 固定 "text"，role 固定 "kiki"，source "system"，unread=true 以便
+ *    inbox/会话两端同时点亮未读数。
+ */
+export type AppendThreadMessageInput = {
+  topicId: string;
+  threadId: string;
+  text: string;
+  severity: ThreadTickPostMessageSeverity;
+  /** 同 traceId 重入会幂等。默认 nowIso()。 */
+  traceId?: string;
+  /** 注入时钟，spec 用；默认 new Date()。 */
+  now?: () => Date;
+};
+
+export type AppendThreadMessageResult = {
+  conversationMessageId: string;
+  conversationId: string;
+};
+
+export function appendThreadMessage(input: AppendThreadMessageInput): AppendThreadMessageResult {
+  if (!input.topicId) throw new Error("appendThreadMessage: topicId required");
+  if (!input.threadId) throw new Error("appendThreadMessage: threadId required");
+  const text = input.text?.trim();
+  if (!text) throw new Error("appendThreadMessage: text required");
+
+  const nowFn = input.now ?? (() => new Date());
+  const traceId = input.traceId ?? nowFn().toISOString();
+  const conversationMessageId = `msg-thread-${input.threadId}-${traceId}`;
+  const db = getDatabase();
+
+  // conversations.goal_id 由 migrateConversationIds normalize 成 goal-opq-* 形式；
+  // 此处必须用 normalize 后的 ID 查询，否则原始 topicId 永远查不到。
+  const normalizedTopicId = normalizeGoalId(input.topicId);
+  const convRow = db
+    .prepare(`SELECT id FROM conversations WHERE goal_id = ? ORDER BY updated_at DESC LIMIT 1`)
+    .get(normalizedTopicId) as { id: string } | undefined;
+  if (!convRow) {
+    throw new Error(`appendThreadMessage: no conversation linked to topic ${input.topicId}`);
+  }
+  const conversationId = convRow.id;
+
+  // 幂等：同 messageId 直接返回
+  const existing = db
+    .prepare(`SELECT id FROM conversation_messages WHERE conversation_id = ? AND id = ? LIMIT 1`)
+    .get(conversationId, conversationMessageId) as { id: string } | undefined;
+  if (existing) {
+    return { conversationMessageId: existing.id, conversationId };
+  }
+
+  const createdAt = nowFn().toISOString();
+  insertConversationMessage(conversationId, {
+    id: conversationMessageId,
+    kind: "text",
+    role: "kiki",
+    content: text,
+    createdAt,
+    unread: true,
+    status: "done",
+    source: "system",
+  });
+
+  return { conversationMessageId, conversationId };
 }

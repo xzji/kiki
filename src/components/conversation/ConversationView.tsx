@@ -8,8 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AssistantComposer } from "@/components/layout/AssistantComposer";
 import { ConversationMessageItem } from "@/components/conversation/ConversationMessageItem";
 import { GoalPlanDrawer } from "@/components/conversation/GoalPlanDrawer";
-import { GoalPlanBreadcrumb } from "@/components/goal/GoalPlanContent";
-import { TaskDetailBody } from "@/components/goal/TaskDetailBody";
+import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
+import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
 import { submitTaskResultFeedback, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
@@ -1242,7 +1242,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           />
           <aside className="fixed inset-y-0 right-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-[#E5E7EB] bg-white">
             <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
-              <GoalPlanBreadcrumb
+              <TopicPlanBreadcrumb
                 goalId={taskInfo.goal.id}
                 goalTitle={taskInfo.goal.title}
                 taskTitle={taskInfo.task.title.replace(/^任务\d+：/, "")}

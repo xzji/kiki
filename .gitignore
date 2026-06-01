@@ -42,3 +42,6 @@ next-env.d.ts
 # local runtime state and task workspaces
 /data/storage/
 /data/workspaces/
+
+# local analysis exports
+/Trump_Donald_J_2026_278T2*

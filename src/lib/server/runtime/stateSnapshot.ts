@@ -1,11 +1,14 @@
 import { getDatabase } from "@/lib/server/db/client";
 import { migrateGoalIds } from "@/lib/opaqueIds";
+import { legacyGoalToTopic } from "@/lib/migration/legacyGoalToTopic";
 import { normalizeGoalTriggerRules } from "@/lib/taskTriggerTime";
 import type { Goal } from "@/types/kiki";
+import type { Topic } from "@/types/topic";
 import type { AgentEvent } from "@/types/schedule";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
-type SnapshotKey = "goals" | "runtimeEnvironments" | "scheduleEvents";
+// §10.5 问题 25：v12 起新增 "topics" key（双写期与 "goals" 共存）
+type SnapshotKey = "goals" | "topics" | "runtimeEnvironments" | "scheduleEvents";
 
 export type SnapshotMeta = {
   revision: number;
@@ -129,4 +132,50 @@ export function readScheduleEventsSnapshot(fallback: AgentEvent[]) {
 
 export function readScheduleEventsSnapshotMeta(fallback: AgentEvent[]) {
   return readSnapshotWithMeta("scheduleEvents", fallback);
+}
+
+// ===== Topic snapshot =====
+// §10.5 问题 25：v12 双写期 — 优先读 "topics"；缺失时从 "goals" envelope
+// 通过 legacyGoalToTopic 兜底，并保持 envelope 的 revision/updatedAt。
+
+function isTopicArray(value: unknown): value is Topic[] {
+  if (!Array.isArray(value)) return false;
+  return value.every(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      typeof (entry as Topic).id === "string" &&
+      Array.isArray((entry as Topic).threads),
+  );
+}
+
+export function readTopicsSnapshot(fallback: Topic[]): Topic[] {
+  const topics = readSnapshotWithMeta<unknown>("topics", null);
+  if (isTopicArray(topics.value)) return topics.value;
+  // 兜底：从 "goals" envelope 转换
+  const goals = readSnapshotWithMeta<Goal[]>("goals", []);
+  if (Array.isArray(goals.value) && goals.value.length > 0) {
+    return goals.value
+      .map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal)))
+      .map((goal) => legacyGoalToTopic({ goal }));
+  }
+  return fallback;
+}
+
+export function readTopicsSnapshotMeta(fallback: Topic[]) {
+  const topics = readSnapshotWithMeta<unknown>("topics", null);
+  if (isTopicArray(topics.value)) {
+    return { value: topics.value, revision: topics.revision, updatedAt: topics.updatedAt };
+  }
+  const goals = readSnapshotWithMeta<Goal[]>("goals", []);
+  const value = Array.isArray(goals.value)
+    ? goals.value
+        .map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal)))
+        .map((goal) => legacyGoalToTopic({ goal }))
+    : fallback;
+  return { value, revision: goals.revision, updatedAt: goals.updatedAt };
+}
+
+export function upsertTopicsSnapshot(topics: Topic[], expectedRevision?: number) {
+  return upsertSnapshot("topics", topics, expectedRevision);
 }

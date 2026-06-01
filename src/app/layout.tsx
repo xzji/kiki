@@ -13,7 +13,7 @@ const geistSans = localFont({
 
 export const metadata: Metadata = {
   title: "KiKi Prototype",
-  description: "目标驱动型自主 Agent 的高保真前端原型",
+  description: "主题驱动型自主 Agent 的高保真前端原型",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

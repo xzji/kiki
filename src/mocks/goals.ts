@@ -1363,7 +1363,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
   return {
     id: goalId,
     title: draft.goalTitle,
-    deadline: draft.deadline || "2026-06-30T23:59:59+08:00",
+    deadline: draft.deadline || "",
     progress: 0,
     createdAt: INITIAL_NOW,
     kind: "collab",
@@ -1389,7 +1389,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
         expectedOutcome: taskItem.expectedOutcome,
         taskType: taskItem.taskType,
         triggerRule: taskItem.triggerRule,
-        deadline: draft.deadline || "2026-06-30T23:59:59+08:00",
+        deadline: draft.deadline || "",
         progress: 0,
         instances: [],
         executionKind: normalizeExecutionKind(taskItem.executionKind),

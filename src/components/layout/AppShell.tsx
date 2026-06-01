@@ -12,7 +12,7 @@ import {
   Sidebar,
 } from "@/components/layout/Sidebar";
 import { UserMenu } from "@/components/layout/UserMenu";
-import { TaskDetailDrawer } from "@/components/goal/TaskDetailDrawer";
+import { TaskDetailDrawer } from "@/components/topic/TaskDetailDrawer";
 import { useTriggerEngine } from "@/hooks/useTriggerEngine";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
@@ -25,7 +25,7 @@ function DrawerTaskIdSyncer() {
   const openTaskDrawer = useTaskDrawerStore((state) => state.open);
   const drawerTaskId = searchParams.get("drawerTaskId");
   useEffect(() => {
-    const match = pathname.match(/^\/goals\/([^/]+)$/);
+    const match = pathname.match(/^\/(?:topics|goals)\/([^/]+)$/);
     if (!match || !drawerTaskId) return;
     openTaskDrawer(decodeURIComponent(match[1]), drawerTaskId);
   }, [drawerTaskId, openTaskDrawer, pathname]);

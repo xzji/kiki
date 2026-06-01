@@ -1,3 +1,4 @@
+import type { AgentEvent, AgentRun, SagaInstance } from "@/types/agentRuntime";
 import type { GoalWorkflowPhase, TaskInstanceStatus } from "@/types/kiki";
 
 export type GoalEventKind =
@@ -13,7 +14,16 @@ export type GoalEventKind =
   | "instance.user_response"
   | "instance.timeout_paused"
   | "instance.user_command"
-  | "schedule.event_synthesized";
+  | "schedule.event_synthesized"
+  // Topic/Thread runtime events — Plan ref: §10.6 problem 26
+  | "agent.run.started"
+  | "agent.run.event"
+  | "agent.run.completed"
+  | "saga.step.advanced"
+  | "topic.created"
+  | "topic.updated"
+  | "thread.tick.started"
+  | "thread.tick.completed";
 
 export type GoalEventProducer = "scheduler" | "worker" | "user" | "judge" | "daemon" | "api";
 
@@ -87,6 +97,19 @@ export type GoalEventPayloadMap = {
   };
   "schedule.event_synthesized": {
     scheduleEventId: string;
+  };
+  // Topic/Thread runtime payloads — Plan ref: §10.6 problem 26
+  "agent.run.started": { run: AgentRun };
+  "agent.run.event": { event: AgentEvent };
+  "agent.run.completed": { run: AgentRun };
+  "saga.step.advanced": { saga: SagaInstance };
+  "topic.created": { topicId: string; title: string };
+  "topic.updated": { topicId: string; revision: number };
+  "thread.tick.started": { threadId: string; tickAt: string };
+  "thread.tick.completed": {
+    threadId: string;
+    silentCount?: number;
+    failureCount?: number;
   };
 };
 
