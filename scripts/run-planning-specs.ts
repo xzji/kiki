@@ -25,6 +25,7 @@ import { runResumeManagerSpecs } from "../src/lib/server/agentRuntime/resumeMana
 import { runAgentRunCommandServiceSpecs } from "../src/lib/server/services/agentRunCommandService.spec";
 import { runLegacyGoalToTopicSpecs } from "../src/lib/migration/legacyGoalToTopic.spec";
 import { runSchemaSpecs } from "../src/lib/server/db/schema.spec";
+import { runGoalCommandServiceSpecs } from "../src/lib/server/services/goalCommandService.spec";
 import { runTopicCommandServiceSpecs } from "../src/lib/server/services/topicCommandService.spec";
 import { runTopicInitSagaSpecs } from "../src/lib/server/goalPlanning/topicInitSaga.spec";
 import { runTopicInitSagaDefaultsSpecs } from "../src/lib/server/goalPlanning/runTopicInitSagaDefaults.spec";
@@ -68,6 +69,7 @@ runResumeManagerSpecs();
 runAgentRunCommandServiceSpecs();
 runLegacyGoalToTopicSpecs();
 runSchemaSpecs();
+runGoalCommandServiceSpecs();
 runTopicCommandServiceSpecs();
 runThreadTickOutputSchemaSpecs();
 runThreadLoopSchedulerSpecs();

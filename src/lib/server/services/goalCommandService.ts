@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 
-import { deriveOpaqueId, normalizeGoalId, normalizeSubGoalId, normalizeTaskId } from "@/lib/opaqueIds";
+import { deriveOpaqueId, migrateGoalIds, normalizeGoalId, normalizeSubGoalId, normalizeTaskId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
 import {
   appendGoalEventOnce,
@@ -253,7 +253,7 @@ function applyCommandToGoals(goals: Goal[], command: GoalCommand, idempotencyKey
       if (goals.some((goal) => normalizeGoalId(goal.id) === nextGoalId)) {
         throw new GoalCommandValidationError(409, "目标已存在，请刷新后重试");
       }
-      return [...goals, command.goal];
+      return [...goals, migrateGoalIds(command.goal)];
     }
     case "confirm_goal_plan":
       return withGoal(goals, command.goalId, (goal) =>
@@ -496,6 +496,10 @@ export function applyGoalCommand(input: ApplyGoalCommandInput): ApplyGoalCommand
       throw new GoalCommandConflictError(snapshot.revision, input.baseRevision);
     }
     const nextGoals = applyCommandToGoals(snapshot.value, input.command, input.idempotencyKey);
+    const result = writeGoalsProjection(nextGoals, snapshot.revision);
+    if (!result.ok) {
+      throw new GoalCommandConflictError(result.revision, snapshot.revision);
+    }
     const event = appendGoalEventOnce({
       goalId,
       taskId,
@@ -506,10 +510,6 @@ export function applyGoalCommand(input: ApplyGoalCommandInput): ApplyGoalCommand
     });
     if (!event) {
       throw new GoalCommandValidationError(500, "命令事件写入失败");
-    }
-    const result = writeGoalsProjection(nextGoals, snapshot.revision);
-    if (!result.ok) {
-      throw new GoalCommandConflictError(result.revision, snapshot.revision);
     }
     return {
       event,
