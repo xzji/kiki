@@ -109,7 +109,7 @@ export function DevPanel() {
           onClick={() => setExpanded((prev) => !prev)}
           className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E5E7EB] bg-white text-[10px] font-medium text-[#6B7280] shadow-sm hover:bg-[#F5F6F8] hover:text-[#111]"
           aria-label={expanded ? "收起 Dev 演示面板" : "打开 Dev 演示面板"}
-          title={`Dev ${formatClock(currentTime)}`}
+          title="Dev 演示面板"
         >
           Dev
         </button>
