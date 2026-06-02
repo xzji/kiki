@@ -103,7 +103,7 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
     "4. 判断规则：能在本次 tick 一段话讲完的 → post_message；要再起一次完整执行流程的 → dispatch_task。",
     "5. dispatch_task 派发的 Task 强制为 one_shot 模式（taskType 由 ThreadRunner 固定写入，taskDraft 中无需也禁止包含 taskType 字段），避免与 Thread tick 同频造成双重重复触发。",
     "6. post_message 固定双写会话流 + Inbox（无需选择渠道），单条 text ≤ 500 字。",
-    "7. 所有 dispatch_task 必须填 threadId，绑定当前 Thread；禁止跨 Thread 派发。",
+    `7. 所有 post_message / dispatch_task 必须填 threadId="${thread.id}"，绑定当前 Thread；禁止跨 Thread 派发。`,
     "8. 整体 payload ≤ 8KB 硬约束；超长请压缩或拆分到下一次 tick。",
     "",
     "# 上下文",
@@ -119,5 +119,10 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
     "",
     "# 输出格式",
     '{ "actions": [...], "memoryDelta"?: {...} }',
+    "",
+    "# action JSON 形状",
+    `post_message: { "kind": "post_message", "threadId": "${thread.id}", "text": "≤500字", "severity": "info|warning|important" }`,
+    `dispatch_task: { "kind": "dispatch_task", "threadId": "${thread.id}", "reason": "原因", "taskDraft": { "title": "任务标题" } }`,
+    'silent: { "kind": "silent", "reason": "原因" }',
   ].join("\n");
 }

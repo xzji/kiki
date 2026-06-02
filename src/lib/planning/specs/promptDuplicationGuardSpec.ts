@@ -224,7 +224,7 @@ export function runPromptDuplicationGuardSpecs() {
     { key: "one_shot", rule: "约束 5：dispatch_task 默认 one_shot" },
     { key: "会话流", rule: "约束 6：会话流 + Inbox 双写" },
     { key: "Inbox", rule: "约束 6：会话流 + Inbox 双写" },
-    { key: "threadId", rule: "约束 7：dispatch_task 必须填 threadId" },
+    { key: "threadId", rule: "约束 7：post_message / dispatch_task 必须填 threadId" },
     { key: "8KB", rule: "约束 8：payload ≤ 8KB" },
   ];
 
@@ -235,6 +235,17 @@ export function runPromptDuplicationGuardSpecs() {
       `ThreadRunner prompt 缺少关键字 "${key}"（${rule}），与 §3.3.4 必备约束冲突`,
     );
   }
+
+  assert.equal(
+    threadRunnerPrompt.includes('post_message: { "kind": "post_message", "threadId": "thread-runner-spec"'),
+    true,
+    "ThreadRunner prompt 必须给出 post_message.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
+  );
+  assert.equal(
+    threadRunnerPrompt.includes('dispatch_task: { "kind": "dispatch_task", "threadId": "thread-runner-spec"'),
+    true,
+    "ThreadRunner prompt 必须给出 dispatch_task.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
+  );
 
   // ThreadRunner prompt 同样禁止出现已废弃字面量
   for (const literal of FORBIDDEN_LITERALS) {
