@@ -12,9 +12,11 @@ import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
+import { generateTopicSagaPlan } from "@/lib/api/topics";
 import { submitTaskResultFeedback, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { buildTaskQuoteContent } from "@/lib/taskFeedback";
 import {
+  commitGoalDraftToStores,
   continueGoalWorkflowAfterInfo,
   hasRecoverableGoalPlanCheckpoint,
   resumeGoalWorkflowFromCheckpoint,
@@ -80,6 +82,14 @@ function shouldResumePlanningFromMessage(message: string) {
 function buildAutoConversationTitle(message: string) {
   const normalized = message.replace(/\s+/g, " ").trim();
   return normalized.slice(0, 24) || "新会话";
+}
+
+function buildRecentConversationContext(messages: ConversationMessage[]) {
+  const recent = messages.slice(-8);
+  if (!recent.length) return undefined;
+  return recent
+    .map((message) => `${message.role === "user" ? "用户" : "KiKi"}：${message.content}`)
+    .join("\n");
 }
 
 function goalPlanMessageContent() {
@@ -488,9 +498,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     quoted?: QuotedConversationMessageContext | null,
   ) => {
     const parsedCommand = parseSlashCommand(text);
-    const canResumePlanning =
-      !(parsedCommand.kind === "command" && parsedCommand.command === "goal") &&
-      shouldResumePlanningFromMessage(text);
+    const canResumePlanning = parsedCommand.kind === "plain" && shouldResumePlanningFromMessage(text);
     const hasLocalPlanningFailure = conversation.planningRunState?.status === "failed";
     const hasCheckpointPlanningFailure =
       canResumePlanning && !hasLocalPlanningFailure
@@ -610,7 +618,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     if (
       conversation.goalInfoCollection &&
       conversation.goalInfoCollection.status === "awaiting_user" &&
-      !(parsedCommand.kind === "command" && parsedCommand.command === "goal")
+      parsedCommand.kind === "plain"
     ) {
       const now = new Date().toISOString();
       const userId = `msg-user-${Date.now()}`;
@@ -707,7 +715,107 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (parsedCommand.kind === "unknown") {
-      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以先使用 /goal 创建长程目标。`);
+      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以使用 /goal 或 /saga 发起规划。`);
+      return;
+    }
+
+    if (parsedCommand.kind === "command" && parsedCommand.command === "saga") {
+      const now = new Date().toISOString();
+      const userId = `msg-user-${Date.now()}`;
+      const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+      activeAssistantMessageIdRef.current = assistantId;
+      setHasLocalActiveStream(true);
+      appendMessage(conversation.id, {
+        id: userId,
+        kind: "text",
+        role: "user",
+        content: text,
+        createdAt: now,
+        source: "user",
+        status: "done",
+      });
+      appendMessage(conversation.id, {
+        id: assistantId,
+        kind: "text",
+        role: "kiki",
+        content: "正在启动 5 角色拆解 Saga（Interviewer / Planner / Critic / Refiner / Presenter）...",
+        createdAt: now,
+        status: "streaming",
+        source: "kiki",
+      });
+      setConversationStatus(conversation.id, "streaming");
+      setStreamError(null);
+
+      try {
+        const runtimeEnv = activeRuntimeEnv;
+        if (!runtimeEnv || runtimeEnv.type !== "local") {
+          throw new Error("当前没有可用的本地 Claude 环境，请先到设置 -> 运行环境完成连接。");
+        }
+        const result = await generateTopicSagaPlan({
+          topicText: parsedCommand.payload,
+          runtimeEnv,
+          conversationContext: buildRecentConversationContext(conversation.messages),
+          signal: controller.signal,
+        });
+        if (result.kind === "awaiting_user") {
+          const questionText = result.questions
+            .map((question, index) => `${index + 1}. ${question}`)
+            .join("\n");
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: questionText
+              ? `5 角色 Saga 仍需要补充信息：\n\n${questionText}\n\n当前 /saga 先走单轮模式，你可以把补充信息合并到下一条新的 /saga ... 指令里重新发起。`
+              : "5 角色 Saga 需要更多信息才能继续，请补充后重新使用 /saga 发起。",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          return;
+        }
+        const committed = await commitGoalDraftToStores({
+          conversationId: conversation.id,
+          draft: result.draft,
+        });
+        updateMessage(conversation.id, assistantId, (message) => ({
+          id: message.id,
+          kind: "goal_plan_card",
+          role: "kiki",
+          content: goalPlanMessageContent(),
+          createdAt: message.createdAt,
+          unread: message.unread,
+          status: "done",
+          source: "kiki",
+          goalRef: {
+            goalId: committed.goalId,
+            title: committed.goalTitle,
+            summary: committed.summary,
+            subGoalCount: committed.subGoalCount,
+            taskCount: committed.taskCount,
+          },
+        }));
+        setConversationStatus(conversation.id, "idle");
+        setActivePlanGoalId(committed.goalId);
+      } catch (error) {
+        if (isAbortError(error)) {
+          setConversationStatus(conversation.id, "idle");
+          return;
+        }
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: appendPlanningFailureMessage(message.content, error),
+          status: "error",
+        }));
+        setConversationStatus(conversation.id, "error");
+        setStreamError(getErrorMessage(error, "5 角色 Saga 规划失败"));
+      } finally {
+        if (streamAbortRef.current === controller) {
+          streamAbortRef.current = null;
+          activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
+        }
+      }
+      setQuotedMessage(null);
       return;
     }
 

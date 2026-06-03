@@ -24,10 +24,29 @@ import {
   releaseExpiredRuntimeJobLeases,
   renewRuntimeJobLease,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import {
+  findThreadById,
+  ThreadRevisionMismatchError,
+  updateThread,
+} from "@/lib/server/repositories/threadsRepository";
 
 const DAEMON_VERSION = "0.1.0";
 const LEASE_RENEW_INTERVAL_MS = 30 * 1000;
 const LEASE_RENEW_DURATION_MS = 2 * 60 * 1000;
+
+function requestThreadGovernanceTick(threadId: string, now: Date) {
+  const thread = findThreadById(threadId);
+  if (!thread || thread.status !== "active") return false;
+  const nextTickAtMs = thread.nextTickAt ? new Date(thread.nextTickAt).getTime() : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(nextTickAtMs) && nextTickAtMs <= now.getTime()) return false;
+  try {
+    updateThread(thread.id, { nextTickAt: now.toISOString() }, thread.revision);
+    return true;
+  } catch (error) {
+    if (error instanceof ThreadRevisionMismatchError) return false;
+    throw error;
+  }
+}
 
 function ensureDeviceState(deviceId: string) {
   const current = readRuntimeDaemonDeviceState();
@@ -182,6 +201,12 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         leaseOwner: undefined,
         leaseExpiresAt: undefined,
       });
+      if (nextStatus === "completed" || nextStatus === "failed") {
+        const requested = requestThreadGovernanceTick(job.payload.subGoal.id, new Date());
+        if (requested) {
+          appendRuntimeDaemonLog(`任务 ${job.id} 触发线程 ${job.payload.subGoal.id} 治理 tick`);
+        }
+      }
       writeRuntimeDaemonState({
         deviceId: device.deviceId,
         status: "idle",
@@ -232,6 +257,10 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         leaseOwner: undefined,
         leaseExpiresAt: undefined,
       });
+      const requested = requestThreadGovernanceTick(job.payload.subGoal.id, new Date());
+      if (requested) {
+        appendRuntimeDaemonLog(`失败任务 ${job.id} 触发线程 ${job.payload.subGoal.id} 治理 tick`);
+      }
       writeRuntimeDaemonState({
         deviceId: device.deviceId,
         status: "error",

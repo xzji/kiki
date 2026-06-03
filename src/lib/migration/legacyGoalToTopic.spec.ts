@@ -59,7 +59,7 @@ export function runLegacyGoalToTopicSpecs() {
   assert.equal(thread.topicId, "g-1");
   assert.equal(thread.title, "盯盘 NVDA");
   assert.equal(thread.intent, "每天盯一次大盘和持仓");
-  assert.equal(thread.loopInterval, "daily");
+  assert.equal(thread.loopInterval, "weekly");
   assert.equal(thread.status, "active");
   assert.equal(thread.silentCount, 0);
   assert.equal(thread.failureCount, 0);
@@ -107,6 +107,17 @@ export function runLegacyGoalToTopicSpecs() {
   const subTitleOnly = makeSubGoal({ id: "sg-3", goalId: "g-3", title: "只剩标题" });
   const threadTitleOnly = legacySubGoalToThread({ subGoal: subTitleOnly, topicId: "g-3" });
   assert.equal(threadTitleOnly.intent, "只剩标题");
+
+  const subWithReview = makeSubGoal({
+    id: "sg-review",
+    goalId: "g-review",
+    title: "风险预警",
+    reviewInterval: "daily",
+    terminationCondition: "用户停止关注",
+  });
+  const threadWithReview = legacySubGoalToThread({ subGoal: subWithReview, topicId: "g-review" });
+  assert.equal(threadWithReview.loopInterval, "daily");
+  assert.equal(threadWithReview.terminationCondition, "用户停止关注");
 
   // 5. conversationId 透传
   const goalWithConv = makeGoal({

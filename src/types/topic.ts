@@ -4,7 +4,8 @@
  * 设计要点：
  *  - Topic 是非量化、持续关注的容器；deadline / completionCriteria 仅在用户
  *    显式给出时填写，缺失不构成缺陷（详见 §9.5 问题 17）。
- *  - Thread 是 Topic 下的执行循环单元，loopInterval 决定 tick 周期。
+ *  - Thread 是 Topic 下的维度/阶段/板块容器；loopInterval 仅决定治理 review 节拍，
+ *    不代表 Task 执行频率。
  *  - silentCount / failureCount 分别承载“无产出告警”与“连续失败暂停”两种语义
  *    （详见 §9.3 问题 12）。
  *  - revision 字段配合 sqlite 乐观锁，所有命令式 API 都需 baseRevision。
@@ -29,7 +30,13 @@ export type Thread = {
   topicId: string;
   title: string;
   intent: string;
+  /**
+   * Thread 治理 review 节拍；不是执行频率。
+   * Task 执行频率由各自 taskType + triggerRule 自持。
+   */
   loopInterval: ThreadLoopInterval;
+  /** 板块终止条件；monitoring 类 Thread 可留空表示无自然终止。 */
+  terminationCondition?: string;
   status: ThreadStatus;
   lastTickAt?: string;
   nextTickAt?: string;
@@ -88,9 +95,10 @@ export type ThreadTickPostMessageSeverity = "info" | "warning" | "important";
 /**
  * Thread tick 单次输出的动作契约。
  *
- * 三类动作可叠加，仅当无 dispatch_task / post_message 时才允许 silent。
+ * 多类动作可叠加，仅当无结构性动作 / post_message 时才允许 silent。
  * 设计要点（计划 §3.3.4）：
- *  - dispatch_task：派发新 Task，threadId 必填，taskType 强制 one_shot
+ *  - dispatch_task：派发新 Task，threadId 必填，Task 自带频率
+ *  - update_task / cancel_task：治理本 Thread 下既有 Task 集合
  *  - post_message：固定双写 conversation_messages + inbox，text ≤ 500 字
  *  - silent：仅累计 thread.silentCount，不写任何对外通道
  */
@@ -99,6 +107,19 @@ export type ThreadTickAction =
       kind: "dispatch_task";
       threadId: string;
       taskDraft: TaskDraft;
+      reason: string;
+    }
+  | {
+      kind: "update_task";
+      threadId: string;
+      taskId: string;
+      patch: Partial<TaskDraft>;
+      reason: string;
+    }
+  | {
+      kind: "cancel_task";
+      threadId: string;
+      taskId: string;
       reason: string;
     }
   | {

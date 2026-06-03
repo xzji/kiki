@@ -399,6 +399,10 @@ export type SubGoal = {
   goalId: string;
   title: string;
   description?: string;
+  /** Thread 治理 review 节拍；执行频率仍由 Task.triggerRule 决定。 */
+  reviewInterval?: string;
+  /** 板块/阶段终止条件；持续监控类可留空。 */
+  terminationCondition?: string;
   why?: string;
   priority?: TaskPriority;
   weight?: number;
@@ -543,6 +547,8 @@ export type GoalBreakdownDraft = {
     id: string;
     title: string;
     description?: string;
+    reviewInterval?: string;
+    terminationCondition?: string;
     why?: string;
     priority?: TaskPriority;
     weight?: number;

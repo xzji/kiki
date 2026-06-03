@@ -5,10 +5,11 @@
  *  - 本模块是**纯函数**层，不接入 setInterval / cron 守护进程（由 PR14 scheduler
  *    在调度循环里调用本函数得到 due 列表，再依次 runThreadTick）。
  *  - paused / archived 状态的 thread 永远不被选中。
- *  - one_shot：只要从未触发过（lastTickAt 缺失）就视为 due。
+ *  - one_shot：从未触发过时视为 due；触发过后仅响应事件桥写入的 nextTickAt。
  *  - cron：本函数无 cron 解析能力，统一返回 due（worker 在调用端结合
  *    cron-parser 自行二次过滤）；本期 MVP 不强测此分支。
  *  - 固定间隔（realtime / hourly / daily / weekly）：依据 nextTickAt ≤ now。
+ *    这里的 loopInterval 表示治理 review 节拍，不代表 Task 执行频率。
  *    若 nextTickAt 缺失（如刚创建 thread），fallback 到 lastTickAt + intervalMs；
  *    再缺失则视为首次触发立即 due。
  */
@@ -21,7 +22,7 @@ export type DueThread = {
   /** 该次调度计算出的预期触发时间（用于排序）；首次触发时与 now 相同。 */
   scheduledAt: Date;
   /** 该 thread 的诊断信息（worker 写入 agent_events 时使用）。 */
-  reason: "first_tick" | "interval_due" | "cron_passthrough";
+  reason: "first_tick" | "event_triggered" | "interval_due" | "cron_passthrough";
 };
 
 /**
@@ -51,8 +52,15 @@ export function isThreadDue(
   if (thread.failureCount >= THREAD_FAILURE_PAUSE_THRESHOLD) return null;
 
   const parsed = parseThreadLoopInterval(thread.loopInterval);
+  const explicitNext = parseDateSafe(thread.nextTickAt);
 
   if (parsed.kind === "one_shot") {
+    if (explicitNext && explicitNext.getTime() <= now.getTime()) {
+      return {
+        scheduledAt: explicitNext,
+        reason: thread.lastTickAt ? "event_triggered" : "first_tick",
+      };
+    }
     if (!thread.lastTickAt) return { scheduledAt: new Date(now.getTime()), reason: "first_tick" };
     return null;
   }
@@ -63,7 +71,6 @@ export function isThreadDue(
   }
 
   // 固定间隔类型：优先信任 nextTickAt；缺失或异常时回落到 computeNextTickAt
-  const explicitNext = parseDateSafe(thread.nextTickAt);
   if (explicitNext) {
     return explicitNext.getTime() <= now.getTime()
       ? { scheduledAt: explicitNext, reason: thread.lastTickAt ? "interval_due" : "first_tick" }

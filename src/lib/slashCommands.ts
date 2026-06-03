@@ -1,4 +1,4 @@
-export type SlashCommandName = "goal";
+export type SlashCommandName = "goal" | "saga";
 
 export type SlashCommand = {
   name: SlashCommandName;
@@ -20,6 +20,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "把后续内容转为长期目标，并生成可执行任务计划",
     usage: "/goal 准备托福 110 分",
     placeholder: "描述一个长期目标，例如 /goal 三个月内托福达到 110 分",
+  },
+  {
+    name: "saga",
+    label: "5 角色拆解",
+    description: "使用新 5 角色 Saga 直接生成规划草案",
+    usage: "/saga 帮我持续跟踪美股科技板块",
+    placeholder: "描述一个想持续推进或监控的话题，例如 /saga 帮我持续跟踪美股科技板块",
   },
 ];
 

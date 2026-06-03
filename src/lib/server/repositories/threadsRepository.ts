@@ -94,6 +94,7 @@ export type ThreadPatch = Partial<
     | "title"
     | "intent"
     | "loopInterval"
+    | "terminationCondition"
     | "status"
     | "lastTickAt"
     | "nextTickAt"

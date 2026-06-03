@@ -61,6 +61,37 @@ export function runThreadTickOutputSchemaSpecs() {
   );
   assert.equal(dispatchHappy.actions[0]?.kind, "dispatch_task");
 
+  const updateHappy = parseThreadTickOutput(
+    {
+      actions: [
+        {
+          kind: "update_task",
+          threadId: THREAD_ID,
+          taskId: "task-1",
+          reason: "调低频率",
+          patch: { cadence: "每周一" },
+        },
+      ],
+    },
+    THREAD_ID,
+  );
+  assert.equal(updateHappy.actions[0]?.kind, "update_task");
+
+  const cancelHappy = parseThreadTickOutput(
+    {
+      actions: [
+        {
+          kind: "cancel_task",
+          threadId: THREAD_ID,
+          taskId: "task-1",
+          reason: "关注点关闭",
+        },
+      ],
+    },
+    THREAD_ID,
+  );
+  assert.equal(cancelHappy.actions[0]?.kind, "cancel_task");
+
   // silent 单独存在 — OK
   const silent = parseThreadTickOutput(
     { actions: [{ kind: "silent", reason: "今日无新增信号" }] },
@@ -183,24 +214,19 @@ export function runThreadTickOutputSchemaSpecs() {
     "taskDraft 缺 title",
   );
 
-  // taskDraft 不允许 taskType
+  // update_task 缺 taskId
   expectError(
     () =>
       parseThreadTickOutput(
         {
           actions: [
-            {
-              kind: "dispatch_task",
-              threadId: THREAD_ID,
-              reason: "x",
-              taskDraft: { title: "t", taskType: "repeat" },
-            },
+            { kind: "update_task", threadId: THREAD_ID, reason: "x", patch: { cadence: "每天" } },
           ],
         },
         THREAD_ID,
       ),
-    "task_draft_invalid",
-    "taskDraft 含 taskType",
+    "missing_field",
+    "update_task 缺 taskId",
   );
 
   // 8KB payload

@@ -163,6 +163,8 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       goalId,
       title: subGoal.title,
       description: subGoal.description,
+      reviewInterval: subGoal.reviewInterval,
+      terminationCondition: subGoal.terminationCondition,
       why: subGoal.why,
       priority: subGoal.priority,
       weight: subGoal.weight,

@@ -185,7 +185,7 @@ function clearPlanningFailure(conversationId: string) {
   void writeCurrentConversationContext(conversationId);
 }
 
-async function commitGoalDraftToStores(input: {
+export async function commitGoalDraftToStores(input: {
   conversationId: string;
   draft: GoalBreakdownDraft;
 }): Promise<GoalWorkflowResult> {

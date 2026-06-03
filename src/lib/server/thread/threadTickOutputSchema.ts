@@ -84,14 +84,7 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
       const reason = asString(obj.reason, "action.reason");
       const taskDraftRaw = asPlainObject(obj.taskDraft, "action.taskDraft");
       const title = asString(taskDraftRaw.title, "action.taskDraft.title");
-      // 计划 §3.3.4 第 5 条：taskDraft 中禁止携带 taskType（由 ThreadRunner 固定写入）
-      if ("taskType" in taskDraftRaw) {
-        throw new ThreadTickOutputValidationError(
-          "taskDraft 中禁止包含 taskType 字段（由 ThreadRunner 固定写入 one_shot）",
-          "task_draft_invalid",
-        );
-      }
-      // taskDraft 仅做最小校验（必填 title + 禁止 taskType）；
+      // taskDraft 仅做最小校验（必填 title）；
       // 完整字段 sanitize 由下游派发逻辑调用 taskDraftSchema 处理。
       const taskDraft: TaskDraft = {
         ...(taskDraftRaw as Record<string, unknown>),
@@ -102,6 +95,42 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
         threadId,
         reason,
         taskDraft,
+      };
+    }
+    case "update_task": {
+      const threadId = asString(obj.threadId, "action.threadId");
+      if (threadId !== expectedThreadId) {
+        throw new ThreadTickOutputValidationError(
+          `update_task.threadId(${threadId}) 与当前 Thread(${expectedThreadId}) 不一致；禁止跨 Thread 修改`,
+          "thread_id_mismatch",
+        );
+      }
+      const taskId = asString(obj.taskId, "action.taskId");
+      const reason = asString(obj.reason, "action.reason");
+      const patchRaw = asPlainObject(obj.patch, "action.patch");
+      return {
+        kind: "update_task",
+        threadId,
+        taskId,
+        reason,
+        patch: patchRaw as Partial<TaskDraft>,
+      };
+    }
+    case "cancel_task": {
+      const threadId = asString(obj.threadId, "action.threadId");
+      if (threadId !== expectedThreadId) {
+        throw new ThreadTickOutputValidationError(
+          `cancel_task.threadId(${threadId}) 与当前 Thread(${expectedThreadId}) 不一致；禁止跨 Thread 删除`,
+          "thread_id_mismatch",
+        );
+      }
+      const taskId = asString(obj.taskId, "action.taskId");
+      const reason = asString(obj.reason, "action.reason");
+      return {
+        kind: "cancel_task",
+        threadId,
+        taskId,
+        reason,
       };
     }
     case "post_message": {
@@ -139,7 +168,7 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
     }
     default:
       throw new ThreadTickOutputValidationError(
-        `未知 action.kind=${String(kind)}；允许值：dispatch_task / post_message / silent`,
+        `未知 action.kind=${String(kind)}；允许值：dispatch_task / update_task / cancel_task / post_message / silent`,
         "unknown_kind",
       );
   }
@@ -149,7 +178,7 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
  * 解析并校验 ThreadRunner 决策层输出。
  *
  * @param parsed jsonRepair 后的对象（可能是任何形状）
- * @param expectedThreadId 当前 Thread.id；所有 dispatch_task / post_message 的 threadId
+ * @param expectedThreadId 当前 Thread.id；所有结构化 action 的 threadId
  *                         必须与此一致，否则抛 thread_id_mismatch。
  */
 export function parseThreadTickOutput(
@@ -197,9 +226,13 @@ export function parseThreadTickOutput(
 
   const actions = actionsRaw.map((raw) => parseAction(raw, expectedThreadId));
 
-  // 计划 §3.3.4 第 3 条：仅当无 dispatch_task 与 post_message 时才允许 silent
+  // 计划 §3.3.4 第 3 条：仅当无结构性动作与 post_message 时才允许 silent
   const hasNonSilent = actions.some(
-    (a) => a.kind === "dispatch_task" || a.kind === "post_message",
+    (a) =>
+      a.kind === "dispatch_task" ||
+      a.kind === "update_task" ||
+      a.kind === "cancel_task" ||
+      a.kind === "post_message",
   );
   const hasSilent = actions.some((a) => a.kind === "silent");
   if (hasSilent && hasNonSilent) {

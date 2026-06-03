@@ -4,7 +4,8 @@
  * Plan ref: §9.4 问题 13。
  *  - SubGoal.successCriteria[] 在 Thread 上不存在 → 丢弃（仅保留首项作为 intent 的兜底）
  *  - SubGoal.tasks 不映射到 Thread 上（Task 仍按 threadId 关联），由调用方处理
- *  - loopInterval 默认 daily，silentCount/failureCount 默认 0，memory={}
+ *  - loopInterval 表示 Thread 治理 review 节拍，默认 weekly；
+ *    Task 执行频率由各 Task 自己的 triggerRule 决定。
  */
 
 import type { SubGoal } from "@/types/kiki";
@@ -13,10 +14,30 @@ import type { Thread, ThreadLoopInterval } from "@/types/topic";
 export type LegacySubGoalToThreadInput = {
   subGoal: SubGoal;
   topicId: string;
-  /** 默认 daily；调用方若已知频率请显式覆盖。 */
+  /** 默认 weekly；调用方若已知治理 review 节拍请显式覆盖。 */
   loopInterval?: ThreadLoopInterval;
+  terminationCondition?: string;
   createdAt?: string;
 };
+
+function normalizeThreadLoopInterval(value: unknown): ThreadLoopInterval | undefined {
+  if (
+    value === "realtime" ||
+    value === "hourly" ||
+    value === "daily" ||
+    value === "weekly" ||
+    value === "one_shot"
+  ) {
+    return value;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.kind === "cron" && typeof record.expr === "string" && record.expr.trim()) {
+      return { kind: "cron", expr: record.expr.trim() };
+    }
+  }
+  return undefined;
+}
 
 export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread {
   const { subGoal, topicId } = input;
@@ -31,7 +52,11 @@ export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread
     topicId,
     title: subGoal.title,
     intent,
-    loopInterval: input.loopInterval ?? "daily",
+    loopInterval:
+      input.loopInterval ??
+      normalizeThreadLoopInterval(subGoal.reviewInterval) ??
+      "weekly",
+    terminationCondition: input.terminationCondition ?? subGoal.terminationCondition,
     status: "active",
     memory: {},
     silentCount: 0,

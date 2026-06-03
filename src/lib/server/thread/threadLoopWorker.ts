@@ -21,12 +21,14 @@
 import { dispatchThreadActions, type DispatchThreadActionsResult } from "./dispatchActions";
 import type {
   DispatchTaskCallback,
+  CancelTaskCallback,
   SendThreadMessageCallback,
+  UpdateTaskCallback,
 } from "./dispatchActions";
 import { selectDueThreads, type DueThread } from "./threadLoopScheduler";
 import { runThreadTick, type ThreadTickResult } from "./threadRunner";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
-import type { TaskInstance } from "@/types/kiki";
+import type { Task, TaskInstance } from "@/types/kiki";
 import type { Thread, Topic } from "@/types/topic";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +45,12 @@ export type CollectRecentTaskInstancesCallback = (input: {
   topicId: string;
   threadId: string;
 }) => Promise<TaskInstance[]>;
+
+/** 收集 thread 当前 Task 列表，用于治理 tick 判断增/改/删。 */
+export type CollectCurrentThreadTasksCallback = (input: {
+  topicId: string;
+  threadId: string;
+}) => Promise<Task[]>;
 
 /** 为每次 tick 准备 agent_run；调用方决定 idempotencyKey 等。 */
 export type PrepareAgentRunCallback = (input: {
@@ -72,10 +80,13 @@ export type ThreadLoopFrameInput = {
   callbacks: {
     collectActiveThreads: CollectActiveThreadsCallback;
     collectRecentTaskInstances: CollectRecentTaskInstancesCallback;
+    collectCurrentThreadTasks?: CollectCurrentThreadTasksCallback;
     prepareAgentRun: PrepareAgentRunCallback;
     persistThreadPatch: PersistThreadPatchCallback;
     recordTickOutcome: RecordTickOutcomeCallback;
     dispatchTask: DispatchTaskCallback;
+    updateTask?: UpdateTaskCallback;
+    cancelTask?: CancelTaskCallback;
     sendThreadMessage: SendThreadMessageCallback;
   };
 };
@@ -90,6 +101,8 @@ export type ThreadLoopFrameOutcome = {
     failureReason?: string;
     /** 派发汇总（仅成功 tick 才有）。 */
     dispatchedTaskCount?: number;
+    updatedTaskCount?: number;
+    cancelledTaskCount?: number;
     sentMessageCount?: number;
     silentCount?: number;
     /** 乐观锁冲突 → 跳过本次写回（worker 在下一帧重试）。 */
@@ -160,7 +173,20 @@ async function tickOneThread(
     return;
   }
 
-  // 3.2 拉最近 task instances
+  // 3.2 拉当前 task 列表 + 最近 task instances
+  let currentTasks: Task[];
+  try {
+    currentTasks = input.callbacks.collectCurrentThreadTasks
+      ? await input.callbacks.collectCurrentThreadTasks({
+          topicId: topic.id,
+          threadId: thread.id,
+        })
+      : [];
+  } catch (error) {
+    ticked.failureReason = `collectTasks_failed: ${stringifyErr(error)}`;
+    return;
+  }
+
   let recentTaskInstances: TaskInstance[];
   try {
     recentTaskInstances = await input.callbacks.collectRecentTaskInstances({
@@ -174,7 +200,7 @@ async function tickOneThread(
 
   // 3.3 跑 tick
   const tickResult = await runThreadTick({
-    ctx: { topic, thread, recentTaskInstances, now: input.now },
+    ctx: { topic, thread, currentTasks, recentTaskInstances, now: input.now },
     invoke: input.invoke,
     agentRunId,
   });
@@ -188,8 +214,11 @@ async function tickOneThread(
       output: tickResult.output,
       callbacks: {
         dispatchTask: input.callbacks.dispatchTask,
+        updateTask: input.callbacks.updateTask,
+        cancelTask: input.callbacks.cancelTask,
         sendThreadMessage: input.callbacks.sendThreadMessage,
       },
+      currentTasks,
     });
   }
 
@@ -231,6 +260,8 @@ async function tickOneThread(
     ticked.ok = ticked.failureReason === undefined;
     if (dispatch) {
       ticked.dispatchedTaskCount = dispatch.dispatchedTasks.length;
+      ticked.updatedTaskCount = dispatch.updatedTasks.length;
+      ticked.cancelledTaskCount = dispatch.cancelledTasks.length;
       ticked.sentMessageCount = dispatch.sentMessages.length;
       ticked.silentCount = dispatch.silentReasons.length;
       if (dispatch.errors.length > 0 && !ticked.failureReason) {

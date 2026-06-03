@@ -10,6 +10,7 @@ import {
   type SendThreadMessageCallback,
 } from "@/lib/server/thread/dispatchActions";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
+import type { Task } from "@/types/kiki";
 import type { ThreadTickOutput } from "@/types/topic";
 
 const TOPIC_ID = "topic-d-1";
@@ -31,6 +32,21 @@ function noopDispatch(): DispatchTaskCallback {
 function noopSend(): SendThreadMessageCallback {
   let counter = 0;
   return async () => ({ conversationMessageId: `cm-${++counter}`, inboxItemId: `ib-${counter}` });
+}
+
+function makeTask(id: string, title = "既有任务"): Task {
+  return {
+    id,
+    subGoalId: THREAD_ID,
+    title,
+    description: `${title}-desc`,
+    expectedOutcome: `${title}-outcome`,
+    taskType: "repeat",
+    triggerRule: "每天 09:00",
+    progress: 0,
+    instances: [],
+    executionKind: "generic_result",
+  };
 }
 
 export async function runDispatchActionsSpecs() {
@@ -57,7 +73,6 @@ export async function runDispatchActionsSpecs() {
       callbacks: {
         dispatchTask: async (req) => {
           callOrder.push(`dispatch:${req.taskDraft.title}`);
-          assert.equal(req.taskType, "one_shot", "taskType 必须由派发器固定为 one_shot");
           return { taskId: "task-1", instanceId: "ti-1" };
         },
         sendThreadMessage: async (req) => {
@@ -72,6 +87,51 @@ export async function runDispatchActionsSpecs() {
     assert.equal(result.dispatchedTasks.length, 1);
     assert.equal(result.sentMessages.length, 2);
     assert.equal(result.silentReasons.length, 1);
+    assert.equal(result.errors.length, 0);
+  }
+
+  // ---------- update/cancel：基于当前 Task 列表治理 ----------
+  {
+    const callOrder: string[] = [];
+    const currentTasks = [makeTask("task-existing")];
+    const output: ThreadTickOutput = {
+      actions: [
+        {
+          kind: "update_task",
+          threadId: THREAD_ID,
+          taskId: "task-existing",
+          reason: "降低频率",
+          patch: { cadence: "每周一" },
+        },
+        {
+          kind: "cancel_task",
+          threadId: THREAD_ID,
+          taskId: "task-existing",
+          reason: "关注点关闭",
+        },
+      ],
+    };
+    const result = await dispatchThreadActions({
+      topicId: TOPIC_ID,
+      threadId: THREAD_ID,
+      output,
+      currentTasks,
+      callbacks: {
+        dispatchTask: noopDispatch(),
+        updateTask: async (req) => {
+          callOrder.push(`update:${req.taskId}:${req.patch.cadence}`);
+          return { taskId: req.taskId };
+        },
+        cancelTask: async (req) => {
+          callOrder.push(`cancel:${req.taskId}:${req.reason}`);
+          return { taskId: req.taskId };
+        },
+        sendThreadMessage: noopSend(),
+      },
+    });
+    assert.deepEqual(callOrder, ["update:task-existing:每周一", "cancel:task-existing:关注点关闭"]);
+    assert.equal(result.updatedTasks.length, 1);
+    assert.equal(result.cancelledTasks.length, 1);
     assert.equal(result.errors.length, 0);
   }
 

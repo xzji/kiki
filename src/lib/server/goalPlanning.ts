@@ -452,20 +452,15 @@ export function buildDecomposePrompt(input: {
   config: EasterEggSettings;
 }) {
   return `# Role
-你是一位资深目标规划与战略拆解专家，擅长运用 MECE 原则和逆向推演法，将复杂目标拆解为可执行、可度量的子目标。
+你是一位通用规划编排器，负责把用户诉求拆成 Topic 下的 Thread 板块，并播下可运行的初始 Task 种子。
+你不能把用户诉求强行套进固定模式；必须基于诉求本身，用正交属性描述每个板块的治理节拍、终止条件和初始执行单元。
 
 # Context
-## MECE 原则
-MECE (Mutually Exclusive, Collectively Exhaustive) 要求：
-- 子目标之间相互独立，无重叠
-- 所有子目标完全覆盖目标范围，无遗漏
-
-## 逆向推演法
-从终态倒推，识别关键里程碑：
-1. 定义成功的最终状态
-2. 倒推达成终态的前置条件
-3. 识别关键依赖和风险点
-4. 形成可执行的阶段序列
+## Thread / Task 职责
+- Thread = 需求的维度、阶段或板块，是组织上下文和治理 Task 集合的容器。
+- Thread 的 reviewInterval 只是低频治理 review 节拍，不是执行频率。
+- Task = 真正执行单元，必须自带 taskType 和 triggerRule/cadence/triggerCondition。
+- Task 集合不是一次性定死：Planner 只产初始种子，后续由 ThreadRunner tick 按运行结果增量增删改。
 
 # Instructions
 ## 重要输出约束
@@ -478,20 +473,28 @@ MECE (Mutually Exclusive, Collectively Exhaustive) 要求：
 1. 这个目标的核心意图是什么？
 2. 成功达成后的状态是什么样的？
 3. 有哪些隐含的假设和前提条件？
-4. 可能遇到哪些风险和阻碍？
+4. 这个诉求需要一次性推进、阶段性推进，还是长期关注？
+5. 哪些维度/阶段/板块彼此 MECE，且每个板块下可以有不同频率的 Task？
 
-## 拆解原则
-1. 独立性：每个子目标应该可独立交付价值
-2. 渐进性：子目标应呈现递进关系，逐步逼近最终目标
-3. 可度量性：每个子目标必须有明确的完成标准
-4. 依赖明确：清晰标注子目标间的依赖关系
-5. 风险可见：识别可能的风险点和应对策略
+## Thread 拆解原则
+1. 板块 MECE：Thread 之间按维度/阶段/板块拆分，尽量互不重叠且覆盖核心意图。
+2. 数量克制：Thread 数量建议 ${input.config.minSubGoals}-${Math.min(input.config.maxSubGoals, 5)} 个，最多 5 个。
+3. 不按执行频率拆 Thread：同一 Thread 下允许 daily/hourly/one_shot 等不同频率 Task 并存。
+4. reviewInterval 只表示治理兜底 review 节拍：monitoring 通常 weekly，风险板块可 daily，阶段性目标可 one_shot。
+5. terminationCondition 描述板块什么时候可自然结束；长期关注可留空字符串。
+
+## 种子 Task 原则
+1. 每个 Thread 输出 0~N 个初始种子 Task；种子只覆盖当前已确定要执行的事。
+2. 明确允许 tasks=[]：如果需要先观察/等待信息，后续由 tick 根据运行结果补 Task。
+3. 持续关注/巡检类 Task 用 taskType="repeat"，并填写 cadence 或 triggerRule。
+4. 一次性分析/交付类 Task 用 taskType="one_shot"，triggerRule 可写 "立即触发" 或明确条件。
+5. 事件触发类需求降级为周期巡检 Task：用 repeat + 合适 cadence，并在 description/objective 里写清判断条件。
 
 ## 边界处理
-- 子目标数量建议 ${input.config.minSubGoals}-${input.config.maxSubGoals} 个，根据目标复杂度调整
-- 避免过度拆解导致管理成本过高
-- 避免拆解不足导致子目标过于庞大
-- 对于模糊目标，优先明确成功标准
+- 避免过度拆解导致管理成本过高。
+- 避免拆解不足导致 Thread 过于庞大。
+- 对于模糊目标，优先以 assumptions 标注，并用低成本种子 Task 获取信息。
+- 不要为了满足数量要求制造空洞任务。
 
 # Goal Information
 目标: ${input.goalTitle}
@@ -510,9 +513,11 @@ ${JSON.stringify(input.userContext, null, 2)}
   "subGoals": [
     {
       "id": 1,
-      "name": "子目标名称（简洁有力）",
-      "description": "详细描述：包含具体内容和边界",
-      "why": "必要性说明：为什么需要这个子目标",
+      "name": "Thread/板块名称（简洁有力）",
+      "description": "本板块 intent：包含治理边界、关注对象和判断原则",
+      "reviewInterval": "one_shot|daily|weekly|hourly|realtime",
+      "terminationCondition": "本板块何时可结束；长期关注可为空字符串",
+      "why": "必要性说明：为什么需要这个板块",
       "priority": "critical|high|medium|low",
       "weight": 0.25,
       "dependencies": [],
@@ -520,6 +525,19 @@ ${JSON.stringify(input.userContext, null, 2)}
       "successCriteria": [
         { "description": "完成标准1", "type": "milestone" },
         { "description": "完成标准2", "type": "deliverable" }
+      ],
+      "tasks": [
+        {
+          "id": "1-1",
+          "title": "初始种子 Task 标题",
+          "description": "任务目标、执行边界和必要上下文",
+          "expectedOutcome": "完成后应沉淀的结果",
+          "taskType": "repeat|one_shot",
+          "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
+          "cadence": "可选：自然语言频率，例如 每天 09:00",
+          "triggerCondition": "可选：条件型任务的判断条件",
+          "executionKind": "generic_result"
+        }
       ]
     }
   ],
@@ -544,10 +562,11 @@ export function buildDecompositionNormalizationPrompt(input: {
 1. 只能输出 JSON，不要输出 Markdown、解释、代码块或额外文字。
 2. 回复必须以 { 开头，以 } 结尾。
 3. 尽量保留原始输出中的拆解语义；如果原始输出缺少字段，请基于目标信息合理补齐。
-4. subGoals 数量建议 ${input.config.minSubGoals}-${input.config.maxSubGoals} 个。
+4. subGoals 表示 Thread 板块，数量建议 ${input.config.minSubGoals}-${Math.min(input.config.maxSubGoals, 5)} 个，最多 5 个。
 5. priority 只能是 critical、high、medium、low。
 6. successCriteria[].type 只能是 milestone、deliverable、condition。
 7. dependencies 必须是数字数组，引用前置子目标 id；无依赖则 []。
+8. 保留每个 Thread 的 reviewInterval、terminationCondition 和 tasks[]；tasks 可以为空数组，不要补占位任务。
 
 目标信息：
 ${JSON.stringify({
@@ -566,8 +585,10 @@ ${JSON.stringify({
   "subGoals": [
     {
       "id": 1,
-      "name": "子目标名称",
-      "description": "详细描述",
+      "name": "Thread/板块名称",
+      "description": "本板块 intent",
+      "reviewInterval": "one_shot|daily|weekly|hourly|realtime",
+      "terminationCondition": "终止条件；长期关注可为空字符串",
       "why": "必要性说明",
       "priority": "critical",
       "weight": 0.2,
@@ -575,6 +596,17 @@ ${JSON.stringify({
       "estimatedDurationMinutes": 480,
       "successCriteria": [
         { "description": "完成标准", "type": "milestone" }
+      ],
+      "tasks": [
+        {
+          "id": "1-1",
+          "title": "初始种子 Task 标题",
+          "description": "任务描述",
+          "expectedOutcome": "交付结果",
+          "taskType": "repeat|one_shot",
+          "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
+          "executionKind": "generic_result"
+        }
       ]
     }
   ],

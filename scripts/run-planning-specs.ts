@@ -29,6 +29,7 @@ import { runGoalCommandServiceSpecs } from "../src/lib/server/services/goalComma
 import { runTopicCommandServiceSpecs } from "../src/lib/server/services/topicCommandService.spec";
 import { runTopicInitSagaSpecs } from "../src/lib/server/goalPlanning/topicInitSaga.spec";
 import { runTopicInitSagaDefaultsSpecs } from "../src/lib/server/goalPlanning/runTopicInitSagaDefaults.spec";
+import { runSagaDraftAdapterSpecs } from "../src/lib/server/goalPlanning/sagaDraftAdapter.spec";
 import { runThreadTickOutputSchemaSpecs } from "../src/lib/server/thread/threadTickOutputSchema.spec";
 import { runThreadRunnerSpecs } from "../src/lib/server/thread/threadRunner.spec";
 import { runThreadLoopSchedulerSpecs } from "../src/lib/server/thread/threadLoopScheduler.spec";
@@ -71,6 +72,7 @@ runLegacyGoalToTopicSpecs();
 runSchemaSpecs();
 runGoalCommandServiceSpecs();
 runTopicCommandServiceSpecs();
+runSagaDraftAdapterSpecs();
 runThreadTickOutputSchemaSpecs();
 runThreadLoopSchedulerSpecs();
 runDaemonRunnerSpecs();

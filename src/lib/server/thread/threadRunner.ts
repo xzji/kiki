@@ -14,7 +14,7 @@
 
 import { computeNextTickAt } from "@/lib/taskTriggerTime";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
-import type { TaskInstance } from "@/types/kiki";
+import type { Task, TaskInstance } from "@/types/kiki";
 import {
   THREAD_FAILURE_PAUSE_THRESHOLD,
   type Thread,
@@ -37,6 +37,8 @@ import {
 export type ThreadTickContext = {
   topic: Topic;
   thread: Thread;
+  /** 当前 Thread 下的 Task 列表，用于治理增/改/删。 */
+  currentTasks?: Task[];
   /** 由调用方注入的最近 7 天 Task 实例（已按 thread_id 过滤）。 */
   recentTaskInstances: TaskInstance[];
   /** 上一轮 tick 输出快照，可选；用于让模型判断是否继续推进。 */
@@ -108,6 +110,7 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
   const prompt = buildThreadRunnerDecisionPrompt({
     topic: ctx.topic,
     thread: ctx.thread,
+    currentTasks: ctx.currentTasks,
     recentTaskInstances: ctx.recentTaskInstances,
     threadMemory: ctx.thread.memory,
     lastTickOutput: ctx.lastTickOutput,
@@ -224,14 +227,18 @@ function computeNextTickAtIso(thread: Thread, now: Date): string | undefined {
 
 export type GroupedActions = {
   dispatch: Extract<ThreadTickAction, { kind: "dispatch_task" }>[];
+  update: Extract<ThreadTickAction, { kind: "update_task" }>[];
+  cancel: Extract<ThreadTickAction, { kind: "cancel_task" }>[];
   postMessage: Extract<ThreadTickAction, { kind: "post_message" }>[];
   silent: Extract<ThreadTickAction, { kind: "silent" }>[];
 };
 
 export function groupActions(actions: ThreadTickAction[]): GroupedActions {
-  const grouped: GroupedActions = { dispatch: [], postMessage: [], silent: [] };
+  const grouped: GroupedActions = { dispatch: [], update: [], cancel: [], postMessage: [], silent: [] };
   for (const a of actions) {
     if (a.kind === "dispatch_task") grouped.dispatch.push(a);
+    else if (a.kind === "update_task") grouped.update.push(a);
+    else if (a.kind === "cancel_task") grouped.cancel.push(a);
     else if (a.kind === "post_message") grouped.postMessage.push(a);
     else grouped.silent.push(a);
   }

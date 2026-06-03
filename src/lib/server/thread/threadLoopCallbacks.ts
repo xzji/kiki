@@ -23,9 +23,15 @@ import { appendThreadMessage } from "@/lib/server/repositories/conversationMessa
 import { createAgentRun } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import { appendAgentEvent } from "@/lib/server/repositories/agentRuntime/agentEventsRepository";
 import { dispatchTaskFromThread } from "@/lib/server/services/dispatchTaskFromThread";
+import {
+  cancelTaskFromThread,
+  updateTaskFromThread,
+} from "@/lib/server/services/dispatchTaskFromThread";
 import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type {
   CollectActiveThreadsCallback,
+  CollectCurrentThreadTasksCallback,
   CollectRecentTaskInstancesCallback,
   PrepareAgentRunCallback,
   PersistThreadPatchCallback,
@@ -33,7 +39,9 @@ import type {
 } from "@/lib/server/thread/threadLoopWorker";
 import type {
   DispatchTaskCallback,
+  CancelTaskCallback,
   SendThreadMessageCallback,
+  UpdateTaskCallback,
 } from "@/lib/server/thread/dispatchActions";
 
 // ---------------------------------------------------------------------------
@@ -76,6 +84,15 @@ export const collectRecentTaskInstances: CollectRecentTaskInstancesCallback = as
   threadId,
 }) => {
   return listRecentByThreadId(threadId, { limit: 12, sinceDays: 7 });
+};
+
+export const collectCurrentThreadTasks: CollectCurrentThreadTasksCallback = async ({
+  topicId,
+  threadId,
+}) => {
+  const goal = readGoalsSnapshot([]).find((candidate) => candidate.id === topicId);
+  const subGoal = goal?.subGoals.find((candidate) => candidate.id === threadId);
+  return subGoal?.tasks ?? [];
 };
 
 // ---------------------------------------------------------------------------
@@ -140,6 +157,8 @@ export const recordTickOutcome: RecordTickOutcomeCallback = async ({
       payloadJson: JSON.stringify({
         kind: partial ? "thread.tick.dispatch_partial_failure" : "thread.tick.completed",
         dispatchedTaskCount: dispatch?.dispatchedTasks.length ?? 0,
+        updatedTaskCount: dispatch?.updatedTasks.length ?? 0,
+        cancelledTaskCount: dispatch?.cancelledTasks.length ?? 0,
         sentMessageCount: dispatch?.sentMessages.length ?? 0,
         silentCount: dispatch?.silentReasons.length ?? 0,
         failureCount: result.patch.failureCount,
@@ -191,6 +210,24 @@ export function buildDispatchTask(frameStartedAt: Date): DispatchTaskCallback {
   };
 }
 
+export function buildUpdateTask(frameStartedAt: Date): UpdateTaskCallback {
+  let counter = 0;
+  return async (request) => {
+    counter += 1;
+    const idempotencyKey = `update-task:${request.threadId}:${request.taskId}:${frameStartedAt.toISOString()}:${counter}`;
+    return updateTaskFromThread(request, { idempotencyKey });
+  };
+}
+
+export function buildCancelTask(frameStartedAt: Date): CancelTaskCallback {
+  let counter = 0;
+  return async (request) => {
+    counter += 1;
+    const idempotencyKey = `cancel-task:${request.threadId}:${request.taskId}:${frameStartedAt.toISOString()}:${counter}`;
+    return cancelTaskFromThread(request, { idempotencyKey });
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 7. sendThreadMessage — 双写 conversation_messages + inbox（同 traceId）
 // ---------------------------------------------------------------------------
@@ -229,10 +266,13 @@ export function buildSendThreadMessage(frameStartedAt: Date): SendThreadMessageC
 export type ThreadLoopFrameCallbacks = {
   collectActiveThreads: CollectActiveThreadsCallback;
   collectRecentTaskInstances: CollectRecentTaskInstancesCallback;
+  collectCurrentThreadTasks?: CollectCurrentThreadTasksCallback;
   prepareAgentRun: PrepareAgentRunCallback;
   persistThreadPatch: PersistThreadPatchCallback;
   recordTickOutcome: RecordTickOutcomeCallback;
   dispatchTask: DispatchTaskCallback;
+  updateTask?: UpdateTaskCallback;
+  cancelTask?: CancelTaskCallback;
   sendThreadMessage: SendThreadMessageCallback;
 };
 
@@ -240,10 +280,13 @@ export function buildThreadLoopFrameCallbacks(frameStartedAt: Date): ThreadLoopF
   return {
     collectActiveThreads,
     collectRecentTaskInstances,
+    collectCurrentThreadTasks,
     prepareAgentRun: buildPrepareAgentRun(frameStartedAt),
     persistThreadPatch,
     recordTickOutcome,
     dispatchTask: buildDispatchTask(frameStartedAt),
+    updateTask: buildUpdateTask(frameStartedAt),
+    cancelTask: buildCancelTask(frameStartedAt),
     sendThreadMessage: buildSendThreadMessage(frameStartedAt),
   };
 }

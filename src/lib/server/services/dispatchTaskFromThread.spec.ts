@@ -5,8 +5,8 @@
  *
  * 覆盖：
  *  1. happy path：把 TaskDraft 写入 envelope，返回的 taskId 与 envelope 一致；
- *     taskType 强制为 "one_shot"。
- *  2. 缺 threadId / 非 one_shot taskType / 缺 idempotencyKey 抛错。
+ *     无频率 draft 默认为 one_shot。
+ *  2. 缺 threadId / 缺 idempotencyKey 抛错；有 cadence/triggerCondition 时生成 repeat。
  *  3. 同 idempotencyKey 重入：底层去重，不重复创建 task。
  */
 
@@ -51,7 +51,6 @@ function makeRequest(overrides: Partial<DispatchTaskRequest> = {}): DispatchTask
     threadId: THREAD_ID,
     reason: "ThreadRunner tick",
     taskDraft: overrides.taskDraft ?? makeDraft(),
-    taskType: "one_shot",
     ...overrides,
   };
 }
@@ -87,7 +86,7 @@ export async function runDispatchTaskFromThreadSpecs() {
     const sub = goals[0]?.subGoals.find((s) => normalizeSubGoalId(s.id) === THREAD_ID);
     assert.ok(sub, "subGoal located");
     assert.equal(sub?.tasks.length, 1, "task created in envelope");
-    assert.equal(sub?.tasks[0]?.taskType, "one_shot", "taskType forced one_shot");
+    assert.equal(sub?.tasks[0]?.taskType, "one_shot", "无频率 draft 默认为 one_shot");
     assert.equal(sub?.tasks[0]?.id, result.taskId, "taskId matches envelope");
     assert.equal(sub?.tasks[0]?.expectedOutcome, "返回行情摘要");
   }
@@ -103,16 +102,18 @@ export async function runDispatchTaskFromThreadSpecs() {
     );
   }
 
-  // 3. 非 one_shot 抛错
+  // 3. 有 cadence 时生成 repeat，不再强制 one_shot
   {
-    await assert.rejects(
-      () =>
-        dispatchTaskFromThread(
-          makeRequest({ taskType: "repeat" as unknown as "one_shot" }),
-          { idempotencyKey: "dispatch-y" },
-        ),
-      /one_shot/,
+    const result = await dispatchTaskFromThread(
+      makeRequest({ taskDraft: makeDraft({ cadence: "每天" }) }),
+      { idempotencyKey: "dispatch-repeat" },
     );
+    const goals = readGoalsSnapshot([]);
+    const task = goals[0]?.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((candidate) => candidate.id === result.taskId);
+    assert.equal(task?.taskType, "repeat");
+    assert.match(task?.triggerRule ?? "", /每天/);
   }
 
   // 4. 缺 idempotencyKey 抛错

@@ -28,7 +28,13 @@ export function legacyGoalToTopic(input: LegacyGoalToTopicInput): Topic {
   const deadline = trimmedDeadline.length > 0 ? trimmedDeadline : undefined;
 
   const threads = goal.subGoals.map((sub) =>
-    legacySubGoalToThread({ subGoal: sub, topicId: goal.id, createdAt }),
+    legacySubGoalToThread({
+      subGoal: sub,
+      topicId: goal.id,
+      loopInterval: undefined,
+      terminationCondition: sub.terminationCondition,
+      createdAt,
+    }),
   );
 
   return {

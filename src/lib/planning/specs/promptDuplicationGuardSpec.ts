@@ -216,12 +216,16 @@ export function runPromptDuplicationGuardSpecs() {
     { key: "决策/展示层拆分", rule: "约束 1：决策/展示层拆分" },
     { key: "Thread memory", rule: "约束 2：数据源限定 Thread memory" },
     { key: "上次 tick 产出", rule: "约束 2：数据源限定 上次 tick 产出" },
+    { key: "当前 Task 列表", rule: "约束 2：数据源限定 当前 Task 列表" },
     { key: "最近 7 天 Task instances", rule: "约束 2：数据源限定 最近 7 天 Task instances" },
     { key: "dispatch_task", rule: "约束 3：动作之一 dispatch_task" },
+    { key: "update_task", rule: "约束 3：动作之一 update_task" },
+    { key: "cancel_task", rule: "约束 3：动作之一 cancel_task" },
     { key: "post_message", rule: "约束 3：动作之一 post_message" },
     { key: "silent", rule: "约束 3：动作之一 silent" },
     { key: "能在本次 tick 一段话讲完的", rule: "约束 4：判断规则" },
-    { key: "one_shot", rule: "约束 5：dispatch_task 默认 one_shot" },
+    { key: "taskType", rule: "约束 5：dispatch_task 指定 taskType" },
+    { key: "triggerRule", rule: "约束 5：dispatch_task 指定 triggerRule" },
     { key: "会话流", rule: "约束 6：会话流 + Inbox 双写" },
     { key: "Inbox", rule: "约束 6：会话流 + Inbox 双写" },
     { key: "threadId", rule: "约束 7：post_message / dispatch_task 必须填 threadId" },
@@ -245,6 +249,16 @@ export function runPromptDuplicationGuardSpecs() {
     threadRunnerPrompt.includes('dispatch_task: { "kind": "dispatch_task", "threadId": "thread-runner-spec"'),
     true,
     "ThreadRunner prompt 必须给出 dispatch_task.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
+  );
+  assert.equal(
+    threadRunnerPrompt.includes('update_task: { "kind": "update_task", "threadId": "thread-runner-spec"'),
+    true,
+    "ThreadRunner prompt 必须给出 update_task.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
+  );
+  assert.equal(
+    threadRunnerPrompt.includes('cancel_task: { "kind": "cancel_task", "threadId": "thread-runner-spec"'),
+    true,
+    "ThreadRunner prompt 必须给出 cancel_task.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
   );
 
   // ThreadRunner prompt 同样禁止出现已废弃字面量
