@@ -49,10 +49,6 @@ export function legacyGoalTaskRedirectPath(
   );
 }
 
-export function legacyGoalDeliverableRedirectPath(topicId: string, searchParams?: RouteSearchParams) {
-  return appendRouteQuery(`${topicDetailPath(safeDecodeRouteParam(topicId))}/deliverable`, searchParams);
-}
-
 /**
  * Deprecated Goal-named aliases kept for transition compatibility.
  * They intentionally point at the canonical /topics routes after PR16.

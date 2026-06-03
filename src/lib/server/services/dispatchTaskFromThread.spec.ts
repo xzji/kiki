@@ -116,7 +116,21 @@ export async function runDispatchTaskFromThreadSpecs() {
     assert.match(task?.triggerRule ?? "", /每天/);
   }
 
-  // 4. 缺 idempotencyKey 抛错
+  // 4. 显式 taskType + triggerRule 应被保留
+  {
+    const result = await dispatchTaskFromThread(
+      makeRequest({ taskDraft: makeDraft({ taskType: "repeat", triggerRule: "每小时" }) }),
+      { idempotencyKey: "dispatch-explicit-rule" },
+    );
+    const goals = readGoalsSnapshot([]);
+    const task = goals[0]?.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((candidate) => candidate.id === result.taskId);
+    assert.equal(task?.taskType, "repeat");
+    assert.match(task?.triggerRule ?? "", /每小时/);
+  }
+
+  // 5. 缺 idempotencyKey 抛错
   {
     await assert.rejects(
       () => dispatchTaskFromThread(makeRequest(), { idempotencyKey: "" }),

@@ -4,10 +4,6 @@ import {
   markTaskNotificationDeliveredProjection,
   transitionTaskInstanceProjection,
 } from "@/lib/server/services/goalRuntimeService";
-import {
-  goalHasCompletedTasks,
-  materializeGoalDeliverable,
-} from "@/lib/server/services/goalDeliverableService";
 import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
 import { getConversation } from "@/lib/server/repositories/conversationsRepository";
 import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
@@ -239,13 +235,9 @@ export function runGoalDaemonSideEffects(goals: Goal[]) {
   const schedule = runGoalScheduleSynthesisWorker(goals);
   const watchdog = runGoalWatchdogWorker(readGoalsSnapshot(goals));
   const notifications = runGoalNotificationDeliveryWorker(readGoalsSnapshot(goals));
-  const deliverables = readGoalsSnapshot(goals)
-    .filter(goalHasCompletedTasks)
-    .filter((goal) => materializeGoalDeliverable(goal.id).changed).length;
   return {
     schedule,
     watchdog,
     notifications,
-    deliverables,
   };
 }

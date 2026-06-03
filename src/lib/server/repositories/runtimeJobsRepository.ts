@@ -4,6 +4,7 @@ import {
   migrateGoalIds,
   migrateTaskIds,
   migrateTaskInstanceIds,
+  normalizeGoalId,
   normalizeInstanceId,
   normalizeSubGoalId,
   normalizeTaskId,
@@ -284,6 +285,59 @@ export function createQueuedRuntimeJobInternal(
     },
   });
   return record;
+}
+
+/** 监控面板用的运行时 job 实时状态行（执行引擎的权威状态，可能比 goals 快照更新）。 */
+export type RuntimeJobActivityRow = {
+  jobId: string;
+  taskInstanceId: string;
+  taskId: string | null;
+  goalId: string | null;
+  status: RuntimeJobStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+};
+
+/**
+ * 列出仍处于活动态（queued/running/awaiting_user）的 goal_task job 实时状态。
+ *
+ * 用于在监控面板中校正 goals 快照滞后的问题：当 job 已被 worker 领走并在执行（running），
+ * 但 goals 快照尚未回写时，面板据此把对应实例归入「执行中」。
+ */
+export function listOpenRuntimeJobActivity(): RuntimeJobActivityRow[] {
+  const db = getDatabase();
+  const rows = db
+    .prepare(
+      `
+        SELECT id, task_instance_id, task_id, goal_id, status, started_at, finished_at, updated_at
+        FROM runtime_jobs
+        WHERE kind = 'goal_task'
+          AND status IN ('queued', 'running', 'awaiting_user')
+          AND task_instance_id IS NOT NULL
+        ORDER BY updated_at DESC
+      `,
+    )
+    .all() as Array<{
+    id: string;
+    task_instance_id: string;
+    task_id: string | null;
+    goal_id: string | null;
+    status: RuntimeJobStatus;
+    started_at: string | null;
+    finished_at: string | null;
+    updated_at: string;
+  }>;
+  return rows.map((row) => ({
+    jobId: row.id,
+    taskInstanceId: normalizeInstanceId(row.task_instance_id),
+    taskId: row.task_id ? normalizeTaskId(row.task_id) : null,
+    goalId: row.goal_id ? normalizeGoalId(row.goal_id) : null,
+    status: row.status,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    updatedAt: row.updated_at,
+  }));
 }
 
 export function getRuntimeJobByTaskInstanceId(taskInstanceId: string) {

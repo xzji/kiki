@@ -15,6 +15,8 @@ import assert from "node:assert/strict";
 
 import { normalizeSubGoalId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
+import { requestThreadGovernanceTick } from "@/lib/server/services/goalRuntimeService";
+import { isThreadDue } from "@/lib/server/thread/threadLoopScheduler";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import {
   readTopicsSnapshotMeta,
@@ -218,5 +220,26 @@ export async function runThreadsRepositorySpecs() {
     const noOp = markThreadPaused("thread-pause-2", "already paused");
     assert.equal(noOp.status, "paused");
     assert.equal(noOp.revision, 5, "no extra revision bump on already paused");
+  }
+
+  // -----------------------------------------------------------------------
+  // 6. event bridge — completed task requests next Thread governance tick
+  // -----------------------------------------------------------------------
+  {
+    const now = new Date("2026-06-01T08:00:00.000Z");
+    const t = makeThread("thread-event", {
+      topicId: "topic-E",
+      revision: 0,
+      loopInterval: "daily",
+      lastTickAt: "2026-06-01T07:00:00.000Z",
+      nextTickAt: "2026-06-02T07:00:00.000Z",
+    });
+    seedTopics([makeTopic("topic-E", [t])]);
+
+    assert.equal(requestThreadGovernanceTick("thread-event", now), true);
+    const updated = findThreadById("thread-event");
+    assert.equal(updated?.nextTickAt, now.toISOString());
+    const verdict = updated ? isThreadDue(updated, now) : null;
+    assert.equal(verdict?.reason, "event_triggered");
   }
 }

@@ -4,7 +4,8 @@
  * Plan ref: §9.4 问题 13。
  *  - SubGoal.successCriteria[] 在 Thread 上不存在 → 丢弃（仅保留首项作为 intent 的兜底）
  *  - SubGoal.tasks 不映射到 Thread 上（Task 仍按 threadId 关联），由调用方处理
- *  - loopInterval 表示 Thread 治理 review 节拍，默认 weekly；
+ *  - loopInterval 表示 Thread 治理 review 节拍；未显式给出时，
+ *    含 repeat Task 的板块默认 weekly，否则默认 one_shot。
  *    Task 执行频率由各 Task 自己的 triggerRule 决定。
  */
 
@@ -39,6 +40,10 @@ function normalizeThreadLoopInterval(value: unknown): ThreadLoopInterval | undef
   return undefined;
 }
 
+function inferDefaultReviewInterval(subGoal: SubGoal): ThreadLoopInterval {
+  return subGoal.tasks.some((task) => task.taskType === "repeat") ? "weekly" : "one_shot";
+}
+
 export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread {
   const { subGoal, topicId } = input;
   const now = input.createdAt ?? new Date().toISOString();
@@ -55,7 +60,7 @@ export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread
     loopInterval:
       input.loopInterval ??
       normalizeThreadLoopInterval(subGoal.reviewInterval) ??
-      "weekly",
+      inferDefaultReviewInterval(subGoal),
     terminationCondition: input.terminationCondition ?? subGoal.terminationCondition,
     status: "active",
     memory: {},

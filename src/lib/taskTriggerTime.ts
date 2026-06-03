@@ -17,7 +17,7 @@ export type ParsedTaskTriggerRule =
   | { kind: "unsupported" };
 
 const TIME_PATTERN = /(?:^|[^\d])([01]?\d|2[0-3])[:：]([0-5]\d)(?:[^\d]|$)/;
-const INTERVAL_HOURS_PATTERN = /每(?:隔)?\s*(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:小时|小時|h|H)/;
+const INTERVAL_HOURS_PATTERN = /每(?:隔)?\s*(\d+(?:\.\d+)?)?\s*(?:个)?\s*(?:小时|小時|h|H)/;
 const CONDITION_PREFIX_PATTERN = /^满足触发条件(?:后)?执行[:：]?\s*/;
 const IMMEDIATE_PATTERN = /^(立即触发|立即执行|准备好后执行一次|准备好后执行)$/;
 const RELATIVE_DATE_TIME_PATTERN = /(今天|明天|后天)\s*([01]?\d|2[0-3])[:：]([0-5]\d)/;
@@ -57,7 +57,7 @@ export function hasConcreteTriggerTime(triggerRule: string) {
 export function parseTaskTriggerInterval(triggerRule: string) {
   const match = triggerRule.match(INTERVAL_HOURS_PATTERN);
   if (!match) return null;
-  const intervalHours = Number(match[1]);
+  const intervalHours = match[1] ? Number(match[1]) : 1;
   if (!Number.isFinite(intervalHours) || intervalHours <= 0) return null;
   return {
     intervalHours,

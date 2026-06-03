@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 
 import {
-  legacyGoalDeliverableRedirectPath,
   legacyGoalDetailRedirectPath,
   legacyGoalTaskRedirectPath,
 } from "@/lib/routes";
@@ -28,10 +27,5 @@ export function runRoutesSpecs() {
   assert.equal(
     legacyGoalTaskRedirectPath("topic%2Fa%20b", "task%2Fx%20y", { view: "exec" }),
     "/topics/topic%2Fa%20b/tasks/task%2Fx%20y?view=exec",
-  );
-
-  assert.equal(
-    legacyGoalDeliverableRedirectPath("topic/a b", { from: "legacy" }),
-    "/topics/topic%2Fa%20b/deliverable?from=legacy",
   );
 }

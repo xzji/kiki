@@ -57,6 +57,7 @@ export type ContextBlocker = {
   options?: string[];
   optionQuestion?: string;
   inputPlaceholder?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
   suggestedActions: ContextSuggestedAction[];
 };
 

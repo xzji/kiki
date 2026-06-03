@@ -10,6 +10,7 @@ export type UserConfirmationMissingItem = {
   label: string;
   description?: string;
   reason?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
 };
 
 export type UserConfirmationOptionsContext = {
@@ -35,6 +36,7 @@ export type UserConfirmationOptionItem = {
   question: string;
   options: UserConfirmationOption[];
   inputPlaceholder?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
 };
 
 export type UserConfirmationOptionsResult = {
@@ -62,7 +64,7 @@ export function buildUserConfirmationOptionsPrompt(input: UserConfirmationOption
 - seedOptions：上游模型可能已经给出的候选项，如果有
 
 # 生成目标
-为 missingItems 中的每一项生成 0-3 个候选答案。
+为 missingItems 中的每一项生成候选答案：text / image_or_text 字段优先生成 3 个候选答案；image / file 字段必须生成 0 个候选答案。
 
 候选答案必须满足：
 1. 是用户可以直接提交的“答案”，不是动作或说明。
@@ -70,7 +72,9 @@ export function buildUserConfirmationOptionsPrompt(input: UserConfirmationOption
 3. 候选项之间要互斥，覆盖常见分支。
 4. 每个候选项要包含区分信息，例如范围、程度、数量、时间、场景、取舍或条件。
 5. 每个候选项建议 8-28 个中文字符。
-6. 如果当前字段本质上需要用户提供精确事实，不能合理枚举候选项，则 options 返回空数组，并给 inputPlaceholder。
+6. text / image_or_text 字段必须优先返回 3 个候选项；只有当前字段本质上需要用户提供精确事实，不能合理枚举候选项时，才允许 options 返回空数组，并给 inputPlaceholder。
+7. inputKind 必须沿用 missingItems 中的 inputKind；如果缺失则返回 text。它是 UI 输入形态的权威字段，不能根据文案猜测。
+8. inputKind 为 image 或 file 时，options 必须返回空数组，不能生成“上传截图/上传文件”这类动作候选项。
 
 # 禁止
 禁止输出这些空壳候选项或同义表达：
@@ -103,14 +107,15 @@ export function buildUserConfirmationOptionsPrompt(input: UserConfirmationOption
           "hint": "一句话解释该选项适用场景，可为空"
         }
       ],
-      "inputPlaceholder": "没有合适候选项时，提示用户如何手动填写"
+      "inputPlaceholder": "没有合适候选项时，提示用户如何手动填写",
+      "inputKind": "text|image|file|image_or_text"
     }
   ]
 }
 
 # 输出要求
 - items 必须覆盖输入中的所有 missingItems，顺序保持一致。
-- 每个 item 最多 3 个 options。
+- text / image_or_text 字段优先输出 3 个 options；image / file 字段输出 0 个 options。
 - 如果没有合适候选项，options 输出 []，不要硬凑。
 - question / inputPlaceholder 要使用用户能看懂的自然语言。
 
@@ -136,11 +141,13 @@ ${input.rawOutput}
 1. 只输出 JSON，不要输出 Markdown 代码块或解释。
 2. 输出必须符合指定 Schema。
 3. items 必须覆盖上下文 JSON 中的所有 missingItems，并保持顺序。
-4. 每个 item 最多生成 3 个候选答案。
+4. text / image_or_text 字段优先生成 3 个候选答案；image / file 字段生成 0 个候选答案。
 5. 候选答案必须是用户可以直接提交的具体答案。
 6. 如果某个字段需要用户提供精确事实，不能合理枚举，则 options 返回 []，并提供 inputPlaceholder。
-7. 不要使用“主流方案 / 稳妥方案 / 高性价比方案 / 体验优先方案 / 补充信息 / 选项A”等空壳候选项。
-8. 不要把同一组选项复制给多个 missingItems。
+7. inputKind 必须沿用上下文 missingItems 中的 inputKind；如果缺失则返回 text。
+8. inputKind 为 image 或 file 时，options 必须返回空数组，不能生成“上传截图/上传文件”这类动作候选项。
+9. 不要使用“主流方案 / 稳妥方案 / 高性价比方案 / 体验优先方案 / 补充信息 / 选项A”等空壳候选项。
+10. 不要把同一组选项复制给多个 missingItems。
 
 # 输出 JSON Schema
 {
@@ -156,7 +163,8 @@ ${input.rawOutput}
           "hint": "一句话解释该选项适用场景，可为空"
         }
       ],
-      "inputPlaceholder": "没有合适候选项时，提示用户如何手动填写"
+      "inputPlaceholder": "没有合适候选项时，提示用户如何手动填写",
+      "inputKind": "text|image|file|image_or_text"
     }
   ]
 }
@@ -176,6 +184,17 @@ function normalizeOption(value: unknown): UserConfirmationOption | null {
   };
 }
 
+function normalizeInputKind(value: unknown): UserConfirmationOptionItem["inputKind"] {
+  if (value === "image" || value === "file" || value === "image_or_text" || value === "text") return value;
+  return "text";
+}
+
+function normalizeOptionsForInputKind(value: unknown, inputKind: UserConfirmationOptionItem["inputKind"]) {
+  if (inputKind === "image" || inputKind === "file") return [];
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeOption).filter((item): item is UserConfirmationOption => Boolean(item)).slice(0, 3);
+}
+
 function normalizeOptionItem(value: unknown): UserConfirmationOptionItem | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as {
@@ -184,16 +203,20 @@ function normalizeOptionItem(value: unknown): UserConfirmationOptionItem | null 
     question?: unknown;
     options?: unknown;
     inputPlaceholder?: unknown;
+    inputKind?: unknown;
+    input_kind?: unknown;
   };
   const id = typeof raw.id === "string" ? raw.id.trim() : "";
   const label = typeof raw.label === "string" ? raw.label.trim() : "";
   if (!id || !label || !Array.isArray(raw.options)) return null;
+  const inputKind = normalizeInputKind(raw.inputKind ?? raw.input_kind);
   return {
     id,
     label,
     question: typeof raw.question === "string" ? raw.question.trim() : "",
-    options: raw.options.map(normalizeOption).filter((item): item is UserConfirmationOption => Boolean(item)).slice(0, 3),
+    options: normalizeOptionsForInputKind(raw.options, inputKind),
     inputPlaceholder: typeof raw.inputPlaceholder === "string" ? raw.inputPlaceholder.trim() : undefined,
+    inputKind,
   };
 }
 
@@ -223,6 +246,7 @@ export function parseUserConfirmationOptions(raw: string): UserConfirmationOptio
             label: "待补充信息",
             question: typeof parsed.question === "string" ? parsed.question.trim() : "",
             options,
+            inputKind: "text",
           },
         ],
       };

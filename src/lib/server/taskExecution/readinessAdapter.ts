@@ -19,6 +19,7 @@ function blockerFromReadinessItem(item: TaskReadinessInfoItem): ContextBlocker {
     options: item.options,
     optionQuestion: item.optionQuestion,
     inputPlaceholder: item.inputPlaceholder,
+    inputKind: item.inputKind,
     suggestedActions: [{ kind: "free_text", label: `补充${item.label}` }],
   };
 }
@@ -74,6 +75,7 @@ export function readinessFromContext(context: TaskExecutionContext): TaskReadine
       options: blocker.options,
       optionQuestion: blocker.optionQuestion,
       inputPlaceholder: blocker.inputPlaceholder,
+      inputKind: blocker.inputKind,
     }));
   return {
     status: items.length ? "blocked" : "ready",

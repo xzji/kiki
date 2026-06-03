@@ -22,6 +22,7 @@ export type TopicSagaPlanResult =
 export async function generateTopicSagaPlan(input: {
   topicText: string;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   conversationContext?: string;
   maxRefineLoops?: number;
   signal?: AbortSignal;

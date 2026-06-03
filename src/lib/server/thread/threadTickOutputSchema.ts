@@ -133,6 +133,21 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
         reason,
       };
     }
+    case "archive_thread": {
+      const threadId = asString(obj.threadId, "action.threadId");
+      if (threadId !== expectedThreadId) {
+        throw new ThreadTickOutputValidationError(
+          `archive_thread.threadId(${threadId}) 与当前 Thread(${expectedThreadId}) 不一致；禁止跨 Thread 归档`,
+          "thread_id_mismatch",
+        );
+      }
+      const reason = asString(obj.reason, "action.reason");
+      return {
+        kind: "archive_thread",
+        threadId,
+        reason,
+      };
+    }
     case "post_message": {
       const threadId = asString(obj.threadId, "action.threadId");
       if (threadId !== expectedThreadId) {
@@ -168,7 +183,7 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
     }
     default:
       throw new ThreadTickOutputValidationError(
-        `未知 action.kind=${String(kind)}；允许值：dispatch_task / update_task / cancel_task / post_message / silent`,
+        `未知 action.kind=${String(kind)}；允许值：dispatch_task / update_task / cancel_task / archive_thread / post_message / silent`,
         "unknown_kind",
       );
   }
@@ -232,6 +247,7 @@ export function parseThreadTickOutput(
       a.kind === "dispatch_task" ||
       a.kind === "update_task" ||
       a.kind === "cancel_task" ||
+      a.kind === "archive_thread" ||
       a.kind === "post_message",
   );
   const hasSilent = actions.some((a) => a.kind === "silent");

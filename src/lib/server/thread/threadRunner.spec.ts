@@ -138,6 +138,28 @@ export async function runThreadRunnerSpecs() {
     assert.equal(grouped.postMessage.length, 1);
   }
 
+  // ---------- happy: archive_thread → archived + 清空 nextTickAt ----------
+  {
+    const result = await runThreadTick({
+      ctx: makeCtx({ thread: makeThread({ terminationCondition: "完成一次复盘" }) }),
+      agentRunId: "ar-archive",
+      invoke: async () => ({
+        rawText: "",
+        parsed: {
+          actions: [
+            { kind: "archive_thread", threadId: "thread-runner-1", reason: "已完成一次复盘" },
+          ],
+        },
+      }),
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.patch.status, "archived");
+    assert.equal(result.patch.nextTickAt, undefined);
+    const grouped = groupActions(result.output.actions);
+    assert.equal(grouped.archive.length, 1);
+  }
+
   // ---------- failure: invoke 异常 → failureCount + 1 ----------
   {
     const result = await runThreadTick({

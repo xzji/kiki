@@ -23,6 +23,16 @@ function normalizeFieldSource(value: unknown): MissingFieldQuestion["source"] {
   return "user";
 }
 
+function normalizeInputKind(value: unknown): MissingFieldQuestion["inputKind"] {
+  if (value === "image" || value === "file" || value === "image_or_text" || value === "text") return value;
+  return "text";
+}
+
+function normalizeOptionsForInputKind(value: unknown, inputKind: MissingFieldQuestion["inputKind"]) {
+  if (inputKind === "image" || inputKind === "file") return [];
+  return normalizeOptions(value);
+}
+
 function normalizeDisplayText(value: string) {
   return value
     .replace(/[“”"「」『』《》\[\]【】]/g, "")
@@ -48,13 +58,15 @@ function dedupeRepeatedQuestionsByLabel(fields: MissingFieldQuestion[]) {
 }
 
 function fieldFromReadinessItem(item: TaskReadinessInfoItem): MissingFieldQuestion {
+  const inputKind = normalizeInputKind(item.inputKind);
   return {
     id: item.id,
     label: item.label,
     question: item.optionQuestion?.trim() || item.description?.trim() || `请补充：${item.label}`,
     description: item.description || item.reason || item.label,
-    options: normalizeOptions(item.options ?? []),
+    options: normalizeOptionsForInputKind(item.options ?? [], inputKind),
     inputPlaceholder: item.inputPlaceholder,
+    inputKind,
     source: item.source,
   };
 }
@@ -81,13 +93,15 @@ export function normalizeMissingFieldQuestions(value: unknown): MissingFieldQues
           : typeof item.input_placeholder === "string" && item.input_placeholder.trim()
             ? item.input_placeholder.trim()
             : undefined;
+      const inputKind = normalizeInputKind(item.inputKind ?? item.input_kind);
       return {
         id,
         label,
         question,
         description,
-        options: normalizeOptions(item.options),
+        options: normalizeOptionsForInputKind(item.options, inputKind),
         inputPlaceholder,
+        inputKind,
         source: normalizeFieldSource(item.source),
       };
     });
@@ -116,6 +130,7 @@ export function compileMissingFieldQuestions(input: {
         question,
         description: question,
         options: fallbackOptions,
+        inputKind: "text",
         source: "user",
       },
     ];
@@ -134,6 +149,7 @@ export function compileMissingFieldQuestions(input: {
       description: llmField.description || readinessField.description,
       options: llmField.options.length ? llmField.options : readinessField.options,
       inputPlaceholder: llmField.inputPlaceholder || readinessField.inputPlaceholder,
+      inputKind: llmField.inputKind ?? readinessField.inputKind,
       source: item.source,
     };
   }));

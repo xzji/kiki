@@ -6,6 +6,8 @@ export type TaskDraft = {
   objective: string;
   deliverable: string;
   acceptanceCriteria: string[];
+  taskType?: "repeat" | "one_shot";
+  triggerRule?: string;
   cadence?: string;
   triggerCondition?: string;
   userInvolvement?: {
@@ -73,6 +75,10 @@ function normalizeMode(value: unknown): TaskDraftUserInvolvementMode | undefined
   return value === "none" || value === "confirm" || value === "answer" || value === "collaborate" ? value : undefined;
 }
 
+function normalizeTaskType(value: unknown): TaskDraft["taskType"] {
+  return value === "repeat" || value === "one_shot" ? value : undefined;
+}
+
 export function normalizeTaskDraft(value: unknown, fallbackIndex: number): { draft?: TaskDraft; reason?: TaskDraftDropReason } {
   if (!value || typeof value !== "object") {
     return { reason: { index: fallbackIndex, missingFields: ["task"], reason: "任务草稿不是对象" } };
@@ -84,6 +90,8 @@ export function normalizeTaskDraft(value: unknown, fallbackIndex: number): { dra
     objective: text(record.objective),
     deliverable: text(record.deliverable),
     acceptanceCriteria: list(record.acceptanceCriteria),
+    taskType: normalizeTaskType(record.taskType),
+    triggerRule: text(record.triggerRule) || undefined,
     cadence: text(record.cadence) || undefined,
     triggerCondition: text(record.triggerCondition) || undefined,
     dependencyHints: list(record.dependencyHints),

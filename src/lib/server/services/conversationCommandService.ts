@@ -122,6 +122,24 @@ function appendEvent(input: Parameters<typeof appendConversationEvent>[0]) {
   return event;
 }
 
+function createSyntheticDeletedEvent(input: {
+  conversationId: string;
+  producedBy: "user" | "system" | "worker" | "migration";
+  idempotencyKey: string;
+}): ConversationEventRecord<"conversation.deleted"> {
+  return {
+    id: getLatestConversationEventId() + 1,
+    eventId: `conversation-event-deleted-${input.conversationId}`,
+    conversationId: input.conversationId,
+    kind: "conversation.deleted",
+    payload: { conversationId: input.conversationId },
+    producedBy: input.producedBy,
+    idempotencyKey: input.idempotencyKey,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+
 function commandConversationId(command: ConversationCommand) {
   return command.type === "create_conversation" ? command.conversation.id : command.conversationId;
 }
@@ -211,20 +229,19 @@ export function applyConversationCommand(input: {
       return { event, conversation: created.conversation, revision: created.revision };
     }
 
-    assertExpectedRevision(conversationId, input.expectedRevision);
-    const current = requireConversation(conversationId);
-
     if (command.type === "delete_conversation") {
+      const currentRevision = getConversationRevision(conversationId);
+      const event = createSyntheticDeletedEvent({ conversationId, producedBy, idempotencyKey });
+      if (currentRevision === undefined) {
+        return { event, conversations: listConversationMetas() };
+      }
+      assertExpectedRevision(conversationId, input.expectedRevision);
       deleteConversation(conversationId);
-      const event = appendEvent({
-        conversationId,
-        kind: "conversation.deleted",
-        payload: { conversationId },
-        producedBy,
-        idempotencyKey,
-      });
       return { event, conversations: listConversationMetas() };
     }
+
+    assertExpectedRevision(conversationId, input.expectedRevision);
+    const current = requireConversation(conversationId);
 
     if (command.type === "append_message") {
       const inserted = insertConversationMessage(conversationId, command.message);

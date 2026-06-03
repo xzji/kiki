@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { runTopicInitSagaWithDefaults } from "@/lib/server/topicPlanning";
 import { adaptTopicInitSagaToGoalDraft } from "@/lib/server/goalPlanning/sagaDraftAdapter";
+import { ensureConversationWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 export const runtime = "nodejs";
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 type RequestBody = {
   topicText: string;
   runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
   conversationContext?: string;
   maxRefineLoops?: number;
 };
@@ -30,6 +32,8 @@ export async function POST(request: NextRequest) {
     const requestId =
       request.headers.get("x-topic-saga-request-id")?.trim() ||
       `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const conversationId = body.conversationId?.trim();
+    const workspace = conversationId ? ensureConversationWorkspace(conversationId) : undefined;
     const result = await runTopicInitSagaWithDefaults({
       topicId: `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       topicText,
@@ -37,8 +41,9 @@ export async function POST(request: NextRequest) {
       userContext: {
         command: "/saga",
         initialRequest: topicText,
+        conversationId,
       },
-      cwd: process.cwd(),
+      cwd: workspace?.workspaceDir ?? process.cwd(),
       runtimeEnv: body.runtimeEnv,
       signal: request.signal,
       idempotencyKey: requestId,

@@ -67,6 +67,15 @@ export function runThreadLoopSchedulerSpecs() {
       makeThread({ nextTickAt: "2026-06-01T07:30:00.000Z", lastTickAt: "2026-05-31T08:00:00.000Z" }),
       NOW,
     );
+    assert.equal(verdict?.reason, "event_triggered");
+  }
+
+  // ---------- 正常 review 到期：interval_due ----------
+  {
+    const verdict = isThreadDue(
+      makeThread({ nextTickAt: "2026-06-01T08:00:00.000Z", lastTickAt: "2026-05-31T08:00:00.000Z" }),
+      NOW,
+    );
     assert.equal(verdict?.reason, "interval_due");
   }
 

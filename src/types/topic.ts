@@ -99,6 +99,7 @@ export type ThreadTickPostMessageSeverity = "info" | "warning" | "important";
  * 设计要点（计划 §3.3.4）：
  *  - dispatch_task：派发新 Task，threadId 必填，Task 自带频率
  *  - update_task / cancel_task：治理本 Thread 下既有 Task 集合
+ *  - archive_thread：Thread 满足终止条件后归档本板块
  *  - post_message：固定双写 conversation_messages + inbox，text ≤ 500 字
  *  - silent：仅累计 thread.silentCount，不写任何对外通道
  */
@@ -120,6 +121,11 @@ export type ThreadTickAction =
       kind: "cancel_task";
       threadId: string;
       taskId: string;
+      reason: string;
+    }
+  | {
+      kind: "archive_thread";
+      threadId: string;
       reason: string;
     }
   | {

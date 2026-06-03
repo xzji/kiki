@@ -14,14 +14,16 @@ const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
   generic_result: "Agent 任务",
 };
 
-function awaitingStatusLabel(instance: TaskInstance) {
+function awaitingStatusLabel(task: Task, instance: TaskInstance) {
+  const displayModel = buildAwaitingDisplayModel(task, instance, "card");
+  if (displayModel.active) return displayModel.statusLabel;
   const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
-  if (type === "answer") return "待作答";
-  if (type === "provide_context") return "待补充";
-  if (type === "perform_offline_action") return "待线下完成";
+  if (type === "answer") return "需作答";
+  if (type === "provide_context") return "需填写";
+  if (type === "perform_offline_action") return "需线下完成";
   if (type === "agent_revision_required") return "等待 Agent 补齐";
   if (type === "deliverable_gap") return "未通过验收";
-  return "待确认";
+  return "需确认";
 }
 
 function hasSubmittedInteraction(instance: TaskInstance) {
@@ -56,13 +58,13 @@ export function TaskMessageCard({
     isOptionalFeedbackResult
       ? "已结束"
       : instance.awaitingUser
-      ? awaitingStatusLabel(instance)
+      ? awaitingStatusLabel(task, instance)
       : instance.status === "completed"
       ? "已结束"
       : instance.status === "in_progress"
         ? "进行中"
         : instance.status === "awaiting_user"
-          ? awaitingStatusLabel(instance)
+          ? awaitingStatusLabel(task, instance)
           : instance.status === "paused"
             ? "已暂停"
             : "待处理";

@@ -13,6 +13,7 @@ export type TaskReadinessInfoItem = {
   options?: string[];
   optionQuestion?: string;
   inputPlaceholder?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
 };
 
 export type TaskReadinessCheck = {

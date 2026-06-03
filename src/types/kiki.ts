@@ -61,6 +61,7 @@ export type MissingFieldQuestion = {
   description: string;
   options: string[];
   inputPlaceholder?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
   source: "user" | "agent" | "system";
 };
 

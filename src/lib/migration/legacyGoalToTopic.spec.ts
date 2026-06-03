@@ -59,7 +59,7 @@ export function runLegacyGoalToTopicSpecs() {
   assert.equal(thread.topicId, "g-1");
   assert.equal(thread.title, "盯盘 NVDA");
   assert.equal(thread.intent, "每天盯一次大盘和持仓");
-  assert.equal(thread.loopInterval, "weekly");
+  assert.equal(thread.loopInterval, "one_shot");
   assert.equal(thread.status, "active");
   assert.equal(thread.silentCount, 0);
   assert.equal(thread.failureCount, 0);
@@ -118,6 +118,28 @@ export function runLegacyGoalToTopicSpecs() {
   const threadWithReview = legacySubGoalToThread({ subGoal: subWithReview, topicId: "g-review" });
   assert.equal(threadWithReview.loopInterval, "daily");
   assert.equal(threadWithReview.terminationCondition, "用户停止关注");
+
+  const subWithRepeatTask = makeSubGoal({
+    id: "sg-repeat",
+    goalId: "g-repeat",
+    title: "持续巡检",
+    tasks: [
+      {
+        id: "task-repeat",
+        subGoalId: "sg-repeat",
+        title: "每日巡检",
+        description: "巡检",
+        expectedOutcome: "摘要",
+        taskType: "repeat",
+        triggerRule: "每天 09:00",
+        progress: 0,
+        instances: [],
+        executionKind: "generic_result",
+      },
+    ],
+  });
+  const threadWithRepeatTask = legacySubGoalToThread({ subGoal: subWithRepeatTask, topicId: "g-repeat" });
+  assert.equal(threadWithRepeatTask.loopInterval, "weekly");
 
   // 5. conversationId 透传
   const goalWithConv = makeGoal({

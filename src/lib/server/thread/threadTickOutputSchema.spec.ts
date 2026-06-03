@@ -92,6 +92,20 @@ export function runThreadTickOutputSchemaSpecs() {
   );
   assert.equal(cancelHappy.actions[0]?.kind, "cancel_task");
 
+  const archiveHappy = parseThreadTickOutput(
+    {
+      actions: [
+        {
+          kind: "archive_thread",
+          threadId: THREAD_ID,
+          reason: "已满足终止条件",
+        },
+      ],
+    },
+    THREAD_ID,
+  );
+  assert.equal(archiveHappy.actions[0]?.kind, "archive_thread");
+
   // silent 单独存在 — OK
   const silent = parseThreadTickOutput(
     { actions: [{ kind: "silent", reason: "今日无新增信号" }] },

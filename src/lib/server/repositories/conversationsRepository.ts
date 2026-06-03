@@ -2,6 +2,7 @@ import { migrateConversationIds } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
 import { listConversationMessages } from "@/lib/server/repositories/conversationMessagesRepository";
 import type { Conversation, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
+import type { Topic } from "@/types/topic";
 
 type ConversationRow = {
   id: string;
@@ -24,6 +25,341 @@ type ConversationRow = {
 function parseJson<T>(value: string | null): T | undefined {
   if (!value) return undefined;
   return JSON.parse(value) as T;
+}
+
+type SnapshotEnvelope<T> = {
+  value: T;
+  revision: number;
+  updatedAt: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseSnapshotEnvelope<T>(value: string | null): SnapshotEnvelope<T> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      isRecord(parsed) &&
+      Array.isArray(parsed.value) &&
+      typeof parsed.revision === "number" &&
+      typeof parsed.updatedAt === "string"
+    ) {
+      return parsed as SnapshotEnvelope<T>;
+    }
+    if (Array.isArray(parsed)) {
+      return { value: parsed as T, revision: 0, updatedAt: "" };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function addDefined(target: Set<string>, ...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (value) target.add(value);
+  }
+}
+
+function collectIdsFromTopic(topic: Topic, ids: RelatedConversationIds) {
+  addDefined(ids.topicIds, topic.id);
+  for (const thread of topic.threads ?? []) {
+    addDefined(ids.threadIds, thread.id);
+  }
+}
+
+type LegacyGoalSnapshot = Array<{
+  id?: string;
+  conversationId?: string;
+  subGoals?: Array<{
+    id?: string;
+    tasks?: Array<{
+      id?: string;
+      instances?: Array<{ id?: string }>;
+    }>;
+  }>;
+}>;
+
+type RelatedConversationIds = {
+  goalIds: Set<string>;
+  topicIds: Set<string>;
+  threadIds: Set<string>;
+  taskIds: Set<string>;
+  taskInstanceIds: Set<string>;
+  runtimeJobIds: Set<string>;
+  sagaInstanceIds: Set<string>;
+  agentRunIds: Set<string>;
+};
+
+function placeholders(values: Set<string>) {
+  return Array.from(values).map(() => "?").join(",");
+}
+
+function deleteWhereIn(table: string, column: string, values: Set<string>) {
+  if (values.size === 0) return 0;
+  const result = getDatabase()
+    .prepare(`DELETE FROM ${table} WHERE ${column} IN (${placeholders(values)})`)
+    .run(...Array.from(values));
+  return result.changes;
+}
+
+function selectStrings(sql: string, ...params: unknown[]) {
+  return (getDatabase().prepare(sql).all(...params) as Array<{ value: string | null }>).flatMap((row) =>
+    row.value ? [row.value] : [],
+  );
+}
+
+function setSize(ids: RelatedConversationIds) {
+  return (
+    ids.goalIds.size +
+    ids.topicIds.size +
+    ids.threadIds.size +
+    ids.taskIds.size +
+    ids.taskInstanceIds.size +
+    ids.runtimeJobIds.size +
+    ids.sagaInstanceIds.size +
+    ids.agentRunIds.size
+  );
+}
+
+function createRelatedConversationIds(): RelatedConversationIds {
+  return {
+    goalIds: new Set(),
+    topicIds: new Set(),
+    threadIds: new Set(),
+    taskIds: new Set(),
+    taskInstanceIds: new Set(),
+    runtimeJobIds: new Set(),
+    sagaInstanceIds: new Set(),
+    agentRunIds: new Set(),
+  };
+}
+
+function collectRuntimeSnapshotIds(conversationId: string, ids: RelatedConversationIds) {
+  const rows = getDatabase()
+    .prepare(`SELECT key, value_json FROM runtime_state_snapshots WHERE key IN ('goals', 'topics')`)
+    .all() as Array<{ key: "goals" | "topics"; value_json: string }>;
+
+  for (const row of rows) {
+    if (row.key === "goals") {
+      const envelope = parseSnapshotEnvelope<LegacyGoalSnapshot>(row.value_json);
+      for (const goal of envelope?.value ?? []) {
+        if (goal.conversationId !== conversationId) continue;
+        addDefined(ids.goalIds, goal.id);
+        addDefined(ids.topicIds, goal.id);
+        for (const subGoal of goal.subGoals ?? []) {
+          addDefined(ids.threadIds, subGoal.id);
+          for (const task of subGoal.tasks ?? []) {
+            addDefined(ids.taskIds, task.id);
+            for (const instance of task.instances ?? []) {
+              addDefined(ids.taskInstanceIds, instance.id);
+            }
+          }
+        }
+      }
+      continue;
+    }
+
+    const envelope = parseSnapshotEnvelope<Topic[]>(row.value_json);
+    for (const topic of envelope?.value ?? []) {
+      if (topic.conversationId !== conversationId) continue;
+      collectIdsFromTopic(topic, ids);
+    }
+  }
+}
+
+function collectRowsBySet(
+  table: string,
+  column: string,
+  values: Set<string>,
+  selectColumn: string,
+) {
+  if (values.size === 0) return [];
+  return selectStrings(
+    `SELECT ${selectColumn} AS value FROM ${table} WHERE ${column} IN (${placeholders(values)})`,
+    ...Array.from(values),
+  );
+}
+
+function collectRuntimeJobIds(conversationId: string, ids: RelatedConversationIds) {
+  for (const value of selectStrings(`SELECT id AS value FROM runtime_jobs WHERE conversation_id = ?`, conversationId)) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "goal_id", ids.goalIds, "id")) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "topic_id", ids.topicIds, "id")) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "thread_id", ids.threadIds, "id")) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "task_id", ids.taskIds, "id")) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "task_instance_id", ids.taskInstanceIds, "id")) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "saga_instance_id", ids.sagaInstanceIds, "id")) {
+    addDefined(ids.runtimeJobIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "id", ids.runtimeJobIds, "goal_id")) {
+    addDefined(ids.goalIds, value);
+    addDefined(ids.topicIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "id", ids.runtimeJobIds, "topic_id")) {
+    addDefined(ids.topicIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "id", ids.runtimeJobIds, "thread_id")) {
+    addDefined(ids.threadIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "id", ids.runtimeJobIds, "task_id")) {
+    addDefined(ids.taskIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "id", ids.runtimeJobIds, "task_instance_id")) {
+    addDefined(ids.taskInstanceIds, value);
+  }
+  for (const value of collectRowsBySet("runtime_jobs", "id", ids.runtimeJobIds, "saga_instance_id")) {
+    addDefined(ids.sagaInstanceIds, value);
+  }
+}
+
+function collectArtifactIds(conversationId: string, ids: RelatedConversationIds) {
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT task_id, instance_id, runtime_job_id
+        FROM artifacts
+        WHERE conversation_id = ?
+        UNION ALL
+        SELECT task_id, instance_id, NULL AS runtime_job_id
+        FROM artifact_interaction_state
+        WHERE conversation_id = ?
+      `,
+    )
+    .all(conversationId, conversationId) as Array<{
+    task_id: string | null;
+    instance_id: string | null;
+    runtime_job_id: string | null;
+  }>;
+
+  for (const row of rows) {
+    addDefined(ids.taskIds, row.task_id);
+    addDefined(ids.taskInstanceIds, row.instance_id);
+    addDefined(ids.runtimeJobIds, row.runtime_job_id);
+  }
+}
+
+function collectAgentRuntimeIds(ids: RelatedConversationIds) {
+  for (const value of collectRowsBySet("saga_instances", "topic_id", ids.topicIds, "id")) {
+    addDefined(ids.sagaInstanceIds, value);
+  }
+
+  for (const value of collectRowsBySet("agent_runs", "topic_id", ids.topicIds, "id")) {
+    addDefined(ids.agentRunIds, value);
+  }
+  for (const value of collectRowsBySet("agent_runs", "thread_id", ids.threadIds, "id")) {
+    addDefined(ids.agentRunIds, value);
+  }
+  for (const value of collectRowsBySet("agent_runs", "task_id", ids.taskIds, "id")) {
+    addDefined(ids.agentRunIds, value);
+  }
+  for (const value of collectRowsBySet("agent_runs", "saga_instance_id", ids.sagaInstanceIds, "id")) {
+    addDefined(ids.agentRunIds, value);
+  }
+
+  for (const value of collectRowsBySet("agent_runs", "id", ids.agentRunIds, "saga_instance_id")) {
+    addDefined(ids.sagaInstanceIds, value);
+  }
+}
+
+function collectRelatedConversationIds(conversationId: string): RelatedConversationIds {
+  const ids = createRelatedConversationIds();
+  const row = getDatabase()
+    .prepare(`SELECT goal_id FROM conversations WHERE id = ? LIMIT 1`)
+    .get(conversationId) as { goal_id: string | null } | undefined;
+  addDefined(ids.goalIds, row?.goal_id);
+  addDefined(ids.topicIds, row?.goal_id);
+
+  collectRuntimeSnapshotIds(conversationId, ids);
+  let previousSize = -1;
+  while (previousSize !== setSize(ids)) {
+    previousSize = setSize(ids);
+    collectArtifactIds(conversationId, ids);
+    collectRuntimeJobIds(conversationId, ids);
+    collectAgentRuntimeIds(ids);
+  }
+  return ids;
+}
+
+function updateSnapshotArray<T>(
+  key: "goals" | "topics",
+  shouldKeep: (item: T) => boolean,
+) {
+  const db = getDatabase();
+  const row = db
+    .prepare(`SELECT value_json FROM runtime_state_snapshots WHERE key = ? LIMIT 1`)
+    .get(key) as { value_json: string } | undefined;
+  if (!row) return;
+
+  const envelope = parseSnapshotEnvelope<T[]>(row.value_json);
+  if (!envelope) return;
+  const nextValue = envelope.value.filter(shouldKeep);
+  if (nextValue.length === envelope.value.length) return;
+  const nextEnvelope: SnapshotEnvelope<T[]> = {
+    value: nextValue,
+    revision: envelope.revision + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  db.prepare(`UPDATE runtime_state_snapshots SET value_json = ?, updated_at = ? WHERE key = ?`).run(
+    JSON.stringify(nextEnvelope),
+    nextEnvelope.updatedAt,
+    key,
+  );
+}
+
+function removeConversationRuntimeSnapshots(conversationId: string, ids: RelatedConversationIds) {
+  updateSnapshotArray<LegacyGoalSnapshot[number]>("goals", (goal) => {
+    return goal.conversationId !== conversationId && !ids.goalIds.has(goal.id ?? "");
+  });
+  updateSnapshotArray<Topic>("topics", (topic) => {
+    return topic.conversationId !== conversationId && !ids.topicIds.has(topic.id);
+  });
+}
+
+function deleteRelatedConversationData(conversationId: string) {
+  const db = getDatabase();
+  const ids = collectRelatedConversationIds(conversationId);
+  removeConversationRuntimeSnapshots(conversationId, ids);
+
+  db.prepare(`DELETE FROM artifact_interaction_state WHERE conversation_id = ?`).run(conversationId);
+  deleteWhereIn("artifact_interaction_state", "task_id", ids.taskIds);
+  deleteWhereIn("artifact_interaction_state", "instance_id", ids.taskInstanceIds);
+  db.prepare(`DELETE FROM artifacts WHERE conversation_id = ?`).run(conversationId);
+  deleteWhereIn("artifacts", "task_id", ids.taskIds);
+  deleteWhereIn("artifacts", "instance_id", ids.taskInstanceIds);
+  deleteWhereIn("artifacts", "runtime_job_id", ids.runtimeJobIds);
+  db.prepare(`DELETE FROM runtime_jobs WHERE conversation_id = ?`).run(conversationId);
+  deleteWhereIn("runtime_jobs", "id", ids.runtimeJobIds);
+
+  deleteWhereIn("goal_deliverables", "goal_id", ids.goalIds);
+  deleteWhereIn("goal_event_log", "goal_id", ids.goalIds);
+  deleteWhereIn("goal_event_log", "task_id", ids.taskIds);
+  deleteWhereIn("goal_event_log", "instance_id", ids.taskInstanceIds);
+
+  deleteWhereIn("agent_events", "agent_run_id", ids.agentRunIds);
+  deleteWhereIn("agent_snapshots", "agent_run_id", ids.agentRunIds);
+  deleteWhereIn("agent_messages", "saga_instance_id", ids.sagaInstanceIds);
+  deleteWhereIn("agent_runs", "id", ids.agentRunIds);
+  deleteWhereIn("agent_runs", "topic_id", ids.topicIds);
+  deleteWhereIn("agent_runs", "thread_id", ids.threadIds);
+  deleteWhereIn("agent_runs", "task_id", ids.taskIds);
+  deleteWhereIn("agent_runs", "saga_instance_id", ids.sagaInstanceIds);
+  deleteWhereIn("saga_instances", "id", ids.sagaInstanceIds);
+  deleteWhereIn("saga_instances", "topic_id", ids.topicIds);
 }
 
 export function mapConversationRow(row: ConversationRow, messages: Conversation["messages"] = []) {
@@ -140,6 +476,7 @@ export function insertConversation(conversation: Conversation) {
 export function deleteConversation(conversationId: string) {
   const db = getDatabase();
   return db.transaction(() => {
+    deleteRelatedConversationData(conversationId);
     db.prepare(`DELETE FROM conversation_event_log WHERE conversation_id = ?`).run(conversationId);
     const result = db.prepare(`DELETE FROM conversations WHERE id = ?`).run(conversationId);
     return result.changes > 0;

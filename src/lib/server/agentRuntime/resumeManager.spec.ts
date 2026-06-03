@@ -14,7 +14,6 @@ import { appendAgentEvent } from "@/lib/server/repositories/agentRuntime/agentEv
 import {
   createAgentRun,
   findAgentRunById,
-  updateAgentRun,
 } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import {
   createSagaInstance,

@@ -756,6 +756,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         const result = await generateTopicSagaPlan({
           topicText: parsedCommand.payload,
           runtimeEnv,
+          conversationId: conversation.id,
           conversationContext: buildRecentConversationContext(conversation.messages),
           signal: controller.signal,
         });

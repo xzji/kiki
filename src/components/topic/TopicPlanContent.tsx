@@ -232,16 +232,6 @@ export function TopicPlanContent({
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
           </div>
         </div>
-        {summary.completedCount > 0 ? (
-          <div className="mt-5 flex justify-end">
-            <Link
-              href={`${topicDetailPath(goal.id)}/deliverable`}
-              className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
-            >
-              查看交付包
-            </Link>
-          </div>
-        ) : null}
         {displayWorkflow ? (
           <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -418,35 +408,6 @@ function SummaryStat({
         {value}
       </div>
       <div className="mt-1 text-[11px] tracking-[0.08em] text-[#8C9198]">{label}</div>
-    </div>
-  );
-}
-
-function ProgressRing({ value }: { value: number }) {
-  const clamped = Math.max(0, Math.min(100, value));
-  const radius = 42;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - clamped / 100);
-
-  return (
-    <div className="relative h-24 w-24 shrink-0">
-      <svg width="96" height="96" className="-rotate-90">
-        <circle cx="48" cy="48" r={radius} fill="none" stroke="#E5E7EB" strokeWidth="6" />
-        <circle
-          cx="48"
-          cy="48"
-          r={radius}
-          fill="none"
-          stroke="#1F2328"
-          strokeWidth="6"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center text-[22px] font-semibold tracking-[-0.03em] text-[#1F2328]">
-        {clamped}%
-      </div>
     </div>
   );
 }

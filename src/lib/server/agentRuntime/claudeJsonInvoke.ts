@@ -17,9 +17,11 @@
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 import {
+  buildJsonRepairPrompt,
   buildJsonParseCandidates,
   normalizeClaudeJsonText,
   parseJsonWithCandidates,
+  parseRepairedJsonText,
 } from "@/lib/server/claude/jsonRepair";
 import { runPromptJson, runPromptText } from "@/lib/server/claude/transport";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
@@ -36,6 +38,79 @@ export type CreateClaudeJsonInvokeInput<T> = {
   /** Optional fallback parsed payload when validator fails (saga 决策保守降级). */
   degradedFallback?: (raw: string, error: unknown) => T | undefined;
 };
+
+export type ClaudeJsonParseResult<T> = {
+  rawText: string;
+  parsed: T;
+  meta: {
+    strategy: string;
+    repaired?: boolean;
+    repairElapsedMs?: number;
+    fallbackReason?: string;
+  };
+};
+
+export async function parseClaudeJsonTextWithRepair<T>(input: {
+  raw: string;
+  validator: (value: unknown) => T;
+  repair?: (malformedJson: string, error: unknown) => Promise<string>;
+  degradedFallback?: (raw: string, error: unknown) => T | undefined;
+}): Promise<ClaudeJsonParseResult<T>> {
+  const primary = normalizeClaudeJsonText(input.raw);
+  const attempt = parseJsonWithCandidates<T>(
+    buildJsonParseCandidates(primary),
+    input.validator,
+  );
+
+  if (attempt.ok) {
+    return {
+      rawText: primary,
+      parsed: attempt.parsed,
+      meta: { strategy: attempt.strategy },
+    };
+  }
+
+  let lastError: unknown = attempt.error;
+  if (input.repair) {
+    const repairStartedAt = Date.now();
+    try {
+      const repaired = normalizeClaudeJsonText(await input.repair(primary, attempt.error));
+      const repairedAttempt = parseRepairedJsonText(repaired, input.validator);
+      if (repairedAttempt.ok) {
+        return {
+          rawText: primary,
+          parsed: repairedAttempt.parsed,
+          meta: {
+            strategy: "claude_repair",
+            repaired: true,
+            repairElapsedMs: Date.now() - repairStartedAt,
+          },
+        };
+      }
+      lastError = repairedAttempt.error;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (input.degradedFallback) {
+    const fallback = input.degradedFallback(primary, lastError);
+    if (fallback !== undefined) {
+      return {
+        rawText: primary,
+        parsed: fallback,
+        meta: {
+          strategy: "degraded_fallback",
+          fallbackReason: lastError instanceof Error ? lastError.message : String(lastError),
+        },
+      };
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`claudeJsonInvoke: parse failed (${String(lastError)})`);
+}
 
 /**
  * Create an LlmInvoke that returns parsed JSON for decision-layer roles.
@@ -55,43 +130,35 @@ export function createClaudeJsonInvoke<T>(input: CreateClaudeJsonInvokeInput<T>)
       },
     });
 
-    const primary = normalizeClaudeJsonText(result.raw);
-    const attempt = parseJsonWithCandidates<T>(
-      buildJsonParseCandidates(primary),
-      input.validator,
-    );
-
-    if (attempt.ok) {
-      return {
-        rawText: primary,
-        parsed: attempt.parsed as unknown as Record<string, unknown>,
-        meta: {
-          elapsedMs: result.elapsedMs,
-          exitCode: result.exitCode,
-          strategy: attempt.strategy,
-        },
-      };
-    }
-
-    if (input.degradedFallback) {
-      const fallback = input.degradedFallback(primary, attempt.error);
-      if (fallback !== undefined) {
-        return {
-          rawText: primary,
-          parsed: fallback as unknown as Record<string, unknown>,
-          meta: {
-            elapsedMs: result.elapsedMs,
-            exitCode: result.exitCode,
-            degraded: true,
-            fallbackReason: attempt.error instanceof Error ? attempt.error.message : String(attempt.error),
+    const parsed = await parseClaudeJsonTextWithRepair<T>({
+      raw: result.raw,
+      validator: input.validator,
+      degradedFallback: input.degradedFallback,
+      repair: async (malformedJson) => {
+        const repaired = await runPromptJson({
+          prompt: buildJsonRepairPrompt(malformedJson),
+          runtimeEnv: input.runtimeEnv,
+          cwd: input.cwd,
+          abortSignal: input.signal,
+          traceContext: {
+            scope: "topic_init_saga_json_repair",
+            stepLabel: typeof request.context?.role === "string" ? request.context.role : undefined,
           },
-        };
-      }
-    }
+        });
+        return repaired.raw;
+      },
+    });
 
-    throw attempt.error instanceof Error
-      ? attempt.error
-      : new Error(`claudeJsonInvoke: parse failed (${String(attempt.error)})`);
+    return {
+      rawText: parsed.rawText,
+      parsed: parsed.parsed as unknown as Record<string, unknown>,
+      meta: {
+        elapsedMs: result.elapsedMs,
+        exitCode: result.exitCode,
+        ...parsed.meta,
+        degraded: parsed.meta.strategy === "degraded_fallback" ? true : undefined,
+      },
+    };
   };
 }
 

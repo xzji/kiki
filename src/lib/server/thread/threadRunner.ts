@@ -160,15 +160,16 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
   // ---- 3. 计算 patch ----
   const isAllSilent =
     output.actions.length > 0 && output.actions.every((a) => a.kind === "silent");
+  const shouldArchive = output.actions.some((a) => a.kind === "archive_thread");
   const memoryAfter = mergeMemory(ctx.thread.memory, output.memoryDelta);
   const nextTickAt = computeNextTickAtIso(ctx.thread, ctx.now);
 
   return {
     ok: true,
     patch: {
-      status: ctx.thread.status, // tick 成功不改 status；status 切换仅在失败阈值或 archive 时
+      status: shouldArchive ? "archived" : ctx.thread.status,
       lastTickAt,
-      nextTickAt,
+      nextTickAt: shouldArchive ? undefined : nextTickAt,
       memory: memoryAfter,
       silentCount: isAllSilent ? ctx.thread.silentCount + 1 : 0,
       failureCount: 0, // 成功一次即重置
@@ -229,16 +230,25 @@ export type GroupedActions = {
   dispatch: Extract<ThreadTickAction, { kind: "dispatch_task" }>[];
   update: Extract<ThreadTickAction, { kind: "update_task" }>[];
   cancel: Extract<ThreadTickAction, { kind: "cancel_task" }>[];
+  archive: Extract<ThreadTickAction, { kind: "archive_thread" }>[];
   postMessage: Extract<ThreadTickAction, { kind: "post_message" }>[];
   silent: Extract<ThreadTickAction, { kind: "silent" }>[];
 };
 
 export function groupActions(actions: ThreadTickAction[]): GroupedActions {
-  const grouped: GroupedActions = { dispatch: [], update: [], cancel: [], postMessage: [], silent: [] };
+  const grouped: GroupedActions = {
+    dispatch: [],
+    update: [],
+    cancel: [],
+    archive: [],
+    postMessage: [],
+    silent: [],
+  };
   for (const a of actions) {
     if (a.kind === "dispatch_task") grouped.dispatch.push(a);
     else if (a.kind === "update_task") grouped.update.push(a);
     else if (a.kind === "cancel_task") grouped.cancel.push(a);
+    else if (a.kind === "archive_thread") grouped.archive.push(a);
     else if (a.kind === "post_message") grouped.postMessage.push(a);
     else grouped.silent.push(a);
   }

@@ -192,3 +192,51 @@ export function listLatestAgentRunsByThread(threadId: string, limit = 10): Agent
     .all(threadId, limit) as AgentRunRow[];
   return rows.map(mapRow);
 }
+
+export type ThreadRunnerActivityRow = {
+  threadId: string;
+  topicId: string | null;
+  runningCount: number;
+  pendingCount: number;
+  failedCount: number;
+  completedCount: number;
+  totalCount: number;
+  latestStartedAt: string;
+  latestFinishedAt: string | null;
+};
+
+/**
+ * 按 thread 聚合 ThreadRunner 的执行活动（每个 thread 一行），用于「任务执行情况」
+ * 监控面板。同一 thread 的多个 backlog tick 会被折叠为一条记录，避免列表被
+ * 重复的调度心跳淹没。仅统计 `started_at >= sinceIso` 的 run。
+ */
+export function aggregateThreadRunnerActivity(sinceIso?: string): ThreadRunnerActivityRow[] {
+  const db = getDatabase();
+  const where = ["role = 'thread_runner'", "thread_id IS NOT NULL"];
+  const params: unknown[] = [];
+  if (sinceIso) {
+    where.push("started_at >= ?");
+    params.push(sinceIso);
+  }
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        thread_id AS threadId,
+        MAX(topic_id) AS topicId,
+        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS runningCount,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedCount,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completedCount,
+        COUNT(*) AS totalCount,
+        MAX(started_at) AS latestStartedAt,
+        MAX(finished_at) AS latestFinishedAt
+      FROM agent_runs
+      WHERE ${where.join(" AND ")}
+      GROUP BY thread_id
+      ORDER BY latestStartedAt DESC
+    `,
+    )
+    .all(...params) as ThreadRunnerActivityRow[];
+  return rows;
+}

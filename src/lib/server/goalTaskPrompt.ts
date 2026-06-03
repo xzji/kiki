@@ -251,8 +251,10 @@ ${buildStepZeroPrompt(isResume)}
    - awaiting_user 必须为 true。
    - interaction_requirement.question 只用于多字段总问题；如果本轮只有 1 个 field，不要把该 field.question 复制到顶层 question。
    - 同一个问题只能出现在一个字段里：顶层 question、field.question、final_message、summary 不要互相复述；如果 field.question 已经完整表达问题，顶层 question 应留作总问题或留空。
-   - interaction_requirement.fields 必须为每个缺失字段各输出 1 个对象，包含 id、label、question、description、options、inputPlaceholder。
-   - 每个 field.options 必须给出恰好 3 个可直接点击的候选项，而且必须与该字段 question 直接对应。
+   - interaction_requirement.fields 必须为每个缺失字段各输出 1 个对象，包含 id、label、question、description、options、inputPlaceholder、inputKind。
+   - field.inputKind 是 UI 输入形态的权威来源，只能取 text、image、file、image_or_text：纯文本/事实填写用 text；必须上传截图或照片用 image；必须上传文档或附件用 file；截图或文字记录均可用 image_or_text。
+   - field.inputKind 为 text 或 image_or_text 时，必须优先给 3 个可直接点击的候选答案；只有在字段确实需要用户输入精确事实、无法合理枚举时，才允许返回空数组并提供 inputPlaceholder。
+   - field.inputKind 为 image 或 file 时，field.options 必须为空数组，避免把上传动作伪装成候选答案。
    - 候选项必须是“答案”，不是“动作”：禁止写“补充具体信息 / 补充约束或偏好 / 说明暂时无法提供 / 填写其他信息”。
    - 候选项之间要互斥，并覆盖常见主流分支；每项必须自带区分参数（时长、价格、适用场景、条件等），控制在 8-25 字。
      例如：问“偏好的住宿区域和酒店类型”时，应给“海滩区+度假酒店（放松） / 市中心+四星酒店（便利） / 度假区+五星酒店（省心）”。
@@ -344,15 +346,16 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 }
 
 输出模板 B（等待用户，适用于执行前提不足）：
-说明：当 awaiting_user=true 时，interaction_requirement.fields 是权威结构；每个缺失字段必须给 1 个 field，每个 field.options 必须恰好给 3 个候选项。候选项生成模板如下：
+说明：当 awaiting_user=true 时，interaction_requirement.fields 是权威结构；每个缺失字段必须给 1 个 field。候选项生成模板如下：
 1. 每个 field.question 必须是完整自然问句，不要只写字段名。
 2. 每个 field.description 必须说明为什么这个信息会影响任务结果。
-3. 每个 field.options 必须是该问题的具体答案，不是“补充信息/提供偏好/说明暂时无法提供”这类动作。
+3. text/image_or_text 字段必须优先给 3 个具体答案，降低用户填写成本；field.options 必须是该问题的具体答案，不是“补充信息/提供偏好/说明暂时无法提供”这类动作；image/file 字段必须返回空数组。
 4. 同一 field 内候选项之间应互斥，覆盖 2-3 个主流答案。
 5. 每项自带关键参数（时长 / 价格 / 适用场景 / 条件），让用户不点开也能判断。
 6. 每项 8-25 字，口语化，不要写“方案 A / 选项一”。
-7. UI 会为每个 field 自动追加“都不是，我自己描述”，不要把该兜底项写进 options。
-8. 顶层 question、每个 field.question、summary、final_message 之间禁止逐字或近义重复；summary/final_message 只说明状态，不复述具体问题。
+7. UI 会为 text/image_or_text 字段自动追加“都不是，我自己描述”，不要把该兜底项写进 options。
+8. 每个 field.inputKind 必须根据用户实际要采取的动作填写，只能取 text、image、file、image_or_text；禁止让 UI 依赖字段文案猜测输入形态。
+9. 顶层 question、每个 field.question、summary、final_message 之间禁止逐字或近义重复；summary/final_message 只说明状态，不复述具体问题。
 提交前自检：如果任一 field.options 中仍有“补充 XX / 提供 XX / 填写其他信息”等元操作描述，或同一句问题同时出现在顶层 question 与 field.question 中，必须重写后再输出。
 {
   "summary": "需要用户补充关键信息后才能继续",
@@ -374,6 +377,7 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
         "description": "查询交通、住宿或行程安排需要明确出发地。",
         "options": ["北京", "上海", "广州"],
         "inputPlaceholder": "请输入城市名，如 成都",
+        "inputKind": "text",
         "source": "user"
       }
     ],
@@ -425,7 +429,8 @@ ${requiresFileSurface ? FILE_ARTIFACT_PROMPT_FRAGMENT : ""}
 
 示例 2：等待用户补充信息
 - 如果缺少用户才能提供的关键输入，awaiting_user=true。
-- interaction_requirement.fields 必须按缺失字段分组；每个 field.options 必须是 3 个具体答案，例如“海滩区+度假酒店（放松）/ 市中心+四星酒店（便利）/ 度假区+五星酒店（省心）”。
+- interaction_requirement.fields 必须按缺失字段分组；text/image_or_text 字段应优先给 3 个具体答案，例如“海滩区+度假酒店（放松）/ 市中心+四星酒店（便利）/ 度假区+五星酒店（省心）”；image/file 字段必须为空数组。
+- 每个 field.inputKind 必须显式声明 UI 输入形态，例如“截图或确认记录”应返回 image_or_text，“账号文本”应返回 text。
 - 禁止把任一 field.options 写成“补充信息 / 提供偏好 / 填写其他内容”这类动作。
 - 禁止把同一句问题同时写进 interaction_requirement.question 和 fields[].question；单字段时优先保留 fields[].question，顶层 question 写“请补充以下信息”或留空。
 

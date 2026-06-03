@@ -15,6 +15,7 @@ type ReadinessItem = {
   options?: string[];
   optionQuestion?: string;
   inputPlaceholder?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
 };
 
 type TaskReadiness = {
@@ -29,6 +30,7 @@ export type AwaitingDisplayModel = {
   active: boolean;
   origin: AwaitingDisplayOrigin;
   panelTitle: string;
+  statusLabel: string;
   notice?: string;
   headline?: string;
   fields: MissingFieldQuestion[];
@@ -40,12 +42,37 @@ export type AwaitingDisplayModel = {
 
 function titleFor(instance: TaskInstance) {
   const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
-  if (type === "answer") return "等待你作答";
-  if (type === "provide_context") return "等待你补充信息";
-  if (type === "perform_offline_action") return "等待你完成线下动作";
+  if (type === "answer") return "请回答问题";
+  if (type === "provide_context") return "请补充任务所需信息";
+  if (type === "perform_offline_action") return "请完成线下操作";
   if (type === "agent_revision_required") return "等待 Agent 补齐";
   if (type === "deliverable_gap") return "未通过验收";
-  return "等待你确认";
+  return "请确认后继续";
+}
+
+function fieldActionText(field: MissingFieldQuestion) {
+  const label = field.label.trim();
+  if (field.inputKind === "image_or_text") return `上传或填写${label}`;
+  if (field.inputKind === "image") return `上传${label}`;
+  if (field.inputKind === "file") return `上传${label}`;
+  return `填写${label}`;
+}
+
+function titleFromFields(instance: TaskInstance, fields: MissingFieldQuestion[]) {
+  if (!fields.length) return titleFor(instance);
+  return `请${fields.map(fieldActionText).join("、")}`;
+}
+
+function statusLabelFor(instance: TaskInstance, fields: MissingFieldQuestion[]) {
+  const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
+  if (fields.some((field) => field.inputKind === "image" || field.inputKind === "file")) return "需上传";
+  if (fields.some((field) => field.inputKind === "image_or_text")) return "需上传/填写";
+  if (type === "answer") return "需作答";
+  if (type === "provide_context") return "需填写";
+  if (type === "perform_offline_action") return "需线下完成";
+  if (type === "agent_revision_required") return "等待 Agent";
+  if (type === "deliverable_gap") return "未通过验收";
+  return "需确认";
 }
 
 function isTaskReadiness(value: unknown): value is TaskReadiness {
@@ -80,6 +107,7 @@ function fieldsFromInstance(instance: TaskInstance): MissingFieldQuestion[] {
     description: item.description || item.reason || item.label,
     options: item.options?.length ? item.options : missingItems.length === 1 ? rawOptions : [],
     inputPlaceholder: item.inputPlaceholder,
+    inputKind: item.inputKind,
     source: item.source,
   }));
 }
@@ -144,7 +172,8 @@ export function buildAwaitingDisplayModel(
   return {
     active,
     origin,
-    panelTitle: titleFor(instance),
+    panelTitle: titleFromFields(instance, fields),
+    statusLabel: statusLabelFor(instance, fields),
     notice: active && headline ? noticeFrom(instance) : undefined,
     headline,
     fields,

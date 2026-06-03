@@ -47,6 +47,54 @@ export async function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload> 
   return (await response.json()) as RuntimeStatePayload;
 }
 
+export type ThreadRunnerActivity = {
+  threadId: string;
+  topicId: string | null;
+  runningCount: number;
+  pendingCount: number;
+  failedCount: number;
+  completedCount: number;
+  totalCount: number;
+  latestStartedAt: string;
+  latestFinishedAt: string | null;
+};
+
+export type SagaActivity = {
+  id: string;
+  topicId: string;
+  type: "topic_init" | "thread_loop";
+  status: "pending" | "running" | "awaiting_user" | "completed" | "failed";
+  currentStep?: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
+export type RuntimeJobActivity = {
+  jobId: string;
+  taskInstanceId: string;
+  taskId: string | null;
+  goalId: string | null;
+  status: "queued" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+};
+
+export type RuntimeActivityPayload = {
+  ok: boolean;
+  threadRunners: ThreadRunnerActivity[];
+  sagas: SagaActivity[];
+  jobs: RuntimeJobActivity[];
+};
+
+export async function fetchRuntimeActivity(): Promise<RuntimeActivityPayload> {
+  const response = await fetch("/api/runtime/activity", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("运行时执行活动获取失败");
+  }
+  return (await response.json()) as RuntimeActivityPayload;
+}
+
 export async function fetchRuntimeDaemonStatus(): Promise<RuntimeDaemonStatusPayload> {
   const response = await fetch("/api/runtime/daemon/status", { cache: "no-store" });
   if (!response.ok) {

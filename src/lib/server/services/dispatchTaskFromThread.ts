@@ -40,8 +40,8 @@ export type DispatchTaskFromThreadResult = {
  *  - title          ← TaskDraft.title
  *  - description    ← TaskDraft.objective + acceptanceCriteria（拼接）
  *  - expectedOutcome ← TaskDraft.deliverable（一定有；schema 已校验）
- *  - taskType       = "one_shot"（硬约束）
- *  - triggerRule    ← TaskDraft.triggerCondition || "立即触发"
+ *  - taskType       ← draft.taskType / cadence / triggerCondition 推断
+ *  - triggerRule    ← draft.triggerRule / cadence / triggerCondition / "立即触发"
  *  - executionKind  = "general"（默认；后续 PR15 可替换）
  */
 function descriptionFromDraft(draft: Partial<TaskDraft>, fallback = "") {
@@ -52,15 +52,26 @@ function descriptionFromDraft(draft: Partial<TaskDraft>, fallback = "") {
 }
 
 function inferTaskTiming(draft: Partial<TaskDraft>, fallback?: Pick<Task, "taskType" | "triggerRule">) {
+  const explicitTaskType = draft.taskType;
+  const explicitTriggerRule = draft.triggerRule?.trim();
   const cadence = draft.cadence?.trim();
   const triggerCondition = draft.triggerCondition?.trim();
-  if (cadence || triggerCondition) {
-    const taskType = "repeat" as const;
+  if (explicitTriggerRule || cadence || triggerCondition) {
+    const taskType = explicitTaskType ?? (cadence || triggerCondition ? "repeat" : "one_shot");
     const triggerRule = normalizeConcreteTriggerRule(
-      cadence || `满足条件：${triggerCondition}`,
+      explicitTriggerRule || cadence || `满足条件：${triggerCondition}`,
       taskType,
     );
     return { taskType, triggerRule };
+  }
+  if (explicitTaskType) {
+    return {
+      taskType: explicitTaskType,
+      triggerRule: normalizeConcreteTriggerRule(
+        explicitTaskType === "one_shot" ? "立即触发" : "每天 09:00",
+        explicitTaskType,
+      ),
+    };
   }
   if (fallback) {
     return {

@@ -72,9 +72,15 @@ export function isThreadDue(
 
   // 固定间隔类型：优先信任 nextTickAt；缺失或异常时回落到 computeNextTickAt
   if (explicitNext) {
-    return explicitNext.getTime() <= now.getTime()
-      ? { scheduledAt: explicitNext, reason: thread.lastTickAt ? "interval_due" : "first_tick" }
-      : null;
+    if (explicitNext.getTime() > now.getTime()) return null;
+    if (!thread.lastTickAt) return { scheduledAt: explicitNext, reason: "first_tick" };
+    const last = parseDateSafe(thread.lastTickAt);
+    const expectedReviewAt = last ? last.getTime() + parsed.intervalMs : undefined;
+    const reason =
+      expectedReviewAt !== undefined && explicitNext.getTime() < expectedReviewAt
+        ? "event_triggered"
+        : "interval_due";
+    return { scheduledAt: explicitNext, reason };
   }
   // 既无 nextTickAt 也无 lastTickAt → 首次触发立即 due
   if (!thread.lastTickAt) {

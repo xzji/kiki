@@ -170,6 +170,7 @@ export function updateThread(
  * thread 已是 paused/archived 则原样返回（不做无意义写入）。
  */
 export function markThreadPaused(threadId: string, _reason: string): Thread {
+  void _reason;
   const current = findThreadById(threadId);
   if (!current) throw new ThreadNotFoundError(threadId);
   if (current.status === "paused" || current.status === "archived") return current;

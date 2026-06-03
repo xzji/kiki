@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { ChangeEvent, useMemo, useRef, useState } from "react";
 
 import { respondGoalInstance } from "@/lib/api/goal-commands";
-import { buildAwaitingDisplayModel, questionForField } from "@/lib/taskInstance/awaitingDisplayModel";
+import { buildAwaitingDisplayModel, isSameDisplayText, questionForField } from "@/lib/taskInstance/awaitingDisplayModel";
 import type { MissingFieldQuestion, Task, TaskInstance } from "@/types/kiki";
 
 function primaryLabelFor(instance: TaskInstance) {
@@ -106,6 +106,13 @@ function pickFieldAnswerOptions(values: string[]) {
 
 type PromptField = MissingFieldQuestion;
 
+type UploadedAttachment = {
+  name: string;
+  url: string;
+  size: number;
+  type?: string;
+};
+
 function optionTextForSubmit(option: string, instance: TaskInstance, item?: Pick<PromptField, "label">) {
   if (item) return `${item.label}：${option}`;
   const type = instance.awaitingUser?.interactionRequirement?.type;
@@ -138,6 +145,14 @@ function optionDotClass(selected: boolean) {
   ].join(" ");
 }
 
+function fieldDescriptionFor(item: PromptField) {
+  const title = item.label.trim();
+  const candidates = [item.question, item.description]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  return candidates.find((value) => !isSameDisplayText(value, title));
+}
+
 export function AwaitingUserResumePanel({
   task,
   instance,
@@ -149,17 +164,24 @@ export function AwaitingUserResumePanel({
 }) {
   const [selectedOption, setSelectedOption] = useState("");
   const [selectedItemOptions, setSelectedItemOptions] = useState<Record<string, string>>({});
+  const [selectedItemFiles, setSelectedItemFiles] = useState<Record<string, UploadedAttachment[]>>({});
   const [customText, setCustomText] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [customMode, setCustomMode] = useState(false);
   const [customItemModes, setCustomItemModes] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<"approve" | "revise" | null>(null);
+  const [uploadingFieldId, setUploadingFieldId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const blocker = instance.awaitingUser?.blocker ?? instance.blocker;
   const requirement = instance.awaitingUser?.interactionRequirement;
   const displayModel = useMemo(() => buildAwaitingDisplayModel(task, instance, "card"), [task, instance]);
   const promptFields = useMemo(
-    () => displayModel.fields.map((field) => ({ ...field, options: pickFieldAnswerOptions(field.options ?? []) })),
+    () =>
+      displayModel.fields.map((field) => ({
+        ...field,
+        options: field.inputKind === "image" || field.inputKind === "file" ? [] : pickFieldAnswerOptions(field.options ?? []),
+      })),
     [displayModel.fields],
   );
   const type = requirement?.type;
@@ -175,6 +197,16 @@ export function AwaitingUserResumePanel({
     if (item) {
       setSelectedItemOptions((current) => ({ ...current, [item.id]: option }));
       setCustomItemModes((current) => ({ ...current, [item.id]: false }));
+      setSelectedItemFiles((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setCustomFields((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
       return;
     }
     setSelectedOption(option);
@@ -185,6 +217,16 @@ export function AwaitingUserResumePanel({
     setError(null);
     if (item) {
       setCustomItemModes((current) => ({ ...current, [item.id]: true }));
+      setSelectedItemOptions((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setSelectedItemFiles((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
       return;
     }
     setCustomMode(true);
@@ -195,6 +237,16 @@ export function AwaitingUserResumePanel({
     if (item) {
       setCustomItemModes((current) => ({ ...current, [item.id]: true }));
       setCustomFields((current) => ({ ...current, [item.id]: value }));
+      setSelectedItemOptions((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setSelectedItemFiles((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
       return;
     }
     setCustomMode(true);
@@ -202,8 +254,78 @@ export function AwaitingUserResumePanel({
   };
 
   const feedbackValueForItem = (item: PromptField) => {
+    const fileNames = selectedItemFiles[item.id] ?? [];
+    if (fileNames.length) {
+      const fileLabel = item.inputKind === "file" ? "已选择文件" : "已选择截图";
+      return `${fileLabel}：${fileNames.map((file) => `${file.name}（${file.url}）`).join("、")}`;
+    }
     if (customItemModes[item.id]) return customFields[item.id]?.trim() ?? "";
     return selectedItemOptions[item.id]?.trim() ?? "";
+  };
+
+  const allowsTextInput = (item: PromptField) =>
+    item.inputKind !== "image" && item.inputKind !== "file";
+
+  const uploadAttachment = async (file: File): Promise<UploadedAttachment> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(`/api/goals/instances/${encodeURIComponent(instance.id)}/attachments`, {
+      method: "POST",
+      body: formData,
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { attachment?: UploadedAttachment; reason?: string }
+      | null;
+    if (!response.ok || !payload?.attachment) {
+      throw new Error(payload?.reason || "附件上传失败");
+    }
+    return payload.attachment;
+  };
+
+  const chooseFiles = async (item: PromptField, event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    setUploadingFieldId(item.id);
+    try {
+      const uploadedFiles = await Promise.all(files.map(uploadAttachment));
+      setError(null);
+      setSelectedItemFiles((current) => ({ ...current, [item.id]: uploadedFiles }));
+      setCustomItemModes((current) => ({ ...current, [item.id]: false }));
+      setSelectedItemOptions((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setCustomFields((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "附件上传失败");
+    } finally {
+      setUploadingFieldId(null);
+    }
+  };
+
+  const fieldAcceptFor = (item: PromptField) => {
+    if (item.inputKind === "image" || item.inputKind === "image_or_text") return "image/*";
+    return undefined;
+  };
+
+  const shouldShowFilePicker = (item: PromptField) =>
+    item.inputKind === "image" || item.inputKind === "file" || item.inputKind === "image_or_text";
+
+  const customActionLabelFor = (item: PromptField, hasOptions: boolean) => {
+    if (item.inputKind === "image_or_text") return "我来填写记录";
+    return hasOptions ? "都不是，我自己描述" : "我来填写";
+  };
+
+  const inputPlaceholderFor = (item: PromptField) => {
+    if (item.inputPlaceholder?.trim()) return item.inputPlaceholder.trim();
+    if (item.inputKind === "image_or_text") return `无法上传时，填写${item.label}的文字记录`;
+    return `输入${item.label}`;
   };
 
   const buildFeedback = () => {
@@ -222,6 +344,10 @@ export function AwaitingUserResumePanel({
 
   const submit = async (approved: boolean) => {
     if (!blocker) return;
+    if (uploadingFieldId) {
+      setError("附件仍在上传中，请上传完成后再提交。");
+      return;
+    }
     const normalizedFeedback = buildFeedback();
     if ((type === "answer" || type === "provide_context" || customMode) && !normalizedFeedback) {
       setError("请先选择一个选项，或填写你要补充的信息。");
@@ -247,6 +373,7 @@ export function AwaitingUserResumePanel({
       });
       setSelectedOption("");
       setSelectedItemOptions({});
+      setSelectedItemFiles({});
       setCustomText("");
       setCustomFields({});
       setCustomMode(false);
@@ -272,15 +399,24 @@ export function AwaitingUserResumePanel({
       <div className="mt-4 text-[14px] leading-6 text-[#374151]">{headline}</div>
       {promptFields.length ? (
         <div className="mt-3 space-y-3">
-          {promptFields.map((item) => {
+          {promptFields.map((item, index) => {
             const itemOptions = pickFieldAnswerOptions(item.options);
             const customSelected = Boolean(customItemModes[item.id]);
-            const itemQuestion = questionForField(item);
+            const selectedFiles = selectedItemFiles[item.id] ?? [];
+            const itemTitle = item.label.trim() || questionForField(item);
+            const itemDescription = fieldDescriptionFor(item);
             const hideItemQuestion = displayModel.hideFieldQuestions.has(item.id);
             return (
               <div key={item.id}>
                 {hideItemQuestion ? null : (
-                  <div className="text-[12px] font-medium text-[#6B7280]">{itemQuestion}</div>
+                  <div>
+                    <div className="text-[13px] font-semibold text-[#1F2328]">
+                      {index + 1}. {itemTitle}
+                    </div>
+                    {itemDescription ? (
+                      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{itemDescription}</div>
+                    ) : null}
+                  </div>
                 )}
                 <div className={`${hideItemQuestion ? "" : "mt-2"} space-y-1.5`}>
                   {itemOptions.map((option) => {
@@ -297,35 +433,68 @@ export function AwaitingUserResumePanel({
                       </button>
                     );
                   })}
-                  <div
-                    role="radio"
-                    aria-checked={customSelected}
-                    tabIndex={0}
-                    onClick={() => chooseCustom(item)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        chooseCustom(item);
-                      }
-                    }}
-                    className={`${optionRowClass(customSelected)} grid cursor-pointer grid-cols-[8px_auto_minmax(0,1fr)]`}
-                  >
-                    <span className={optionDotClass(customSelected)} />
-                    <button
-                      type="button"
+                  {shouldShowFilePicker(item) ? (
+                    <div className="flex flex-wrap items-center gap-2 py-1">
+                      <input
+                        ref={(node) => {
+                          fileInputRefs.current[item.id] = node;
+                        }}
+                        type="file"
+                        accept={fieldAcceptFor(item)}
+                        multiple
+                        className="hidden"
+                        onChange={(event) => void chooseFiles(item, event)}
+                      />
+                      <button
+                        type="button"
+                        disabled={uploadingFieldId === item.id}
+                        onClick={() => fileInputRefs.current[item.id]?.click()}
+                        className="rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] font-medium text-[#374151] transition hover:border-[#1F2328] hover:text-[#1F2328] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {uploadingFieldId === item.id ? "上传中..." : item.inputKind === "file" ? "上传文件" : "上传截图"}
+                      </button>
+                      {selectedFiles.length ? (
+                        <span className="min-w-0 truncate text-[12px] text-[#57606A]">
+                          已上传：{selectedFiles.map((file) => file.name).join("、")}
+                        </span>
+                      ) : (
+                        <span className="text-[12px] text-[#8C9198]">
+                          {item.inputKind === "image_or_text" ? "也可以直接填写文字记录" : "请先上传后再提交"}
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
+                  {allowsTextInput(item) ? (
+                    <div
+                      role="radio"
+                      aria-checked={customSelected}
+                      tabIndex={0}
                       onClick={() => chooseCustom(item)}
-                      className="shrink-0 text-left text-[13px] text-inherit"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          chooseCustom(item);
+                        }
+                      }}
+                      className={`${optionRowClass(customSelected)} grid cursor-pointer grid-cols-[8px_auto_minmax(0,1fr)]`}
                     >
-                      {itemOptions.length ? "都不是，我自己描述" : "我来填写"}
-                    </button>
-                    <input
-                      value={customFields[item.id] ?? ""}
-                      onFocus={() => chooseCustom(item)}
-                      onChange={(event) => updateCustomValue(event.target.value, item)}
-                      placeholder={item.inputPlaceholder?.trim() || `输入${item.label}`}
-                      className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
-                    />
-                  </div>
+                      <span className={optionDotClass(customSelected)} />
+                      <button
+                        type="button"
+                        onClick={() => chooseCustom(item)}
+                        className="shrink-0 text-left text-[13px] text-inherit"
+                      >
+                        {customActionLabelFor(item, itemOptions.length > 0)}
+                      </button>
+                      <input
+                        value={customFields[item.id] ?? ""}
+                        onFocus={() => chooseCustom(item)}
+                        onChange={(event) => updateCustomValue(event.target.value, item)}
+                        placeholder={inputPlaceholderFor(item)}
+                        className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
@@ -386,16 +555,16 @@ export function AwaitingUserResumePanel({
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              disabled={Boolean(pending)}
+              disabled={Boolean(pending) || Boolean(uploadingFieldId)}
               onClick={() => void submit(true)}
               className="rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#2B2B2B] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {pending === "approve" ? "提交中..." : primaryLabelFor(instance)}
+              {pending === "approve" ? "提交中..." : uploadingFieldId ? "上传中..." : primaryLabelFor(instance)}
             </button>
             {showReviseButton ? (
               <button
                 type="button"
-                disabled={Boolean(pending)}
+                disabled={Boolean(pending) || Boolean(uploadingFieldId)}
                 onClick={() => void submit(false)}
                 className="bg-transparent px-0 py-2 text-[13px] text-[#6B7280] hover:text-[#1F2933] disabled:cursor-not-allowed disabled:opacity-50"
               >

@@ -12,12 +12,14 @@ import {
   Sidebar,
 } from "@/components/layout/Sidebar";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { TaskMonitorDrawer } from "@/components/task/TaskMonitorDrawer";
 import { TaskDetailDrawer } from "@/components/topic/TaskDetailDrawer";
 import { useTriggerEngine } from "@/hooks/useTriggerEngine";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
+import { useTaskMonitorStore } from "@/stores/taskMonitorStore";
 
 function DrawerTaskIdSyncer() {
   const pathname = usePathname();
@@ -55,9 +57,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const assistantOpen = hydrated && isOpen;
   const taskDrawerOpen = useTaskDrawerStore((state) => Boolean(state.activeTaskId));
   const closeTaskDrawer = useTaskDrawerStore((state) => state.close);
+  const closeTaskMonitor = useTaskMonitorStore((state) => state.closeMonitor);
   useEffect(() => {
     closeTaskDrawer();
-  }, [pathname, closeTaskDrawer]);
+    closeTaskMonitor();
+  }, [pathname, closeTaskDrawer, closeTaskMonitor]);
 
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
   const leftPadding = navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
@@ -84,6 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Suspense fallback={null}>
         <DrawerTaskIdSyncer />
       </Suspense>
+      <TaskMonitorDrawer />
       <TaskDetailDrawer />
       <AssistantSidebar />
       {!taskDrawerOpen ? <AssistantFab /> : null}

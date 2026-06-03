@@ -57,6 +57,7 @@ import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type {
   Goal,
   InteractionRequirement,
+  MissingFieldQuestion,
   SubGoal,
   Task,
   TaskInstance,
@@ -597,6 +598,7 @@ function buildOptionGenerationContext(input: RunGoalTaskInput, options: {
       label: item.label,
       description: item.description,
       reason: item.reason,
+      inputKind: item.inputKind,
     })),
     resumeContext: input.resumeContext,
     seedOptions: normalizeConfirmationOptionLabels(options.seedOptions ?? []),
@@ -765,16 +767,21 @@ function applyGeneratedOptionsToReadiness(
     if (item.status !== "missing_user" || item.source !== "user") return item;
     const generatedMeta = generatedOptionMetaForItem(result, item);
     const generatedOptions = generatedOptionsForItem(result, item);
+    const inputKind = generatedMeta?.inputKind ?? item.inputKind;
     return {
       ...item,
-      options: chooseReadinessOptions({
-        item,
-        question: optionsContext.question,
-        seedOptions: readiness.missingUserInfo.length === 1 ? optionsContext.seedOptions ?? [] : [],
-        generatedOptions,
-      }),
+      options:
+        inputKind === "image" || inputKind === "file"
+          ? []
+          : chooseReadinessOptions({
+              item,
+              question: optionsContext.question,
+              seedOptions: readiness.missingUserInfo.length === 1 ? optionsContext.seedOptions ?? [] : [],
+              generatedOptions,
+            }),
       optionQuestion: generatedMeta?.question,
       inputPlaceholder: generatedMeta?.inputPlaceholder,
+      inputKind,
     };
   });
   return refreshReadinessCollections(items, readiness.generatedAt, readiness.summary);
@@ -790,6 +797,90 @@ async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readine
     }),
   );
   return applyGeneratedOptionsToReadiness(readiness, result, { question, seedOptions });
+}
+
+function fieldNeedsGeneratedOptions(field: MissingFieldQuestion) {
+  if (field.inputKind === "image" || field.inputKind === "file") return false;
+  return (field.options?.length ?? 0) < 3;
+}
+
+function readinessItemFromField(field: MissingFieldQuestion): TaskReadinessInfoItem {
+  return {
+    id: field.id,
+    label: field.label,
+    description: field.description || field.question || field.label,
+    source: field.source,
+    status: "missing_user",
+    reason: field.description || field.question || field.label,
+    options: field.options,
+    optionQuestion: field.question,
+    inputPlaceholder: field.inputPlaceholder,
+    inputKind: field.inputKind,
+  };
+}
+
+async function enrichAwaitingUserFieldOptions(
+  input: RunGoalTaskInput,
+  result: ParsedTaskRunnerResult,
+): Promise<ParsedTaskRunnerResult> {
+  if (!result.awaitingUser || !result.interactionRequirement.fields?.length) return result;
+  const fields = result.interactionRequirement.fields;
+  const fieldsToGenerate = fields.filter(fieldNeedsGeneratedOptions);
+  if (!fieldsToGenerate.length) return result;
+
+  const generated = await runOptionGenerationPrompt(
+    input,
+    buildOptionGenerationContext(input, {
+      question: result.interactionRequirement.question || result.awaitingReason || result.interactionRequirement.reason,
+      missingItems: fieldsToGenerate.map(readinessItemFromField),
+      seedOptions: result.interactionRequirement.options ?? [],
+    }),
+  );
+  if (!generated) return result;
+
+  const nextFields = fields.map((field) => {
+    if (!fieldNeedsGeneratedOptions(field)) return field;
+    const generatedMeta = generatedOptionMetaForItem(generated, readinessItemFromField(field));
+    const generatedOptions = generatedOptionsForItem(generated, readinessItemFromField(field));
+    const inputKind = generatedMeta?.inputKind ?? field.inputKind;
+    const options = uniqueStrings([
+      ...(field.options ?? []),
+      ...generatedOptions,
+    ]).slice(0, 3);
+    if (inputKind === "image" || inputKind === "file") {
+      return {
+        ...field,
+        question: generatedMeta?.question || field.question,
+        options: [],
+        inputPlaceholder: generatedMeta?.inputPlaceholder || field.inputPlaceholder,
+        inputKind,
+      };
+    }
+    if (!options.length) return field;
+    return {
+      ...field,
+      question: generatedMeta?.question || field.question,
+      options,
+      inputPlaceholder: generatedMeta?.inputPlaceholder || field.inputPlaceholder,
+      inputKind,
+    };
+  });
+  const nextOptions = singleFieldOptions(nextFields);
+  const nextRequirement: InteractionRequirement = {
+    ...result.interactionRequirement,
+    fields: nextFields,
+    options: nextOptions,
+    suggestedActions: fieldsSuggestedActions(nextFields),
+  };
+  return {
+    ...result,
+    suggestedActions: nextRequirement.suggestedActions,
+    interactionRequirement: nextRequirement,
+    structuredOutput: {
+      ...(result.structuredOutput ?? {}),
+      interactionRequirement: nextRequirement,
+    },
+  };
 }
 
 function applyInteractionOptionsToSingleMissingReadiness(
@@ -1999,7 +2090,10 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceRuntime: runtime };
   }
 
-  let currentResult = resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult));
+  let currentResult = await enrichAwaitingUserFieldOptions(
+    input,
+    resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult)),
+  );
   if (currentResult.awaitingUser) {
     return {
       ...currentResult,
@@ -2133,7 +2227,20 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       });
       return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
     }
-    currentResult = resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult));
+    currentResult = await enrichAwaitingUserFieldOptions(
+      input,
+      resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult)),
+    );
+    if (currentResult.awaitingUser) {
+      return {
+        ...currentResult,
+        rawOutput: local.rawOutput,
+        trajectory: state.trajectory,
+        localValidationReport: local.localValidationReport,
+        acceptanceReport,
+        acceptanceRuntime: runtime,
+      };
+    }
   }
 
   const failed = buildUnfinishedResult(input, {

@@ -221,6 +221,7 @@ export function runPromptDuplicationGuardSpecs() {
     { key: "dispatch_task", rule: "约束 3：动作之一 dispatch_task" },
     { key: "update_task", rule: "约束 3：动作之一 update_task" },
     { key: "cancel_task", rule: "约束 3：动作之一 cancel_task" },
+    { key: "archive_thread", rule: "约束 3：动作之一 archive_thread" },
     { key: "post_message", rule: "约束 3：动作之一 post_message" },
     { key: "silent", rule: "约束 3：动作之一 silent" },
     { key: "能在本次 tick 一段话讲完的", rule: "约束 4：判断规则" },
@@ -259,6 +260,11 @@ export function runPromptDuplicationGuardSpecs() {
     threadRunnerPrompt.includes('cancel_task: { "kind": "cancel_task", "threadId": "thread-runner-spec"'),
     true,
     "ThreadRunner prompt 必须给出 cancel_task.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
+  );
+  assert.equal(
+    threadRunnerPrompt.includes('archive_thread: { "kind": "archive_thread", "threadId": "thread-runner-spec"'),
+    true,
+    "ThreadRunner prompt 必须给出 archive_thread.threadId 的显式 JSON 形状，避免真实 LLM 输出缺字段",
   );
 
   // ThreadRunner prompt 同样禁止出现已废弃字面量
