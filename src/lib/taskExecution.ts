@@ -3,7 +3,6 @@
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { cancelGoalInstance } from "@/lib/api/goal-commands";
 import { startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
-import { createGeneratedInstance } from "@/lib/goalFactory";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
@@ -25,6 +24,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       instanceId: target.id,
       reason: "用户暂停任务执行",
     });
+    await syncGoalsFromRuntimeSnapshot();
     return;
   }
 
@@ -55,31 +55,11 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     if (run.goals) {
       useGoalStore.getState().applyGoalsProjection(run.goals, run.revision);
     }
+    await syncGoalsFromRuntimeSnapshot();
 
     if (run.outcome === "awaiting_user") {
-      ensureTaskInstanceProjection({
-        task: current.task,
-        taskInstanceId: run.taskInstanceId,
-        targetInstance,
-        status: "awaiting_user",
-      });
-      useGoalStore.getState().applyInstanceProgressProjection({
-        taskId: current.task.id,
-        instanceId: run.taskInstanceId,
-        progress: run.progress,
-        logs: [],
-        trajectory: [],
-        waitingReason: run.waitingReason,
-      });
       return;
     }
-
-    ensureTaskInstanceProjection({
-      task: current.task,
-      taskInstanceId: run.taskInstanceId,
-      targetInstance,
-      status: "in_progress",
-    });
 
     if (run.outcome === "already_running" && !run.requestId) {
       await syncGoalsFromRuntimeSnapshot();
@@ -94,25 +74,12 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       requestId,
       taskInstanceId: run.taskInstanceId,
       onProgress: (payload) => {
-        useGoalStore.getState().applyInstanceProgressProjection({
-          taskId: current.task.id,
-          instanceId: run.taskInstanceId,
-          progress: payload.progress,
-          logs: payload.logs,
-          trajectory: payload.trajectory,
-          waitingReason: payload.waitingReason,
-        });
+        void payload;
+        void syncGoalsFromRuntimeSnapshot();
       },
     })
-      .then((result) => {
-        useGoalStore.getState().applyInstanceProgressProjection({
-          taskId: current.task.id,
-          instanceId: run.taskInstanceId,
-          progress: result.progress,
-          logs: result.logs,
-          trajectory: result.trajectory,
-          waitingReason: result.waitingReason,
-        });
+      .then(() => {
+        void syncGoalsFromRuntimeSnapshot();
       })
       .catch((error) => {
         console.error("手动执行任务失败", error);
@@ -153,64 +120,6 @@ function resolveTargetInstance(task: Task, action: TaskExecutionAction, instance
   const sorted = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   if (action === "resume") return sorted.find((instance) => instance.status === "paused") ?? null;
   return null;
-}
-
-function getTaskInstance(taskId: string, instanceId: string) {
-  return findTaskLocation(selectVisibleGoals(useGoalStore.getState()), taskId)?.task.instances.find((instance) => instance.id === instanceId);
-}
-
-function buildOptimisticTaskInstance(input: {
-  task: Task;
-  taskInstanceId: string;
-  targetInstance?: TaskInstance;
-  status: TaskInstance["status"];
-}) {
-  const createdAt = input.targetInstance?.createdAt ?? new Date().toISOString();
-  const base = input.targetInstance ?? createGeneratedInstance(input.task, createdAt);
-  const intro =
-    input.targetInstance?.intro?.trim() || `用户手动发起执行“${input.task.title.replace(/^任务\d+：/, "")}”。`;
-  const phase =
-    input.status === "awaiting_user"
-      ? "awaiting_user"
-      : input.status === "in_progress"
-        ? "running"
-        : input.status === "completed"
-          ? "completed"
-          : input.status === "error"
-            ? "failed"
-            : input.status === "paused"
-              ? "paused"
-              : "queued";
-  return {
-    ...base,
-    id: input.taskInstanceId,
-    taskId: input.task.id,
-    status: input.status,
-    intro,
-    createdAt,
-    execution: {
-      ...base.execution,
-      phase,
-      status: input.status,
-      startedAt: input.status === "pending" ? base.execution?.startedAt : base.execution?.startedAt ?? createdAt,
-      finishedAt: undefined,
-      lastUpdatedAt: new Date().toISOString(),
-    },
-    awaitingUser: input.status === "awaiting_user" ? base.awaitingUser : undefined,
-  } satisfies TaskInstance;
-}
-
-function ensureTaskInstanceProjection(input: {
-  task: Task;
-  taskInstanceId: string;
-  targetInstance?: TaskInstance;
-  status: TaskInstance["status"];
-}) {
-  const projected = getTaskInstance(input.task.id, input.taskInstanceId);
-  if (projected && projected.status !== "pending") return;
-  useGoalStore
-    .getState()
-    .upsertTaskInstanceProjection(input.task.id, buildOptimisticTaskInstance(input));
 }
 
 async function syncGoalsFromRuntimeSnapshot() {

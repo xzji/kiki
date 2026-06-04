@@ -1,15 +1,25 @@
 "use client";
 
-import { ChevronDown, FileText, Sparkles, TerminalSquare } from "lucide-react";
+import { ChevronDown, FileText, Sparkles, TerminalSquare, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { formatClock, formatChineseDate } from "@/lib/date";
 import { useVirtualClock } from "@/hooks/useVirtualClock";
 import { seedToeflMockGoalPlanConversation } from "@/lib/devMockSessions";
+import { resetLocalDevData } from "@/lib/api/runtime-daemon";
 import { BackendLogsDialog } from "@/components/settings/BackendLogsPanel";
 import { ClaudeTraceDialog } from "@/components/dev/ClaudeTracePanel";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
+
+const RESET_LOCAL_STORAGE_KEYS = [
+  "kiki.conversations",
+  "kiki.conversations.migrated",
+  "kiki.conversations.migrated.failed_at",
+  "kiki.goal-events.cursor.v1",
+  "kiki.runtime-event.metrics.v1",
+  "kiki.task-monitor",
+];
 
 export function DevPanel() {
   const router = useRouter();
@@ -17,6 +27,8 @@ export function DevPanel() {
   const [expanded, setExpanded] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [claudeTraceOpen, setClaudeTraceOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
 
@@ -36,6 +48,32 @@ export function DevPanel() {
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [expanded, logsOpen, claudeTraceOpen]);
+
+  const handleResetLocalData = async () => {
+    if (resetting) return;
+    const confirmed = window.confirm(
+      "确认清空本地测试数据？该操作会停止 worker/Claude 进程并删除本地会话、执行记录、workspace、storage 和备份；保留 Runtime 配置与当前 Web 服务。",
+    );
+    if (!confirmed) return;
+
+    setResetting(true);
+    setResetMessage(null);
+    try {
+      const payload = await resetLocalDevData();
+      for (const key of RESET_LOCAL_STORAGE_KEYS) {
+        window.localStorage.removeItem(key);
+      }
+      const stopped = payload.result?.stoppedProcesses.length ?? 0;
+      const deleted = payload.result?.deletedPaths.length ?? 0;
+      setResetMessage(`已清空本地测试数据：停止 ${stopped} 个进程，删除 ${deleted} 项。`);
+      router.refresh();
+      window.location.href = "/";
+    } catch (error) {
+      setResetMessage(error instanceof Error ? error.message : "清空本地测试数据失败");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <>
@@ -100,6 +138,26 @@ export function DevPanel() {
                   <Sparkles className="h-3.5 w-3.5" />
                   Mock 托福规划会话
                 </button>
+              </div>
+              <div className="mt-2 rounded-lg border border-[#FCA5A5] bg-[#FEF2F2] p-3">
+                <div className="text-[11px] font-medium text-[#991B1B]">危险操作</div>
+                <div className="mt-1 text-[11px] leading-5 text-[#B91C1C]">
+                  停止本地 worker/Claude 进程，并删除会话、执行记录、DB、workspace、storage、备份和运行日志。保留 Runtime 配置与当前 Web 服务。
+                </div>
+                <button
+                  type="button"
+                  disabled={resetting}
+                  onClick={handleResetLocalData}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#EF4444] bg-white px-3 py-2 text-xs text-[#B91C1C] hover:bg-[#FEE2E2] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {resetting ? "清空中..." : "清空本地测试数据"}
+                </button>
+                {resetMessage ? (
+                  <div className="mt-2 rounded-md bg-white/70 px-2 py-1.5 text-[11px] leading-5 text-[#991B1B]">
+                    {resetMessage}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

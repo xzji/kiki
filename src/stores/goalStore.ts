@@ -223,12 +223,6 @@ function inferSubGoalEstimatedDuration(subGoal: Goal["subGoals"][number]) {
   }, 0);
 }
 
-function inferSubGoalWeight(goal: Goal, subGoal: Goal["subGoals"][number]) {
-  const totalTaskCount = goal.subGoals.reduce((count, item) => count + item.tasks.length, 0);
-  if (totalTaskCount === 0 || subGoal.tasks.length === 0) return undefined;
-  return Number((subGoal.tasks.length / totalTaskCount).toFixed(2));
-}
-
 function inferSubGoalWhy(
   goal: Goal,
   subGoal: Goal["subGoals"][number],
@@ -295,7 +289,6 @@ function enrichSubGoalMetadata(goal: Goal): Goal {
           inferSubGoalDescription(goal, subGoal, successCriteria, reviewDetail),
         why: getTrimmedString(subGoal.why) ?? inferSubGoalWhy(goal, subGoal, successCriteria, reviewDetail),
         priority: subGoal.priority ?? inferSubGoalPriority(subGoal),
-        weight: typeof subGoal.weight === "number" ? subGoal.weight : inferSubGoalWeight(goal, subGoal),
         dependencies:
           subGoal.dependencies && subGoal.dependencies.length > 0
             ? subGoal.dependencies
@@ -448,7 +441,7 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
           : status === "error"
             ? "failed"
             : status === "paused"
-              ? "failed"
+              ? "paused"
               : "queued");
   return {
     ...instance,
@@ -774,6 +767,8 @@ export const useGoalStore = create<GoalStore>()((set) => ({
                     {
                       ...instance,
                       status,
+                      awaitingUser: status === "awaiting_user" ? instance.awaitingUser : undefined,
+                      blocker: status === "awaiting_user" ? instance.blocker : undefined,
                       execution: {
                         phase:
                           status === "completed"
@@ -785,12 +780,14 @@ export const useGoalStore = create<GoalStore>()((set) => ({
                                 : status === "error"
                                   ? "failed"
                                   : status === "paused"
-                                    ? "failed"
+                                    ? "paused"
                                     : "queued",
                         status,
                         startedAt: instance.execution?.startedAt ?? instance.createdAt,
                         finishedAt: status === "completed" ? nowIso() : undefined,
                         lastUpdatedAt: nowIso(),
+                        waitingReason:
+                          status === "awaiting_user" ? instance.execution?.waitingReason : undefined,
                         errorCategory: status === "error" ? "unknown" : instance.execution?.errorCategory,
                         errorMessage: status === "error" ? "任务执行失败" : instance.execution?.errorMessage,
                       },

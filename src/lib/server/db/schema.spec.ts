@@ -105,8 +105,8 @@ function rerunAllMigrations(db: Database.Database) {
 }
 
 export function runSchemaSpecs() {
-  // 0. 确保 schema_version 常量已经升到 12
-  assert.equal(KIKI_DB_SCHEMA_VERSION, 12);
+  // 0. 确保 schema_version 常量已经升到 15
+  assert.equal(KIKI_DB_SCHEMA_VERSION, 15);
 
   const dbA = bootstrapPathA();
   const dbB = bootstrapPathB();
@@ -130,6 +130,7 @@ export function runSchemaSpecs() {
       "saga_instances",
       "agent_snapshots",
       "runtime_state_snapshots",
+      "task_notification_states",
     ];
     for (const table of keyTables) {
       const colsA = listColumns(dbA, table).map((c) => c.name);

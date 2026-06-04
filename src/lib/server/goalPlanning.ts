@@ -72,7 +72,6 @@ type DecompositionPayload = {
     description: string;
     why?: string;
     priority: "critical" | "high" | "medium" | "low";
-    weight?: number;
     dependencies: number[];
     estimatedDurationMinutes?: number;
     successCriteria: Array<{
@@ -519,7 +518,6 @@ ${JSON.stringify(input.userContext, null, 2)}
       "terminationCondition": "本板块何时可结束；长期关注可为空字符串",
       "why": "必要性说明：为什么需要这个板块",
       "priority": "critical|high|medium|low",
-      "weight": 0.25,
       "dependencies": [],
       "estimatedDurationMinutes": 480,
       "successCriteria": [
@@ -591,7 +589,6 @@ ${JSON.stringify({
       "terminationCondition": "终止条件；长期关注可为空字符串",
       "why": "必要性说明",
       "priority": "critical",
-      "weight": 0.2,
       "dependencies": [],
       "estimatedDurationMinutes": 480,
       "successCriteria": [
@@ -1067,7 +1064,6 @@ function validateDecomposition(value: unknown): DecompositionPayload {
         typeof subGoal.description === "string" ? subGoal.description.trim() : subGoal.name.trim(),
       why: typeof subGoal.why === "string" ? subGoal.why.trim() : "",
       priority: normalizePriority(subGoal.priority),
-      weight: typeof subGoal.weight === "number" ? subGoal.weight : undefined,
       dependencies: Array.isArray(subGoal.dependencies)
         ? subGoal.dependencies.filter((dependency): dependency is number => typeof dependency === "number")
         : [],
@@ -2056,7 +2052,6 @@ export async function generateGoalPlanWithClaude(input: {
         description: subGoal.description,
         why: subGoal.why,
         priority: subGoal.priority,
-        weight: subGoal.weight,
         dependencies: subGoal.dependencies.map((dependency: number) => `draft-subgoal-${dependency}`),
         estimatedDurationMinutes: subGoal.estimatedDurationMinutes,
         successCriteria: subGoal.successCriteria.map(

@@ -39,6 +39,22 @@ export type RuntimeDaemonAutostartPayload = RuntimeDaemonInstallPayload & {
   config: RuntimeDaemonConfig | null;
 };
 
+export type LocalDataResetPayload = {
+  ok: boolean;
+  message?: string;
+  result?: {
+    ok: boolean;
+    stoppedProcesses: Array<{
+      pid: number;
+      command: string;
+      signal: "SIGTERM" | "SIGKILL" | "skipped";
+    }>;
+    deletedPaths: string[];
+    preservedPaths: string[];
+    warnings: string[];
+  };
+};
+
 export async function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload> {
   const response = await fetch("/api/runtime/state", { cache: "no-store" });
   if (!response.ok) {
@@ -137,6 +153,20 @@ export async function setRuntimeDaemonAutoStart(input: {
   const payload = (await response.json()) as RuntimeDaemonAutostartPayload;
   if (!response.ok || !payload.ok) {
     throw new Error(payload.message || "24h 运行设置失败");
+  }
+  return payload;
+}
+
+export async function resetLocalDevData(): Promise<LocalDataResetPayload> {
+  const response = await fetch("/api/dev/runtime/reset-local-data", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+  const payload = (await response.json()) as LocalDataResetPayload;
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || "清空本地测试数据失败");
   }
   return payload;
 }

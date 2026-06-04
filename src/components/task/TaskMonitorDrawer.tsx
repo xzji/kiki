@@ -13,9 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  fetchRuntimeActivity,
   fetchRuntimeStateSnapshot,
-  type RuntimeActivityPayload,
 } from "@/lib/api/runtime-daemon";
 import { cancelGoalInstance } from "@/lib/api/goal-commands";
 import {
@@ -75,13 +73,9 @@ export function TaskMonitorDrawer() {
   const [detailWidth, setDetailWidth] = useState(DETAIL_MIN_WIDTH);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [runtimeActivity, setRuntimeActivity] = useState<RuntimeActivityPayload | null>(null);
   const wasOpenRef = useRef(false);
 
-  const rows = useMemo(
-    () => selectTaskMonitorRows(goals, runtimeActivity),
-    [goals, runtimeActivity],
-  );
+  const rows = useMemo(() => selectTaskMonitorRows(goals), [goals]);
   const groups = useMemo(() => groupTaskMonitorRows(rows), [rows]);
   const taskRunningCount = groups.running.filter((row) => row.kind === "task").length;
   const detailOpen = Boolean(activeTaskId);
@@ -98,25 +92,6 @@ export function TaskMonitorDrawer() {
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const activity = await fetchRuntimeActivity();
-        if (!cancelled) setRuntimeActivity(activity);
-      } catch (error) {
-        console.warn("获取运行时执行活动失败", error);
-      }
-    };
-    load();
-    const timer = window.setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [open]);
 
   useEffect(() => {
     if (wasOpenRef.current && !open) {

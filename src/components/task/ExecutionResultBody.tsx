@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { GenericAgentResultView } from "@/components/task/GenericAgentResultView";
 import { TaskExecutionTimeline } from "@/components/task/TaskExecutionTimeline";
@@ -143,7 +144,7 @@ export function ExecutionResultBody(props: {
   mode?: "shell" | "result";
 }) {
   const { goal, task, instance } = props;
-  const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const [refreshTick, setRefreshTick] = useState(0);
   const awaitingDisplay = buildAwaitingDisplayModel(task, instance, "detail");
   const currentKind = normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
@@ -170,14 +171,8 @@ export function ExecutionResultBody(props: {
         taskInstanceId: instance.id,
       });
       if (cancelled) return;
-      applyInstanceProgressProjection({
-        taskId: task.id,
-        instanceId: instance.id,
-        progress: state.progress,
-        logs: state.logs,
-        trajectory: state.trajectory,
-        waitingReason: state.waitingReason,
-      });
+      const snapshot = await fetchRuntimeStateSnapshot();
+      if (!cancelled) applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
       if (state.progress?.status === "running") {
         window.setTimeout(() => {
           if (!cancelled) setRefreshTick((value) => value + 1);
@@ -188,7 +183,7 @@ export function ExecutionResultBody(props: {
     return () => {
       cancelled = true;
     };
-  }, [applyInstanceProgressProjection, instance.id, instance.runner?.requestId, refreshTick, task.id]);
+  }, [applyGoalsProjection, instance.id, instance.runner?.requestId, refreshTick]);
 
   const hasGenericResultContent =
     Boolean(instance.result?.taskResult) ||

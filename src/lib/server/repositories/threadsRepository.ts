@@ -4,21 +4,21 @@
  * 计划 ref：§12.3.1.1 + §3.4.1。
  *
  * 存储策略：
- *  - 不新建 `threads` 表，复用 `runtime_state_snapshots["topics"]` envelope 内嵌的
- *    `topic.threads[]` 数组（避免 v12 后再次扩 schema）。
- *  - 读：`readTopicsSnapshot` → 遍历 `topic.threads[]` 定位 threadId。
- *  - 写：定位后 patch，再 `upsertTopicsSnapshot(..., expectedRevision)` 提交。
+ *  - 一期确立 `runtime_state_snapshots["goals"]` 为唯一权威源。
+ *  - 读：`readTopicsSnapshot` 从 goals 实时投影 topic/thread 视图。
+ *  - 写：定位权威源 `goal.subGoals[]` 后，把 Thread 治理字段写回 SubGoal。
  *
  * 并发控制（双重 revision 校验）：
  *  - thread 级：`thread.revision === baseRevision`，不匹配抛 `ThreadRevisionMismatchError`。
- *  - envelope 级：`upsertTopicsSnapshot` 透传 `expectedRevision`，冲突时抛同一异常类
- *    （envelope 冲突 = 别的 writer 同时改了任何 topic）。
+ *  - envelope 级：通过 `writeGoalsProjection` 透传 `expectedRevision`，冲突时抛同一异常类。
  */
 
 import {
+  readGoalsSnapshotMeta,
   readTopicsSnapshotMeta,
-  upsertTopicsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
+import { writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
+import type { Goal, SubGoal } from "@/types/kiki";
 import type { Thread, ThreadStatus, Topic, TopicStatus } from "@/types/topic";
 
 export class ThreadRevisionMismatchError extends Error {
@@ -58,6 +58,19 @@ function locate(
     if (!topic || !Array.isArray(topic.threads)) continue;
     const threadIndex = topic.threads.findIndex((thread) => thread.id === threadId);
     if (threadIndex >= 0) return { topicIndex, threadIndex };
+  }
+  return null;
+}
+
+function locateSubGoal(
+  goals: Goal[],
+  threadId: string,
+): { goalIndex: number; subGoalIndex: number } | null {
+  for (let goalIndex = 0; goalIndex < goals.length; goalIndex += 1) {
+    const goal = goals[goalIndex];
+    if (!goal || !Array.isArray(goal.subGoals)) continue;
+    const subGoalIndex = goal.subGoals.findIndex((subGoal) => subGoal.id === threadId);
+    if (subGoalIndex >= 0) return { goalIndex, subGoalIndex };
   }
   return null;
 }
@@ -117,48 +130,61 @@ export function updateThread(
   patch: ThreadPatch,
   baseRevision: number,
 ): Thread {
-  const snapshot = readTopicsSnapshotMeta([]);
-  const located = locate(snapshot.value, threadId);
+  const snapshot = readGoalsSnapshotMeta([]);
+  const located = locateSubGoal(snapshot.value, threadId);
   if (!located) throw new ThreadNotFoundError(threadId);
 
-  const { topicIndex, threadIndex } = located;
-  const topic = snapshot.value[topicIndex];
-  const thread = topic.threads[threadIndex];
+  const { goalIndex, subGoalIndex } = located;
+  const goal = snapshot.value[goalIndex];
+  const subGoal = goal.subGoals[subGoalIndex];
+  const currentRevision = subGoal.threadRevision ?? 0;
 
-  if (thread.revision !== baseRevision) {
+  if (currentRevision !== baseRevision) {
     throw new ThreadRevisionMismatchError(
       threadId,
       baseRevision,
-      thread.revision,
+      currentRevision,
       "thread",
     );
   }
 
-  const updatedThread: Thread = {
-    ...thread,
-    ...patch,
-    // memory 浅合并（与 ThreadRunner.tick memoryDelta 语义对齐）
-    memory: patch.memory !== undefined ? { ...thread.memory, ...patch.memory } : thread.memory,
-    revision: thread.revision + 1,
-    updatedAt: nowIso(),
+  const updatedAt = nowIso();
+  const updatedSubGoal: SubGoal = {
+    ...subGoal,
+    title: patch.title ?? subGoal.title,
+    description: patch.intent ?? subGoal.description,
+    reviewInterval: patch.loopInterval !== undefined ? (patch.loopInterval as SubGoal["reviewInterval"]) : subGoal.reviewInterval,
+    terminationCondition: patch.terminationCondition ?? subGoal.terminationCondition,
+    threadStatus: patch.status ?? subGoal.threadStatus,
+    // lastTickAt / nextTickAt 用「键是否存在」区分「未提供」与「显式清空」：
+    // ThreadRunner 在 archive / failure_threshold 暂停时会显式传 nextTickAt=undefined
+    // 以清空下一拍时间（恢复时再重算），若用 ?? 回落会导致永远清不掉。
+    lastTickAt: "lastTickAt" in patch ? patch.lastTickAt : subGoal.lastTickAt,
+    nextTickAt: "nextTickAt" in patch ? patch.nextTickAt : subGoal.nextTickAt,
+    threadUpdatedAt: updatedAt,
+    threadMemory: patch.memory !== undefined ? { ...(subGoal.threadMemory ?? {}), ...patch.memory } : subGoal.threadMemory,
+    silentCount: patch.silentCount ?? subGoal.silentCount,
+    failureCount: patch.failureCount ?? subGoal.failureCount,
+    threadRevision: currentRevision + 1,
   };
 
-  // 不可变更新整 envelope 数组
-  const nextThreads = topic.threads.slice();
-  nextThreads[threadIndex] = updatedThread;
-  const nextTopics = snapshot.value.slice();
-  nextTopics[topicIndex] = { ...topic, threads: nextThreads };
+  const nextSubGoals = goal.subGoals.slice();
+  nextSubGoals[subGoalIndex] = updatedSubGoal;
+  const nextGoals = snapshot.value.slice();
+  nextGoals[goalIndex] = { ...goal, subGoals: nextSubGoals };
 
-  const expectedEnvelopeRevision = snapshot.source === "topics" ? snapshot.revision : 0;
-  const writeResult = upsertTopicsSnapshot(nextTopics, expectedEnvelopeRevision);
+  const writeResult = writeGoalsProjection(nextGoals, snapshot.revision);
   if (!writeResult.ok) {
     throw new ThreadRevisionMismatchError(
       threadId,
-      expectedEnvelopeRevision,
+      snapshot.revision,
       writeResult.revision,
       "envelope",
     );
   }
+
+  const updatedThread = findThreadById(threadId);
+  if (!updatedThread) throw new ThreadNotFoundError(threadId);
   return updatedThread;
 }
 

@@ -5,9 +5,9 @@ import {
   writeRuntimeDaemonDeviceState,
   writeRuntimeDaemonState,
 } from "@/lib/daemon/daemonState";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import {
-  syncTaskInstanceProgressProjection,
+  projectRuntimeJobStatusProjection,
+  reconcileRuntimeJobStatusProjections,
   updateGoalRuntimeJobExecution,
 } from "@/lib/server/services/goalRuntimeService";
 import { getGoalTelemetryProgress, getTaskTelemetryLogs } from "@/lib/server/goalTelemetry";
@@ -24,6 +24,7 @@ import {
   releaseExpiredRuntimeJobLeases,
   renewRuntimeJobLease,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { executionSupervisor } from "@/lib/server/worker/executionSupervisor";
 
 const DAEMON_VERSION = "0.1.0";
 const LEASE_RENEW_INTERVAL_MS = 30 * 1000;
@@ -42,7 +43,17 @@ function ensureDeviceState(deviceId: string) {
 }
 
 export async function runTaskDispatchWorker(leaseOwner: string) {
-  releaseExpiredRuntimeJobLeases();
+  const expiredJobs = releaseExpiredRuntimeJobLeases();
+  expiredJobs.forEach((job) => {
+    projectRuntimeJobStatusProjection({
+      job,
+      status: "queued",
+      reason: "任务 lease 已过期，重新进入队列",
+    });
+  });
+  reconcileRuntimeJobStatusProjections({
+    statuses: ["queued", "running", "awaiting_user"],
+  });
   const config = readRuntimeDaemonConfig();
   const device = ensureDeviceState(config.deviceId);
   const claimed = claimQueuedRuntimeJobs({
@@ -60,6 +71,11 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
   }
 
   for (const job of claimed) {
+    projectRuntimeJobStatusProjection({
+      job,
+      status: "running",
+      reason: "worker 已领取任务并开始执行",
+    });
     writeRuntimeDaemonState({
       deviceId: device.deviceId,
       status: "running",
@@ -71,6 +87,15 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
     let renewTimer: NodeJS.Timeout | null = null;
     let leaseLostMessage: string | null = null;
     const abortController = new AbortController();
+    const requestId = job.requestId ?? `goal-task-${Date.now()}`;
+    executionSupervisor.registerJob({
+      requestId,
+      jobId: job.id,
+      leaseOwner,
+      abortController,
+      maxDurationMs: config.jobMaxDurationMs,
+      idleTimeoutMs: config.jobIdleTimeoutMs,
+    });
     try {
       const conversationId = job.conversationId ?? job.payload.goal.conversationId;
       const conversationWorkspaceDir = conversationId
@@ -93,8 +118,8 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
           });
           if (!renewResult.renewed) {
             leaseLostMessage = `任务 ${job.id} 续租失败：lease 已被其他 owner 占用或任务已不在 running 状态`;
-            appendRuntimeDaemonLog(leaseLostMessage);
-            abortController.abort();
+            // 统一交由 ExecutionSupervisor 中止，由 transport 的 abort 监听强杀进程组。
+            executionSupervisor.abortJob(requestId, leaseLostMessage);
             return;
           }
           const now = new Date().toISOString();
@@ -111,7 +136,7 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         }
       }, LEASE_RENEW_INTERVAL_MS);
       await runGoalTask({
-        requestId: job.requestId ?? `goal-task-${Date.now()}`,
+        requestId,
         goal: job.payload.goal,
         subGoal: job.payload.subGoal,
         task: job.payload.task,
@@ -122,12 +147,14 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         resumeContext: job.payload.resumeContext,
         initialTrajectory: job.payload.resumeContext ? job.trajectory : [],
         signal: abortController.signal,
+        onProgressPing: (kind) => executionSupervisor.markProgress(requestId, kind),
+        onSpawn: (pid) => executionSupervisor.attachProcess(requestId, pid),
       });
       if (abortController.signal.aborted) {
-        throw new Error(leaseLostMessage || `任务 ${job.id} 已因 lease 失效中断`);
+        throw new Error(leaseLostMessage || `任务 ${job.id} 已因 lease 失效或超时中断`);
       }
 
-      const latestProgress = getGoalTelemetryProgress(job.requestId ?? "");
+      const latestProgress = getGoalTelemetryProgress(requestId);
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
       const runTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
         ? (latestProgress.resultPayload.trajectory as typeof job.trajectory)
@@ -158,15 +185,6 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
           : latestProgress?.resultPayload?.awaitingUser || latestBlocker
             ? "awaiting_user"
             : "completed";
-      syncTaskInstanceProgressProjection({
-        goals: readGoalsSnapshot([]),
-        taskId: job.payload.task.id,
-        instanceId: job.payload.instance.id,
-        progress: latestProgress,
-        logs: latestLogs,
-        trajectory: latestTrajectory,
-      });
-
       updateGoalRuntimeJobExecution(job.id, {
         status: nextStatus,
         progress: latestProgress,
@@ -204,7 +222,7 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         continue;
       }
       const failedJob = job.requestId ? getRuntimeJobByRequestId(job.requestId) : null;
-      const latestProgress = job.requestId ? getGoalTelemetryProgress(job.requestId) : failedJob?.progress ?? null;
+      const latestProgress = getGoalTelemetryProgress(requestId) ?? failedJob?.progress ?? null;
       const latestLogs = job.taskInstanceId ? getTaskTelemetryLogs(job.taskInstanceId) : [];
       const runTrajectory = Array.isArray(latestProgress?.resultPayload?.trajectory)
         ? (latestProgress.resultPayload.trajectory as typeof job.trajectory)
@@ -214,14 +232,6 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
             ? job.trajectory.concat(runTrajectory).filter((step, index, all) => all.findIndex((item) => item.id === step.id) === index)
             : runTrajectory)
         : job.trajectory;
-      syncTaskInstanceProgressProjection({
-        goals: readGoalsSnapshot([]),
-        taskId: job.payload.task.id,
-        instanceId: job.payload.instance.id,
-        progress: latestProgress,
-        logs: latestLogs,
-        trajectory: latestTrajectory,
-      });
       updateGoalRuntimeJobExecution(job.id, {
         status: "failed",
         progress: latestProgress,
@@ -246,6 +256,8 @@ export async function runTaskDispatchWorker(leaseOwner: string) {
         clearInterval(renewTimer);
         renewTimer = null;
       }
+      // 统一销账：清理 supervisor 内存态（含总时长计时器），避免泄漏。
+      executionSupervisor.completeJob(requestId);
     }
   }
 

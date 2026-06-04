@@ -17,6 +17,7 @@ type AgentRunRow = {
   topic_id: string | null;
   thread_id: string | null;
   task_id: string | null;
+  runtime_job_id: string | null;
   saga_instance_id: string | null;
   role: AgentRunRole;
   status: AgentRunStatus;
@@ -37,6 +38,7 @@ function mapRow(row: AgentRunRow): AgentRun {
     topicId: row.topic_id ?? undefined,
     threadId: row.thread_id ?? undefined,
     taskId: row.task_id ?? undefined,
+    runtimeJobId: row.runtime_job_id ?? undefined,
     sagaInstanceId: row.saga_instance_id ?? undefined,
     role: row.role,
     status: row.status,
@@ -53,6 +55,7 @@ export type CreateAgentRunInput = {
   topicId?: string;
   threadId?: string;
   taskId?: string;
+  runtimeJobId?: string;
   sagaInstanceId?: string;
   role: AgentRunRole;
   status?: AgentRunStatus;
@@ -77,10 +80,10 @@ export function createAgentRun(input: CreateAgentRunInput): AgentRun {
   db.prepare(
     `
       INSERT INTO agent_runs (
-        id, topic_id, thread_id, task_id, saga_instance_id,
+        id, topic_id, thread_id, task_id, runtime_job_id, saga_instance_id,
         role, status, started_at, last_event_seq, revision, idempotency_key
       ) VALUES (
-        @id, @topic_id, @thread_id, @task_id, @saga_instance_id,
+        @id, @topic_id, @thread_id, @task_id, @runtime_job_id, @saga_instance_id,
         @role, @status, @started_at, 0, 0, @idempotency_key
       )
     `,
@@ -89,6 +92,7 @@ export function createAgentRun(input: CreateAgentRunInput): AgentRun {
     topic_id: input.topicId ?? null,
     thread_id: input.threadId ?? null,
     task_id: input.taskId ?? null,
+    runtime_job_id: input.runtimeJobId ?? null,
     saga_instance_id: input.sagaInstanceId ?? null,
     role: input.role,
     status,
@@ -170,6 +174,16 @@ export function listAgentRunsBySaga(sagaInstanceId: string): AgentRun[] {
       `SELECT * FROM agent_runs WHERE saga_instance_id = ? ORDER BY started_at ASC`,
     )
     .all(sagaInstanceId) as AgentRunRow[];
+  return rows.map(mapRow);
+}
+
+export function listAgentRunsByRuntimeJobId(runtimeJobId: string): AgentRun[] {
+  const db = getDatabase();
+  const rows = db
+    .prepare(
+      `SELECT * FROM agent_runs WHERE runtime_job_id = ? ORDER BY started_at ASC`,
+    )
+    .all(runtimeJobId) as AgentRunRow[];
   return rows.map(mapRow);
 }
 

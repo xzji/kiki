@@ -8,6 +8,8 @@ import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { cn } from "@/lib/utils";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
+import { useSagaInstancesStore } from "@/stores/sagaInstancesStore";
+import type { SagaInstance } from "@/types/agentRuntime";
 import type { ConversationMessage } from "@/types/kiki";
 
 /**
@@ -35,6 +37,12 @@ export function ConversationMessageItem({
   onDelete: (messageId: string) => void;
 }) {
   const goals = useGoalStore(selectVisibleGoals);
+  const sagaRequestId = message.kind === "text" ? message.sagaRequestId : undefined;
+  const saga = useSagaInstancesStore((state) =>
+    sagaRequestId
+      ? Object.values(state.sagas).find((item) => item.idempotencyKey === sagaRequestId) ?? null
+      : null,
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -155,6 +163,10 @@ export function ConversationMessageItem({
           {isKikiLoading ? <LoadingDots /> : <MarkdownRenderer content={message.content} />}
         </div>
 
+        {sagaRequestId && message.status === "streaming" ? (
+          <SagaProgressCard saga={saga} />
+        ) : null}
+
         {message.kind === "task_card" && taskInfo ? (
           <TaskMessageCard
             task={taskInfo.task}
@@ -180,6 +192,130 @@ export function ConversationMessageItem({
       </div>
     </div>
   );
+}
+
+const SAGA_STEPS = [
+  {
+    key: "interview",
+    role: "Interviewer",
+    title: "理解目标",
+    description: "确认背景信息与关键约束",
+  },
+  {
+    key: "plan",
+    role: "Planner",
+    title: "拆解方案",
+    description: "生成板块与任务草案",
+  },
+  {
+    key: "critic",
+    role: "Critic",
+    title: "评审草案",
+    description: "检查是否贴合目标",
+  },
+  {
+    key: "refine",
+    role: "Refiner",
+    title: "按需修正",
+    description: "根据评审意见调整草案",
+  },
+  {
+    key: "present",
+    role: "Presenter",
+    title: "整理结果",
+    description: "生成可确认的目标规划",
+  },
+] as const;
+
+function SagaProgressCard({ saga }: { saga: SagaInstance | null }) {
+  const currentStep = saga?.currentStep ?? "interview";
+  const currentIndex = SAGA_STEPS.findIndex((step) => step.key === currentStep);
+  const activeIndex = currentIndex >= 0 ? currentIndex : 0;
+  const isTerminal = saga?.status === "completed" || saga?.status === "failed";
+
+  return (
+    <div className="mt-3 w-full max-w-xl rounded-2xl border border-[#E5E7EB] bg-[#FBFCFE] px-4 py-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-[12px] font-medium text-[#1F2328]">拆解进度</div>
+        <div className="text-[12px] text-[#6B7280]">
+          {saga ? formatSagaStatus(saga) : "启动中"}
+        </div>
+      </div>
+      <div className="space-y-2">
+        {SAGA_STEPS.map((step, index) => {
+          const state = resolveSagaStepState({
+            index,
+            activeIndex,
+            saga,
+            isTerminal,
+          });
+          return (
+            <div key={step.key} className="flex items-start gap-3">
+              <div
+                className={cn(
+                  "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium",
+                  state === "completed" && "border-[#1A7F37] bg-[#DAFBE1] text-[#1A7F37]",
+                  state === "running" && "border-[#8250DF] bg-[#F0EDFF] text-[#5B3DBE]",
+                  state === "failed" && "border-[#D1242F] bg-[#FFEBE9] text-[#D1242F]",
+                  state === "pending" && "border-[#D0D7DE] bg-white text-[#8C9198]",
+                )}
+              >
+                {state === "completed" ? "✓" : index + 1}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[12px] font-medium text-[#1F2328]">{step.title}</span>
+                  <span className="rounded-md bg-white px-1.5 py-0.5 font-mono text-[11px] text-[#6B7280]">
+                    {step.role}
+                  </span>
+                  <span className={cn("text-[11px]", sagaStepStateClassName(state))}>
+                    {formatSagaStepState(state)}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[12px] leading-5 text-[#6B7280]">{step.description}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function resolveSagaStepState(input: {
+  index: number;
+  activeIndex: number;
+  saga: SagaInstance | null;
+  isTerminal: boolean;
+}) {
+  if (!input.saga) return input.index === 0 ? "running" : "pending";
+  if (input.saga.status === "failed" && input.index === input.activeIndex) return "failed";
+  if (input.saga.status === "completed") return "completed";
+  if (input.index < input.activeIndex) return "completed";
+  if (input.index === input.activeIndex && !input.isTerminal) return "running";
+  return "pending";
+}
+
+function formatSagaStatus(saga: SagaInstance) {
+  if (saga.status === "awaiting_user") return "等待补充信息";
+  if (saga.status === "completed") return "已完成";
+  if (saga.status === "failed") return "执行失败";
+  const step = SAGA_STEPS.find((item) => item.key === saga.currentStep);
+  return step ? `进行中：${step.title}` : "进行中";
+}
+
+function formatSagaStepState(state: ReturnType<typeof resolveSagaStepState>) {
+  if (state === "completed") return "已完成";
+  if (state === "running") return "进行中";
+  if (state === "failed") return "失败";
+  return "待开始";
+}
+
+function sagaStepStateClassName(state: ReturnType<typeof resolveSagaStepState>) {
+  if (state === "completed") return "text-[#1A7F37]";
+  if (state === "running") return "text-[#5B3DBE]";
+  if (state === "failed") return "text-[#D1242F]";
+  return "text-[#8C9198]";
 }
 
 function GoalPlanMessageCard({

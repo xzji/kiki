@@ -135,45 +135,22 @@ export function readScheduleEventsSnapshotMeta(fallback: AgentEvent[]) {
 }
 
 // ===== Topic snapshot =====
-// §10.5 问题 25：v12 双写期 — 优先读 "topics"；缺失时从 "goals" envelope
-// 通过 legacyGoalToTopic 兜底。source 用于区分后续写入应使用哪个 envelope 的 revision。
+// 一期：goals envelope 是唯一权威源；topics 仅作为从 goals 实时投影出的只读视图。
+// 物理 topics 行可能存在历史空副本，读路径不再信任它，避免空数组短路投影。
 export type TopicsSnapshotSource = "topics" | "goals_fallback" | "fallback";
 
-function isTopicArray(value: unknown): value is Topic[] {
-  if (!Array.isArray(value)) return false;
-  return value.every(
-    (entry) =>
-      entry &&
-      typeof entry === "object" &&
-      typeof (entry as Topic).id === "string" &&
-      Array.isArray((entry as Topic).threads),
-  );
+function projectGoalsToTopics(goals: Goal[]): Topic[] {
+  return goals.map((goal) => legacyGoalToTopic({ goal }));
 }
 
 export function readTopicsSnapshot(fallback: Topic[]): Topic[] {
-  const topics = readSnapshotWithMeta<unknown>("topics", null);
-  if (isTopicArray(topics.value)) return topics.value;
-  // 兜底：从 "goals" envelope 转换
-  const goals = readSnapshotWithMeta<Goal[]>("goals", []);
-  if (Array.isArray(goals.value) && goals.value.length > 0) {
-    return goals.value
-      .map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal)))
-      .map((goal) => legacyGoalToTopic({ goal }));
-  }
-  return fallback;
+  const goals = readGoalsSnapshot([]);
+  return goals.length > 0 ? projectGoalsToTopics(goals) : fallback;
 }
 
 export function readTopicsSnapshotMeta(fallback: Topic[]) {
-  const topics = readSnapshotWithMeta<unknown>("topics", null);
-  if (isTopicArray(topics.value)) {
-    return { value: topics.value, revision: topics.revision, updatedAt: topics.updatedAt, source: "topics" as const };
-  }
-  const goals = readSnapshotWithMeta<Goal[]>("goals", []);
-  const value = Array.isArray(goals.value)
-    ? goals.value
-        .map((goal) => normalizeGoalTriggerRules(migrateGoalIds(goal)))
-        .map((goal) => legacyGoalToTopic({ goal }))
-    : fallback;
+  const goals = readGoalsSnapshotMeta([]);
+  const value = goals.value.length > 0 ? projectGoalsToTopics(goals.value) : fallback;
   return {
     value,
     revision: goals.revision,

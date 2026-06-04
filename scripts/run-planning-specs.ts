@@ -8,9 +8,11 @@ import { runRuntimeStateChannelSpecs } from "../src/lib/runtimeStateChannel.spec
 import { runRoutesSpecs } from "../src/lib/routes.spec";
 import { runMiddlewareSpecs } from "../src/middleware.spec";
 import { runStateSnapshotSpecs } from "../src/lib/server/runtime/stateSnapshot.spec";
+import { runGoalStateSnapshotFailureReasonSpecs } from "../src/lib/server/runtime/goalStateSnapshotFailureReason.spec";
 import { runStorageAdapterSpecs } from "../src/lib/server/adapters/storage.spec";
 import { runRuntimeEnvironmentCommandServiceSpecs } from "../src/lib/server/services/runtimeEnvironmentCommandService.spec";
 import { runTaskTriggerTimeSpecs } from "../src/lib/taskTriggerTime.spec";
+import { runTaskFailureReasonSpecs } from "../src/lib/taskFailureReason.spec";
 import { runGoalSchedulerEngineSpecs } from "../src/lib/server/worker/goalSchedulerEngine.spec";
 import { runConversationCommandServiceSpecs } from "../src/lib/server/services/conversationCommandService.spec";
 import { runRuntimeEventsAggregationSpecs } from "../src/lib/api/runtime-events.spec";
@@ -33,6 +35,7 @@ import { runTopicInitSagaSpecs } from "../src/lib/server/goalPlanning/topicInitS
 import { runTopicInitSagaDefaultsSpecs } from "../src/lib/server/goalPlanning/runTopicInitSagaDefaults.spec";
 import { runSagaDraftAdapterSpecs } from "../src/lib/server/goalPlanning/sagaDraftAdapter.spec";
 import { runThreadTickOutputSchemaSpecs } from "../src/lib/server/thread/threadTickOutputSchema.spec";
+import { runThreadRunnerPromptSpecs } from "../src/lib/server/thread/threadRunnerPrompt.spec";
 import { runThreadRunnerSpecs } from "../src/lib/server/thread/threadRunner.spec";
 import { runThreadLoopSchedulerSpecs } from "../src/lib/server/thread/threadLoopScheduler.spec";
 import { runDispatchActionsSpecs } from "../src/lib/server/thread/dispatchActions.spec";
@@ -47,7 +50,9 @@ import { runDevPanelDataSpecs } from "../src/lib/server/repositories/agentRuntim
 import { runDaemonRunnerSpecs } from "../src/lib/daemon/daemonRunner.spec";
 
 runStateSnapshotSpecs();
+runGoalStateSnapshotFailureReasonSpecs();
 runTaskTriggerTimeSpecs();
+runTaskFailureReasonSpecs();
 runGoalSchedulerEngineSpecs();
 runBlockProtocolSpecs();
 runTaskCompilerSpecs();
@@ -77,6 +82,7 @@ runGoalRuntimeServiceSpecs();
 runTopicCommandServiceSpecs();
 runSagaDraftAdapterSpecs();
 runThreadTickOutputSchemaSpecs();
+runThreadRunnerPromptSpecs();
 runThreadLoopSchedulerSpecs();
 runDaemonRunnerSpecs();
 

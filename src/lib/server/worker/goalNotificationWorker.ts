@@ -1,9 +1,13 @@
 import { DEFAULT_EASTER_EGG_SETTINGS } from "@/lib/goalSystemConfig";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import {
-  markTaskNotificationDeliveredProjection,
-  transitionTaskInstanceProjection,
-} from "@/lib/server/services/goalRuntimeService";
+  backfillTaskNotificationStatesFromGoals,
+  listPendingTaskNotificationStates,
+  markTaskNotificationDeliveredState,
+} from "@/lib/server/repositories/taskNotificationStateRepository";
+import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
+import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
+import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
 import { getConversation } from "@/lib/server/repositories/conversationsRepository";
 import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
@@ -44,6 +48,18 @@ function shouldDeliverToConversation(channel: NonNullable<Task["instances"][numb
   return channel === "conversation" || channel === "both";
 }
 
+function resolveDeliveryChannel(notification: NonNullable<Task["instances"][number]["notification"]>) {
+  // 兼容已由旧策略生成但尚未派发的 pending 通知：普通 result_ready 不再只进 inbox。
+  if (
+    notification.notificationType === "result_ready" &&
+    notification.priority === "normal" &&
+    notification.channel === "inbox"
+  ) {
+    return "conversation";
+  }
+  return notification.channel;
+}
+
 function canDeliverNotification(instance: Task["instances"][number]) {
   const notification = instance.notification;
   if (!notification?.shouldNotify || notification.deliveryState !== "pending") return false;
@@ -52,6 +68,20 @@ function canDeliverNotification(instance: Task["instances"][number]) {
 
 function upsertScheduleEvent(events: AgentEvent[], event: AgentEvent) {
   return events.some((entry) => entry.id === event.id) ? events : [...events, event];
+}
+
+function findTaskContext(goals: Goal[], input: { goalId?: string; taskId?: string; instanceId: string }) {
+  for (const goal of goals) {
+    if (input.goalId && goal.id !== input.goalId) continue;
+    for (const subGoal of goal.subGoals) {
+      for (const task of subGoal.tasks) {
+        if (input.taskId && task.id !== input.taskId) continue;
+        const instance = task.instances.find((entry) => entry.id === input.instanceId);
+        if (instance) return { goal, subGoal, task, instance };
+      }
+    }
+  }
+  return null;
 }
 
 export function runGoalScheduleSynthesisWorker(goals: Goal[]) {
@@ -88,94 +118,101 @@ export function runGoalScheduleSynthesisWorker(goals: Goal[]) {
 }
 
 export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
-  let nextGoals = goals;
+  backfillTaskNotificationStatesFromGoals(goals);
+  const composedGoals = composeGoalsWithRuntimeJobs(goals);
   let delivered = 0;
-  for (const goal of goals) {
-    for (const subGoal of goal.subGoals) {
-      for (const task of subGoal.tasks) {
-        for (const instance of task.instances) {
-          const notification = instance.notification;
-          if (!notification || !canDeliverNotification(instance)) continue;
-          const previousSequence = notification.notificationSequence ?? 0;
-          const nextSequence = previousSequence + 1;
-          // 每次进入 pending 的派发都生成新的 conversationMessageId（携带递增序号），
-          // 让会话流以 append-only 方式记录每一次任务通知，避免历史卡片被新内容替换。
-          const inboxItemId = shouldDeliverToInbox(notification.channel) ? `inbox-${instance.id}` : undefined;
-          const conversationExists = goal.conversationId ? !!getConversation(goal.conversationId) : false;
-          const conversationMessageId =
-            goal.conversationId && conversationExists && shouldDeliverToConversation(notification.channel)
-              ? `msg-task-${instance.id}-n${nextSequence}`
-              : undefined;
-          nextGoals = markTaskNotificationDeliveredProjection({
-            goals: nextGoals,
-            taskId: task.id,
-            instanceId: instance.id,
-            inboxItemId,
-            conversationMessageId,
-            notificationSequence: nextSequence,
-          });
-          if (conversationMessageId && notification.userMessage) {
-            try {
-              applyConversationCommand({
-                command: {
-                  type: "append_message",
-                  conversationId: goal.conversationId!,
-                  message: {
-                    id: conversationMessageId,
-                    kind: "task_card",
-                    role: "kiki",
-                    content: notification.userMessage,
-                    createdAt: notification.createdAt,
-                    unread: true,
-                    status: "done",
-                    source: "system",
-                    taskRef: {
-                      goalId: goal.id,
-                      subGoalId: subGoal.id,
-                      taskId: task.id,
-                      instanceId: instance.id,
-                    },
-                    taskSnapshot: {
-                      task,
-                      instance,
-                    },
-                  },
-                },
-                idempotencyKey: `conversation.message.append:${conversationMessageId}`,
-                producedBy: "worker",
-              });
-            } catch {
-              // 会话投影失败不应阻断 goal 侧通知派发；事件流仍保留 notification.delivered。
-            }
-          }
-          delivered += 1;
-          for (const target of [
-            inboxItemId ? "inbox" : null,
-            conversationMessageId ? "conversation" : null,
-          ] as const) {
-            if (!target) continue;
-            appendGoalEventOnce({
-              goalId: goal.id,
-              taskId: task.id,
-              instanceId: instance.id,
-              kind: "notification.delivered",
-              producedBy: "daemon",
-              idempotencyKey: `notification.delivered:${target}:${instance.id}:n${nextSequence}`,
-              payload: {
-                target,
-                notificationId: target === "inbox" ? inboxItemId : conversationMessageId,
+  for (const record of listPendingTaskNotificationStates()) {
+    const context = findTaskContext(composedGoals, {
+      goalId: record.goalId,
+      taskId: record.taskId,
+      instanceId: record.instanceId,
+    });
+    if (!context) continue;
+    const { goal, subGoal, task } = context;
+    const instance = {
+      ...context.instance,
+      notification: record.notification,
+    };
+    const notification = record.notification;
+    if (!canDeliverNotification(instance)) continue;
+    const deliveryChannel = resolveDeliveryChannel(notification);
+    const previousSequence = notification.notificationSequence ?? 0;
+    const nextSequence = previousSequence + 1;
+    // 每次进入 pending 的派发都生成新的 conversationMessageId（携带递增序号），
+    // 让会话流以 append-only 方式记录每一次任务通知，避免历史卡片被新内容替换。
+    const inboxItemId = shouldDeliverToInbox(deliveryChannel) ? `inbox-${instance.id}` : undefined;
+    const conversationExists = goal.conversationId ? !!getConversation(goal.conversationId) : false;
+    const conversationMessageId =
+      goal.conversationId && conversationExists && shouldDeliverToConversation(deliveryChannel)
+        ? `msg-task-${instance.id}-n${nextSequence}`
+        : undefined;
+
+    if (conversationMessageId && notification.userMessage) {
+      try {
+        applyConversationCommand({
+          command: {
+            type: "append_message",
+            conversationId: goal.conversationId!,
+            message: {
+              id: conversationMessageId,
+              kind: "task_card",
+              role: "kiki",
+              content: notification.userMessage,
+              createdAt: notification.createdAt,
+              unread: true,
+              status: "done",
+              source: "system",
+              taskRef: {
+                goalId: goal.id,
+                subGoalId: subGoal.id,
+                taskId: task.id,
+                instanceId: instance.id,
               },
-            });
-          }
-        }
+              taskSnapshot: {
+                task,
+                instance,
+              },
+            },
+          },
+          idempotencyKey: `conversation.message.append:${conversationMessageId}`,
+          producedBy: "worker",
+        });
+      } catch {
+        // 会话投影失败时保持 pending，下一轮 worker 重试，避免账本误标 delivered。
+        continue;
       }
+    }
+
+    markTaskNotificationDeliveredState({
+      instanceId: instance.id,
+      inboxItemId,
+      conversationMessageId,
+      notificationSequence: nextSequence,
+    });
+    delivered += 1;
+    for (const target of [
+      inboxItemId ? "inbox" : null,
+      conversationMessageId ? "conversation" : null,
+    ] as const) {
+      if (!target) continue;
+      appendGoalEventOnce({
+        goalId: goal.id,
+        taskId: task.id,
+        instanceId: instance.id,
+        kind: "notification.delivered",
+        producedBy: "daemon",
+        idempotencyKey: `notification.delivered:${target}:${instance.id}:n${nextSequence}`,
+        payload: {
+          target,
+          notificationId: target === "inbox" ? inboxItemId : conversationMessageId,
+        },
+      });
     }
   }
   return { delivered };
 }
 
 export function runGoalWatchdogWorker(goals: Goal[]) {
-  let nextGoals = goals;
   let paused = 0;
   let heartbeats = 0;
   const nowMs = Date.now();
@@ -186,13 +223,16 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
         for (const instance of task.instances) {
           const ageMs = nowMs - new Date(instance.createdAt).getTime();
           if (instance.status === "in_progress" && ageMs >= DEFAULT_EASTER_EGG_SETTINGS.taskDefaultTimeoutMs) {
-            nextGoals = transitionTaskInstanceProjection({
-              goals: nextGoals,
-              taskId: task.id,
-              instanceId: instance.id,
-              status: "paused",
-              reason: "任务执行超时，daemon 已自动暂停。",
-            });
+            const job = getRuntimeJobByTaskInstanceId(instance.id);
+            if (job) {
+              updateGoalRuntimeJobExecution(job.id, {
+                status: "cancelled",
+                finishedAt: now,
+                leaseOwner: undefined,
+                leaseExpiresAt: undefined,
+                lastError: "任务执行超时，daemon 已自动暂停。",
+              });
+            }
             paused += 1;
             appendGoalEventOnce({
               goalId: goal.id,

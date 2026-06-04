@@ -1,9 +1,13 @@
 import { createGeneratedInstance } from "@/lib/goalFactory";
-import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
+import { normalizeTaskId } from "@/lib/opaqueIds";
+import {
+  getRuntimeJobByTaskInstanceId,
+  listOpenRuntimeJobsByTaskIds,
+} from "@/lib/server/repositories/runtimeJobsRepository";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { isTaskTriggerDue } from "@/lib/taskTriggerTime";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
-import type { Goal, Task, TaskInstanceStatus } from "@/types/kiki";
+import type { Goal, Task } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 const PRIORITY_WEIGHT: Record<NonNullable<Task["priority"]>, number> = {
@@ -12,13 +16,6 @@ const PRIORITY_WEIGHT: Record<NonNullable<Task["priority"]>, number> = {
   medium: 200,
   low: 100,
 };
-
-const OPEN_INSTANCE_STATUSES = new Set<TaskInstanceStatus>([
-  "pending",
-  "in_progress",
-  "awaiting_user",
-  "paused",
-]);
 
 type SchedulerResult = {
   createdJobs: number;
@@ -32,13 +29,6 @@ type ReadyTask = {
   priorityScore: number;
 };
 
-function toTaskRuntimeStatus(task: Task) {
-  const latestStatus = task.instances[0]?.status;
-  if (latestStatus && OPEN_INSTANCE_STATUSES.has(latestStatus)) return latestStatus;
-  if (task.progress >= 100) return "completed";
-  return "pending";
-}
-
 function computePriorityScore(task: Task) {
   const priority = task.priority ?? "medium";
   const taskTypeScore = task.taskType === "one_shot" ? 30 : 10;
@@ -49,6 +39,14 @@ function computePriorityScore(task: Task) {
 function getReadyTasks(goals: Goal[]) {
   const ready: ReadyTask[] = [];
   const now = new Date();
+  const taskIds = goals.flatMap((goal) =>
+    goal.subGoals.flatMap((subGoal) => subGoal.tasks.map((task) => task.id)),
+  );
+  const openTaskIds = new Set(
+    listOpenRuntimeJobsByTaskIds(taskIds)
+      .map((job) => (job.taskId ? normalizeTaskId(job.taskId) : null))
+      .filter((taskId): taskId is string => Boolean(taskId)),
+  );
   for (const goal of goals) {
     if (
       goal.workflow?.planDecision !== "confirmed" ||
@@ -60,8 +58,7 @@ function getReadyTasks(goals: Goal[]) {
       for (const task of subGoal.tasks) {
         if (task.autoRunDisabled) continue;
         if (task.progress >= 100 && task.taskType === "one_shot") continue;
-        const runtimeStatus = toTaskRuntimeStatus(task);
-        if (runtimeStatus !== "pending" && runtimeStatus !== "completed") continue;
+        if (openTaskIds.has(normalizeTaskId(task.id))) continue;
         if (!isTaskTriggerDue(task, now)) continue;
         ready.push({
           goal,

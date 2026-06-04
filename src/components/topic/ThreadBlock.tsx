@@ -47,8 +47,8 @@ export function ThreadBlock({
   const hasDetails =
     Boolean(subGoal.description?.trim()) ||
     Boolean(subGoal.why?.trim()) ||
+    Boolean(subGoal.reviewInterval?.trim()) ||
     Boolean(subGoal.priority) ||
-    typeof subGoal.weight === "number" ||
     typeof subGoal.estimatedDurationMinutes === "number" ||
     dependencyTitles.length > 0 ||
     (subGoal.successCriteria?.length ?? 0) > 0;
@@ -93,10 +93,10 @@ export function ThreadBlock({
           {hasDetails && detailsOpen ? (
             <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
               <div className="flex flex-wrap gap-2">
-                {subGoal.priority ? <DetailBadge label={`优先级：${priorityLabel(subGoal.priority)}`} /> : null}
-                {typeof subGoal.weight === "number" ? (
-                  <DetailBadge label={`权重：${Math.round(subGoal.weight * 100)}%`} />
+                {subGoal.reviewInterval?.trim() ? (
+                  <DetailBadge label={`回顾周期：${reviewIntervalLabel(subGoal.reviewInterval)}`} />
                 ) : null}
+                {subGoal.priority ? <DetailBadge label={`优先级：${priorityLabel(subGoal.priority)}`} /> : null}
                 {typeof subGoal.estimatedDurationMinutes === "number" ? (
                   <DetailBadge label={`预计耗时：${formatDuration(subGoal.estimatedDurationMinutes)}`} />
                 ) : null}
@@ -105,41 +105,19 @@ export function ThreadBlock({
                 ) : null}
               </div>
 
-              {subGoal.description?.trim() ? (
-                <div className="mt-3">
-                  <div className="text-[12px] font-medium text-[#6B7280]">线程说明</div>
-                  <p className="mt-1 text-[13px] leading-6 text-[#1F2328]">{subGoal.description}</p>
-                </div>
-              ) : null}
+              <ul className="mt-3 list-disc space-y-3 pl-5 text-left text-[13px] leading-6 text-[#1F2328]">
+                {subGoal.description?.trim() ? (
+                  <DetailGroup label="线程说明" items={[subGoal.description]} />
+                ) : null}
 
-              {subGoal.why?.trim() ? (
-                <div className="mt-3">
-                  <div className="text-[12px] font-medium text-[#6B7280]">为什么要做</div>
-                  <p className="mt-1 text-[13px] leading-6 text-[#1F2328]">{subGoal.why}</p>
-                </div>
-              ) : null}
+                {subGoal.why?.trim() ? (
+                  <DetailGroup label="为什么做" items={[subGoal.why]} />
+                ) : null}
 
-              {dependencyTitles.length > 0 ? (
-                <div className="mt-3">
-                  <div className="text-[12px] font-medium text-[#6B7280]">依赖线程</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {dependencyTitles.map((dependencyTitle) => (
-                      <DetailBadge key={dependencyTitle} label={dependencyTitle} />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {(subGoal.successCriteria?.length ?? 0) > 0 ? (
-                <div className="mt-3">
-                  <div className="text-[12px] font-medium text-[#6B7280]">任务完成标准</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {subGoal.successCriteria?.map((criterion) => (
-                      <DetailBadge key={criterion} label={criterion} tone="light" />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+                {(subGoal.successCriteria?.length ?? 0) > 0 ? (
+                  <DetailGroup label="完成标准" items={subGoal.successCriteria ?? []} ordered />
+                ) : null}
+              </ul>
             </div>
           ) : null}
         </div>
@@ -203,12 +181,55 @@ function priorityLabel(priority: Goal["subGoals"][number]["priority"]) {
   }
 }
 
+function reviewIntervalLabel(value: string) {
+  const normalized = value.trim();
+  switch (normalized) {
+    case "realtime":
+      return "实时（每分钟检查）";
+    case "hourly":
+      return "每小时";
+    case "daily":
+      return "每天";
+    case "weekly":
+      return "每周";
+    case "one_shot":
+      return "仅首次治理";
+    default:
+      if (normalized.startsWith("cron:")) return `Cron：${normalized.slice("cron:".length).trim()}`;
+      return normalized;
+  }
+}
+
 function formatDuration(minutes: number) {
   if (minutes < 60) return `${minutes} 分钟`;
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   if (remainingMinutes === 0) return `${hours} 小时`;
   return `${hours} 小时 ${remainingMinutes} 分钟`;
+}
+
+function DetailGroup({ label, items, ordered = false }: { label: string; items: string[]; ordered?: boolean }) {
+  const displayItems = items.map((item) => item.trim()).filter(Boolean);
+  if (displayItems.length === 0) return null;
+
+  return (
+    <li className="pl-0.5">
+      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-1">
+        <span className="font-medium text-[#6B7280]">{label}</span>
+        {ordered || displayItems.length > 1 ? (
+          <ol className="list-decimal space-y-1 pl-5 text-[#1F2328]">
+            {displayItems.map((item, index) => (
+              <li key={`${label}-${index}`} className="whitespace-pre-wrap break-words pl-0.5">
+                {item}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <span className="whitespace-pre-wrap break-words text-[#1F2328]">{displayItems[0]}</span>
+        )}
+      </div>
+    </li>
+  );
 }
 
 function DetailBadge({ label, tone = "default" }: { label: string; tone?: "default" | "light" }) {

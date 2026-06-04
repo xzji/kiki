@@ -179,7 +179,7 @@ export function runPromptDuplicationGuardSpecs() {
   );
 
   // ---------------------------------------------------------------------
-  // ThreadRunner 8 条必备约束断言（计划 §3.3.4 + §3.3.5）
+  // ThreadRunner 必备约束断言（计划 §3.3.4 + §3.3.5）
   // ---------------------------------------------------------------------
   const threadRunnerTopic: Topic = {
     id: "topic-runner-spec",
@@ -231,6 +231,8 @@ export function runPromptDuplicationGuardSpecs() {
     { key: "Inbox", rule: "约束 6：会话流 + Inbox 双写" },
     { key: "threadId", rule: "约束 7：post_message / dispatch_task 必须填 threadId" },
     { key: "8KB", rule: "约束 8：payload ≤ 8KB" },
+    { key: "failureReason", rule: "约束 9：失败实例必须透出 failureReason" },
+    { key: "禁止猜测", rule: "约束 9：未知失败原因禁止猜测" },
   ];
 
   for (const { key, rule } of REQUIRED_KEYWORDS) {

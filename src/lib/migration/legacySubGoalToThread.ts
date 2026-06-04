@@ -10,7 +10,7 @@
  */
 
 import type { SubGoal } from "@/types/kiki";
-import type { Thread, ThreadLoopInterval } from "@/types/topic";
+import type { Thread, ThreadLoopInterval, ThreadStatus } from "@/types/topic";
 
 export type LegacySubGoalToThreadInput = {
   subGoal: SubGoal;
@@ -44,6 +44,22 @@ function inferDefaultReviewInterval(subGoal: SubGoal): ThreadLoopInterval {
   return subGoal.tasks.some((task) => task.taskType === "repeat") ? "weekly" : "one_shot";
 }
 
+function normalizeThreadStatus(value: unknown): ThreadStatus {
+  if (value === "active" || value === "paused" || value === "archived") return value;
+  return "active";
+}
+
+function normalizeNonNegativeNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function normalizeMemory(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
 export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread {
   const { subGoal, topicId } = input;
   const now = input.createdAt ?? new Date().toISOString();
@@ -62,12 +78,14 @@ export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread
       normalizeThreadLoopInterval(subGoal.reviewInterval) ??
       inferDefaultReviewInterval(subGoal),
     terminationCondition: input.terminationCondition ?? subGoal.terminationCondition,
-    status: "active",
-    memory: {},
-    silentCount: 0,
-    failureCount: 0,
+    status: normalizeThreadStatus(subGoal.threadStatus),
+    lastTickAt: subGoal.lastTickAt,
+    nextTickAt: subGoal.nextTickAt,
+    memory: normalizeMemory(subGoal.threadMemory),
+    silentCount: normalizeNonNegativeNumber(subGoal.silentCount),
+    failureCount: normalizeNonNegativeNumber(subGoal.failureCount),
     createdAt: now,
-    updatedAt: now,
-    revision: 0,
+    updatedAt: subGoal.threadUpdatedAt ?? now,
+    revision: normalizeNonNegativeNumber(subGoal.threadRevision),
   };
 }

@@ -1,6 +1,5 @@
 import type {
   RuntimeActivityPayload,
-  RuntimeJobActivity,
   SagaActivity,
   ThreadRunnerActivity,
 } from "@/lib/api/runtime-daemon";
@@ -65,12 +64,6 @@ export function selectTaskMonitorRows(
   const subGoalTitleById = new Map<string, string>();
   const goalIdBySubGoalId = new Map<string, string>();
 
-  // 运行时 job 的权威实时状态，用于校正 goals 快照滞后（key: taskInstanceId）。
-  const jobByInstanceId = new Map<string, RuntimeJobActivity>();
-  for (const job of runtime?.jobs ?? []) {
-    jobByInstanceId.set(job.taskInstanceId, job);
-  }
-
   for (const goal of goals) {
     goalTitleById.set(goal.id, goal.title);
     for (const subGoal of goal.subGoals) {
@@ -78,8 +71,7 @@ export function selectTaskMonitorRows(
       goalIdBySubGoalId.set(subGoal.id, goal.id);
       for (const task of subGoal.tasks) {
         for (const instance of task.instances) {
-          const job = jobByInstanceId.get(instance.id);
-          const group = getMonitorGroup(instance, job);
+          const group = getMonitorGroup(instance);
           if (!group) continue;
           rows.push({
             rowKey: `task:${instance.id}`,
@@ -96,11 +88,11 @@ export function selectTaskMonitorRows(
             instance,
             group,
             sourceLabel: goal.title,
-            statusLabel: monitorStatusLabel(instance, job, group),
-            result: monitorResult(instance, job, group),
+            statusLabel: monitorStatusLabel(instance, group),
+            result: monitorResult(instance, group),
             createdAt: instance.createdAt,
-            startedAt: job?.startedAt ?? instance.execution?.startedAt,
-            finishedAt: job?.finishedAt ?? instance.execution?.finishedAt,
+            startedAt: instance.execution?.startedAt,
+            finishedAt: instance.execution?.finishedAt,
           });
         }
       }
@@ -211,21 +203,7 @@ function sagaStatusLabel(status: SagaActivity["status"], step?: string): string 
   }
 }
 
-/**
- * 计算任务实例归属的监控分组。
- *
- * 优先采用运行时 job 的权威实时状态（runtime_jobs），仅在 job 缺失时回落到 goals 快照里的
- * instance.status。这样可解决「worker 已领走并在 running，但 goals 快照尚未回写」导致
- * 正在执行的任务被误显为「待执行」的问题。
- */
-function getMonitorGroup(
-  instance: TaskInstance,
-  job?: RuntimeJobActivity,
-): TaskMonitorGroup | null {
-  if (job) {
-    const fromJob = jobStatusToGroup(job.status);
-    if (fromJob) return fromJob;
-  }
+function getMonitorGroup(instance: TaskInstance): TaskMonitorGroup | null {
   if (instance.status === "pending") return "queued";
   if (instance.status === "in_progress") return "running";
   if (instance.status === "paused" || instance.status === "awaiting_user" || instance.awaitingUser)
@@ -234,40 +212,21 @@ function getMonitorGroup(
   return null;
 }
 
-function jobStatusToGroup(status: RuntimeJobActivity["status"]): TaskMonitorGroup | null {
-  switch (status) {
-    case "queued":
-      return "queued";
-    case "running":
-      return "running";
-    case "awaiting_user":
-      return "paused";
-    case "completed":
-    case "failed":
-      return "done";
-    default:
-      // cancelled 等终态不再展示，回落到快照判定。
-      return null;
-  }
-}
-
 function monitorStatusLabel(
   instance: TaskInstance,
-  job: RuntimeJobActivity | undefined,
   group: TaskMonitorGroup,
 ): string {
-  if (job?.status === "failed" || instance.status === "error") return "执行失败";
+  if (instance.status === "error") return "执行失败";
   return TASK_MONITOR_GROUP_LABEL[group];
 }
 
 function monitorResult(
   instance: TaskInstance,
-  job: RuntimeJobActivity | undefined,
   group: TaskMonitorGroup,
 ): "ok" | "fail" | undefined {
   if (group !== "done") return undefined;
-  if (job?.status === "failed" || instance.status === "error") return "fail";
-  if (job?.status === "completed" || instance.status === "completed") return "ok";
+  if (instance.status === "error") return "fail";
+  if (instance.status === "completed") return "ok";
   return undefined;
 }
 

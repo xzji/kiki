@@ -4,7 +4,6 @@ import {
   disableTaskAutoRunProjection,
   enqueueGoalRuntimeJob,
   persistTaskInstanceProjection,
-  syncTaskInstanceProgressProjection,
   updateGoalRuntimeJobExecution,
 } from "@/lib/server/services/goalRuntimeService";
 import { resolveAdmitDecision } from "@/lib/server/taskExecution/contextResolver";
@@ -281,20 +280,12 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       trajectory: [],
     });
 
-    const nextGoalsWithInstance = persistInstanceSnapshot({
+    persistInstanceSnapshot({
       goals: currentGoals,
       goal: latestGoal,
       subGoal: latestSubGoal,
       task: latestTask,
       instance,
-    });
-    syncTaskInstanceProgressProjection({
-      goals: nextGoalsWithInstance,
-      taskId: latestTask.id,
-      instanceId: instance.id,
-      progress,
-      logs: [],
-      trajectory: [],
     });
 
     enqueueRuntimeJob({

@@ -1375,7 +1375,6 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       description: subGoal.description,
       why: subGoal.why,
       priority: subGoal.priority,
-      weight: subGoal.weight,
       dependencies: subGoal.dependencies?.map(
         (dependencyId) => subGoalIdMap.get(dependencyId) ?? dependencyId,
       ),

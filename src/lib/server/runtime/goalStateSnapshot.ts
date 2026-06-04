@@ -1,5 +1,6 @@
 import { createGeneratedInstance } from "@/lib/goalFactory";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
+import { extractFailureReason } from "@/lib/taskFailureReason";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import { normalizeTaskResultViewKind } from "@/types/kiki";
@@ -117,7 +118,7 @@ function isNotificationDecision(value: unknown): value is TaskResultNotification
   );
 }
 
-function notificationContentHash(decision: TaskResultNotificationDecision) {
+export function notificationContentHash(decision: TaskResultNotificationDecision) {
   // 内容指纹：仅在用户可见的语义字段变化时才视为「新一次通知」，
   // 避免单纯的 channel/shouldNotify 抖动错误重置已 delivered 状态。
   return JSON.stringify({
@@ -373,6 +374,8 @@ export function markGoalInstanceStatusSnapshot(
               ? {
                   ...instance,
                   status: input.status,
+                  awaitingUser: input.status === "awaiting_user" ? instance.awaitingUser : undefined,
+                  blocker: input.status === "awaiting_user" ? instance.blocker : undefined,
                   execution: {
                     ...instance.execution,
                     phase: executionPhaseFromInstanceStatus(input.status),
@@ -380,6 +383,8 @@ export function markGoalInstanceStatusSnapshot(
                     startedAt: instance.execution?.startedAt ?? instance.createdAt,
                     finishedAt: input.status === "completed" ? now : instance.execution?.finishedAt,
                     lastUpdatedAt: now,
+                    waitingReason:
+                      input.status === "awaiting_user" ? instance.execution?.waitingReason : undefined,
                     errorMessage: input.status === "error" ? input.reason : instance.execution?.errorMessage,
                   },
                 }
@@ -440,6 +445,129 @@ export function markGoalTaskNotificationDeliveredSnapshot(
   }));
 }
 
+export function deriveTaskInstanceFromProgress(input: {
+  task: Task;
+  instance: TaskInstance;
+  progress: GoalServerProgress | null;
+  logs?: GoalServerLogEntry[];
+  trajectory?: ExecutionTrajectoryStep[];
+}) {
+  if (!input.progress) return input.instance;
+  const progressTrajectory = Array.isArray(input.progress.resultPayload?.trajectory)
+    ? (input.progress.resultPayload.trajectory as ExecutionTrajectoryStep[])
+    : undefined;
+  const nextTrajectory = input.trajectory?.length ? input.trajectory : progressTrajectory;
+  const timeline = normalizeTimelineFromTrajectory(nextTrajectory) ?? normalizeTimelineFromLogs(input.logs);
+  const nextStatus: TaskInstanceStatus =
+    input.progress.status === "completed"
+      ? input.progress.resultPayload?.awaitingUser
+        ? "awaiting_user"
+        : "completed"
+      : input.progress.status === "cancelled"
+        ? "paused"
+      : input.progress.status === "failed"
+        ? "error"
+      : "in_progress";
+  const nextPhase: TaskExecutionPhase =
+    nextStatus === "completed"
+      ? "completed"
+      : nextStatus === "awaiting_user"
+        ? "awaiting_user"
+      : nextStatus === "error"
+        ? "failed"
+      : nextStatus === "paused"
+        ? "cancelled"
+      : "running";
+  const nextKind = normalizeTaskResultViewKind(
+    input.progress.resultPayload?.resultViewKind ?? defaultResultViewKind(input.task),
+  );
+  const artifacts = Array.isArray(input.progress.resultPayload?.artifacts)
+    ? (input.progress.resultPayload.artifacts as TaskRunArtifact[])
+    : undefined;
+  const interactionRequirement = input.progress.resultPayload?.interactionRequirement as
+    | InteractionRequirement
+    | undefined;
+  const interactionSubmission = input.progress.resultPayload?.interactionSubmission as
+    | InteractionSubmission
+    | undefined;
+  const taskResult = input.progress.resultPayload?.taskResult as TaskResult | undefined;
+  const blocker = input.progress.resultPayload?.blocker as ExecutionBlocker | undefined;
+  const currentFailureReason = extractFailureReason({
+    progressError: input.progress.error,
+    resultPayload: input.progress.resultPayload,
+    logs: input.logs,
+  });
+  const failureReason =
+    currentFailureReason ??
+    extractFailureReason({
+      executionErrorMessage: input.instance.execution?.errorMessage,
+      resultSummary: input.instance.result?.summary,
+      resultFinalMessage: input.instance.result?.finalMessage,
+    });
+
+  return {
+    ...input.instance,
+    status: nextStatus,
+    payload:
+      nextKind === "generic_result"
+        ? {
+            kind: "generic_result" as const,
+            summary: input.progress.summary || input.instance.result?.summary || input.instance.intro,
+            details:
+              typeof input.progress.resultPayload?.finalMessage === "string"
+                ? input.progress.resultPayload.finalMessage
+                : undefined,
+            artifacts:
+              artifacts ?? (input.instance.payload.kind === "generic_result" ? input.instance.payload.artifacts : undefined),
+          }
+        : input.instance.payload,
+    execution: {
+      phase: nextPhase,
+      status: nextStatus,
+      startedAt: input.instance.execution?.startedAt ?? input.progress.startedAt ?? input.instance.createdAt,
+      finishedAt: input.progress.finishedAt,
+      lastUpdatedAt: input.progress.updatedAt ?? nowIso(),
+      errorCategory:
+        nextStatus === "error"
+          ? ((input.progress.resultPayload?.errorCategory as TaskRunErrorCategory | undefined) ?? "unknown")
+          : undefined,
+      errorMessage: nextStatus === "error" ? failureReason : undefined,
+    },
+    result: {
+      summary: input.progress.summary || input.instance.result?.summary,
+      finalMessage:
+        typeof input.progress.resultPayload?.finalMessage === "string"
+          ? input.progress.resultPayload.finalMessage
+          : input.instance.result?.finalMessage,
+      taskResult: taskResult ?? input.instance.result?.taskResult,
+      structuredOutput:
+        (input.progress.resultPayload?.structuredOutput as Record<string, unknown> | null | undefined) ??
+        input.instance.result?.structuredOutput ??
+        null,
+      artifacts: artifacts ?? input.instance.result?.artifacts,
+      interactionRequirement: interactionRequirement ?? input.instance.result?.interactionRequirement,
+      interactionSubmission: interactionSubmission ?? input.instance.result?.interactionSubmission,
+    },
+    awaitingUser: input.progress.resultPayload?.awaitingUser
+      ? {
+          reason:
+            (input.progress.resultPayload?.awaitingReason as string | undefined) ||
+            interactionRequirement?.reason ||
+            "任务需要你参与后才能继续。",
+          suggestedActions: Array.isArray(input.progress.resultPayload?.suggestedActions)
+            ? (input.progress.resultPayload.suggestedActions as string[])
+            : interactionRequirement?.suggestedActions,
+          interactionRequirement,
+          blocker,
+        }
+      : undefined,
+    blocker,
+    notification: normalizeNotificationFromProgress(input.progress, input.instance),
+    timeline: mergeTimelineSteps(input.instance.timeline, timeline),
+    trajectory: nextTrajectory ?? input.instance.trajectory,
+  };
+}
+
 export function syncGoalInstanceFromProgress(
   goals: Goal[],
   input: {
@@ -456,11 +584,6 @@ export function syncGoalInstanceFromProgress(
       ...subGoal,
       tasks: subGoal.tasks.map((task) => {
         if (task.id !== input.taskId) return task;
-        const progressTrajectory = Array.isArray(input.progress?.resultPayload?.trajectory)
-          ? (input.progress.resultPayload.trajectory as ExecutionTrajectoryStep[])
-          : undefined;
-        const nextTrajectory = input.trajectory?.length ? input.trajectory : progressTrajectory;
-        const timeline = normalizeTimelineFromTrajectory(nextTrajectory) ?? normalizeTimelineFromLogs(input.logs);
         return {
           ...task,
           progress:
@@ -472,102 +595,13 @@ export function syncGoalInstanceFromProgress(
               : task.progress,
           instances: task.instances.map((instance) => {
             if (instance.id !== input.instanceId) return instance;
-            const nextStatus: TaskInstanceStatus =
-              input.progress?.status === "completed"
-                ? input.progress.resultPayload?.awaitingUser
-                  ? "awaiting_user"
-                  : "completed"
-                : input.progress?.status === "cancelled"
-                  ? "paused"
-                : input.progress?.status === "failed"
-                  ? "error"
-                  : "in_progress";
-            const nextPhase: TaskExecutionPhase =
-              nextStatus === "completed"
-                ? "completed"
-                : nextStatus === "awaiting_user"
-                  ? "awaiting_user"
-                  : nextStatus === "error"
-                    ? "failed"
-                    : nextStatus === "paused"
-                      ? "cancelled"
-                    : "running";
-            const nextKind = normalizeTaskResultViewKind(
-              input.progress?.resultPayload?.resultViewKind ?? defaultResultViewKind(task),
-            );
-            const artifacts = Array.isArray(input.progress?.resultPayload?.artifacts)
-              ? (input.progress.resultPayload.artifacts as TaskRunArtifact[])
-              : undefined;
-            if (!input.progress) return instance;
-            const interactionRequirement = input.progress?.resultPayload?.interactionRequirement as
-              | InteractionRequirement
-              | undefined;
-            const interactionSubmission = input.progress?.resultPayload?.interactionSubmission as
-              | InteractionSubmission
-              | undefined;
-            const taskResult = input.progress?.resultPayload?.taskResult as TaskResult | undefined;
-            const blocker = input.progress?.resultPayload?.blocker as ExecutionBlocker | undefined;
-            return {
-              ...instance,
-              status: nextStatus,
-              payload:
-                nextKind === "generic_result"
-                  ? {
-                      kind: "generic_result" as const,
-                      summary: input.progress?.summary || instance.result?.summary || instance.intro,
-                      details:
-                        typeof input.progress?.resultPayload?.finalMessage === "string"
-                          ? input.progress.resultPayload.finalMessage
-                          : undefined,
-                      artifacts:
-                        artifacts ?? (instance.payload.kind === "generic_result" ? instance.payload.artifacts : undefined),
-                    }
-                  : instance.payload,
-              execution: {
-                phase: nextPhase,
-                status: nextStatus,
-                startedAt: instance.execution?.startedAt ?? input.progress?.startedAt ?? instance.createdAt,
-                finishedAt: input.progress?.finishedAt,
-                lastUpdatedAt: input.progress?.updatedAt ?? nowIso(),
-                errorCategory:
-                  nextStatus === "error"
-                    ? ((input.progress?.resultPayload?.errorCategory as TaskRunErrorCategory | undefined) ?? "unknown")
-                    : undefined,
-                errorMessage: nextStatus === "error" ? input.progress?.error : undefined,
-              },
-              result: {
-                summary: input.progress.summary || instance.result?.summary,
-                finalMessage:
-                  typeof input.progress.resultPayload?.finalMessage === "string"
-                    ? input.progress.resultPayload.finalMessage
-                    : instance.result?.finalMessage,
-                taskResult: taskResult ?? instance.result?.taskResult,
-                structuredOutput:
-                  (input.progress.resultPayload?.structuredOutput as Record<string, unknown> | null | undefined) ??
-                  instance.result?.structuredOutput ??
-                  null,
-                artifacts: artifacts ?? instance.result?.artifacts,
-                interactionRequirement: interactionRequirement ?? instance.result?.interactionRequirement,
-                interactionSubmission: interactionSubmission ?? instance.result?.interactionSubmission,
-              },
-              awaitingUser: input.progress?.resultPayload?.awaitingUser
-                ? {
-                    reason:
-                      (input.progress.resultPayload?.awaitingReason as string | undefined) ||
-                      interactionRequirement?.reason ||
-                      "任务需要你参与后才能继续。",
-                    suggestedActions: Array.isArray(input.progress.resultPayload?.suggestedActions)
-                      ? (input.progress.resultPayload.suggestedActions as string[])
-                      : interactionRequirement?.suggestedActions,
-                    interactionRequirement,
-                    blocker,
-                  }
-                : undefined,
-              blocker,
-              notification: normalizeNotificationFromProgress(input.progress, instance),
-              timeline: mergeTimelineSteps(instance.timeline, timeline),
-              trajectory: nextTrajectory ?? instance.trajectory,
-            };
+            return deriveTaskInstanceFromProgress({
+              task,
+              instance,
+              progress: input.progress,
+              logs: input.logs,
+              trajectory: input.trajectory,
+            });
           }),
         };
       }),

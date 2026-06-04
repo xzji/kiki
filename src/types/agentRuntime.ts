@@ -15,7 +15,8 @@ export type AgentRunRole =
   | "critic"
   | "refiner"
   | "presenter"
-  | "thread_runner";
+  | "thread_runner"
+  | "goal_task";
 
 export type AgentRunStatus =
   | "pending"
@@ -30,6 +31,9 @@ export type AgentEventType =
   | "decision"
   | "dispatch"
   | "message"
+  | "log"
+  | "tool_call"
+  | "tool_result"
   | "error"
   | "thread_paused"
   | "snapshot"
@@ -42,6 +46,7 @@ export type AgentRun = {
   topicId?: string;
   threadId?: string;
   taskId?: string;
+  runtimeJobId?: string;
   sagaInstanceId?: string;
   role: AgentRunRole;
   status: AgentRunStatus;

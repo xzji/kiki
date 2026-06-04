@@ -1,4 +1,5 @@
 import { streamClaudeCli } from "@/lib/server/claudeCli";
+import { appendGuardedEvent } from "@/lib/server/agentRuntime/agentExecutor";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
@@ -34,7 +35,12 @@ export type MultiAgentOrchestratorInput = AgentStrategyInput & {
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
   context?: TaskExecutionContext;
+  agentRunId?: string;
   signal?: AbortSignal;
+  /** 流式进展事件回调，用于上层（ExecutionSupervisor）重置空闲超时判定。 */
+  onProgressPing?: (kind: string) => void;
+  /** Claude CLI spawn 成功后回传 pid，供上层绑定 OS 进程做生命周期管理。 */
+  onSpawn?: (pid: number) => void;
   appendTrajectory: AppendTrajectory;
 };
 
@@ -80,6 +86,23 @@ function parseJsonObject(rawOutput: string) {
   }
 }
 
+function appendRoleEvent(input: MultiAgentOrchestratorInput, type: "llm.request" | "llm.response" | "tool_call" | "decision" | "error", payload: Record<string, unknown>) {
+  if (!input.agentRunId) return;
+  appendGuardedEvent({
+    agentRunId: input.agentRunId,
+    type,
+    payload: {
+      requestId: input.requestId,
+      goalId: input.goal.id,
+      threadId: input.subGoal.id,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      phase: "goal_task_multi_agent_orchestration",
+      ...payload,
+    },
+  });
+}
+
 function createRoleRun(input: { requestId: string; role: AgentRole; taskTitle: string; attempt?: number }): AgentRoleRun {
   return {
     id: `${input.requestId}-${input.role}${input.attempt && input.attempt > 1 ? `-attempt-${input.attempt}` : ""}`,
@@ -113,6 +136,21 @@ async function runRole(input: MultiAgentOrchestratorInput & {
 }) {
   let finalMessage = "";
   const startedAt = nowIso();
+  const prompt = buildRolePrompt({
+    goal: input.goal,
+    subGoal: input.subGoal,
+    task: input.task,
+    instance: input.instance,
+    role: input.role,
+    handoffs: input.handoffs,
+    previousOutputs: input.previousOutputs,
+    review: input.review,
+    resumeContext: input.resumeContext,
+    initialTrajectory: input.initialTrajectory,
+    webAppInteractionContext: buildWebAppInteractionContext({ conversationId: input.goal.conversationId }),
+    context: input.context,
+  });
+  const workingDirectory = input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory;
   input.appendTrajectory({
     type: "system",
     status: "running",
@@ -121,32 +159,33 @@ async function runRole(input: MultiAgentOrchestratorInput & {
     agentRole: input.role,
     startedAt,
   });
+  appendRoleEvent(input, "llm.request", {
+    role: input.role,
+    permissionMode: rolePermission(input.role, input.runtimeEnv),
+    workingDirectory,
+    prompt,
+  });
   try {
     await streamClaudeCli({
-      message: buildRolePrompt({
-        goal: input.goal,
-        subGoal: input.subGoal,
-        task: input.task,
-        instance: input.instance,
-        role: input.role,
-        handoffs: input.handoffs,
-        previousOutputs: input.previousOutputs,
-        review: input.review,
-        resumeContext: input.resumeContext,
-        initialTrajectory: input.initialTrajectory,
-        webAppInteractionContext: buildWebAppInteractionContext({ conversationId: input.goal.conversationId }),
-        context: input.context,
-      }),
-      workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
+      message: prompt,
+      workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: rolePermission(input.role, input.runtimeEnv),
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
       claudeSessionId: undefined,
       signal: input.signal,
+      onSpawn: input.onSpawn,
       onEvent: (event) => {
+        input.onProgressPing?.(event.type);
         if (event.type === "message") finalMessage = event.content;
         if (event.type === "tool_call") {
+          appendRoleEvent(input, "tool_call", {
+            role: input.role,
+            toolName: event.toolName,
+            input: event.input,
+            summary: event.summary,
+          });
           input.appendTrajectory({
             type: "tool_call",
             status: "running",
@@ -159,10 +198,20 @@ async function runRole(input: MultiAgentOrchestratorInput & {
             agentRole: input.role,
           });
         }
-        if (event.type === "error") throw new Error(event.message);
+        if (event.type === "error") {
+          appendRoleEvent(input, "error", {
+            role: input.role,
+            message: event.message,
+          });
+          throw new Error(event.message);
+        }
       },
     });
   } catch (error) {
+    appendRoleEvent(input, "error", {
+      role: input.role,
+      message: error instanceof Error ? error.message : String(error),
+    });
     input.appendTrajectory({
       type: "error",
       status: "failed",
@@ -173,7 +222,23 @@ async function runRole(input: MultiAgentOrchestratorInput & {
     });
     throw error;
   }
-  if (!finalMessage.trim()) throw new Error(`${input.role} 未返回有效输出。`);
+  if (!finalMessage.trim()) {
+    const message = `${input.role} 未返回有效输出。`;
+    appendRoleEvent(input, "error", {
+      role: input.role,
+      message,
+    });
+    throw new Error(message);
+  }
+  const parsedOutput = parseJsonObject(finalMessage);
+  appendRoleEvent(input, "llm.response", {
+    role: input.role,
+    rawText: finalMessage,
+  });
+  appendRoleEvent(input, "decision", {
+    role: input.role,
+    parsedOutput,
+  });
   input.appendTrajectory({
     type: input.role === "synthesizer" ? "result" : "assistant",
     status: "completed",
@@ -184,7 +249,7 @@ async function runRole(input: MultiAgentOrchestratorInput & {
   });
   return {
     rawOutput: finalMessage,
-    parsedOutput: parseJsonObject(finalMessage),
+    parsedOutput,
     startedAt,
     finishedAt: nowIso(),
   };

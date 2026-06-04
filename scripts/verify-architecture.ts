@@ -26,10 +26,11 @@ function fail(message: string, matches: string[]) {
 
 const files = walk(srcDir).filter((file) => /\.(ts|tsx)$/.test(file));
 const contents = files.map((file) => ({ file, rel: relative(file), text: readFileSync(file, "utf8") }));
+const productionContents = contents.filter(({ rel }) => !rel.endsWith(".spec.ts"));
 
 fail(
   "Claude CLI spawn 只能出现在 claude/transport.ts",
-  contents
+  productionContents
     .filter(({ text }) => text.includes("spawn("))
     .map(({ rel }) => rel)
     .filter((rel) => rel !== "src/lib/server/claude/transport.ts"),
@@ -37,7 +38,7 @@ fail(
 
 fail(
   "upsertGoalsSnapshot 只能通过 goalRuntimeService 门面调用",
-  contents
+  productionContents
     .filter(({ text }) => text.includes("upsertGoalsSnapshot("))
     .map(({ rel }) => rel)
     .filter((rel) => rel !== "src/lib/server/runtime/stateSnapshot.ts" && rel !== "src/lib/server/services/goalRuntimeService.ts"),

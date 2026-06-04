@@ -115,7 +115,6 @@ function normalizeSubGoals(
         terminationCondition: readString(record.terminationCondition),
         why: readString(record.why),
         priority: normalizePriority(record.priority),
-        weight: readNumber(record.weight),
         dependencies: normalizeDependencies(record.dependencies),
         estimatedDurationMinutes: readNumber(record.estimatedDurationMinutes),
         successCriteria,

@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 
-import type { Goal, SubGoal } from "@/types/kiki";
+import type { Goal, GoalWorkflowPhase, SubGoal } from "@/types/kiki";
 
 import { legacyGoalToTopic } from "./legacyGoalToTopic";
 import { legacySubGoalToThread } from "./legacySubGoalToThread";
@@ -20,7 +20,6 @@ function makeSubGoal(partial: Partial<SubGoal> & Pick<SubGoal, "id" | "goalId" |
     description: partial.description,
     why: partial.why,
     priority: partial.priority,
-    weight: partial.weight,
     dependencies: partial.dependencies,
     estimatedDurationMinutes: partial.estimatedDurationMinutes,
     successCriteria: partial.successCriteria,
@@ -41,6 +40,15 @@ function makeGoal(partial: Partial<Goal> & Pick<Goal, "id" | "title">): Goal {
     workflow: partial.workflow,
     kind: partial.kind,
     ...partial,
+  };
+}
+
+function makeWorkflow(phase: GoalWorkflowPhase): Goal["workflow"] {
+  return {
+    phase,
+    planDecision: phase === "presenting_plan" || phase === "collecting_info" ? "pending" : "confirmed",
+    startedAt: "2026-05-31T00:00:00.000Z",
+    updatedAt: "2026-05-31T00:00:00.000Z",
   };
 }
 
@@ -69,6 +77,29 @@ export function runLegacyGoalToTopicSpecs() {
   assert.equal(("successCriteria" in (thread as Record<string, unknown>)), false);
   assert.equal(("tasks" in (thread as Record<string, unknown>)), false);
 
+  const subWithGovernance = makeSubGoal({
+    id: "sg-governed",
+    goalId: "g-1",
+    title: "治理态 Thread",
+    threadStatus: "paused",
+    lastTickAt: "2026-06-01T00:00:00.000Z",
+    nextTickAt: "2026-06-02T00:00:00.000Z",
+    threadUpdatedAt: "2026-06-01T01:00:00.000Z",
+    threadMemory: { foo: 1 },
+    silentCount: 2,
+    failureCount: 3,
+    threadRevision: 4,
+  });
+  const governedThread = legacySubGoalToThread({ subGoal: subWithGovernance, topicId: "g-1" });
+  assert.equal(governedThread.status, "paused");
+  assert.equal(governedThread.lastTickAt, "2026-06-01T00:00:00.000Z");
+  assert.equal(governedThread.nextTickAt, "2026-06-02T00:00:00.000Z");
+  assert.equal(governedThread.updatedAt, "2026-06-01T01:00:00.000Z");
+  assert.deepEqual(governedThread.memory, { foo: 1 });
+  assert.equal(governedThread.silentCount, 2);
+  assert.equal(governedThread.failureCount, 3);
+  assert.equal(governedThread.revision, 4);
+
   // 2. Goal.deadline 严格透传：空串 / undefined → undefined（禁止默认兜底）
   const goalNoDeadline = makeGoal({
     id: "g-empty",
@@ -83,6 +114,23 @@ export function runLegacyGoalToTopicSpecs() {
   assert.equal(topicNoDeadline.threads[0].id, "sg-1");
   assert.equal(topicNoDeadline.status, "active");
   assert.equal(topicNoDeadline.revision, 0);
+
+  assert.equal(
+    legacyGoalToTopic({ goal: makeGoal({ id: "g-plan", title: "待确认", workflow: makeWorkflow("presenting_plan") }) }).status,
+    "collecting_info",
+  );
+  assert.equal(
+    legacyGoalToTopic({ goal: makeGoal({ id: "g-exec", title: "执行中", workflow: makeWorkflow("executing") }) }).status,
+    "active",
+  );
+  assert.equal(
+    legacyGoalToTopic({ goal: makeGoal({ id: "g-paused", title: "暂停", workflow: makeWorkflow("paused") }) }).status,
+    "paused",
+  );
+  assert.equal(
+    legacyGoalToTopic({ goal: makeGoal({ id: "g-done", title: "完成", workflow: makeWorkflow("completed") }) }).status,
+    "archived",
+  );
 
   // 3. Goal.deadline 显式给出 → 透传
   const goalWithDeadline = makeGoal({

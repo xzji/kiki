@@ -10,6 +10,7 @@
  *    promptDuplicationGuardSpec 校验）。
  */
 
+import { extractFailureReason, formatFailureReasonForPrompt } from "@/lib/taskFailureReason";
 import type { Task, TaskInstance } from "@/types/kiki";
 import type { Thread, ThreadTickOutput, Topic } from "@/types/topic";
 
@@ -39,11 +40,21 @@ function summarizeTaskInstance(instance: TaskInstance): string {
   const headline = clip(instance.intro || instance.payload?.summary || instance.taskId, 80);
   const status = instance.status;
   const finishedAt = instance.execution?.finishedAt ?? "";
+  const failed = instance.status === "error" || instance.execution?.status === "error";
+  const failureReason = failed
+    ? ` ${formatFailureReasonForPrompt(
+        extractFailureReason({
+          executionErrorMessage: instance.execution?.errorMessage,
+          resultSummary: instance.result?.summary,
+          resultFinalMessage: instance.result?.finalMessage,
+        }),
+      )}`
+    : "";
   const resultSnippet = clip(
     instance.result?.summary ?? instance.result?.finalMessage ?? "",
     120,
   );
-  return `- [${status}] ${headline}${finishedAt ? ` @ ${finishedAt}` : ""}${
+  return `- [${status}] ${headline}${finishedAt ? ` @ ${finishedAt}` : ""}${failureReason}${
     resultSnippet ? ` -> ${resultSnippet}` : ""
   }`;
 }
@@ -51,8 +62,16 @@ function summarizeTaskInstance(instance: TaskInstance): string {
 function summarizeTask(task: Task): string {
   const latest = task.instances[0];
   const latestStatus = latest ? `, latest=${latest.status}` : "";
+  const latestFailed = latest?.status === "error" || latest?.execution?.status === "error";
+  const latestFailureReason = latestFailed
+    ? `, latestFailureReason=${extractFailureReason({
+        executionErrorMessage: latest?.execution?.errorMessage,
+        resultSummary: latest?.result?.summary,
+        resultFinalMessage: latest?.result?.finalMessage,
+      }) ?? "失败原因未记录"}`
+    : "";
   const latestResult = latest?.result?.summary ?? latest?.result?.finalMessage ?? "";
-  return `- ${task.id}: ${clip(task.title, 60)} (taskType=${task.taskType}, triggerRule=${clip(task.triggerRule, 60)}${latestStatus})${
+  return `- ${task.id}: ${clip(task.title, 60)} (taskType=${task.taskType}, triggerRule=${clip(task.triggerRule, 60)}${latestStatus}${latestFailureReason})${
     latestResult ? ` -> ${clip(latestResult, 100)}` : ""
   }`;
 }
@@ -93,7 +112,7 @@ function summarizeLastTickOutput(output?: ThreadTickOutput): string {
 /**
  * 构造 ThreadRunner 决策层 prompt。
  *
- * 必须保证输出包含 §3.3.4 列出的 8 条约束关键字（详见 promptDuplicationGuardSpec）：
+ * 必须保证输出包含 §3.3.4 列出的必备约束关键字（详见 promptDuplicationGuardSpec）：
  *  1. "决策/展示层拆分"
  *  2. "Thread memory" + "上次 tick 产出" + "最近 7 天 Task instances"
  *  3. "dispatch_task / update_task / cancel_task / archive_thread / post_message / silent"
@@ -102,6 +121,7 @@ function summarizeLastTickOutput(output?: ThreadTickOutput): string {
  *  6. "会话流" + "Inbox"
  *  7. "threadId"
  *  8. "8KB"
+ *  9. "failureReason" + "禁止猜测"
  */
 export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromptInput): string {
   const { topic, thread, currentTasks = [], recentTaskInstances, threadMemory, lastTickOutput } = input;
@@ -129,6 +149,7 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
     "6. post_message 固定双写会话流 + Inbox（无需选择渠道），单条 text ≤ 500 字。",
     `7. 所有 post_message / dispatch_task / update_task / cancel_task / archive_thread 必须填 threadId="${thread.id}"，只能治理当前 Thread，禁止跨 Thread。`,
     "8. 整体 payload ≤ 8KB 硬约束；超长请压缩或拆分到下一次 tick。",
+    "9. 当 post_message / dispatch_task / update_task / cancel_task 引用失败或 error 的 Task instance 时，必须包含上下文中的 failureReason；如果 failureReason=失败原因未记录，只能如实说明“失败原因未记录”，禁止猜测外部数据源、配置、权限等原因。",
     "",
     "# 上下文",
     `Topic: ${clip(topic.title, 80)} (status=${topic.status})`,

@@ -231,7 +231,7 @@ function resultReadyDecision(
   const summary = buildSummary(input, `任务「${taskTitle}」已完成。`);
   return baseDecision(input, {
     shouldNotify: true,
-    channel: priority === "high" ? "both" : "inbox",
+    channel: priority === "high" ? "both" : "conversation",
     notificationType: "result_ready",
     priority,
     reason: "任务完成并产出了值得用户查看的结果。",

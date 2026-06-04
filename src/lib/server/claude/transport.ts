@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 
 import type {
@@ -16,6 +16,51 @@ import {
   resolveRuntimeToolPolicy,
   type ToolChannelPolicy,
 } from "@/lib/runtime/toolPolicy";
+
+/**
+ * 强制回收 Claude CLI 子进程及其衍生的整个进程组。
+ *
+ * 背景：spawn 时使用 `detached: true`，子进程成为独立进程组组长，
+ * 因此可以通过 `process.kill(-pid, signal)` 一次性回收其所有孙进程，
+ * 避免出现「父进程被 SIGTERM 杀掉、孙进程仍残留」的孤儿 CLI。
+ *
+ * 升级策略：先发 SIGTERM 优雅终止；若 KILL_ESCALATION_MS 内进程仍未退出，
+ * 再发 SIGKILL 强杀，确保「abort 一定能杀干净」。
+ */
+const KILL_ESCALATION_MS = 5 * 1000;
+
+function killChildTree(child: ChildProcess) {
+  const pid = child.pid;
+  // spawn 失败时 pid 为 undefined，直接返回，避免 process.kill(-undefined) 抛 TypeError。
+  if (typeof pid !== "number") return;
+
+  const killGroup = (signal: NodeJS.Signals) => {
+    try {
+      // 负 pid = 向整个进程组发送信号（依赖 detached: true）。
+      process.kill(-pid, signal);
+    } catch {
+      // 进程组可能已不存在（ESRCH）或权限问题，退化为直接杀进程本身。
+      try {
+        child.kill(signal);
+      } catch {
+        // 进程已退出，忽略。
+      }
+    }
+  };
+
+  killGroup("SIGTERM");
+
+  const escalation = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
+      killGroup("SIGKILL");
+    }
+  }, KILL_ESCALATION_MS);
+  // 不阻塞进程退出。
+  escalation.unref?.();
+  // 进程一旦退出即清理升级定时器。
+  child.once("exit", () => clearTimeout(escalation));
+}
+
 
 export type ClaudeCliPayload = {
   type?: string;
@@ -67,6 +112,8 @@ export type ClaudeStreamOptions = {
   channelPolicy?: ToolChannelPolicy;
   signal?: AbortSignal;
   onEvent: (event: ClaudeStreamEvent) => void;
+  /** spawn 成功后回传子进程 pid，供上层（如 ExecutionSupervisor）绑定 OS 进程做生命周期管理。 */
+  onSpawn?: (pid: number) => void;
 };
 
 export type ClaudeStreamEvent =
@@ -189,6 +236,7 @@ export async function runPromptJson(input: {
       cwd,
       env: buildClaudeEnv(),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     child.stdin.write(input.prompt);
@@ -200,7 +248,7 @@ export async function runPromptJson(input: {
 
     const abort = () => {
       aborted = true;
-      child.kill("SIGTERM");
+      killChildTree(child);
       trace?.finish("aborted", input.abortMessage ?? "Claude CLI 调用已中断");
       reject(new DOMException(input.abortMessage ?? "Claude CLI 调用已中断", "AbortError"));
     };
@@ -307,6 +355,7 @@ export async function runPromptText(input: {
       cwd,
       env: buildClaudeEnv(),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     child.stdin.write(input.prompt);
@@ -318,7 +367,7 @@ export async function runPromptText(input: {
 
     const abort = () => {
       aborted = true;
-      child.kill("SIGTERM");
+      killChildTree(child);
       trace?.finish("aborted", input.abortMessage ?? "Claude CLI 文本调用已中断");
       reject(new DOMException(input.abortMessage ?? "Claude CLI 文本调用已中断", "AbortError"));
     };
@@ -643,7 +692,12 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       cwd,
       env: buildClaudeEnv(),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
+
+    if (typeof child.pid === "number") {
+      options.onSpawn?.(child.pid);
+    }
 
     // 通过 stdin 传入 prompt，彻底规避 --allowedTools 的 variadic 参数吞食问题。
     child.stdin.write(promptInput);
@@ -680,7 +734,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       } catch (error) {
         callbackError = error;
         emittedFatalError = true;
-        child.kill("SIGTERM");
+        killChildTree(child);
         rejectOnce(error);
         return false;
       }
@@ -690,7 +744,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       if (terminalResultReceived) return;
       aborted = true;
       emittedFatalError = true;
-      child.kill("SIGTERM");
+      killChildTree(child);
       trace?.finish("aborted", "Claude CLI 流式调用已中断");
       if (emitEvent({ type: "done" })) {
         resolveOnce();

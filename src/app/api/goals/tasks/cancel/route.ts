@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { syncTaskInstanceProgressProjection } from "@/lib/server/services/goalRuntimeService";
+import {
+  projectRuntimeJobStatusProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
 
 export const runtime = "nodejs";
@@ -32,6 +34,11 @@ export async function POST(request: NextRequest) {
   }
 
   const now = new Date().toISOString();
+  projectRuntimeJobStatusProjection({
+    job,
+    status: "cancelled",
+    reason: "用户手动停止任务执行",
+  });
   const progress: GoalServerProgress = {
     requestId: job.requestId ?? requestId ?? `cancel-${job.id}`,
     scope: "goal_task_execute",
@@ -52,13 +59,18 @@ export async function POST(request: NextRequest) {
   };
 
   if (job.taskId && job.taskInstanceId) {
-    syncTaskInstanceProgressProjection({
-      goals: readGoalsSnapshot([]),
-      taskId: job.taskId,
-      instanceId: job.taskInstanceId,
+    updateGoalRuntimeJobExecution(job.id, {
+      status: "cancelled",
       progress,
       logs: job.logs,
       trajectory: job.trajectory,
+      result:
+        progress.resultPayload && typeof progress.resultPayload === "object"
+          ? progress.resultPayload
+          : null,
+      finishedAt: now,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
     });
   }
 

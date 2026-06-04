@@ -4,7 +4,6 @@ import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { transitionTaskInstanceProjection } from "@/lib/server/services/goalRuntimeService";
 import type { Goal } from "@/types/kiki";
 
 export const runtime = "nodejs";
@@ -58,13 +57,6 @@ export async function POST(
   cancelRuntimeJobByTaskRun({
     taskInstanceId: located.instance.id,
     requestId: located.instance.runner?.requestId,
-  });
-  transitionTaskInstanceProjection({
-    goals,
-    taskId: located.task.id,
-    instanceId: located.instance.id,
-    status: "paused",
-    reason: body.reason ?? "用户取消任务执行",
   });
   const event = appendGoalEventOnce({
     goalId: located.goal.id,

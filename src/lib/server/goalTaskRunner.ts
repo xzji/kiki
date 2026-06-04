@@ -74,6 +74,10 @@ import type { ResultBlock, TaskResult } from "@/types/taskResult";
 import { streamClaudeCli } from "./claudeCli";
 import { getRuntimeJobByRequestId } from "./repositories/runtimeJobsRepository";
 import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
+import { appendGuardedEvent } from "@/lib/server/agentRuntime/agentExecutor";
+import { createAgentRun, updateAgentRun } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
+import { upsertAgentSnapshot } from "@/lib/server/repositories/agentRuntime/agentSnapshotsRepository";
+import type { AgentEventType } from "@/types/agentRuntime";
 
 type RunGoalTaskInput = {
   requestId: string;
@@ -87,7 +91,12 @@ type RunGoalTaskInput = {
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
   executionContext?: TaskExecutionContext;
+  agentRunId?: string;
   signal?: AbortSignal;
+  /** 流式进展事件回调，用于上层（ExecutionSupervisor）重置空闲超时判定。 */
+  onProgressPing?: (kind: string) => void;
+  /** Claude CLI spawn 成功后回传 pid，供上层绑定 OS 进程做生命周期管理。 */
+  onSpawn?: (pid: number) => void;
 };
 
 type DeliverableCheckStatus = "passed" | "failed" | "unknown";
@@ -158,6 +167,62 @@ type ExternalEmbedSpec = {
   url: string;
   provider?: "youtube" | "generic";
 };
+
+function getGoalTaskRuntimeJobId(input: RunGoalTaskInput) {
+  return `job-${input.instance.id}`;
+}
+
+function appendGoalTaskAgentEvent(
+  input: Pick<RunGoalTaskInput, "agentRunId" | "requestId" | "goal" | "subGoal" | "task" | "instance">,
+  type: AgentEventType,
+  payload: Record<string, unknown>,
+) {
+  if (!input.agentRunId) return;
+  appendGuardedEvent({
+    agentRunId: input.agentRunId,
+    type,
+    payload: {
+      requestId: input.requestId,
+      goalId: input.goal.id,
+      threadId: input.subGoal.id,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      ...payload,
+    },
+  });
+}
+
+function createGoalTaskAgentRun(input: RunGoalTaskInput) {
+  const run = createAgentRun({
+    topicId: input.goal.id,
+    threadId: input.subGoal.id,
+    taskId: input.task.id,
+    runtimeJobId: getGoalTaskRuntimeJobId(input),
+    role: "goal_task",
+    status: "running",
+    idempotencyKey: `goal-task:${input.requestId}`,
+  });
+  updateAgentRun({ id: run.id, status: "running" });
+  return run.id;
+}
+
+function finishGoalTaskAgentRun(agentRunId: string | undefined, status: "completed" | "failed") {
+  if (!agentRunId) return;
+  const run = updateAgentRun({
+    id: agentRunId,
+    status,
+    finishedAt: new Date().toISOString(),
+  });
+  if (!run) return;
+  upsertAgentSnapshot({
+    agentRunId,
+    lastEventSeq: run.lastEventSeq,
+    state: {
+      status,
+      finishedAt: run.finishedAt,
+    },
+  });
+}
 
 type RawTaskRunnerPayload = {
   summary?: string;
@@ -1571,26 +1636,62 @@ function attachAgentRunPlan<T extends ParsedTaskRunnerResult>(result: T, agentRu
 async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
   let finalMessage = "";
   let fallbackMessage = "";
-  await streamClaudeCli({
-    message,
-    workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
-    cliPath: input.runtimeEnv.cliPath,
+  const workingDirectory = input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory;
+  appendGoalTaskAgentEvent(input, "llm.request", {
+    phase: "goal_task_auxiliary_prompt",
     permissionMode,
-    filePolicy: input.runtimeEnv.filePolicy,
-    channelPolicy: { mode: "task" },
-    claudeSessionId: undefined,
-    signal: input.signal,
-    onEvent: (event) => {
-      if (event.type === "message") {
-        finalMessage = event.content;
-        fallbackMessage = event.fallbackContent ?? "";
-      }
-      if (event.type === "error") throw new Error(event.message);
-    },
+    workingDirectory,
+    prompt: message,
   });
-  if (!finalMessage.trim()) {
-    throw new Error("Claude CLI 未返回 result.result，无法提取最终任务结果。");
+  try {
+    await streamClaudeCli({
+      message,
+      workingDirectory,
+      cliPath: input.runtimeEnv.cliPath,
+      permissionMode,
+      filePolicy: input.runtimeEnv.filePolicy,
+      channelPolicy: { mode: "task" },
+      claudeSessionId: undefined,
+      signal: input.signal,
+      onSpawn: input.onSpawn,
+      onEvent: (event) => {
+        input.onProgressPing?.(event.type);
+        if (event.type === "message") {
+          finalMessage = event.content;
+          fallbackMessage = event.fallbackContent ?? "";
+        }
+        if (event.type === "tool_call") {
+          appendGoalTaskAgentEvent(input, "tool_call", {
+            phase: "goal_task_auxiliary_prompt",
+            toolName: event.toolName,
+            input: event.input,
+            summary: event.summary,
+          });
+        }
+        if (event.type === "error") throw new Error(event.message);
+      },
+    });
+  } catch (error) {
+    appendGoalTaskAgentEvent(input, "error", {
+      phase: "goal_task_auxiliary_prompt",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
+  if (!finalMessage.trim()) {
+    const message = "Claude CLI 未返回 result.result，无法提取最终任务结果。";
+    appendGoalTaskAgentEvent(input, "error", {
+      phase: "goal_task_auxiliary_prompt",
+      message,
+      fallbackText: fallbackMessage,
+    });
+    throw new Error(message);
+  }
+  appendGoalTaskAgentEvent(input, "llm.response", {
+    phase: "goal_task_auxiliary_prompt",
+    rawText: finalMessage,
+    fallbackText: fallbackMessage,
+  });
   return {
     finalMessage,
     fallbackMessage,
@@ -1974,6 +2075,10 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   });
 
   for (let attempt = 1; attempt <= 2 && !lastReport.passed; attempt += 1) {
+    // 中止后停止本地校验修复轮次，避免无谓的 CLI 调用与副作用。
+    if (input.signal?.aborted) {
+      throw new Error("任务已被中止（超时或 lease 失效），停止本地修复");
+    }
     const isFormatRepair = lastReport.issues.length === 1 && lastReport.issues[0]?.code === "json_parse_failed";
     state.runtime.localValidationReports.push(lastReport);
     state.runtime.repairAttempts.push({
@@ -2110,6 +2215,10 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
   }
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    // 中止后停止后续验收 / 语义修复轮次，避免无谓的 CLI 调用与副作用。
+    if (input.signal?.aborted) {
+      throw new Error("任务已被中止（超时或 lease 失效），停止验收与修复");
+    }
     state.appendTrajectory({
       type: "system",
       status: "running",
@@ -2127,6 +2236,11 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     const judgeRaw = await runClaudePrompt(input, judgePrompt, "readonly");
     const acceptanceReport = parseAcceptanceReport(judgeRaw);
     runtime.acceptanceReports.push(acceptanceReport);
+    appendGoalTaskAgentEvent(input, "decision", {
+      phase: "goal_task_acceptance",
+      attempt,
+      acceptanceReport,
+    });
 
     if (acceptanceReport.verdict === "pass") {
       const acceptedResult = applyAcceptedDeliverableCheck(input, currentResult, acceptanceReport);
@@ -2217,6 +2331,12 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       runtimeAttempt.finishedAt = new Date().toISOString();
       runtimeAttempt.status = local.localValidationReport.passed ? "passed" : "failed";
     }
+    appendGoalTaskAgentEvent(input, "decision", {
+      phase: "goal_task_semantic_repair",
+      attempt,
+      localValidationReport: local.localValidationReport,
+      parseError: local.parseError,
+    });
     if (!local.localValidationReport.passed || !local.parsedResult) {
       const failed = buildUnfinishedResult(input, {
         currentResult: local.parsedResult ?? currentResult,
@@ -2391,22 +2511,38 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     });
     finalMessage = orchestration.rawOutput;
     agentRunPlan = orchestration.agentRunPlan;
+    appendGoalTaskAgentEvent(input, "llm.response", {
+      phase: "goal_task_multi_agent_orchestration",
+      strategy: agentStrategy,
+      rawText: finalMessage,
+      agentRunPlan,
+    });
   } else {
+    const runnerPrompt = buildGoalTaskRunnerPrompt({
+      context: executionContext,
+      resumeContext: input.resumeContext,
+      initialTrajectory: input.initialTrajectory,
+      webAppInteractionContext,
+    });
+    const workingDirectory = input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory;
+    appendGoalTaskAgentEvent(input, "llm.request", {
+      phase: "goal_task_main_execution",
+      permissionMode: input.runtimeEnv.permissionMode,
+      workingDirectory,
+      prompt: runnerPrompt,
+    });
     await streamClaudeCli({
-      message: buildGoalTaskRunnerPrompt({
-        context: executionContext,
-        resumeContext: input.resumeContext,
-        initialTrajectory: input.initialTrajectory,
-        webAppInteractionContext,
-      }),
-      workingDirectory: input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory,
+      message: runnerPrompt,
+      workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: input.runtimeEnv.permissionMode,
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
       claudeSessionId: undefined,
       signal: input.signal,
+      onSpawn: input.onSpawn,
       onEvent: (event) => {
+        input.onProgressPing?.(event.type);
         if (event.type === "delta" && event.text.trim()) {
           pendingAssistantProcessOutput += event.text;
           if (
@@ -2442,6 +2578,12 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
           });
         }
         if (event.type === "tool_call") {
+          appendGoalTaskAgentEvent(input, "tool_call", {
+            phase: "goal_task_main_execution",
+            toolName: event.toolName,
+            input: event.input,
+            summary: event.summary,
+          });
           if (isResumeRun) {
             const signature = `${event.toolName}::${JSON.stringify(event.input ?? null)}`;
             if (previousToolSignatures.has(signature)) {
@@ -2490,6 +2632,10 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
           });
         }
         if (event.type === "error") {
+          appendGoalTaskAgentEvent(input, "error", {
+            phase: "goal_task_main_execution",
+            message: event.message,
+          });
           appendTrajectory({
             type: "error",
             status: "failed",
@@ -2503,6 +2649,11 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
           throw new Error(event.message);
         }
       },
+    });
+    appendGoalTaskAgentEvent(input, "llm.response", {
+      phase: "goal_task_main_execution",
+      rawText: finalMessage,
+      fallbackText: fallbackFinalMessage,
     });
   }
 
@@ -2574,6 +2725,12 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   });
 
   let parsed = tryParseTaskRunnerResult(input, finalMessage, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
+  appendGoalTaskAgentEvent(input, "decision", {
+    phase: "goal_task_parse",
+    ok: Boolean(parsed.result),
+    error: parsed.error,
+    parsedResult: parsed.result,
+  });
   if (!parsed.result && fallbackFinalMessage.trim()) {
     const fallbackParsed = tryParseTaskRunnerResult(
       input,
@@ -2827,26 +2984,39 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
 }
 
 export async function runGoalTask(input: RunGoalTaskInput) {
+  const agentRunId = input.agentRunId ?? createGoalTaskAgentRun(input);
+  const tracedInput: RunGoalTaskInput = { ...input, agentRunId };
+  let agentRunFinalized = false;
+  const finishCurrentAgentRun = (status: "completed" | "failed") => {
+    agentRunFinalized = true;
+    finishGoalTaskAgentRun(agentRunId, status);
+  };
+  appendGoalTaskAgentEvent(tracedInput, "message", {
+    phase: "goal_task_started",
+    runtimeJobId: getGoalTaskRuntimeJobId(tracedInput),
+    taskTitle: tracedInput.task.title,
+  });
+  try {
   beginGoalTelemetry({
-    requestId: input.requestId,
+    requestId: tracedInput.requestId,
     scope: "goal_task_execute",
     phase: "executing",
-    message: `KiKi 已自动启动任务「${input.task.title.replace(/^任务\d+：/, "")}」`,
-    goalId: input.goal.id,
-    taskId: input.task.id,
-    taskInstanceId: input.instance.id,
+    message: `KiKi 已自动启动任务「${tracedInput.task.title.replace(/^任务\d+：/, "")}」`,
+    goalId: tracedInput.goal.id,
+    taskId: tracedInput.task.id,
+    taskInstanceId: tracedInput.instance.id,
     attemptCount: 1,
   });
 
   const executionContext = resolveExecutionContext({
-    conversationId: input.goal.conversationId ?? "",
-    goal: input.goal,
-    subGoal: input.subGoal,
-    task: input.task,
-    instance: input.instance,
-    requestId: input.requestId,
+    conversationId: tracedInput.goal.conversationId ?? "",
+    goal: tracedInput.goal,
+    subGoal: tracedInput.subGoal,
+    task: tracedInput.task,
+    instance: tracedInput.instance,
+    requestId: tracedInput.requestId,
   });
-  const enhancedInput = { ...input, executionContext };
+  const enhancedInput: RunGoalTaskInput = { ...tracedInput, executionContext };
   const contextReadiness = readinessFromContext(executionContext);
   const readiness =
     executionContext.readiness.state === "blocked"
@@ -2946,6 +3116,12 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         result: resultPayload,
       });
     }
+    appendGoalTaskAgentEvent(enhancedInput, "decision", {
+      phase: "goal_task_blocked_before_execution",
+      readiness,
+      resultPayload,
+    });
+    finishCurrentAgentRun("completed");
     return;
   }
 
@@ -2964,6 +3140,10 @@ export async function runGoalTask(input: RunGoalTaskInput) {
   let attemptCount = 1;
   const maxAttempts = 2;
   while (attemptCount <= maxAttempts) {
+    // 超时 / lease 失效后由上层 abort：在每次重试入口短路，避免被中止后仍发起新一轮执行。
+    if (input.signal?.aborted) {
+      throw new Error("任务已被中止（超时或 lease 失效），停止后续执行");
+    }
     try {
       const result = normalizeParsedAwaitingResult(await executeOnce({ ...enhancedInput, attemptCount }));
       const notificationDecision = judgeTaskResult({
@@ -2991,6 +3171,11 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       } satisfies Record<string, unknown>;
       if (unresolvedAgentRevision) {
         const errorMessage = result.awaitingReason || "任务缺少组件化产出，Agent 自动补齐后仍未满足交付物要求。";
+        const failedResultPayload = {
+          ...resultPayload,
+          errorMessage,
+          errorCategory: "logic",
+        } satisfies Record<string, unknown>;
         failGoalTelemetry({
           requestId: input.requestId,
           scope: "goal_task_execute",
@@ -3001,7 +3186,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
           taskId: input.task.id,
           taskInstanceId: input.instance.id,
           summary: result.summary,
-          resultPayload,
+          resultPayload: failedResultPayload,
         });
         appendGoalLog({
           requestId: input.requestId,
@@ -3016,10 +3201,16 @@ export async function runGoalTask(input: RunGoalTaskInput) {
           taskInstanceId: input.instance.id,
         });
         updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
-          result: resultPayload,
+          result: failedResultPayload,
           trajectory: result.trajectory,
           lastError: errorMessage,
         });
+        appendGoalTaskAgentEvent(enhancedInput, "error", {
+          phase: "goal_task_unresolved_revision",
+          message: errorMessage,
+          resultPayload: failedResultPayload,
+        });
+        finishCurrentAgentRun("failed");
         return;
       }
       if (result.awaitingUser) {
@@ -3071,10 +3262,21 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         taskId: input.task.id,
         taskInstanceId: input.instance.id,
       });
+      appendGoalTaskAgentEvent(enhancedInput, "decision", {
+        phase: result.awaitingUser ? "goal_task_awaiting_user" : "goal_task_completed",
+        resultPayload,
+      });
+      finishCurrentAgentRun("completed");
       return;
     } catch (error) {
       const category = classifyTaskRunError(error);
       const errorMessage = error instanceof Error ? error.message : "任务执行失败";
+      appendGoalTaskAgentEvent(enhancedInput, "error", {
+        phase: "goal_task_attempt_failed",
+        attemptCount,
+        errorCategory: category,
+        message: errorMessage,
+      });
       if (shouldRetry(category, attemptCount)) {
         appendGoalLog({
           requestId: input.requestId,
@@ -3114,6 +3316,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         taskInstanceId: input.instance.id,
         resultPayload: {
           errorCategory: category,
+          errorMessage,
         },
       });
       appendGoalLog({
@@ -3128,7 +3331,19 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         taskId: input.task.id,
         taskInstanceId: input.instance.id,
       });
+      finishCurrentAgentRun("failed");
       throw error;
     }
+  }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!agentRunFinalized) {
+      appendGoalTaskAgentEvent(tracedInput, "error", {
+        phase: "goal_task_unhandled_failure",
+        message,
+      });
+      finishCurrentAgentRun("failed");
+    }
+    throw error;
   }
 }

@@ -18,6 +18,7 @@ import {
   incrementSagaRetry,
   updateSagaInstance,
 } from "@/lib/server/repositories/agentRuntime/sagaInstancesRepository";
+import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import type { SagaInstance, SagaStatus } from "@/types/agentRuntime";
 
 import { appendGuardedEvent } from "./agentExecutor";
@@ -44,6 +45,7 @@ export function advanceSaga(input: AdvanceSagaInput): SagaInstance | null {
       payload: { sagaInstanceId: input.sagaInstanceId, toStep: input.toStep },
     });
   }
+  publishSagaStep(next, `advance:${input.toStep}:${next?.revision ?? 0}`);
   return next;
 }
 
@@ -56,18 +58,22 @@ export function markAwaitingUser(
     type: "awaiting_user",
     payload: { questions: reason.questions },
   });
-  return updateSagaInstance({
+  const next = updateSagaInstance({
     id: sagaInstanceId,
     status: "awaiting_user",
   });
+  publishSagaStep(next, `awaiting_user:${next?.revision ?? 0}`);
+  return next;
 }
 
 export function markCompleted(sagaInstanceId: string): SagaInstance | null {
-  return updateSagaInstance({
+  const next = updateSagaInstance({
     id: sagaInstanceId,
     status: "completed",
     finishedAt: new Date().toISOString(),
   });
+  publishSagaStep(next, `completed:${next?.revision ?? 0}`);
+  return next;
 }
 
 export function markFailed(
@@ -81,11 +87,13 @@ export function markFailed(
       payload: { message: reason.message },
     });
   }
-  return updateSagaInstance({
+  const next = updateSagaInstance({
     id: sagaInstanceId,
     status: "failed",
     finishedAt: new Date().toISOString(),
   });
+  publishSagaStep(next, `failed:${next?.revision ?? 0}`);
+  return next;
 }
 
 export function retrySaga(sagaInstanceId: string): SagaInstance | null {
@@ -96,4 +104,19 @@ export function retrySaga(sagaInstanceId: string): SagaInstance | null {
 /** Mirrors the SagaStatus → next allowed transitions used by /commands route. */
 export function isTerminalStatus(status: SagaStatus): boolean {
   return status === "completed" || status === "failed";
+}
+
+function publishSagaStep(saga: SagaInstance | null, suffix: string) {
+  if (!saga) return;
+  try {
+    appendGoalEventOnce({
+      goalId: saga.topicId,
+      kind: "saga.step.advanced",
+      payload: { saga },
+      producedBy: "daemon",
+      idempotencyKey: `saga.step.advanced:${saga.id}:${suffix}`,
+    });
+  } catch {
+    // Runtime projection events are best-effort; saga state remains durable.
+  }
 }

@@ -48,10 +48,6 @@ export function getPlanningCheckpointFilePath(conversationId: string) {
   return path.join(getConversationWorkspaceDir(conversationId), "planning", "checkpoint.json");
 }
 
-export function getGoalSnapshotFilePath(conversationId: string) {
-  return path.join(getConversationWorkspaceDir(conversationId), "goals", "goal.json");
-}
-
 export function getTaskWorkspaceDir(input: { conversationId: string; taskId: string; instanceId: string }) {
   return path.join(
     getConversationWorkspaceDir(input.conversationId),
@@ -233,21 +229,6 @@ export function writeTaskPromptFile(input: {
   const taskWorkspaceDir = ensureTaskWorkspace(input);
   const filePath = path.join(taskWorkspaceDir, "prompt.md");
   writeTextFileAtomic(filePath, input.content);
-  return filePath;
-}
-
-export function writeTaskMarkdownLogFile(input: {
-  conversationId: string;
-  taskId: string;
-  instanceId: string;
-  fileName: string;
-  content: string;
-}) {
-  const taskWorkspaceDir = ensureTaskWorkspace(input);
-  const logsDir = ensureDir(path.join(taskWorkspaceDir, "logs"));
-  const safeFileName = sanitizeWorkspaceSegment(input.fileName.replace(/\.md$/i, ""));
-  const filePath = path.join(logsDir, `${safeFileName}.md`);
-  writeTextFileAtomic(filePath, input.content.endsWith("\n") ? input.content : `${input.content}\n`);
   return filePath;
 }
 

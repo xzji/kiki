@@ -25,14 +25,15 @@ export async function generateTopicSagaPlan(input: {
   conversationId?: string;
   conversationContext?: string;
   maxRefineLoops?: number;
+  requestId?: string;
   signal?: AbortSignal;
 }): Promise<TopicSagaPlanResult> {
-  const { signal, ...body } = input;
+  const { signal, requestId, ...body } = input;
   const response = await fetch("/api/topics/plan", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-topic-saga-request-id": `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      "x-topic-saga-request-id": requestId ?? `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     },
     body: JSON.stringify(body),
     signal,

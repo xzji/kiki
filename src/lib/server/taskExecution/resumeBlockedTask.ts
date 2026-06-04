@@ -2,10 +2,8 @@ import {
   getRuntimeJobByTaskInstanceId,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import { requiresUserConfirmationToComplete } from "@/lib/server/domain/taskPolicy";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import {
   requeueBlockedGoalRuntimeJob,
-  syncTaskInstanceProgressProjection,
   updateGoalRuntimeJobExecution,
 } from "@/lib/server/services/goalRuntimeService";
 import {
@@ -459,14 +457,6 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       phase: "completed",
       message: "已记录用户反馈，任务保持完成",
     });
-    syncTaskInstanceProgressProjection({
-      goals: readGoalsSnapshot([]),
-      taskId: job.payload.task.id,
-      instanceId: job.payload.instance.id,
-      progress: nextProgress,
-      logs: job.logs,
-      trajectory: nextTrajectory,
-    });
     if (conversationId) {
       writeTaskRunSnapshot({
         conversationId,
@@ -533,14 +523,6 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       status: "completed",
       phase: "completed",
       message: "用户已确认，任务已完成",
-    });
-    syncTaskInstanceProgressProjection({
-      goals: readGoalsSnapshot([]),
-      taskId: job.payload.task.id,
-      instanceId: job.payload.instance.id,
-      progress: nextProgress,
-      logs: job.logs,
-      trajectory: nextTrajectory,
     });
     if (conversationId) {
       writeTaskRunSnapshot({
@@ -612,14 +594,6 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
     status: "running",
     phase: "executing",
     message: body.approved ? "已收到用户确认，等待 Agent 生成最终方案" : "已收到用户反馈，等待 Agent 继续执行",
-  });
-  syncTaskInstanceProgressProjection({
-    goals: readGoalsSnapshot([]),
-    taskId: job.payload.task.id,
-    instanceId: job.payload.instance.id,
-    progress: nextProgress,
-    logs: job.logs,
-    trajectory: nextTrajectory,
   });
   if (conversationId) {
     writeTaskRunSnapshot({

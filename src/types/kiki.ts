@@ -390,6 +390,8 @@ export type Task = {
   collaboration?: TaskCollaborationRequirements;
 };
 
+export type ThreadGovernanceStatus = "active" | "paused" | "archived";
+
 /**
  * @deprecated 改用 Thread（src/types/topic.ts）。SubGoal 字段（successCriteria/tasks）
  * 与 Thread 不同形不能 type alias，需通过 legacySubGoalToThread() 显式转换。
@@ -406,10 +408,18 @@ export type SubGoal = {
   terminationCondition?: string;
   why?: string;
   priority?: TaskPriority;
-  weight?: number;
   dependencies?: string[];
   estimatedDurationMinutes?: number;
   successCriteria?: string[];
+  /** Thread 治理状态；一期暂存于权威源 SubGoal，二期迁回 Thread 一等字段。 */
+  threadStatus?: ThreadGovernanceStatus;
+  lastTickAt?: string;
+  nextTickAt?: string;
+  threadUpdatedAt?: string;
+  threadMemory?: Record<string, unknown>;
+  silentCount?: number;
+  failureCount?: number;
+  threadRevision?: number;
   tasks: Task[];
 };
 
@@ -452,6 +462,18 @@ export type InboxItem = {
   linkTo: string;
   goalId?: string;
   createdAt: string;
+  favorite?: boolean;
+};
+
+export type InboxItemStatus = "active" | "snoozed" | "archived";
+
+export type InboxItemState = {
+  inboxItemId: string;
+  goalId?: string;
+  status: InboxItemStatus;
+  favorite: boolean;
+  unread: boolean;
+  snoozeUntil?: string;
 };
 
 export type KikiMessage = {
@@ -477,6 +499,7 @@ export type ConversationMessage =
       unread?: boolean;
       status?: "streaming" | "done" | "error";
       source?: "user" | "kiki" | "system";
+      sagaRequestId?: string;
     }
   | {
       id: string;
@@ -552,7 +575,6 @@ export type GoalBreakdownDraft = {
     terminationCondition?: string;
     why?: string;
     priority?: TaskPriority;
-    weight?: number;
     dependencies?: string[];
     estimatedDurationMinutes?: number;
     successCriteria?: string[];

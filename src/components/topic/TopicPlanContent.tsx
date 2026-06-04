@@ -155,7 +155,7 @@ export function TopicPlanContent({
 
   const summary = useMemo(() => {
     const allTasks = displaySubGoals.flatMap((subGoal) => subGoal.tasks);
-    const statusList = allTasks.map(getTaskSummaryStatus);
+    const statusList = allTasks.map((task) => getTaskSummaryStatus(task));
     const completedCount = statusList.filter((status) => status === "completed").length;
     const awaitingCount = statusList.filter((status) => status === "awaiting_user").length;
     const inProgressCount = statusList.filter((status) => status === "in_progress").length;

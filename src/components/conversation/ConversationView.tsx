@@ -12,6 +12,7 @@ import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { generateTopicSagaPlan } from "@/lib/api/topics";
 import { submitTaskResultFeedback, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { buildTaskQuoteContent } from "@/lib/taskFeedback";
@@ -185,7 +186,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const goals = useGoalStore(selectVisibleGoals);
-  const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
   const contextGoal = useMemo(
@@ -208,6 +209,10 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const [showUnreadJump, setShowUnreadJump] = useState(false);
   const [hasLocalActiveStream, setHasLocalActiveStream] = useState(false);
   const resultMessageIdFromQuery = searchParams.get("resultMessageId");
+  const refreshGoalsFromSnapshot = async () => {
+    const snapshot = await fetchRuntimeStateSnapshot();
+    applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
+  };
 
   // 进入会话标记为已读
   useEffect(() => {
@@ -422,13 +427,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         });
       }
       if (feedback.progress && feedback.taskInstanceId) {
-        applyInstanceProgressProjection({
-          taskId: sourceMessage.taskRef.taskId,
-          instanceId: feedback.taskInstanceId,
-          progress: feedback.progress,
-          logs: feedback.logs,
-          trajectory: feedback.trajectory,
-        });
+        void refreshGoalsFromSnapshot();
       }
       if (feedback.decision === "rerun" && feedback.taskCardMessage?.taskRef) {
         // 使用 `local-` 命名空间隔离本地乐观 push 的 task_card，避免与
@@ -453,24 +452,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
             requestId: feedback.progress.requestId,
             taskInstanceId: feedback.taskInstanceId,
             onProgress: (payload) => {
-              applyInstanceProgressProjection({
-                taskId: feedback.taskCardMessage!.taskRef.taskId,
-                instanceId: feedback.taskInstanceId!,
-                progress: payload.progress,
-                logs: payload.logs,
-                trajectory: payload.trajectory,
-                waitingReason: payload.waitingReason,
-              });
+              void payload;
+              void refreshGoalsFromSnapshot();
             },
-          }).then((result) => {
-            applyInstanceProgressProjection({
-              taskId: feedback.taskCardMessage!.taskRef.taskId,
-              instanceId: feedback.taskInstanceId!,
-              progress: result.progress,
-              logs: result.logs,
-              trajectory: result.trajectory,
-              waitingReason: result.waitingReason,
-            });
+          }).then(() => {
+            void refreshGoalsFromSnapshot();
           }).catch((error) => {
             setStreamError(error instanceof Error ? error.message : "反馈修订任务跟进失败");
           });
@@ -723,6 +709,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const now = new Date().toISOString();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const sagaRequestId = `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
@@ -744,6 +731,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         createdAt: now,
         status: "streaming",
         source: "kiki",
+        sagaRequestId,
       });
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
@@ -758,6 +746,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           runtimeEnv,
           conversationId: conversation.id,
           conversationContext: buildRecentConversationContext(conversation.messages),
+          requestId: sagaRequestId,
           signal: controller.signal,
         });
         if (result.kind === "awaiting_user") {
@@ -969,13 +958,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           status: "done",
         }));
         if (feedback.progress && feedback.taskInstanceId) {
-          applyInstanceProgressProjection({
-            taskId: feedbackTaskRef.taskId,
-            instanceId: feedback.taskInstanceId,
-            progress: feedback.progress,
-            logs: feedback.logs,
-            trajectory: feedback.trajectory,
-          });
+          void refreshGoalsFromSnapshot();
         }
         if (feedback.decision === "rerun" && feedback.taskCardMessage?.taskRef) {
           // 同上：本地乐观 push 的 task_card 使用独立 id 命名空间。
@@ -999,24 +982,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
               requestId: feedback.progress.requestId,
               taskInstanceId: feedback.taskInstanceId,
               onProgress: (payload) => {
-                applyInstanceProgressProjection({
-                  taskId: feedback.taskCardMessage!.taskRef.taskId,
-                  instanceId: feedback.taskInstanceId!,
-                  progress: payload.progress,
-                  logs: payload.logs,
-                  trajectory: payload.trajectory,
-                  waitingReason: payload.waitingReason,
-                });
+                void payload;
+                void refreshGoalsFromSnapshot();
               },
-            }).then((result) => {
-              applyInstanceProgressProjection({
-                taskId: feedback.taskCardMessage!.taskRef.taskId,
-                instanceId: feedback.taskInstanceId!,
-                progress: result.progress,
-                logs: result.logs,
-                trajectory: result.trajectory,
-                waitingReason: result.waitingReason,
-              });
+            }).then(() => {
+              void refreshGoalsFromSnapshot();
             }).catch((error) => {
               setStreamError(error instanceof Error ? error.message : "反馈修订任务跟进失败");
             });

@@ -1,5 +1,16 @@
 import {
+  createIdempotencyKey,
+  normalizeInstanceId,
+  normalizeTaskId,
+} from "@/lib/opaqueIds";
+import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
+import {
+  markTaskNotificationDeliveredState,
+  upsertTaskNotificationStateFromProgress,
+} from "@/lib/server/repositories/taskNotificationStateRepository";
+import {
   createQueuedRuntimeJobInternal,
+  listRuntimeJobsByStatuses,
   updateRuntimeJobExecutionInternal,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import {
@@ -9,9 +20,7 @@ import {
 } from "@/lib/server/repositories/threadsRepository";
 import {
   markGoalInstanceStatusSnapshot,
-  markGoalTaskNotificationDeliveredSnapshot,
   setTaskAutoRunDisabled,
-  syncGoalInstanceFromProgress,
   upsertGoalTaskInstanceSnapshot,
 } from "@/lib/server/runtime/goalStateSnapshot";
 import {
@@ -19,7 +28,11 @@ import {
   upsertGoalsSnapshot,
   type SnapshotWriteResult,
 } from "@/lib/server/runtime/stateSnapshot";
-import type { RuntimeJobPayload, RuntimeJobRecord } from "@/lib/server/repositories/runtimeJobsRepository";
+import type {
+  RuntimeJobPayload,
+  RuntimeJobRecord,
+  RuntimeJobStatus,
+} from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { Goal, SubGoal, Task, TaskInstance, TaskInstanceStatus } from "@/types/kiki";
@@ -33,6 +46,72 @@ export class GoalsProjectionConflictError extends Error {
     super(message);
     this.name = "GoalsProjectionConflictError";
   }
+}
+
+function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus): TaskInstanceStatus {
+  switch (status) {
+    case "running":
+      return "in_progress";
+    case "awaiting_user":
+      return "awaiting_user";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "error";
+    case "cancelled":
+      return "paused";
+    case "queued":
+    default:
+      return "pending";
+  }
+}
+
+function findTaskInstance(goals: Goal[], taskId: string, instanceId: string) {
+  const normalizedTaskId = normalizeTaskId(taskId);
+  const normalizedInstanceId = normalizeInstanceId(instanceId);
+  for (const goal of goals) {
+    for (const subGoal of goal.subGoals) {
+      for (const task of subGoal.tasks) {
+        if (normalizeTaskId(task.id) !== normalizedTaskId) continue;
+        const instance = task.instances.find((entry) => normalizeInstanceId(entry.id) === normalizedInstanceId);
+        if (instance) return { goal, task, instance };
+      }
+    }
+  }
+  return null;
+}
+
+function appendInstanceStatusChangedEvent(input: {
+  job: RuntimeJobRecord;
+  previousStatus?: TaskInstanceStatus;
+  nextStatus: TaskInstanceStatus;
+  reason?: string;
+  createdAt?: string;
+}) {
+  const goalId = input.job.goalId ?? input.job.payload.goal.id;
+  const taskId = input.job.taskId ?? input.job.payload.task.id;
+  const instanceId = input.job.taskInstanceId ?? input.job.payload.instance.id;
+  return appendGoalEventOnce({
+    goalId,
+    taskId,
+    instanceId,
+    kind: "instance.status_changed",
+    producedBy: "worker",
+    idempotencyKey: createIdempotencyKey(
+      "instance.status_changed.runtime_job",
+      input.job.id,
+      input.previousStatus ?? "unknown",
+      input.nextStatus,
+      input.job.updatedAt,
+    ),
+    createdAt: input.createdAt ?? input.job.updatedAt,
+    payload: {
+      previousStatus: input.previousStatus,
+      nextStatus: input.nextStatus,
+      requestId: input.job.requestId,
+      reason: input.reason ?? input.job.lastError,
+    },
+  });
 }
 
 export function requestThreadGovernanceTick(threadId: string, now = new Date()) {
@@ -103,13 +182,10 @@ export function syncTaskInstanceProgressProjection(input: {
   logs?: GoalServerLogEntry[];
   trajectory?: ExecutionTrajectoryStep[];
 }) {
-  return mutateGoalsProjection((goals) => syncGoalInstanceFromProgress(goals, {
-    taskId: input.taskId,
-    instanceId: input.instanceId,
-    progress: input.progress,
-    logs: input.logs,
-    trajectory: input.trajectory,
-  }), { fallbackGoals: input.goals });
+  void input.taskId;
+  void input.logs;
+  void input.trajectory;
+  return input.goals;
 }
 
 export function transitionTaskInstanceProjection(input: {
@@ -127,6 +203,56 @@ export function transitionTaskInstanceProjection(input: {
   }), { fallbackGoals: input.goals });
 }
 
+export function projectRuntimeJobStatusProjection(input: {
+  job: RuntimeJobRecord;
+  status?: RuntimeJobStatus;
+  reason?: string;
+  emitEvent?: boolean;
+}) {
+  const taskId = input.job.taskId ?? input.job.payload.task.id;
+  const instanceId = input.job.taskInstanceId ?? input.job.payload.instance.id;
+  const nextStatus = runtimeJobStatusToTaskInstanceStatus(input.status ?? input.job.status);
+  const currentGoals = readGoalsSnapshotMeta([]).value;
+  const located = findTaskInstance(currentGoals, taskId, instanceId);
+  const previousStatus = located?.instance.status;
+  const shouldEmit = !located || previousStatus !== nextStatus;
+
+  if (input.emitEvent !== false && shouldEmit) {
+    appendInstanceStatusChangedEvent({
+      job: input.job,
+      previousStatus,
+      nextStatus,
+      reason: input.reason,
+    });
+  }
+
+  return {
+    projected: shouldEmit,
+    previousStatus,
+    nextStatus,
+  };
+}
+
+export function reconcileRuntimeJobStatusProjections(input?: {
+  statuses?: RuntimeJobStatus[];
+  limit?: number;
+}) {
+  const jobs = listRuntimeJobsByStatuses({
+    statuses: input?.statuses ?? ["queued", "running", "awaiting_user"],
+    limit: input?.limit,
+  });
+  let projected = 0;
+  for (const job of jobs) {
+    const result = projectRuntimeJobStatusProjection({
+      job,
+      status: job.status,
+      reason: "runtime job 状态对账",
+    });
+    if (result.projected) projected += 1;
+  }
+  return { checked: jobs.length, projected };
+}
+
 export function markTaskNotificationDeliveredProjection(input: {
   goals: Goal[];
   taskId: string;
@@ -135,13 +261,15 @@ export function markTaskNotificationDeliveredProjection(input: {
   conversationMessageId?: string;
   notificationSequence?: number;
 }) {
-  return mutateGoalsProjection((goals) => markGoalTaskNotificationDeliveredSnapshot(goals, {
-    taskId: input.taskId,
+  void input.goals;
+  void input.taskId;
+  markTaskNotificationDeliveredState({
     instanceId: input.instanceId,
     inboxItemId: input.inboxItemId,
     conversationMessageId: input.conversationMessageId,
     notificationSequence: input.notificationSequence,
-  }), { fallbackGoals: input.goals });
+  });
+  return input.goals;
 }
 
 export function enqueueGoalRuntimeJob(
@@ -156,6 +284,21 @@ export function updateGoalRuntimeJobExecution(
   updates: Parameters<typeof updateRuntimeJobExecutionInternal>[1],
 ) {
   const next = updateRuntimeJobExecutionInternal(jobId, updates);
+  if (next && updates.progress) {
+    upsertTaskNotificationStateFromProgress({
+      goalId: next.goalId,
+      taskId: next.taskId,
+      instance: next.payload.instance,
+      progress: updates.progress,
+    });
+  }
+  if (next && updates.status) {
+    projectRuntimeJobStatusProjection({
+      job: next,
+      status: updates.status,
+      reason: updates.lastError,
+    });
+  }
   if (next && (updates.status === "completed" || updates.status === "failed")) {
     requestThreadGovernanceTick(next.payload.subGoal.id, new Date(next.updatedAt));
   }
@@ -170,7 +313,7 @@ export function requeueBlockedGoalRuntimeJob(input: {
   trajectory: ExecutionTrajectoryStep[];
   result: Record<string, unknown>;
 }) {
-  return updateRuntimeJobExecutionInternal(input.job.id, {
+  return updateGoalRuntimeJobExecution(input.job.id, {
     status: "queued",
     payload: {
       ...input.job.payload,

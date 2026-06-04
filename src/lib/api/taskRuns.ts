@@ -18,6 +18,21 @@ export class TaskRunApiError extends Error {
   }
 }
 
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text) {
+    return {} as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new TaskRunApiError(
+      response.status,
+      `服务端返回异常（HTTP ${response.status}）：${text.slice(0, 200)}`,
+    );
+  }
+}
+
 async function getTaskRunProgress(input: { requestId?: string; taskInstanceId?: string; signal?: AbortSignal }) {
   if (input.taskInstanceId) {
     const search = new URLSearchParams();
@@ -64,7 +79,7 @@ export async function startTaskRun(input: {
     }),
     signal: input.signal,
   });
-  const data = (await response.json()) as {
+  const data = await parseJsonResponse<{
     outcome?: "queued" | "awaiting_user" | "already_running" | "blocked_config";
     requestId?: string;
     taskInstanceId?: string;
@@ -75,7 +90,7 @@ export async function startTaskRun(input: {
     waitingReason?: string;
     goals?: Goal[];
     revision?: number;
-  };
+  }>(response);
   if (!response.ok || data.outcome === "blocked_config") {
     const blockerMessage = data.blockers?.[0]?.message || data.blockers?.[0]?.reason;
     throw new TaskRunApiError(response.status, blockerMessage || data.reason || "任务执行启动失败");

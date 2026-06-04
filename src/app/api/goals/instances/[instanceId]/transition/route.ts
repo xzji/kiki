@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
+import {
+  getRuntimeJobByTaskInstanceId,
+  type RuntimeJobStatus,
+} from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { transitionTaskInstanceProjection } from "@/lib/server/services/goalRuntimeService";
+import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
 import type { Goal, TaskInstanceStatus } from "@/types/kiki";
 
 export const runtime = "nodejs";
@@ -41,6 +45,15 @@ function isTaskInstanceStatus(value: unknown): value is TaskInstanceStatus {
     value === "paused" ||
     value === "error"
   );
+}
+
+function toRuntimeJobStatus(status: TaskInstanceStatus): RuntimeJobStatus {
+  if (status === "in_progress") return "running";
+  if (status === "awaiting_user") return "awaiting_user";
+  if (status === "completed") return "completed";
+  if (status === "error") return "failed";
+  if (status === "paused") return "cancelled";
+  return "queued";
 }
 
 export async function POST(
@@ -96,13 +109,19 @@ export async function POST(
   if (!isTaskInstanceStatus(nextStatus) || nextStatus !== body.status) {
     return NextResponse.json({ reason: "Idempotency-Key 已用于不同的状态变更" }, { status: 409 });
   }
-  transitionTaskInstanceProjection({
-    goals,
-    taskId: located.task.id,
-    instanceId: located.instance.id,
-    status: nextStatus,
-    reason: body.reason,
-  });
+  const job = getRuntimeJobByTaskInstanceId(located.instance.id);
+  if (job) {
+    updateGoalRuntimeJobExecution(job.id, {
+      status: toRuntimeJobStatus(nextStatus),
+      lastError: body.reason,
+      finishedAt:
+        nextStatus === "completed" || nextStatus === "error" || nextStatus === "paused"
+          ? new Date().toISOString()
+          : undefined,
+      leaseOwner: nextStatus === "in_progress" ? job.leaseOwner : undefined,
+      leaseExpiresAt: nextStatus === "in_progress" ? job.leaseExpiresAt : undefined,
+    });
+  }
   return NextResponse.json({
     ok: true,
     event: statusEvent,

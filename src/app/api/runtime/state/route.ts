@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 
 import {
-  readGoalsSnapshotMeta,
   readRuntimeEnvironmentsSnapshotMeta,
   readScheduleEventsSnapshotMeta,
 } from "@/lib/server/runtime/stateSnapshot";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
+import { readComposedGoalsSnapshotMeta } from "@/lib/server/runtime/instanceComposition";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const goals = readGoalsSnapshotMeta([]);
+  const goals = readComposedGoalsSnapshotMeta([]);
   const runtimeEnvironments = readRuntimeEnvironmentsSnapshotMeta(INITIAL_RUNTIME_ENVIRONMENTS);
   const scheduleEvents = readScheduleEventsSnapshotMeta([]);
   return NextResponse.json({

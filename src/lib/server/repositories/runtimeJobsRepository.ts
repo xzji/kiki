@@ -340,6 +340,92 @@ export function listOpenRuntimeJobActivity(): RuntimeJobActivityRow[] {
   }));
 }
 
+export function listRuntimeJobsByStatuses(input: {
+  statuses: RuntimeJobStatus[];
+  limit?: number;
+}) {
+  if (input.statuses.length === 0) return [];
+  const db = getDatabase();
+  const limit = Math.min(Math.max(input.limit ?? 200, 1), 1000);
+  const placeholders = input.statuses.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `
+        SELECT * FROM runtime_jobs
+        WHERE kind = 'goal_task'
+          AND status IN (${placeholders})
+          AND task_instance_id IS NOT NULL
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `,
+    )
+    .all(...input.statuses, limit) as RuntimeJobRow[];
+  return rows.map((row) => mapRow(row));
+}
+
+export function listRuntimeJobsByInstanceIds(instanceIds: string[]) {
+  const uniqueIds = Array.from(new Set(instanceIds.filter(Boolean).map((id) => normalizeInstanceId(id))));
+  if (uniqueIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  const directRows = db
+    .prepare(
+      `
+        SELECT * FROM runtime_jobs
+        WHERE kind = 'goal_task'
+          AND task_instance_id IN (${placeholders})
+        ORDER BY updated_at DESC
+      `,
+    )
+    .all(...uniqueIds) as RuntimeJobRow[];
+  const byInstanceId = new Map<string, RuntimeJobRecord>();
+  for (const row of directRows) {
+    const job = mapRow(row);
+    const instanceId = job.taskInstanceId ? normalizeInstanceId(job.taskInstanceId) : undefined;
+    if (instanceId && !byInstanceId.has(instanceId)) byInstanceId.set(instanceId, job);
+  }
+  const missingIds = uniqueIds.filter((id) => !byInstanceId.has(id));
+  if (missingIds.length === 0) return Array.from(byInstanceId.values());
+
+  // Legacy rows may contain pre-normalized ids inside payload only.
+  const fallbackRows = db.prepare(`SELECT * FROM runtime_jobs WHERE kind = 'goal_task' ORDER BY updated_at DESC`).all() as RuntimeJobRow[];
+  const missing = new Set(missingIds);
+  for (const row of fallbackRows) {
+    const job = mapRow(row);
+    const instanceId = job.taskInstanceId ? normalizeInstanceId(job.taskInstanceId) : undefined;
+    if (!instanceId || !missing.has(instanceId) || byInstanceId.has(instanceId)) continue;
+    byInstanceId.set(instanceId, job);
+    missing.delete(instanceId);
+    if (missing.size === 0) break;
+  }
+  return Array.from(byInstanceId.values());
+}
+
+export function listOpenRuntimeJobsByTaskIds(taskIds: string[]) {
+  const uniqueIds = Array.from(new Set(taskIds.filter(Boolean).map((id) => normalizeTaskId(id))));
+  if (uniqueIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `
+        SELECT * FROM runtime_jobs
+        WHERE kind = 'goal_task'
+          AND status IN ('queued', 'running', 'awaiting_user')
+          AND task_id IN (${placeholders})
+        ORDER BY updated_at DESC
+      `,
+    )
+    .all(...uniqueIds) as RuntimeJobRow[];
+  const byTaskId = new Map<string, RuntimeJobRecord>();
+  for (const row of rows) {
+    const job = mapRow(row);
+    const taskId = job.taskId ? normalizeTaskId(job.taskId) : undefined;
+    if (taskId && !byTaskId.has(taskId)) byTaskId.set(taskId, job);
+  }
+  return Array.from(byTaskId.values());
+}
+
 export function getRuntimeJobByTaskInstanceId(taskInstanceId: string) {
   const db = getDatabase();
   const row = db
@@ -558,7 +644,17 @@ export function renewRuntimeJobLease(jobId: string, input: { leaseOwner: string;
 export function releaseExpiredRuntimeJobLeases() {
   const db = getDatabase();
   const now = nowIso();
-  db.prepare(
+  const expiredRows = db
+    .prepare(
+      `
+        SELECT * FROM runtime_jobs
+        WHERE lease_expires_at IS NOT NULL
+          AND lease_expires_at <= ?
+          AND status IN ('running')
+      `,
+    )
+    .all(now) as RuntimeJobRow[];
+  const release = db.prepare(
     `
       UPDATE runtime_jobs
       SET status = CASE
@@ -571,8 +667,20 @@ export function releaseExpiredRuntimeJobLeases() {
       WHERE lease_expires_at IS NOT NULL
         AND lease_expires_at <= ?
         AND status IN ('running')
+        AND id = ?
     `,
-  ).run(now, now);
+  );
+  return expiredRows.flatMap((row) => {
+    const result = release.run(now, now, row.id);
+    if (result.changes === 0) return [];
+    return mapRow({
+      ...row,
+      status: "queued",
+      lease_owner: null,
+      lease_expires_at: null,
+      updated_at: now,
+    });
+  });
 }
 
 export function cancelRuntimeJobsByConversationId(conversationId: string) {

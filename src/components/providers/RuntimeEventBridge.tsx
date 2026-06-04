@@ -7,6 +7,7 @@ import {
   importLegacyConversations,
 } from "@/lib/api/conversation-commands";
 import { fetchGoalEvents } from "@/lib/api/goal-events";
+import { fetchInboxBootstrap } from "@/lib/api/inbox-commands";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { createRuntimeEventsSource } from "@/lib/api/runtime-events";
 import {
@@ -32,9 +33,7 @@ import { useScheduleStore } from "@/stores/scheduleStore";
 import { useAgentRunsStore } from "@/stores/agentRunsStore";
 import { useSagaInstancesStore } from "@/stores/sagaInstancesStore";
 import type { Conversation, InboxItem, TaskInstance } from "@/types/kiki";
-import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { GoalEventRecord } from "@/types/goalEventLog";
-import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
 
 function stableStringify(value: unknown) {
@@ -151,72 +150,15 @@ function buildReminderItem(input: NonNullable<ReturnType<typeof findTaskByEvent>
   };
 }
 
-function statusFromEventPayload(status: unknown): TaskInstance["status"] | null {
-  switch (status) {
-    case "pending":
-    case "in_progress":
-    case "completed":
-    case "awaiting_user":
-    case "paused":
-    case "error":
-      return status;
-    case "queued":
-      return "pending";
-    case "running":
-      return "in_progress";
-    case "failed":
-      return "error";
-    case "cancelled":
-      return "paused";
-    default:
-      return null;
-  }
+async function refreshScheduleEventsFromSnapshot() {
+  const snapshot = await fetchRuntimeStateSnapshot();
+  useScheduleStore.getState().replaceEvents(snapshot.scheduleEvents, snapshot.meta?.revisions?.scheduleEvents);
 }
 
-function applyInstanceStatusEvent(event: GoalEventRecord) {
-  if (!event.taskId || !event.instanceId) return false;
-  if (!findTaskByEvent(event)) return false;
-  const payload = event.payload as { nextStatus?: unknown };
-  const nextStatus = statusFromEventPayload(payload.nextStatus);
-  if (!nextStatus) return false;
-  useGoalStore.getState().applyInstanceStatusProjection(event.taskId, event.instanceId, nextStatus);
-  return true;
-}
-
-function applyInstanceProgressEvent(event: GoalEventRecord) {
-  if (!event.taskId || !event.instanceId) return false;
-  if (!findTaskByEvent(event)) return false;
-  const payload = event.payload as {
-    progress?: GoalServerProgress;
-    logs?: GoalServerLogEntry[];
-    trajectory?: ExecutionTrajectoryStep[];
-  };
-  if (!payload.progress) return false;
-  useGoalStore.getState().applyInstanceProgressProjection({
-    taskId: event.taskId,
-    instanceId: event.instanceId,
-    progress: payload.progress,
-    logs: Array.isArray(payload.logs) ? payload.logs : undefined,
-    trajectory: Array.isArray(payload.trajectory) ? payload.trajectory : undefined,
-  });
-  return true;
-}
-
-function applyTimeoutPausedEvent(event: GoalEventRecord) {
-  if (!event.taskId || !event.instanceId) return false;
-  if (!findTaskByEvent(event)) return false;
-  useGoalStore.getState().applyInstanceStatusProjection(event.taskId, event.instanceId, "paused");
-  return true;
-}
-
-function refreshScheduleEventsFromSnapshot() {
-  void fetchRuntimeStateSnapshot()
-    .then((snapshot) => {
-      useScheduleStore.getState().replaceEvents(snapshot.scheduleEvents, snapshot.meta?.revisions?.scheduleEvents);
-    })
-    .catch(() => {
-      // ignore transient schedule refresh failures
-    });
+async function refreshGoalsFromSnapshot() {
+  const snapshot = await fetchRuntimeStateSnapshot();
+  const remoteRevision = revisionFromSnapshot(snapshot);
+  useGoalStore.getState().applyGoalsProjection(snapshot.goals, remoteRevision.goals);
 }
 
 function dependsOnLocalInstance(event: GoalEventRecord) {
@@ -228,7 +170,7 @@ function dependsOnLocalInstance(event: GoalEventRecord) {
   );
 }
 
-function applyGoalEvent(event: GoalEventRecord) {
+async function applyGoalEvent(event: GoalEventRecord) {
   if (appliedGoalEventIds.has(event.id)) {
     pendingGoalEvents.delete(event.id);
     runtimeEventMetrics.duplicates += 1;
@@ -239,44 +181,21 @@ function applyGoalEvent(event: GoalEventRecord) {
     runtimeEventMetrics.pending += 1;
     return false;
   }
-  if (event.kind === "instance.status_changed") {
-    if (applyInstanceStatusEvent(event)) {
-      appliedGoalEventIds.add(event.id);
-      runtimeEventMetrics.applied += 1;
-      pendingGoalEvents.delete(event.id);
-      return true;
-    }
-    appliedGoalEventIds.add(event.id);
-    runtimeEventMetrics.applied += 1;
-    pendingGoalEvents.delete(event.id);
-    return true;
-  }
-  if (event.kind === "instance.progress") {
-    if (applyInstanceProgressEvent(event)) {
-      appliedGoalEventIds.add(event.id);
-      runtimeEventMetrics.applied += 1;
-      pendingGoalEvents.delete(event.id);
-      return true;
-    }
-    appliedGoalEventIds.add(event.id);
-    runtimeEventMetrics.applied += 1;
-    pendingGoalEvents.delete(event.id);
-    return true;
-  }
-  if (event.kind === "instance.timeout_paused") {
-    if (applyTimeoutPausedEvent(event)) {
-      appliedGoalEventIds.add(event.id);
-      runtimeEventMetrics.applied += 1;
-      pendingGoalEvents.delete(event.id);
-      return true;
-    }
+  if (
+    event.kind === "instance.status_changed" ||
+    event.kind === "instance.created" ||
+    event.kind === "job.status_changed" ||
+    event.kind === "instance.progress" ||
+    event.kind === "instance.timeout_paused"
+  ) {
+    await refreshGoalsFromSnapshot();
     appliedGoalEventIds.add(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
   if (event.kind === "schedule.event_synthesized") {
-    refreshScheduleEventsFromSnapshot();
+    await refreshScheduleEventsFromSnapshot();
     appliedGoalEventIds.add(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
@@ -321,6 +240,7 @@ function applyGoalEvent(event: GoalEventRecord) {
     return true;
   }
   if (event.kind !== "notification.delivered") return true;
+  await refreshGoalsFromSnapshot();
   const located = findTaskByEvent(event);
   if (!located) {
     pendingGoalEvents.set(event.id, event);
@@ -386,6 +306,7 @@ export function RuntimeEventBridge() {
   const cursorChannelRef = useRef<BroadcastChannel | null>(null);
   const runtimeStateChannelRef = useRef<BroadcastChannel | null>(null);
   const conversationCursorRef = useRef(0);
+  const goalEventQueueRef = useRef(Promise.resolve());
 
   const refreshSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
@@ -409,15 +330,22 @@ export function RuntimeEventBridge() {
     cursorChannelRef.current?.postMessage(next);
   };
 
-  const applyGoalEventAndAdvance = (event: GoalEventRecord) => {
+  const applyGoalEventAndAdvance = async (event: GoalEventRecord) => {
     const goalId = event.goalId;
     if (event.id <= (eventCursorRef.current[goalId] ?? 0)) {
       runtimeEventMetrics.duplicates += 1;
       return true;
     }
-    const applied = applyGoalEvent(event);
+    const applied = await applyGoalEvent(event);
     if (applied) persistCursor(goalId, event.id);
     return applied;
+  };
+
+  const applyGoalEventsSequentially = async (events: GoalEventRecord[]) => {
+    for (const event of events) {
+      const applied = await applyGoalEventAndAdvance(event);
+      if (!applied) break;
+    }
   };
 
   useEffect(() => {
@@ -475,6 +403,18 @@ export function RuntimeEventBridge() {
         replaceEvents(snapshot.scheduleEvents, remoteRevision.scheduleEvents);
         for (const key of LEGACY_BUSINESS_STATE_KEYS) {
           window.localStorage.removeItem(key);
+        }
+        // 先就绪 inbox 操作覆盖层，确保后续 notification.delivered 事件重投影时
+        // 已归档/稍后卡片不会被拉回首页。失败静默。
+        try {
+          const inboxBootstrap = await fetchInboxBootstrap();
+          if (!cancelled) {
+            const inboxStore = useInboxStore.getState();
+            inboxStore.hydrateStates(inboxBootstrap.states);
+            for (const item of inboxBootstrap.items) inboxStore.upsertItem(item);
+          }
+        } catch {
+          // ignore inbox state hydration failures
         }
         setBootstrapped(true);
       } catch {
@@ -614,9 +554,7 @@ export function RuntimeEventBridge() {
             limit: 500,
           });
           if (cancelled) return;
-          for (const event of response.events) {
-            if (!applyGoalEventAndAdvance(event)) break;
-          }
+          await applyGoalEventsSequentially(response.events);
           sseDisconnectedRef.current = false;
         } catch {
           // ignore event bootstrap failures
@@ -635,9 +573,12 @@ export function RuntimeEventBridge() {
             events?: GoalEventRecord[];
             nextCursor?: number;
           };
-          for (const event of payload.events ?? []) {
-            if (!applyGoalEventAndAdvance(event)) break;
-          }
+          const events = payload.events ?? [];
+          goalEventQueueRef.current = goalEventQueueRef.current
+            .then(() => applyGoalEventsSequentially(events))
+            .catch(() => {
+              sseDisconnectedRef.current = true;
+            });
           if (typeof payload.nextCursor === "number" && payload.nextCursor > aggregateGoalCursor) {
             aggregateGoalCursor = payload.nextCursor;
           }
@@ -681,11 +622,17 @@ export function RuntimeEventBridge() {
 
   useEffect(() => {
     if (!bootstrapped || pendingGoalEvents.size === 0) return;
-    for (const event of Array.from(pendingGoalEvents.values())) {
-      if (applyGoalEventAndAdvance(event)) {
-        runtimeEventMetrics.replayed += 1;
-      }
-    }
+    const events = Array.from(pendingGoalEvents.values());
+    goalEventQueueRef.current = goalEventQueueRef.current
+      .then(async () => {
+        for (const event of events) {
+          const applied = await applyGoalEventAndAdvance(event);
+          if (applied) runtimeEventMetrics.replayed += 1;
+        }
+      })
+      .catch(() => {
+        sseDisconnectedRef.current = true;
+      });
   }, [bootstrapped, currentGoalsKey]);
 
   return null;

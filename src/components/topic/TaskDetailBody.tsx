@@ -14,6 +14,7 @@ import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { getTaskDependencyViews } from "@/lib/taskDependencies";
 import { canStopTaskInstance, runTaskExecutionAction } from "@/lib/taskExecution";
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { summarizeToolOperation } from "@/lib/execution/summarizeToolOperation";
 import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
 import { hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
@@ -189,7 +190,6 @@ export function TaskDetailBody({
   const pendingTaskDeletes = useGoalStore((state) => state.pendingTaskDeletes);
   const addPendingTaskDelete = useGoalStore((state) => state.addPendingTaskDelete);
   const removePendingTaskDelete = useGoalStore((state) => state.removePendingTaskDelete);
-  const applyInstanceProgressProjection = useGoalStore((state) => state.applyInstanceProgressProjection);
   const pendingTaskUpdate = pendingTaskUpdates.find((item) => item.goalId === goal.id && item.taskId === canonicalTask.id);
   const pendingTaskDelete = pendingTaskDeletes.find((item) => item.goalId === goal.id && item.taskId === canonicalTask.id);
   const task = pendingTaskUpdate?.task ?? canonicalTask;
@@ -278,22 +278,17 @@ export function TaskDetailBody({
       try {
         await Promise.all(
           runningInstances.map(async (instance) => {
-            const state = await fetchTaskRunProgress({
+            await fetchTaskRunProgress({
               requestId: instance.runner?.requestId,
               taskInstanceId: instance.id,
               signal: controller.signal,
             });
-            if (cancelled || controller.signal.aborted) return;
-            applyInstanceProgressProjection({
-              taskId: task.id,
-              instanceId: instance.id,
-              progress: state.progress,
-              logs: state.logs,
-              trajectory: state.trajectory,
-              waitingReason: state.waitingReason,
-            });
           }),
         );
+        const snapshot = await fetchRuntimeStateSnapshot();
+        if (!cancelled && !controller.signal.aborted) {
+          applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
+        }
         if (!cancelled && !controller.signal.aborted) {
           setRefreshTick((value) => value + 1);
         }
@@ -308,7 +303,7 @@ export function TaskDetailBody({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [applyInstanceProgressProjection, refreshTick, runningInstances, task.id]);
+  }, [applyGoalsProjection, refreshTick, runningInstances]);
 
   return (
     <div>
@@ -652,7 +647,6 @@ function InstanceCard({
     instance.status === "completed" ||
     instance.status === "error" ||
     Boolean(instance.timeline?.length || instance.trajectory?.length || instance.result);
-  const resultLine = isArchivedExecutionInstance(instance) ? getInstanceResultLine(task, instance) : "";
   const canStop = !hasOptionalResultFeedback(instance) && canStopTaskInstance(instance);
   const executionSteps = applyWaitingReasonToSteps(
     trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
@@ -660,6 +654,7 @@ function InstanceCard({
   );
   const agentRunPlan = getAgentRunPlan(instance);
   const hasFinalResult = instance.status === "completed" || instance.status === "error";
+  const canRetry = instance.status === "error";
   const showInlineDetails = hasFinalResult;
   const showOuterToggle = canExpand && !showInlineDetails;
   const detailOpen = expanded || showInlineDetails;
@@ -691,42 +686,25 @@ function InstanceCard({
               ) : null}
             </div>
             <p className="mt-2 text-[14px] leading-6 text-[#1F2328]">{instance.intro}</p>
-            {resultLine ? (
-              <div
-                className={cn(
-                  "mt-3 flex items-start gap-2 rounded-xl border px-3 py-3",
-                  instance.status === "error"
-                    ? "border-[#FECACA] bg-[#FEF2F2]"
-                    : "border-[#E5E7EB] bg-[#F8F9FB]",
-                )}
-              >
-                <div className="shrink-0 text-[11px] text-[#8C9198]">
-                  {instance.status === "error" ? "失败原因" : "执行结果"}
-                </div>
-                <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-6 text-[#1F2328]">
-                  {resultLine}
-                </div>
-                {instance.status === "error" ? (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void runTaskExecutionAction(task.id, "rerun", {
-                        instanceId: instance.id,
-                      }).catch((error) => {
-                        window.alert(error instanceof Error ? error.message : "任务执行失败");
-                      });
-                    }}
-                    className="shrink-0 rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
-                  >
-                    重试本次
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
           </div>
-          {showOuterToggle ? (
+          {canRetry || showOuterToggle ? (
             <div className="flex shrink-0 items-center gap-2 text-[12px] text-[#6B7280]">
+              {canRetry ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void runTaskExecutionAction(task.id, "rerun", {
+                      instanceId: instance.id,
+                    }).catch((error) => {
+                      window.alert(error instanceof Error ? error.message : "任务执行失败");
+                    });
+                  }}
+                  className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+                >
+                  重试本次
+                </button>
+              ) : null}
               {canStop ? (
                 <button
                   type="button"
@@ -743,8 +721,12 @@ function InstanceCard({
                   停止
                 </button>
               ) : null}
-              <span>{expanded ? "收起详情" : "展开详情"}</span>
-              {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              {showOuterToggle ? (
+                <>
+                  <span>{expanded ? "收起详情" : "展开详情"}</span>
+                  {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -854,6 +836,8 @@ function InstanceDetailSection({
 }
 
 function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskInstance }) {
+  const [structuredOutputOpen, setStructuredOutputOpen] = useState(false);
+
   if (shouldDeferConcreteResultUntilUserInput(instance)) {
     return null;
   }
@@ -906,10 +890,22 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
       ) : null}
       {structuredOutput ? (
         <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
-          <div className="text-[12px] text-[#8C9198]">结构化输出</div>
-          <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-[#F8F9FB] p-3 text-[12px] leading-6 text-[#374151]">
-            {JSON.stringify(structuredOutput, null, 2)}
-          </pre>
+          <button
+            type="button"
+            onClick={() => setStructuredOutputOpen((open) => !open)}
+            aria-expanded={structuredOutputOpen}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <span className="text-[12px] text-[#8C9198]">结构化输出</span>
+            <span className="shrink-0 text-[#8C9198]">
+              {structuredOutputOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </span>
+          </button>
+          {structuredOutputOpen ? (
+            <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-[#F8F9FB] p-3 text-[12px] leading-6 text-[#374151]">
+              {JSON.stringify(structuredOutput, null, 2)}
+            </pre>
+          ) : null}
         </div>
       ) : null}
       {extraPayloadLines.length > 0 ? (

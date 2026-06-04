@@ -44,6 +44,27 @@ export async function installAndLoadLaunchAgent() {
   return targetPath;
 }
 
+export async function unloadLaunchAgentOnly() {
+  if (process.platform !== "darwin") {
+    throw new Error("当前仅支持在 macOS 上管理 LaunchAgent");
+  }
+
+  const targetPath = getLaunchAgentPlistPath();
+  const uid = typeof process.getuid === "function" ? String(process.getuid()) : null;
+
+  if (!uid) {
+    throw new Error("无法识别当前用户，暂时不能关闭 LaunchAgent");
+  }
+
+  if (!fs.existsSync(targetPath)) {
+    return targetPath;
+  }
+
+  const domain = `gui/${uid}`;
+  await execFileAsync("launchctl", ["bootout", domain, targetPath]).catch(() => undefined);
+  return targetPath;
+}
+
 export async function unloadAndRemoveLaunchAgent() {
   if (process.platform !== "darwin") {
     throw new Error("当前仅支持在 macOS 上管理 LaunchAgent");

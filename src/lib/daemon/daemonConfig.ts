@@ -20,6 +20,10 @@ export type RuntimeDaemonConfig = {
   authorizedDirectories: string[];
   schedulerIntervalMs: number;
   heartbeatIntervalMs: number;
+  /** 单个 goal task 执行的总时长上限（毫秒），超时即 abort 并标记 failed。 */
+  jobMaxDurationMs: number;
+  /** 单个 goal task 执行的空闲超时（毫秒），期间无任何进展事件即判定卡死并 abort。 */
+  jobIdleTimeoutMs: number;
   updatedAt: string;
 };
 
@@ -34,6 +38,8 @@ const DEFAULT_CONFIG: RuntimeDaemonConfig = {
   authorizedDirectories: [process.cwd()],
   schedulerIntervalMs: 60_000,
   heartbeatIntervalMs: 15_000,
+  jobMaxDurationMs: 30 * 60_000,
+  jobIdleTimeoutMs: 5 * 60_000,
   updatedAt: new Date().toISOString(),
 };
 

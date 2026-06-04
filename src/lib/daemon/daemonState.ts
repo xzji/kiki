@@ -20,6 +20,10 @@ export type RuntimeDaemonState = {
   lastJobId?: string;
   lastJobFinishedAt?: string;
   lastError?: string;
+  /** worker 进程实际打开的数据库绝对路径，用于跨进程同库自检。 */
+  dbPath?: string | null;
+  /** worker 进程实际打开的数据库文件 inode，用于检测 inode 漂移。 */
+  dbInode?: number | null;
   updatedAt: string;
 };
 

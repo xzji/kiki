@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 12;
+export const KIKI_DB_SCHEMA_VERSION = 15;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   topic_id TEXT,
   thread_id TEXT,
   task_id TEXT,
+  runtime_job_id TEXT,
   saga_instance_id TEXT,
   role TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -222,6 +223,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_saga
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_thread
   ON agent_runs(thread_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_runtime_job
+  ON agent_runs(runtime_job_id, started_at ASC);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_idem
   ON agent_runs(idempotency_key)
@@ -280,6 +284,40 @@ CREATE TABLE IF NOT EXISTS agent_snapshots (
   state_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS inbox_item_states (
+  inbox_item_id TEXT PRIMARY KEY,
+  goal_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  favorite INTEGER NOT NULL DEFAULT 0,
+  unread INTEGER NOT NULL DEFAULT 1,
+  snooze_until TEXT,
+  updated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_item_states_status
+  ON inbox_item_states(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_notification_states (
+  instance_id TEXT PRIMARY KEY,
+  goal_id TEXT,
+  task_id TEXT,
+  notification_json TEXT NOT NULL,
+  delivery_state TEXT NOT NULL,
+  notification_sequence INTEGER NOT NULL DEFAULT 0,
+  inbox_item_id TEXT,
+  conversation_message_ids_json TEXT,
+  delivered_at TEXT,
+  updated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_notification_states_delivery
+  ON task_notification_states(delivery_state, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_task_notification_states_goal
+  ON task_notification_states(goal_id, task_id);
 `;
 
 export const KIKI_DB_MIGRATIONS: Array<{
@@ -595,6 +633,60 @@ export const KIKI_DB_MIGRATIONS: Array<{
           AND NOT EXISTS (
             SELECT 1 FROM runtime_state_snapshots WHERE key = 'topics'
           );
+    `,
+  },
+  {
+    // v13 — Link Goal Task runtime_jobs to AgentRuntime event-sourced runs.
+    version: 13,
+    sql: `
+      ALTER TABLE agent_runs ADD COLUMN runtime_job_id TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_runtime_job
+        ON agent_runs(runtime_job_id, started_at ASC);
+    `,
+  },
+  {
+    // v14 — Inbox 卡片用户操作状态覆盖表（归档/稍后/收藏/未读）。
+    version: 14,
+    sql: `
+      CREATE TABLE IF NOT EXISTS inbox_item_states (
+        inbox_item_id TEXT PRIMARY KEY,
+        goal_id TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        favorite INTEGER NOT NULL DEFAULT 0,
+        unread INTEGER NOT NULL DEFAULT 1,
+        snooze_until TEXT,
+        updated_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_inbox_item_states_status
+        ON inbox_item_states(status, updated_at DESC);
+    `,
+  },
+  {
+    // v15 — 任务通知决策与投递账本从 goals instance.notification 独立出来。
+    version: 15,
+    sql: `
+      CREATE TABLE IF NOT EXISTS task_notification_states (
+        instance_id TEXT PRIMARY KEY,
+        goal_id TEXT,
+        task_id TEXT,
+        notification_json TEXT NOT NULL,
+        delivery_state TEXT NOT NULL,
+        notification_sequence INTEGER NOT NULL DEFAULT 0,
+        inbox_item_id TEXT,
+        conversation_message_ids_json TEXT,
+        delivered_at TEXT,
+        updated_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_task_notification_states_delivery
+        ON task_notification_states(delivery_state, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_task_notification_states_goal
+        ON task_notification_states(goal_id, task_id);
     `,
   },
 ];
