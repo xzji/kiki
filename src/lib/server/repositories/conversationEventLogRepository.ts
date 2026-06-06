@@ -1,6 +1,5 @@
-import { randomUUID } from "crypto";
-
 import { getDatabase } from "@/lib/server/db/client";
+import { createEventLogRepository } from "@/lib/server/repositories/eventLogRepositoryFactory";
 import type {
   ConversationEventKind,
   ConversationEventPayload,
@@ -29,14 +28,6 @@ export type AppendConversationEventInput<K extends ConversationEventKind = Conve
   createdAt?: string;
 };
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function createEventId() {
-  return `conversation-event-${randomUUID()}`;
-}
-
 function mapRow<K extends ConversationEventKind = ConversationEventKind>(
   row: ConversationEventLogRow,
 ): ConversationEventRecord<K> {
@@ -52,75 +43,32 @@ function mapRow<K extends ConversationEventKind = ConversationEventKind>(
   };
 }
 
+const repository = createEventLogRepository<
+  ConversationEventLogRow,
+  ConversationEventRecord,
+  AppendConversationEventInput
+>({
+  table: "conversation_event_log",
+  eventIdPrefix: "conversation-event",
+  ownerColumns: ["conversation_id"],
+  toOwnerParams: (input) => ({ conversation_id: input.conversationId }),
+  mapRow,
+});
+
 export function getConversationEventByIdempotencyKey<K extends ConversationEventKind = ConversationEventKind>(
   idempotencyKey: string,
 ) {
-  const row = getDatabase()
-    .prepare(`SELECT * FROM conversation_event_log WHERE idempotency_key = ? LIMIT 1`)
-    .get(idempotencyKey) as ConversationEventLogRow | undefined;
-  return row ? mapRow<K>(row) : null;
+  return repository.getByIdempotencyKey(idempotencyKey) as ConversationEventRecord<K> | null;
 }
 
 export function appendConversationEvent<K extends ConversationEventKind>(input: AppendConversationEventInput<K>) {
-  const eventId = input.eventId ?? createEventId();
-  const createdAt = input.createdAt ?? nowIso();
-  getDatabase()
-    .prepare(
-      `
-        INSERT INTO conversation_event_log (
-          event_id, conversation_id, kind, payload_json, produced_by, idempotency_key, created_at
-        ) VALUES (
-          @event_id, @conversation_id, @kind, @payload_json, @produced_by, @idempotency_key, @created_at
-        )
-        ON CONFLICT(event_id) DO NOTHING
-      `,
-    )
-    .run({
-      event_id: eventId,
-      conversation_id: input.conversationId,
-      kind: input.kind,
-      payload_json: JSON.stringify(input.payload),
-      produced_by: input.producedBy,
-      idempotency_key: input.idempotencyKey ?? null,
-      created_at: createdAt,
-    });
-  const row = getDatabase()
-    .prepare(`SELECT * FROM conversation_event_log WHERE event_id = ? LIMIT 1`)
-    .get(eventId) as ConversationEventLogRow | undefined;
-  return row ? mapRow<K>(row) : null;
+  return repository.append(input) as ConversationEventRecord<K> | null;
 }
 
 export function appendConversationEventOnce<K extends ConversationEventKind>(
   input: AppendConversationEventInput<K>,
 ) {
-  if (!input.idempotencyKey) return appendConversationEvent(input);
-  const existing = getConversationEventByIdempotencyKey<K>(input.idempotencyKey);
-  if (existing) return existing;
-  const eventId = input.eventId ?? createEventId();
-  const createdAt = input.createdAt ?? nowIso();
-  getDatabase()
-    .prepare(
-      `
-        INSERT OR IGNORE INTO conversation_event_log (
-          event_id, conversation_id, kind, payload_json, produced_by, idempotency_key, created_at
-        ) VALUES (
-          @event_id, @conversation_id, @kind, @payload_json, @produced_by, @idempotency_key, @created_at
-        )
-      `,
-    )
-    .run({
-      event_id: eventId,
-      conversation_id: input.conversationId,
-      kind: input.kind,
-      payload_json: JSON.stringify(input.payload),
-      produced_by: input.producedBy,
-      idempotency_key: input.idempotencyKey,
-      created_at: createdAt,
-    });
-  const row = getDatabase()
-    .prepare(`SELECT * FROM conversation_event_log WHERE idempotency_key = ? LIMIT 1`)
-    .get(input.idempotencyKey) as ConversationEventLogRow | undefined;
-  return row ? mapRow<K>(row) : null;
+  return repository.appendOnce(input) as ConversationEventRecord<K> | null;
 }
 
 export function getConversationEvents(input: { conversationId?: string; fromId?: number; limit?: number }) {

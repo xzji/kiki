@@ -6,7 +6,10 @@ import { readGoalsSnapshot, readRuntimeEnvironmentsSnapshot } from "@/lib/server
 import { runGoalSchedulerEngine } from "@/lib/server/worker/goalSchedulerEngine";
 import { runGoalDaemonSideEffects } from "@/lib/server/worker/goalNotificationWorker";
 import { runRecoveryWorker } from "@/lib/server/worker/recoveryWorker";
-import { runTaskDispatchWorker } from "@/lib/server/worker/taskDispatchWorker";
+import {
+  reconcileRuntimeJobLeasesAndProjections,
+  runTaskDispatchWorker,
+} from "@/lib/server/worker/taskDispatchWorker";
 import { executionSupervisor } from "@/lib/server/worker/executionSupervisor";
 import { createClaudeJsonInvoke } from "@/lib/server/agentRuntime/claudeJsonInvoke";
 import {
@@ -74,6 +77,14 @@ export async function runRuntimeDaemonLoop() {
     appendRuntimeDaemonLog(`db 自检失败 ${err instanceof Error ? err.message : String(err)}`);
   }
   runRecoveryWorker();
+  // 启动时立即做一次对账，避免到首个 reconcile 节拍（30s）前 lease 过期任务无人回收。
+  try {
+    reconcileRuntimeJobLeasesAndProjections();
+  } catch (err) {
+    appendRuntimeDaemonLog(
+      `startup runtime job reconcile error ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   setInterval(() => {
     const now = new Date().toISOString();
     const current = readRuntimeDaemonState();
@@ -108,21 +119,15 @@ export async function runRuntimeDaemonLoop() {
   recordThreadLoopDaemonStartedLog();
 
   // 调度与执行解耦：dispatch 放在独立 setInterval，避免某帧任务执行 hang 住
-  // 拖死整个调度循环（历史根因）。dispatchInFlight 护栏防止上一帧未完成时重入
-  // （claim limit=1，本就串行单任务）。
-  let dispatchInFlight = false;
+  // 拖死整个调度循环（历史根因）。runTaskDispatchWorker 自身按
+  // `maxConcurrentTasks - 在执行数` 领取并 fire-and-forget 并行执行，领取后立即返回，
+  // 因此每帧可安全重入以补位空闲并发额度；这里不再需要 in-flight 串行护栏。
   const runDispatchFrame = () => {
-    if (dispatchInFlight) return;
-    dispatchInFlight = true;
-    void runTaskDispatchWorker(config.deviceId)
-      .catch((err) => {
-        appendRuntimeDaemonLog(
-          `dispatch frame error ${err instanceof Error ? err.message : String(err)}`,
-        );
-      })
-      .finally(() => {
-        dispatchInFlight = false;
-      });
+    void runTaskDispatchWorker(config.deviceId).catch((err) => {
+      appendRuntimeDaemonLog(
+        `dispatch frame error ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   };
   setInterval(runDispatchFrame, config.schedulerIntervalMs);
 
@@ -130,6 +135,15 @@ export async function runRuntimeDaemonLoop() {
   // 命中即中止对应子进程（进程组强杀）。这是「删会话 ≤30s 杀进程」与
   // 「空闲看门狗」真正生效的驱动节拍。
   setInterval(() => {
+    try {
+      // 全量对账下沉到本低频节拍：lease 过期回收 + runtime job 状态投影对账。
+      // dispatch 帧只做领取与启动，不再每帧重复执行重量级全表对账。
+      reconcileRuntimeJobLeasesAndProjections();
+    } catch (err) {
+      appendRuntimeDaemonLog(
+        `runtime job reconcile error ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     try {
       executionSupervisor.reconcileJobOwnership();
     } catch (err) {

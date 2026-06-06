@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   fetchConversationState,
@@ -24,6 +24,7 @@ import {
   isRuntimeStateChannelMessage,
   RUNTIME_STATE_CHANNEL,
 } from "@/lib/runtimeStateChannel";
+import { formatMessageTime } from "@/lib/date";
 import type { RuntimeStatePayload, RuntimeStateRevision } from "@/lib/api/runtime-daemon";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -48,6 +49,37 @@ const EMPTY_REVISION: RuntimeStateRevision = {
 
 const appliedGoalEventIds = new Set<number>();
 const pendingGoalEvents = new Map<number, GoalEventRecord>();
+// 已应用事件 id 仅作 cursor 之外的二级去重；事件 id 全局单调递增，且 applyGoalEventAndAdvance
+// 已用 per-goal cursor 拦截旧事件，故超过上限时按最小 id（最旧）淘汰是安全的，防止长程运行无界增长。
+const APPLIED_GOAL_EVENT_IDS_MAX = 5000;
+
+function rememberAppliedGoalEventId(id: number) {
+  appliedGoalEventIds.add(id);
+  if (appliedGoalEventIds.size <= APPLIED_GOAL_EVENT_IDS_MAX) return;
+  const overflow = appliedGoalEventIds.size - APPLIED_GOAL_EVENT_IDS_MAX;
+  const iterator = appliedGoalEventIds.values();
+  for (let i = 0; i < overflow; i += 1) {
+    const next = iterator.next();
+    if (next.done) break;
+    appliedGoalEventIds.delete(next.value);
+  }
+}
+
+// pending 队列存放依赖本地实例但实例尚未投影到位的事件，等待 goals 刷新后重放。
+// 正常路径下会很快被消费/删除；设上限防止异常场景（实例永不出现）下无界堆积。
+const PENDING_GOAL_EVENTS_MAX = 2000;
+
+function rememberPendingGoalEvent(event: GoalEventRecord) {
+  pendingGoalEvents.set(event.id, event);
+  if (pendingGoalEvents.size <= PENDING_GOAL_EVENTS_MAX) return;
+  const overflow = pendingGoalEvents.size - PENDING_GOAL_EVENTS_MAX;
+  const iterator = pendingGoalEvents.keys();
+  for (let i = 0; i < overflow; i += 1) {
+    const next = iterator.next();
+    if (next.done) break;
+    pendingGoalEvents.delete(next.value);
+  }
+}
 const runtimeEventMetrics = {
   applied: 0,
   duplicates: 0,
@@ -63,6 +95,11 @@ const LEGACY_BUSINESS_STATE_KEYS = [
   "kiki.schedule.events.reset-version",
   "kiki.goals",
 ];
+
+// SSE 连接建立后服务端会以多批 goal-events 回填初始事件（实测各批间隔约 85ms），逐批各自拉取一次全量
+// 快照会形成串行 /api/runtime/state 瀑布。用固定窗口去抖把窗口内多批事件的收敛刷新合并为一次拉取：
+// 窗口取 200ms 以覆盖服务端的批间隔，既消除瀑布又把后台收敛延迟控制在不可感知范围内。
+const SSE_REFRESH_COALESCE_MS = 200;
 
 type RuntimeEventMetricsWindow = Window & {
   __KIKI_RUNTIME_EVENT_METRICS__?: typeof runtimeEventMetrics;
@@ -85,10 +122,6 @@ function revisionFromSnapshot(snapshot: RuntimeStatePayload): RuntimeStateRevisi
     ...EMPTY_REVISION,
     ...(snapshot.meta?.revisions ?? {}),
   };
-}
-
-function formatLocalTime(date: Date) {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function getTaskIconType(): InboxItem["iconType"] {
@@ -124,7 +157,7 @@ function buildResultInboxItem(input: NonNullable<ReturnType<typeof findTaskByEve
     snippet: notification.snippet,
     badge: notification.badge ?? null,
     unreadCount: 1,
-    timeLabel: formatLocalTime(new Date(notification.createdAt || input.instance.createdAt)),
+    timeLabel: formatMessageTime(notification.createdAt || input.instance.createdAt),
     linkTo: buildTaskLink(input.goal.id, input.task.id, input.instance.id),
     goalId: input.goal.id,
     createdAt: notification.createdAt || input.instance.createdAt,
@@ -143,7 +176,7 @@ function buildReminderItem(input: NonNullable<ReturnType<typeof findTaskByEvent>
       : "这个任务已经等待你一段时间了，KiKi 提醒你回来继续推进。",
     badge: timeout ? "need_confirm" : "need_answer",
     unreadCount: 1,
-    timeLabel: formatLocalTime(new Date(createdAt)),
+    timeLabel: formatMessageTime(createdAt),
     linkTo: buildTaskLink(input.goal.id, input.task.id, input.instance.id),
     goalId: input.goal.id,
     createdAt,
@@ -170,14 +203,34 @@ function dependsOnLocalInstance(event: GoalEventRecord) {
   );
 }
 
-async function applyGoalEvent(event: GoalEventRecord) {
+// 这些事件类型只需重新拉取一次完整 goals 快照即可收敛——/api/runtime/state 始终返回最新全量状态，
+// 因此同一批事件内多次拉取结果一致。用于把"每条事件一次全量刷新"合并为"每批一次"。
+// notification.delivered 也计入：批量模式下其处理器不再自行内联刷新，需由批级合并刷新统一收敛
+// （刷新会 bump goalProjectionRevision，从而触发 pending 重试构建收件箱/会话卡片）。
+function eventNeedsGoalsRefresh(event: GoalEventRecord) {
+  return (
+    event.kind === "instance.status_changed" ||
+    event.kind === "instance.created" ||
+    event.kind === "job.status_changed" ||
+    event.kind === "instance.progress" ||
+    event.kind === "instance.timeout_paused" ||
+    event.kind === "notification.delivered"
+  );
+}
+
+function eventNeedsScheduleRefresh(event: GoalEventRecord) {
+  return event.kind === "schedule.event_synthesized";
+}
+
+async function applyGoalEvent(event: GoalEventRecord, options?: { refreshSnapshot?: boolean }) {
+  const refreshSnapshot = options?.refreshSnapshot ?? true;
   if (appliedGoalEventIds.has(event.id)) {
     pendingGoalEvents.delete(event.id);
     runtimeEventMetrics.duplicates += 1;
     return true;
   }
   if (dependsOnLocalInstance(event) && event.taskId && event.instanceId && !findTaskByEvent(event)) {
-    pendingGoalEvents.set(event.id, event);
+    rememberPendingGoalEvent(event);
     runtimeEventMetrics.pending += 1;
     return false;
   }
@@ -188,15 +241,16 @@ async function applyGoalEvent(event: GoalEventRecord) {
     event.kind === "instance.progress" ||
     event.kind === "instance.timeout_paused"
   ) {
-    await refreshGoalsFromSnapshot();
-    appliedGoalEventIds.add(event.id);
+    // 批量回放时跳过内联全量拉取，由批末统一刷新一次，避免 N+1 串行快照请求。
+    if (refreshSnapshot) await refreshGoalsFromSnapshot();
+    rememberAppliedGoalEventId(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
   if (event.kind === "schedule.event_synthesized") {
-    await refreshScheduleEventsFromSnapshot();
-    appliedGoalEventIds.add(event.id);
+    if (refreshSnapshot) await refreshScheduleEventsFromSnapshot();
+    rememberAppliedGoalEventId(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
@@ -211,7 +265,7 @@ async function applyGoalEvent(event: GoalEventRecord) {
       kind: event.kind,
       payload: event.payload as Record<string, unknown>,
     });
-    appliedGoalEventIds.add(event.id);
+    rememberAppliedGoalEventId(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
@@ -220,7 +274,7 @@ async function applyGoalEvent(event: GoalEventRecord) {
     useSagaInstancesStore.getState().advance({
       payload: event.payload as Record<string, unknown>,
     });
-    appliedGoalEventIds.add(event.id);
+    rememberAppliedGoalEventId(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
@@ -234,19 +288,22 @@ async function applyGoalEvent(event: GoalEventRecord) {
     // P0 stage: Topic/Thread stores are introduced in PR4+; until then we
     // only acknowledge the cursor so the SSE stream keeps draining without
     // re-queueing these kinds as pending.
-    appliedGoalEventIds.add(event.id);
+    rememberAppliedGoalEventId(event.id);
     runtimeEventMetrics.applied += 1;
     pendingGoalEvents.delete(event.id);
     return true;
   }
   if (event.kind !== "notification.delivered") return true;
-  await refreshGoalsFromSnapshot();
+  // 仅在调用方未声明「批量/延迟刷新」时才内联拉取快照。批量回放（启动/SSE）时 store 已由 hydrate
+  // 或批级合并刷新保持最新，这里无需逐条再各自拉取，否则会形成多条 notification.delivered 的串行
+  // /api/runtime/state 瀑布。若此时 store 仍缺该实例，下方 findTaskByEvent 会落入 pending 重试兜底。
+  if (refreshSnapshot) await refreshGoalsFromSnapshot();
   const located = findTaskByEvent(event);
   if (!located) {
-    pendingGoalEvents.set(event.id, event);
+    rememberPendingGoalEvent(event);
     return false;
   }
-  appliedGoalEventIds.add(event.id);
+  rememberAppliedGoalEventId(event.id);
   runtimeEventMetrics.applied += 1;
   pendingGoalEvents.delete(event.id);
   const payload = event.payload as { target?: string; notificationId?: string };
@@ -289,14 +346,13 @@ async function applyGoalEvent(event: GoalEventRecord) {
 
 // Browser state is read-only projection: writes go through command APIs and server snapshots/events.
 export function RuntimeEventBridge() {
-  const goals = useGoalStore((state) => state.goals);
+  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const replaceEnvironments = useRuntimeEnvStore((state) => state.replaceEnvironments);
   const replaceEvents = useScheduleStore((state) => state.replaceEvents);
   const hydrateConversations = useConversationStore((state) => state.hydrateConversations);
   const applyConversationEvent = useConversationStore((state) => state.applyConversationEvent);
 
-  const currentGoalsKey = useMemo(() => stableStringify(goals), [goals]);
   const isApplyingRemoteRef = useRef(false);
   const [bootstrapped, setBootstrapped] = useState(false);
   const [conversationHydrated, setConversationHydrated] = useState(false);
@@ -307,6 +363,8 @@ export function RuntimeEventBridge() {
   const runtimeStateChannelRef = useRef<BroadcastChannel | null>(null);
   const conversationCursorRef = useRef(0);
   const goalEventQueueRef = useRef(Promise.resolve());
+  const sseRefreshTimerRef = useRef<number | null>(null);
+  const sseRefreshPendingRef = useRef<{ goals: boolean; schedule: boolean }>({ goals: false, schedule: false });
 
   const refreshSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
@@ -330,22 +388,66 @@ export function RuntimeEventBridge() {
     cursorChannelRef.current?.postMessage(next);
   };
 
-  const applyGoalEventAndAdvance = async (event: GoalEventRecord) => {
+  const applyGoalEventAndAdvance = async (event: GoalEventRecord, options?: { refreshSnapshot?: boolean }) => {
     const goalId = event.goalId;
     if (event.id <= (eventCursorRef.current[goalId] ?? 0)) {
       runtimeEventMetrics.duplicates += 1;
       return true;
     }
-    const applied = await applyGoalEvent(event);
+    const applied = await applyGoalEvent(event, options);
     if (applied) persistCursor(goalId, event.id);
     return applied;
   };
 
-  const applyGoalEventsSequentially = async (events: GoalEventRecord[]) => {
+  const applyGoalEventsSequentially = async (
+    events: GoalEventRecord[],
+    options?: { deferRefresh?: boolean },
+  ) => {
+    // 批量回放：逐条事件不再各自全量拉取快照，统计本批是否涉及 goals/schedule 刷新，
+    // 在批末合并为一次拉取，消除回放历史事件时的 N+1 串行 /api/runtime/state 瀑布。
+    // deferRefresh=true 时不在本批末刷新，而是把刷新需求返回给调用方，由其跨多批合并为一次拉取
+    // （启动阶段多个目标的历史回放共用一次收敛刷新）。
+    const deferRefresh = options?.deferRefresh ?? false;
+    let needGoalsRefresh = false;
+    let needScheduleRefresh = false;
     for (const event of events) {
-      const applied = await applyGoalEventAndAdvance(event);
+      // 仅当事件是「首次应用」时才计入收敛刷新需求。SSE 初始回填会重发已在启动回放中应用过的事件，
+      // 这些重复事件不应再触发全量快照拉取，否则会形成多次冗余的串行 /api/runtime/state。
+      const isDuplicate =
+        appliedGoalEventIds.has(event.id) || event.id <= (eventCursorRef.current[event.goalId] ?? 0);
+      const applied = await applyGoalEventAndAdvance(event, { refreshSnapshot: false });
       if (!applied) break;
+      if (isDuplicate) continue;
+      if (eventNeedsGoalsRefresh(event)) needGoalsRefresh = true;
+      if (eventNeedsScheduleRefresh(event)) needScheduleRefresh = true;
     }
+    if (!deferRefresh) {
+      if (needGoalsRefresh) await refreshGoalsFromSnapshot();
+      if (needScheduleRefresh) await refreshScheduleEventsFromSnapshot();
+    }
+    return { needGoalsRefresh, needScheduleRefresh };
+  };
+
+  // SSE 实时事件的收敛刷新去抖：把短时间内多批事件的刷新需求累计到 sseRefreshPendingRef，
+  // 在 SSE_REFRESH_COALESCE_MS 后合并成一次快照拉取，避免逐批各自一次 /api/runtime/state 的串行瀑布。
+  const scheduleCoalescedRefresh = (need: { goals: boolean; schedule: boolean }) => {
+    if (!need.goals && !need.schedule) return;
+    sseRefreshPendingRef.current.goals = sseRefreshPendingRef.current.goals || need.goals;
+    sseRefreshPendingRef.current.schedule = sseRefreshPendingRef.current.schedule || need.schedule;
+    if (sseRefreshTimerRef.current !== null) return;
+    sseRefreshTimerRef.current = window.setTimeout(() => {
+      sseRefreshTimerRef.current = null;
+      const pending = sseRefreshPendingRef.current;
+      sseRefreshPendingRef.current = { goals: false, schedule: false };
+      goalEventQueueRef.current = goalEventQueueRef.current
+        .then(async () => {
+          if (pending.goals) await refreshGoalsFromSnapshot();
+          if (pending.schedule) await refreshScheduleEventsFromSnapshot();
+        })
+        .catch(() => {
+          sseDisconnectedRef.current = true;
+        });
+    }, SSE_REFRESH_COALESCE_MS);
   };
 
   useEffect(() => {
@@ -544,22 +646,34 @@ export function RuntimeEventBridge() {
       const goalIds = useGoalStore
         .getState()
         .goals.map((goal) => goal.id);
-      // 串行 await，避免一次性打开 N 个并发 HTTP 再次占满浏览器连接池。
-      for (const goalId of goalIds) {
-        if (cancelled) return;
-        try {
-          const response = await fetchGoalEvents({
+      // 并行拉取各目标的历史事件（仅 N 个只读 GET，互不依赖），避免逐目标串行往返的启动瀑布。
+      const responses = await Promise.all(
+        goalIds.map((goalId) =>
+          fetchGoalEvents({
             goalId,
             fromId: eventCursorRef.current[goalId] ?? 0,
             limit: 500,
-          });
-          if (cancelled) return;
-          await applyGoalEventsSequentially(response.events);
-          sseDisconnectedRef.current = false;
-        } catch {
-          // ignore event bootstrap failures
-        }
+          })
+            .then((response) => ({ goalId, response }))
+            .catch(() => null),
+        ),
+      );
+      if (cancelled) return;
+      // 历史回放按目标顺序应用以保证因果，但把各目标的收敛刷新需求合并为一次快照拉取，
+      // 消除"每目标一次 /api/runtime/state"的尾部串行瀑布。
+      let needGoalsRefresh = false;
+      let needScheduleRefresh = false;
+      for (const item of responses) {
+        if (cancelled) return;
+        if (!item) continue;
+        const result = await applyGoalEventsSequentially(item.response.events, { deferRefresh: true });
+        needGoalsRefresh = needGoalsRefresh || result.needGoalsRefresh;
+        needScheduleRefresh = needScheduleRefresh || result.needScheduleRefresh;
+        sseDisconnectedRef.current = false;
       }
+      if (cancelled) return;
+      if (needGoalsRefresh) await refreshGoalsFromSnapshot();
+      if (needScheduleRefresh) await refreshScheduleEventsFromSnapshot();
       if (cancelled) return;
 
       let aggregateGoalCursor = computeAggregateGoalCursor();
@@ -575,7 +689,11 @@ export function RuntimeEventBridge() {
           };
           const events = payload.events ?? [];
           goalEventQueueRef.current = goalEventQueueRef.current
-            .then(() => applyGoalEventsSequentially(events))
+            .then(async () => {
+              const result = await applyGoalEventsSequentially(events, { deferRefresh: true });
+              // 不在本批末同步拉取快照，改为去抖合并；多批 SSE 初始回填只触发一次 /api/runtime/state。
+              scheduleCoalescedRefresh({ goals: result.needGoalsRefresh, schedule: result.needScheduleRefresh });
+            })
             .catch(() => {
               sseDisconnectedRef.current = true;
             });
@@ -616,6 +734,10 @@ export function RuntimeEventBridge() {
       cancelled = true;
       source?.close();
       source = null;
+      if (sseRefreshTimerRef.current !== null) {
+        window.clearTimeout(sseRefreshTimerRef.current);
+        sseRefreshTimerRef.current = null;
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapped, conversationHydrated]);
@@ -625,15 +747,28 @@ export function RuntimeEventBridge() {
     const events = Array.from(pendingGoalEvents.values());
     goalEventQueueRef.current = goalEventQueueRef.current
       .then(async () => {
+        // 逐条应用但不各自内联拉取快照；这些 instance.* 事件的应用语义即「触发一次收敛刷新」，
+        // 因此收集刷新需求后用去抖合并为一次拉取，避免「每条 pending 事件一次 /api/runtime/state」的串行尾巴。
+        let needGoalsRefresh = false;
+        let needScheduleRefresh = false;
         for (const event of events) {
-          const applied = await applyGoalEventAndAdvance(event);
-          if (applied) runtimeEventMetrics.replayed += 1;
+          const isDuplicate =
+            appliedGoalEventIds.has(event.id) || event.id <= (eventCursorRef.current[event.goalId] ?? 0);
+          const applied = await applyGoalEventAndAdvance(event, { refreshSnapshot: false });
+          if (applied) {
+            runtimeEventMetrics.replayed += 1;
+            if (!isDuplicate) {
+              if (eventNeedsGoalsRefresh(event)) needGoalsRefresh = true;
+              if (eventNeedsScheduleRefresh(event)) needScheduleRefresh = true;
+            }
+          }
         }
+        scheduleCoalescedRefresh({ goals: needGoalsRefresh, schedule: needScheduleRefresh });
       })
       .catch(() => {
         sseDisconnectedRef.current = true;
       });
-  }, [bootstrapped, currentGoalsKey]);
+  }, [bootstrapped, goalProjectionRevision]);
 
   return null;
 }

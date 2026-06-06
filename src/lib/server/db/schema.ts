@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 15;
+export const KIKI_DB_SCHEMA_VERSION = 16;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -48,6 +48,12 @@ CREATE INDEX IF NOT EXISTS idx_runtime_jobs_thread
 
 CREATE INDEX IF NOT EXISTS idx_runtime_jobs_topic
   ON runtime_jobs(topic_id);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_jobs_request_id
+  ON runtime_jobs(request_id);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_jobs_conversation
+  ON runtime_jobs(conversation_id);
 
 CREATE TABLE IF NOT EXISTS runtime_state_snapshots (
   key TEXT PRIMARY KEY,
@@ -113,12 +119,11 @@ CREATE TABLE IF NOT EXISTS goal_event_log (
 CREATE INDEX IF NOT EXISTS idx_goal_event_log_goal
   ON goal_event_log(goal_id, id);
 
-CREATE INDEX IF NOT EXISTS idx_goal_event_log_idempotency_key
-  ON goal_event_log(idempotency_key)
-  WHERE idempotency_key IS NOT NULL;
-
 CREATE INDEX IF NOT EXISTS idx_goal_event_log_instance
   ON goal_event_log(instance_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_goal_event_log_kind
+  ON goal_event_log(kind, id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_event_log_idem
   ON goal_event_log(idempotency_key)
@@ -687,6 +692,27 @@ export const KIKI_DB_MIGRATIONS: Array<{
 
       CREATE INDEX IF NOT EXISTS idx_task_notification_states_goal
         ON task_notification_states(goal_id, task_id);
+    `,
+  },
+  {
+    // v16 — 补关键索引 + 去除冗余索引（方案 2.4）。
+    // - runtime_jobs(request_id) / (conversation_id)：加速 getRuntimeJobByRequestId
+    //   与 cancelRuntimeJobsByConversationId 的等值查询，避免全表扫描。
+    // - goal_event_log(kind)：inbox 等按 kind 的派生查询不再全表过滤。
+    // - 删除与唯一索引 idx_goal_event_log_idem 完全重复的 idx_goal_event_log_idempotency_key
+    //   （二者同列同 WHERE，仅唯一性不同；唯一索引已覆盖查询需求）。
+    version: 16,
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_runtime_jobs_request_id
+        ON runtime_jobs(request_id);
+
+      CREATE INDEX IF NOT EXISTS idx_runtime_jobs_conversation
+        ON runtime_jobs(conversation_id);
+
+      CREATE INDEX IF NOT EXISTS idx_goal_event_log_kind
+        ON goal_event_log(kind, id);
+
+      DROP INDEX IF EXISTS idx_goal_event_log_idempotency_key;
     `,
   },
 ];

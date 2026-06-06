@@ -1,4 +1,5 @@
 import { DEFAULT_EASTER_EGG_SETTINGS } from "@/lib/goalSystemConfig";
+import { getDatabase } from "@/lib/server/db/client";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import {
   backfillTaskNotificationStatesFromGoals,
@@ -147,67 +148,74 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
         ? `msg-task-${instance.id}-n${nextSequence}`
         : undefined;
 
-    if (conversationMessageId && notification.userMessage) {
-      try {
-        applyConversationCommand({
-          command: {
-            type: "append_message",
-            conversationId: goal.conversationId!,
-            message: {
-              id: conversationMessageId,
-              kind: "task_card",
-              role: "kiki",
-              content: notification.userMessage,
-              createdAt: notification.createdAt,
-              unread: true,
-              status: "done",
-              source: "system",
-              taskRef: {
-                goalId: goal.id,
-                subGoalId: subGoal.id,
-                taskId: task.id,
-                instanceId: instance.id,
-              },
-              taskSnapshot: {
-                task,
-                instance,
+    // append 消息 + 标记 delivered + 投递事件必须原子：任一步失败则整笔回滚、保持 pending，
+    // 下一轮 worker 重试。markDelivered 在提交前不推进 notificationSequence，因此重试沿用同一
+    // sequence → 同一 conversationMessageId/幂等 key，避免重试产生重复卡片。
+    // applyConversationCommand 自带事务，嵌套时 better-sqlite3 自动降级为 savepoint。
+    try {
+      getDatabase().transaction(() => {
+        if (conversationMessageId && notification.userMessage) {
+          applyConversationCommand({
+            command: {
+              type: "append_message",
+              conversationId: goal.conversationId!,
+              message: {
+                id: conversationMessageId,
+                kind: "task_card",
+                role: "kiki",
+                content: notification.userMessage,
+                createdAt: notification.createdAt,
+                unread: true,
+                status: "done",
+                source: "system",
+                taskRef: {
+                  goalId: goal.id,
+                  subGoalId: subGoal.id,
+                  taskId: task.id,
+                  instanceId: instance.id,
+                },
+                taskSnapshot: {
+                  task,
+                  instance,
+                },
               },
             },
-          },
-          idempotencyKey: `conversation.message.append:${conversationMessageId}`,
-          producedBy: "worker",
-        });
-      } catch {
-        // 会话投影失败时保持 pending，下一轮 worker 重试，避免账本误标 delivered。
-        continue;
-      }
-    }
+            idempotencyKey: `conversation.message.append:${conversationMessageId}`,
+            producedBy: "worker",
+          });
+        }
 
-    markTaskNotificationDeliveredState({
-      instanceId: instance.id,
-      inboxItemId,
-      conversationMessageId,
-      notificationSequence: nextSequence,
-    });
-    delivered += 1;
-    for (const target of [
-      inboxItemId ? "inbox" : null,
-      conversationMessageId ? "conversation" : null,
-    ] as const) {
-      if (!target) continue;
-      appendGoalEventOnce({
-        goalId: goal.id,
-        taskId: task.id,
-        instanceId: instance.id,
-        kind: "notification.delivered",
-        producedBy: "daemon",
-        idempotencyKey: `notification.delivered:${target}:${instance.id}:n${nextSequence}`,
-        payload: {
-          target,
-          notificationId: target === "inbox" ? inboxItemId : conversationMessageId,
-        },
-      });
+        markTaskNotificationDeliveredState({
+          instanceId: instance.id,
+          inboxItemId,
+          conversationMessageId,
+          notificationSequence: nextSequence,
+        });
+
+        for (const target of [
+          inboxItemId ? "inbox" : null,
+          conversationMessageId ? "conversation" : null,
+        ] as const) {
+          if (!target) continue;
+          appendGoalEventOnce({
+            goalId: goal.id,
+            taskId: task.id,
+            instanceId: instance.id,
+            kind: "notification.delivered",
+            producedBy: "daemon",
+            idempotencyKey: `notification.delivered:${target}:${instance.id}:n${nextSequence}`,
+            payload: {
+              target,
+              notificationId: target === "inbox" ? inboxItemId : conversationMessageId,
+            },
+          });
+        }
+      })();
+    } catch {
+      // 投递失败时整笔回滚并保持 pending，下一轮 worker 重试，避免账本误标 delivered。
+      continue;
     }
+    delivered += 1;
   }
   return { delivered };
 }

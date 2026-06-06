@@ -11,12 +11,45 @@ import { ThreadBlock } from "@/components/topic/ThreadBlock";
 import { ThreadCreateDrawer } from "@/components/topic/ThreadCreateDrawer";
 import { confirmGoalPlanCommand, requestGoalPlanRevisionCommand } from "@/lib/api/goal-commands";
 import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
+import { dependencySatisfied } from "@/lib/taskDependencies";
+import { deriveTaskDisplayState, stripTaskPrefix } from "@/lib/taskInstance";
 import { cn } from "@/lib/utils";
 import { BASE_DATE, formatDateInput } from "@/lib/date";
 import { topicDetailPath, topicTaskDetailPath } from "@/lib/routes";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
-import type { Goal, GoalWorkflowPhase, Task, TaskInstanceStatus } from "@/types/kiki";
+import type { Goal, GoalWorkflowPhase, Task, TaskExecutionPhase, TaskInstanceStatus } from "@/types/kiki";
+
+type WorkflowTaskState = "in_progress" | "paused" | "awaiting_user" | "pending" | "error" | "completed";
+
+type TaskProgressItem = {
+  taskId: string;
+  threadTitle: string;
+  title: string;
+  state: Exclude<WorkflowTaskState, "completed">;
+  statusLabel: string;
+  blockedByUpstream: boolean;
+  phaseText?: string;
+  priorityRank: number;
+  threadIndex: number;
+  taskIndex: number;
+};
+
+type WorkflowProgressCounts = {
+  completed: number;
+  running: number;
+  awaiting: number;
+  pending: number;
+  error: number;
+  total: number;
+};
+
+type WorkflowProgress = {
+  runningTasks: TaskProgressItem[];
+  upcomingTasks: TaskProgressItem[];
+  attentionTasks: TaskProgressItem[];
+  counts: WorkflowProgressCounts;
+};
 
 export function TopicPlanBreadcrumb({
   goalId,
@@ -158,7 +191,12 @@ export function TopicPlanContent({
     const statusList = allTasks.map((task) => getTaskSummaryStatus(task));
     const completedCount = statusList.filter((status) => status === "completed").length;
     const awaitingCount = statusList.filter((status) => status === "awaiting_user").length;
-    const inProgressCount = statusList.filter((status) => status === "in_progress").length;
+    // 顶部卡片无独立的「已暂停 / 失败」位；deriveTaskDisplayState 会返回精确的 paused/error，
+    // 这里将其归入「进行中」，避免这类任务从四个卡片中漏算导致合计小于总任务数（重构前 paused
+    // 即按 in_progress 计、error 曾错误落入「待开始」，此处统一为进行中既保总和又不再误显示为待开始）。
+    const inProgressCount = statusList.filter(
+      (status) => status === "in_progress" || status === "paused" || status === "error",
+    ).length;
     const pendingCount = statusList.filter((status) => status === "pending").length;
     const daysLeft = Math.max(
       0,
@@ -176,6 +214,14 @@ export function TopicPlanContent({
       daysLeft,
     };
   }, [displaySubGoals, goal.deadline]);
+
+  const workflowProgress = useMemo(() => buildWorkflowProgress(displaySubGoals), [displaySubGoals]);
+  const hasActiveWork = workflowProgress.runningTasks.length > 0 || workflowProgress.attentionTasks.length > 0;
+  const isExecutingPhase =
+    displayWorkflow?.phase === "executing" ||
+    displayWorkflow?.phase === "monitoring" ||
+    displayWorkflow?.phase === "reviewing";
+  const showWorkflowProgress = hasActiveWork || isExecutingPhase;
 
   if (goal.kind === "chat_history") {
     return <ChatHistoryView goal={goal} />;
@@ -232,96 +278,104 @@ export function TopicPlanContent({
             <SummaryStat label="待开始" value={summary.pendingCount} muted />
           </div>
         </div>
-        {displayWorkflow ? (
+        {displayWorkflow || showWorkflowProgress ? (
           <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-[12px] text-[#6B7280]">主题工作流</div>
-                <div className="mt-1 text-sm font-medium text-[#1F2328]">
-                  {phaseLabel(displayWorkflow.phase)}
+            {displayWorkflow ? (
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="text-[12px] text-[#6B7280]">主题工作流</div>
+                  <div className="mt-1 text-sm font-medium text-[#1F2328]">
+                    {phaseLabel(displayWorkflow.phase)}
+                  </div>
+                  {pendingGoalWorkflow ? (
+                    <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">保存中...</div>
+                  ) : null}
+                  {displayWorkflow.error ? (
+                    <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{displayWorkflow.error}</div>
+                  ) : null}
                 </div>
-                {pendingGoalWorkflow ? (
-                  <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">保存中...</div>
-                ) : null}
-                {displayWorkflow.error ? (
-                  <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{displayWorkflow.error}</div>
+                {displayWorkflow.phase === "presenting_plan" && displayWorkflow.planDecision === "pending" ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const feedback = window.prompt("告诉 KiKi 你希望如何调整这份计划：");
+                        if (!feedback?.trim()) return;
+                        const overlayId = createOpaqueId("idem");
+                        const idempotencyKey = createIdempotencyKey("goal.request_plan_revision", goal.id, feedback.trim(), overlayId);
+                        addPendingGoalWorkflow({
+                          id: overlayId,
+                          goalId: goal.id,
+                          idempotencyKey,
+                          createdAt: new Date().toISOString(),
+                          workflow: {
+                            ...displayWorkflow,
+                            phase: "decomposing",
+                            planDecision: "revision_requested",
+                            updatedAt: new Date().toISOString(),
+                            collectedInfo: {
+                              ...(displayWorkflow.collectedInfo ?? {}),
+                              revisionFeedback: feedback.trim(),
+                            },
+                          },
+                        });
+                        void requestGoalPlanRevisionCommand({
+                          goalId: goal.id,
+                          feedback: feedback.trim(),
+                          baseRevision: goalProjectionRevision,
+                          idempotencyKey,
+                        }).then((result) => {
+                          applyGoalsProjection(result.goals, result.revision);
+                          removePendingGoalWorkflow(overlayId);
+                        }).catch((error) => {
+                          removePendingGoalWorkflow(overlayId);
+                          window.alert(error instanceof Error ? error.message : "规划调整提交失败");
+                        });
+                      }}
+                      className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+                    >
+                      继续调整
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const overlayId = createOpaqueId("idem");
+                        const idempotencyKey = createIdempotencyKey("goal.confirm_plan", goal.id, overlayId);
+                        addPendingGoalWorkflow({
+                          id: overlayId,
+                          goalId: goal.id,
+                          idempotencyKey,
+                          createdAt: new Date().toISOString(),
+                          workflow: {
+                            ...displayWorkflow,
+                            phase: "executing",
+                            planDecision: "confirmed",
+                            updatedAt: new Date().toISOString(),
+                            confirmedAt: displayWorkflow.confirmedAt ?? new Date().toISOString(),
+                          },
+                        });
+                        void confirmGoalPlanCommand({ goalId: goal.id, baseRevision: goalProjectionRevision, idempotencyKey }).then((result) => {
+                          applyGoalsProjection(result.goals, result.revision);
+                          removePendingGoalWorkflow(overlayId);
+                        }).catch((error) => {
+                          removePendingGoalWorkflow(overlayId);
+                          window.alert(error instanceof Error ? error.message : "规划确认失败");
+                        });
+                      }}
+                      className="rounded-lg bg-[#111] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#333]"
+                    >
+                      确认并启动
+                    </button>
+                  </div>
                 ) : null}
               </div>
-              {displayWorkflow.phase === "presenting_plan" && displayWorkflow.planDecision === "pending" ? (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const feedback = window.prompt("告诉 KiKi 你希望如何调整这份计划：");
-                      if (!feedback?.trim()) return;
-                      const overlayId = createOpaqueId("idem");
-                      const idempotencyKey = createIdempotencyKey("goal.request_plan_revision", goal.id, feedback.trim(), overlayId);
-                      addPendingGoalWorkflow({
-                        id: overlayId,
-                        goalId: goal.id,
-                        idempotencyKey,
-                        createdAt: new Date().toISOString(),
-                        workflow: {
-                          ...displayWorkflow,
-                          phase: "decomposing",
-                          planDecision: "revision_requested",
-                          updatedAt: new Date().toISOString(),
-                          collectedInfo: {
-                            ...(displayWorkflow.collectedInfo ?? {}),
-                            revisionFeedback: feedback.trim(),
-                          },
-                        },
-                      });
-                      void requestGoalPlanRevisionCommand({
-                        goalId: goal.id,
-                        feedback: feedback.trim(),
-                        baseRevision: goalProjectionRevision,
-                        idempotencyKey,
-                      }).then((result) => {
-                        applyGoalsProjection(result.goals, result.revision);
-                        removePendingGoalWorkflow(overlayId);
-                      }).catch((error) => {
-                        removePendingGoalWorkflow(overlayId);
-                        window.alert(error instanceof Error ? error.message : "规划调整提交失败");
-                      });
-                    }}
-                    className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
-                  >
-                    继续调整
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const overlayId = createOpaqueId("idem");
-                      const idempotencyKey = createIdempotencyKey("goal.confirm_plan", goal.id, overlayId);
-                      addPendingGoalWorkflow({
-                        id: overlayId,
-                        goalId: goal.id,
-                        idempotencyKey,
-                        createdAt: new Date().toISOString(),
-                        workflow: {
-                          ...displayWorkflow,
-                          phase: "executing",
-                          planDecision: "confirmed",
-                          updatedAt: new Date().toISOString(),
-                          confirmedAt: displayWorkflow.confirmedAt ?? new Date().toISOString(),
-                        },
-                      });
-                      void confirmGoalPlanCommand({ goalId: goal.id, baseRevision: goalProjectionRevision, idempotencyKey }).then((result) => {
-                        applyGoalsProjection(result.goals, result.revision);
-                        removePendingGoalWorkflow(overlayId);
-                      }).catch((error) => {
-                        removePendingGoalWorkflow(overlayId);
-                        window.alert(error instanceof Error ? error.message : "规划确认失败");
-                      });
-                    }}
-                    className="rounded-lg bg-[#111] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#333]"
-                  >
-                    确认并启动
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            ) : (
+              <div>
+                <div className="text-[12px] text-[#6B7280]">主题工作流</div>
+                <div className="mt-1 text-sm font-medium text-[#1F2328]">执行进展</div>
+              </div>
+            )}
+            {showWorkflowProgress ? <WorkflowProgressPanel progress={workflowProgress} /> : null}
           </div>
         ) : null}
       </section>
@@ -413,16 +467,302 @@ function SummaryStat({
 }
 
 function getTaskSummaryStatus(task: Task): TaskInstanceStatus | "pending" {
-  const latest = task.instances[0];
-  const latestStatus = latest?.status;
-  if (latestStatus === "awaiting_user" || latest?.awaitingUser) return "awaiting_user";
-  if (latestStatus === "completed" || task.progress >= 100) return "completed";
-  if (
-    latestStatus === "in_progress" ||
-    latestStatus === "paused"
-  ) {
-    return "in_progress";
+  return deriveTaskDisplayState(task);
+}
+
+function buildWorkflowProgress(subGoals: Goal["subGoals"]): WorkflowProgress {
+  const taskMap = new Map(subGoals.flatMap((subGoal) => subGoal.tasks).map((task) => [task.id, task]));
+  const runningTasks: TaskProgressItem[] = [];
+  const upcomingTasks: TaskProgressItem[] = [];
+  const attentionTasks: TaskProgressItem[] = [];
+  const counts: WorkflowProgressCounts = {
+    completed: 0,
+    running: 0,
+    awaiting: 0,
+    pending: 0,
+    error: 0,
+    total: 0,
+  };
+
+  subGoals.forEach((subGoal, threadIndex) => {
+    subGoal.tasks.forEach((task, taskIndex) => {
+      const state = classifyTaskProgress(task);
+      counts.total += 1;
+
+      if (state === "completed") {
+        counts.completed += 1;
+        return;
+      }
+
+      if (state === "awaiting_user") counts.awaiting += 1;
+      if (state === "pending") counts.pending += 1;
+      if (state === "error") counts.error += 1;
+      if (state === "in_progress" || state === "paused") counts.running += 1;
+
+      const item: TaskProgressItem = {
+        taskId: task.id,
+        threadTitle: subGoal.title,
+        title: stripTaskPrefix(task.title),
+        state,
+        statusLabel: workflowStatusLabel(task, state),
+        blockedByUpstream: isBlockedByUpstream(task, taskMap),
+        phaseText: workflowPhaseText(task, state),
+        priorityRank: priorityRank(task),
+        threadIndex,
+        taskIndex,
+      };
+
+      if (state === "error") {
+        attentionTasks.push(item);
+      } else if (state === "pending") {
+        upcomingTasks.push(item);
+      } else {
+        runningTasks.push(item);
+      }
+    });
+  });
+
+  upcomingTasks.sort((left, right) => {
+    if (left.blockedByUpstream !== right.blockedByUpstream) {
+      return left.blockedByUpstream ? 1 : -1;
+    }
+    if (left.priorityRank !== right.priorityRank) return left.priorityRank - right.priorityRank;
+    if (left.threadIndex !== right.threadIndex) return left.threadIndex - right.threadIndex;
+    return left.taskIndex - right.taskIndex;
+  });
+
+  return { runningTasks, upcomingTasks, attentionTasks, counts };
+}
+
+function classifyTaskProgress(task: Task): WorkflowTaskState {
+  return deriveTaskDisplayState(task);
+}
+
+function isBlockedByUpstream(task: Task, taskMap: Map<string, Task>) {
+  return (task.dependencies ?? []).some((dependencyId) => {
+    const dependency = taskMap.get(dependencyId);
+    return dependency ? !dependencySatisfied(dependency) : false;
+  });
+}
+
+function priorityRank(task: Task) {
+  switch (task.priority) {
+    case "critical":
+      return 0;
+    case "high":
+      return 1;
+    case "medium":
+    case undefined:
+      return 2;
+    case "low":
+      return 3;
+    default:
+      return 2;
   }
-  if (latestStatus === "pending") return task.progress > 0 ? "in_progress" : "pending";
-  return task.progress > 0 ? "in_progress" : "pending";
+}
+
+function workflowStatusLabel(task: Task, state: Exclude<WorkflowTaskState, "completed">) {
+  if (state === "awaiting_user") return awaitingStatusLabel(task);
+  if (state === "paused") return "已暂停";
+  if (state === "error") return "执行失败";
+  if (state === "pending") return "待开始";
+  return "进行中";
+}
+
+function awaitingStatusLabel(task: Task) {
+  const latest = task.instances[0];
+  const type = latest?.awaitingUser?.interactionRequirement?.type ?? latest?.result?.interactionRequirement?.type;
+  if (type === "answer") return "待作答";
+  if (type === "provide_context") return "待补充";
+  if (type === "perform_offline_action") return "待线下完成";
+  return "待确认";
+}
+
+function workflowPhaseText(task: Task, state: Exclude<WorkflowTaskState, "completed">) {
+  const latest = task.instances[0];
+  if (state === "awaiting_user") {
+    return latest?.awaitingUser?.reason ?? latest?.execution?.waitingReason;
+  }
+  if (state === "error") {
+    return latest?.execution?.errorMessage;
+  }
+  if (state === "paused") {
+    return latest?.execution?.waitingReason ?? "等待继续执行";
+  }
+  if (state === "in_progress") {
+    return executionPhaseLabel(latest?.execution?.phase);
+  }
+  return undefined;
+}
+
+function executionPhaseLabel(phase: TaskExecutionPhase | undefined) {
+  switch (phase) {
+    case "queued":
+      return "排队中";
+    case "preparing":
+      return "准备执行";
+    case "running":
+      return "执行中";
+    case "awaiting_user":
+      return "等待用户确认";
+    case "paused":
+      return "已暂停";
+    case "retrying":
+      return "重试中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "执行失败";
+    case "cancelled":
+      return "已取消";
+    default:
+      return undefined;
+  }
+}
+
+function WorkflowProgressPanel({ progress }: { progress: WorkflowProgress }) {
+  const visibleUpcoming = progress.upcomingTasks.slice(0, 5);
+  const hiddenUpcomingCount = Math.max(0, progress.upcomingTasks.length - visibleUpcoming.length);
+  const activeCount = progress.counts.running + progress.counts.awaiting;
+
+  return (
+    <div className="mt-4 border-t border-[#E5E7EB] pt-4">
+      {progress.counts.total > 0 ? (
+        <div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#6B7280]">
+            <span>执行进展</span>
+            <span>
+              已结束 {progress.counts.completed} · 进行中 {activeCount} · 待开始 {progress.counts.pending}
+              {progress.counts.error > 0 ? ` · 失败 ${progress.counts.error}` : ""}
+            </span>
+          </div>
+          <div className="flex h-2 overflow-hidden rounded-full bg-[#E5E7EB]">
+            <ProgressSegment count={progress.counts.completed} total={progress.counts.total} className="bg-[#1F2328]" />
+            <ProgressSegment count={activeCount} total={progress.counts.total} className="bg-[#7C8794]" />
+            <ProgressSegment count={progress.counts.error} total={progress.counts.total} className="bg-[#B42318]" />
+            <ProgressSegment count={progress.counts.pending} total={progress.counts.total} className="bg-[#D0D7DE]" />
+          </div>
+        </div>
+      ) : null}
+
+      {progress.attentionTasks.length > 0 ? (
+        <div className="mt-4 rounded-xl border border-[#F2C7C3] bg-[#FFF7F6] px-3 py-2">
+          <div className="mb-2 text-[12px] font-medium text-[#B42318]">需关注</div>
+          <div className="space-y-2">
+            {progress.attentionTasks.map((item) => (
+              <WorkflowTaskLine key={item.taskId} item={item} tone="error" />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <WorkflowTaskGroup
+          title="正在执行"
+          emptyText="暂无正在执行的任务"
+          items={progress.runningTasks}
+          tone="active"
+        />
+        <WorkflowTaskGroup
+          title="接下来计划执行"
+          emptyText="已无待开始任务"
+          items={visibleUpcoming}
+          tone="pending"
+          footer={hiddenUpcomingCount > 0 ? `还有 ${hiddenUpcomingCount} 个待开始任务` : undefined}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ProgressSegment({
+  count,
+  total,
+  className,
+}: {
+  count: number;
+  total: number;
+  className: string;
+}) {
+  if (count <= 0 || total <= 0) return null;
+  return <div className={className} style={{ width: `${(count / total) * 100}%` }} />;
+}
+
+function WorkflowTaskGroup({
+  title,
+  emptyText,
+  items,
+  tone,
+  footer,
+}: {
+  title: string;
+  emptyText: string;
+  items: TaskProgressItem[];
+  tone: "active" | "pending";
+  footer?: string;
+}) {
+  return (
+    <div>
+      <div className="mb-2 text-[12px] font-medium text-[#6B7280]">{title}</div>
+      {items.length > 0 ? (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <WorkflowTaskLine key={item.taskId} item={item} tone={tone} />
+          ))}
+          {footer ? <div className="text-[12px] leading-5 text-[#8C9198]">{footer}</div> : null}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-[#D4D7DD] px-3 py-3 text-[12px] text-[#8C9198]">
+          {emptyText}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkflowTaskLine({
+  item,
+  tone,
+}: {
+  item: TaskProgressItem;
+  tone: "active" | "pending" | "error";
+}) {
+  return (
+    <div className="rounded-xl bg-white px-3 py-2 shadow-[0_0_0_1px_rgba(31,35,40,0.04)]">
+      <div className="flex items-start gap-2">
+        <span
+          className={cn(
+            "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+            tone === "error" ? "bg-[#B42318]" : tone === "active" ? "bg-[#1F2328]" : "bg-[#D0D7DE]",
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-[13px] font-medium text-[#1F2328]">{item.title}</span>
+            <span
+              className={cn(
+                "rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                tone === "error"
+                  ? "bg-[#FDECEC] text-[#B42318]"
+                  : tone === "active"
+                    ? "bg-[#DDE1E7] text-[#1F2328]"
+                    : "bg-[#F5F6F8] text-[#8C9198]",
+              )}
+            >
+              {item.statusLabel}
+            </span>
+            {item.blockedByUpstream ? (
+              <span className="rounded-md bg-[#FFF3CD] px-1.5 py-0.5 text-[11px] font-medium text-[#8A6D3B]">
+                等待上游
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">
+            {item.threadTitle}
+            {item.phaseText ? ` · ${item.phaseText}` : ""}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

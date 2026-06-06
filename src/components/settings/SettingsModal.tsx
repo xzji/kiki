@@ -12,6 +12,7 @@ import {
 } from "@/lib/goalSystemConfig";
 import { cn } from "@/lib/utils";
 import type { SettingsTab } from "@/lib/settings";
+import { setRuntimeDaemonMaxConcurrentTasks } from "@/lib/api/runtime-daemon";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 
 import { BackendLogsPanel } from "./BackendLogsPanel";
@@ -40,6 +41,16 @@ export function SettingsModal({
   const updateLogMode = useEasterEggSettingsStore((state) => state.updateLogMode);
   const updateUiLogLevel = useEasterEggSettingsStore((state) => state.updateUiLogLevel);
   const resetToDefaults = useEasterEggSettingsStore((state) => state.resetToDefaults);
+
+  // maxConcurrentTasks 是 daemon 执行并发的权威配置，改动后需同步到服务端。
+  const handleNumericChange = (key: NumericSettingKey, value: number) => {
+    updateNumericSetting(key, value);
+    if (key === "maxConcurrentTasks") {
+      void setRuntimeDaemonMaxConcurrentTasks(Math.round(value)).catch(() => {
+        // 同步失败不阻断本地设置；TaskMonitor 抽屉会兜底再次同步。
+      });
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -128,7 +139,7 @@ export function SettingsModal({
               <EasterEggSettingsPanel
                 hydrated={settingsHydrated}
                 settings={settings}
-                onNumericChange={updateNumericSetting}
+                onNumericChange={handleNumericChange}
                 onLogModeChange={updateLogMode}
                 onUiLogLevelChange={updateUiLogLevel}
                 onReset={resetToDefaults}

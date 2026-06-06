@@ -170,11 +170,9 @@ function nowIso() {
 }
 
 function appendRuntimeJobGoalEvent(input: Parameters<typeof appendGoalEventOnce>[0]) {
-  try {
-    return appendGoalEventOnce(input);
-  } catch {
-    return null;
-  }
+  // 不再静默吞错：事件溯源日志失败若被无声丢弃，会导致 inbox/监控投影与实际状态永久分叉。
+  // 由调用方在事务内调用本函数，抛出后整笔（job + event）一起回滚。
+  return appendGoalEventOnce(input);
 }
 
 export function upsertRuntimeJob(record: RuntimeJobRecord) {
@@ -240,6 +238,57 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
   });
 }
 
+/**
+ * 更新除 payload_json 外的全部可变列。
+ *
+ * 高频进度/轨迹/续租路径不会改动 payload（整棵 Goal 树），却经由 upsertRuntimeJob 每次都
+ * JSON.stringify 整个 payload 并重写大列，造成显著写放大。此函数走纯 UPDATE，既不序列化也不
+ * 触碰 payload_json，仅在 payload 确实未变化时使用。
+ */
+function updateRuntimeJobMutableColumns(record: RuntimeJobRecord) {
+  const db = getDatabase();
+  db.prepare(
+    `
+      UPDATE runtime_jobs SET
+        status = @status,
+        request_id = @request_id,
+        runtime_env_id = @runtime_env_id,
+        runtime_transport = @runtime_transport,
+        progress_json = @progress_json,
+        logs_json = @logs_json,
+        trajectory_json = @trajectory_json,
+        blocker_json = @blocker_json,
+        result_json = @result_json,
+        lease_owner = @lease_owner,
+        lease_expires_at = @lease_expires_at,
+        available_at = @available_at,
+        updated_at = @updated_at,
+        started_at = @started_at,
+        finished_at = @finished_at,
+        last_error = @last_error
+      WHERE id = @id
+    `,
+  ).run({
+    id: record.id,
+    status: record.status,
+    request_id: record.requestId ?? null,
+    runtime_env_id: record.runtimeEnvId ?? null,
+    runtime_transport: record.runtimeTransport,
+    progress_json: record.progress ? JSON.stringify(record.progress) : null,
+    logs_json: JSON.stringify(record.logs),
+    trajectory_json: JSON.stringify(record.trajectory),
+    blocker_json: record.blocker ? JSON.stringify(record.blocker) : null,
+    result_json: record.result ? JSON.stringify(record.result) : null,
+    lease_owner: record.leaseOwner ?? null,
+    lease_expires_at: record.leaseExpiresAt ?? null,
+    available_at: record.availableAt ?? null,
+    updated_at: record.updatedAt,
+    started_at: record.startedAt ?? null,
+    finished_at: record.finishedAt ?? null,
+    last_error: record.lastError ?? null,
+  });
+}
+
 export function createQueuedRuntimeJobInternal(
   payload: RuntimeJobPayload,
   input?: { requestId?: string; eventSource?: "scheduler" | "user" | "feedback" | "resume" },
@@ -268,22 +317,26 @@ export function createQueuedRuntimeJobInternal(
     createdAt: now,
     updatedAt: now,
   };
-  upsertRuntimeJob(record);
-  appendRuntimeJobGoalEvent({
-    goalId: payload.goal.id,
-    taskId: payload.task.id,
-    instanceId: payload.instance.id,
-    kind: "instance.created",
-    producedBy: input?.eventSource === "scheduler" || !input?.eventSource ? "scheduler" : "user",
-    idempotencyKey: createIdempotencyKey("instance.created", payload.instance.id),
-    createdAt: now,
-    payload: {
-      requestId: input?.requestId,
-      status: payload.instance.status,
-      runtimeEnvId: payload.runtimeEnv.id,
-      source: input?.eventSource ?? "scheduler",
-    },
-  });
+  // job 写入与事件 append 必须原子：避免 job 已落库但事件丢失导致溯源/投影分叉。
+  const db = getDatabase();
+  db.transaction(() => {
+    upsertRuntimeJob(record);
+    appendRuntimeJobGoalEvent({
+      goalId: payload.goal.id,
+      taskId: payload.task.id,
+      instanceId: payload.instance.id,
+      kind: "instance.created",
+      producedBy: input?.eventSource === "scheduler" || !input?.eventSource ? "scheduler" : "user",
+      idempotencyKey: createIdempotencyKey("instance.created", payload.instance.id),
+      createdAt: now,
+      payload: {
+        requestId: input?.requestId,
+        status: payload.instance.status,
+        runtimeEnvId: payload.runtimeEnv.id,
+        source: input?.eventSource ?? "scheduler",
+      },
+    });
+  })();
   return record;
 }
 
@@ -484,20 +537,21 @@ export function claimQueuedRuntimeJobs(input: { leaseOwner: string; limit: numbe
   const db = getDatabase();
   const leaseExpiresAt = new Date(Date.now() + (input.leaseMs ?? 2 * 60 * 1000)).toISOString();
   const now = nowIso();
-  const rows = db
-    .prepare(
-      `
-        SELECT * FROM runtime_jobs
-        WHERE status = 'queued'
-          AND (available_at IS NULL OR available_at <= ?)
-        ORDER BY created_at ASC
-        LIMIT ?
-      `,
-    )
-    .all(now, input.limit) as RuntimeJobRow[];
-
-  return rows.flatMap((row) => {
-    const result = db.prepare(
+  // SELECT 候选行 + 逐行 CAS UPDATE 包进单事务：消除 select 与 update 之间的 TOCTOU 窗口，
+  // 同时把 N 次写收敛到一笔事务，降低锁竞争。
+  const claim = db.transaction(() => {
+    const rows = db
+      .prepare(
+        `
+          SELECT * FROM runtime_jobs
+          WHERE status = 'queued'
+            AND (available_at IS NULL OR available_at <= ?)
+          ORDER BY created_at ASC
+          LIMIT ?
+        `,
+      )
+      .all(now, input.limit) as RuntimeJobRow[];
+    const update = db.prepare(
       `
         UPDATE runtime_jobs
         SET status = 'running',
@@ -508,24 +562,28 @@ export function claimQueuedRuntimeJobs(input: { leaseOwner: string; limit: numbe
         WHERE id = ?
           AND status = 'queued'
       `,
-    ).run(input.leaseOwner, leaseExpiresAt, now, now, row.id);
-    if (result.changes === 0) return [];
+    );
+    return rows.flatMap((row) => {
+      const result = update.run(input.leaseOwner, leaseExpiresAt, now, now, row.id);
+      if (result.changes === 0) return [];
 
-    return {
-      ...mapRow({
-        ...row,
-        status: "running",
-        lease_owner: input.leaseOwner,
-        lease_expires_at: leaseExpiresAt,
-        started_at: row.started_at ?? now,
-        updated_at: now,
-      }),
-      leaseOwner: input.leaseOwner,
-      leaseExpiresAt,
-      startedAt: row.started_at ?? now,
-      updatedAt: now,
-    };
+      return {
+        ...mapRow({
+          ...row,
+          status: "running",
+          lease_owner: input.leaseOwner,
+          lease_expires_at: leaseExpiresAt,
+          started_at: row.started_at ?? now,
+          updated_at: now,
+        }),
+        leaseOwner: input.leaseOwner,
+        leaseExpiresAt,
+        startedAt: row.started_at ?? now,
+        updatedAt: now,
+      };
+    });
   });
+  return claim();
 }
 
 export function updateRuntimeJobExecutionInternal(
@@ -555,41 +613,52 @@ export function updateRuntimeJobExecutionInternal(
     ...updates,
     updatedAt: nowIso(),
   };
-  upsertRuntimeJob(next);
-  if (updates.status && updates.status !== existing.status && next.goalId && next.taskId && next.taskInstanceId) {
-    appendRuntimeJobGoalEvent({
-      goalId: next.goalId,
-      taskId: next.taskId,
-      instanceId: next.taskInstanceId,
-      kind: "job.status_changed",
-      producedBy: "worker",
-      idempotencyKey: createIdempotencyKey("job.status_changed.worker", next.taskInstanceId, existing.status, updates.status, next.updatedAt),
-      createdAt: next.updatedAt,
-      payload: {
-        previousStatus: existing.status,
-        nextStatus: updates.status,
-        requestId: next.requestId,
-        reason: updates.lastError,
-      },
-    });
-  }
-  if (updates.progress && next.goalId && next.taskId && next.taskInstanceId) {
-    appendRuntimeJobGoalEvent({
-      goalId: next.goalId,
-      taskId: next.taskId,
-      instanceId: next.taskInstanceId,
-      kind: "instance.progress",
-      producedBy: "worker",
-      idempotencyKey: createIdempotencyKey("instance.progress", next.taskInstanceId, next.updatedAt),
-      createdAt: next.updatedAt,
-      payload: {
-        requestId: next.requestId,
-        message: updates.progress.message,
-        progress: updates.progress,
-        trajectoryLength: updates.trajectory?.length ?? next.trajectory.length,
-      },
-    });
-  }
+  // job 写入与状态/进展事件 append 必须原子：避免 job 已更新但事件丢失导致投影分叉。
+  const db = getDatabase();
+  // payload（整棵 Goal 树）未变化时走纯列更新，跳过 payload_json 的全量序列化重写，缓解高频
+  // 进度/轨迹/续租更新的写放大；payload 变化时才回退到完整 upsert。
+  const payloadChanged = updates.payload !== undefined;
+  db.transaction(() => {
+    if (payloadChanged) {
+      upsertRuntimeJob(next);
+    } else {
+      updateRuntimeJobMutableColumns(next);
+    }
+    if (updates.status && updates.status !== existing.status && next.goalId && next.taskId && next.taskInstanceId) {
+      appendRuntimeJobGoalEvent({
+        goalId: next.goalId,
+        taskId: next.taskId,
+        instanceId: next.taskInstanceId,
+        kind: "job.status_changed",
+        producedBy: "worker",
+        idempotencyKey: createIdempotencyKey("job.status_changed.worker", next.taskInstanceId, existing.status, updates.status, next.updatedAt),
+        createdAt: next.updatedAt,
+        payload: {
+          previousStatus: existing.status,
+          nextStatus: updates.status,
+          requestId: next.requestId,
+          reason: updates.lastError,
+        },
+      });
+    }
+    if (updates.progress && next.goalId && next.taskId && next.taskInstanceId) {
+      appendRuntimeJobGoalEvent({
+        goalId: next.goalId,
+        taskId: next.taskId,
+        instanceId: next.taskInstanceId,
+        kind: "instance.progress",
+        producedBy: "worker",
+        idempotencyKey: createIdempotencyKey("instance.progress", next.taskInstanceId, next.updatedAt),
+        createdAt: next.updatedAt,
+        payload: {
+          requestId: next.requestId,
+          message: updates.progress.message,
+          progress: updates.progress,
+          trajectoryLength: updates.trajectory?.length ?? next.trajectory.length,
+        },
+      });
+    }
+  })();
   return next;
 }
 

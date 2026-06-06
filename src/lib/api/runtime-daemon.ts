@@ -157,6 +157,23 @@ export async function setRuntimeDaemonAutoStart(input: {
   return payload;
 }
 
+export async function setRuntimeDaemonMaxConcurrentTasks(
+  maxConcurrentTasks: number,
+): Promise<RuntimeDaemonConfig | null> {
+  const response = await fetch("/api/runtime/daemon/concurrency", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ maxConcurrentTasks }),
+  });
+  const payload = (await response.json()) as { ok: boolean; message?: string; config: RuntimeDaemonConfig | null };
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || "并发上限设置失败");
+  }
+  return payload.config;
+}
+
 export async function resetLocalDevData(): Promise<LocalDataResetPayload> {
   const response = await fetch("/api/dev/runtime/reset-local-data", {
     method: "POST",

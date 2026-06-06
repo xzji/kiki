@@ -279,6 +279,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const firstUnreadId = entryUnreadIds[0] ?? null;
   const unreadCount = entryUnreadIds.length;
 
+  const markUnreadSeen = () => {
+    setShowUnreadJump(false);
+    setEntryUnreadIds([]);
+  };
+
   const refreshUnreadJumpVisibility = () => {
     if (entryUnreadIds.length === 0) {
       setShowUnreadJump(false);
@@ -287,7 +292,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
 
     const container = scrollRef.current;
     if (!container || isScrollNearBottom(container)) {
-      setShowUnreadJump(false);
+      markUnreadSeen();
       return;
     }
 
@@ -298,13 +303,13 @@ export function ConversationView({ conversationId }: { conversationId: string })
       unreadMessageElements.length === entryUnreadIds.length &&
       unreadMessageElements.every((element) => isElementFullyVisibleInContainer(element, container))
     ) {
-      setShowUnreadJump(false);
+      markUnreadSeen();
       return;
     }
 
     const marker = firstUnreadMarkerRef.current;
     if (marker && isElementFullyVisibleInContainer(marker, container)) {
-      setShowUnreadJump(false);
+      markUnreadSeen();
       return;
     }
 
@@ -1269,19 +1274,23 @@ export function ConversationView({ conversationId }: { conversationId: string })
         </div>
 
         {showUnreadJump && unreadCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => {
-              firstUnreadMarkerRef.current?.scrollIntoView({
-                behavior: "smooth",
-                block: "start",
-              });
-              setShowUnreadJump(false);
-            }}
-            className="absolute bottom-4 right-6 rounded-full border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] shadow-sm hover:border-[#111]"
-          >
-            {unreadCount}条新消息
-          </button>
+          <div className="pointer-events-none absolute bottom-4 left-0 right-0 px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto flex w-full max-w-3xl justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  firstUnreadMarkerRef.current?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
+                  markUnreadSeen();
+                }}
+                className="pointer-events-auto rounded-full border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] shadow-sm hover:border-[#111]"
+              >
+                {unreadCount}条新消息
+              </button>
+            </div>
+          </div>
         ) : null}
       </div>
 

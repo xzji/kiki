@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
+import { formatMessageTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useSagaInstancesStore } from "@/stores/sagaInstancesStore";
@@ -424,13 +425,4 @@ function MessageMenu({
       </button>
     </div>
   );
-}
-
-function formatMessageTime(value: string) {
-  const date = new Date(value);
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hours = `${date.getHours()}`.padStart(2, "0");
-  const minutes = `${date.getMinutes()}`.padStart(2, "0");
-  return `${month}-${day} ${hours}:${minutes}`;
 }

@@ -39,6 +39,8 @@ type SupervisedJob = {
   pid?: number;
   aborted: boolean;
   durationTimer: NodeJS.Timeout;
+  /** 续租定时器（由 worker 通过 attachRenewTimer 登记），随 job 销账统一清理，避免泄漏。 */
+  renewTimer?: NodeJS.Timeout;
 };
 
 export class ExecutionSupervisor {
@@ -72,6 +74,23 @@ export class ExecutionSupervisor {
     const job = this.jobs.get(requestId);
     if (!job) return;
     job.pid = pid;
+  }
+
+  /**
+   * 登记续租定时器，纳入 job 生命周期统一管理：job 销账（completeJob/dispose）时一并清理，
+   * 避免极端路径下 worker 的 finally 未执行导致 interval 残留、阻止进程退出。
+   * 传入的 timer 应已 unref()，本方法兜底再 unref 一次。
+   */
+  attachRenewTimer(requestId: string, timer: NodeJS.Timeout) {
+    const job = this.jobs.get(requestId);
+    if (!job) {
+      // job 已不在管（已销账），直接清理传入的 timer，避免泄漏。
+      clearInterval(timer);
+      return;
+    }
+    if (job.renewTimer) clearInterval(job.renewTimer);
+    timer.unref?.();
+    job.renewTimer = timer;
   }
 
   /** 收到流式进展事件（delta/tool_call/status/message）时刷新活跃时间，重置空闲判定。 */
@@ -140,6 +159,7 @@ export class ExecutionSupervisor {
     const job = this.jobs.get(requestId);
     if (!job) return;
     clearTimeout(job.durationTimer);
+    if (job.renewTimer) clearInterval(job.renewTimer);
     this.jobs.delete(requestId);
   }
 }

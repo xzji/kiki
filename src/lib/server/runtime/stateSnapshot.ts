@@ -61,31 +61,35 @@ function readSnapshotWithMeta<T>(key: SnapshotKey, fallback: T): SnapshotEnvelop
 
 function upsertSnapshot<T>(key: SnapshotKey, value: T, expectedRevision?: number): SnapshotWriteResult {
   const db = getDatabase();
-  const current = readSnapshotWithMeta<T>(key, value);
-  if (expectedRevision !== undefined && expectedRevision !== current.revision) {
-    return {
-      ok: false,
-      conflict: true,
-      revision: current.revision,
-      updatedAt: current.updatedAt,
+  // read-check-write 必须原子：否则两个并发写可能都通过 revision 校验后相互覆盖（lost update）。
+  const tx = db.transaction((): SnapshotWriteResult => {
+    const current = readSnapshotWithMeta<T>(key, value);
+    if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+      return {
+        ok: false,
+        conflict: true,
+        revision: current.revision,
+        updatedAt: current.updatedAt,
+      };
+    }
+    const updatedAt = nowIso();
+    const next: SnapshotEnvelope<T> = {
+      value,
+      revision: current.revision + 1,
+      updatedAt,
     };
-  }
-  const updatedAt = nowIso();
-  const next: SnapshotEnvelope<T> = {
-    value,
-    revision: current.revision + 1,
-    updatedAt,
-  };
-  db.prepare(
-    `
-      INSERT INTO runtime_state_snapshots (key, value_json, updated_at)
-      VALUES (?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET
-        value_json = excluded.value_json,
-        updated_at = excluded.updated_at
-    `,
-  ).run(key, JSON.stringify(next), updatedAt);
-  return { ok: true, revision: next.revision, updatedAt };
+    db.prepare(
+      `
+        INSERT INTO runtime_state_snapshots (key, value_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value_json = excluded.value_json,
+          updated_at = excluded.updated_at
+      `,
+    ).run(key, JSON.stringify(next), updatedAt);
+    return { ok: true, revision: next.revision, updatedAt };
+  });
+  return tx();
 }
 
 export function upsertGoalsSnapshot(goals: Goal[], expectedRevision?: number) {

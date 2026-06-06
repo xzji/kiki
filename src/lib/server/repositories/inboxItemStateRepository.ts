@@ -7,6 +7,7 @@
  */
 
 import { getDatabase } from "@/lib/server/db/client";
+import { formatMessageTime } from "@/lib/date";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, InboxItem, InboxItemState, InboxItemStatus } from "@/types/kiki";
 
@@ -44,10 +45,6 @@ function mapRow(row: InboxItemStateRow): InboxItemState {
     unread: Boolean(row.unread),
     snoozeUntil: row.snooze_until ?? undefined,
   };
-}
-
-function formatLocalTime(date: Date) {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function buildTaskLink(goalId: string, taskId: string, instanceId: string) {
@@ -91,7 +88,7 @@ function inboxItemFromDeliveredEvent(row: InboxDeliveredEventRow, goals: Goal[])
     snippet: notification.snippet,
     badge: notification.badge ?? null,
     unreadCount: 1,
-    timeLabel: formatLocalTime(new Date(createdAt)),
+    timeLabel: formatMessageTime(createdAt),
     linkTo: buildTaskLink(located.goal.id, located.task.id, located.instance.id),
     goalId: located.goal.id,
     createdAt,

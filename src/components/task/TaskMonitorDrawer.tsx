@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchRuntimeStateSnapshot,
+  setRuntimeDaemonMaxConcurrentTasks,
 } from "@/lib/api/runtime-daemon";
 import { cancelGoalInstance } from "@/lib/api/goal-commands";
 import {
@@ -146,6 +147,18 @@ export function TaskMonitorDrawer() {
     }
   };
 
+  const changeConcurrency = async (nextValue: number) => {
+    const clamped = Math.min(Math.max(nextValue, 1), 10);
+    if (clamped === maxConcurrentTasks) return;
+    // 先更新本地 store 让 UI 立即响应，再把权威值同步给服务端 daemon 配置。
+    updateNumericSetting("maxConcurrentTasks", clamped);
+    try {
+      await setRuntimeDaemonMaxConcurrentTasks(clamped);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "并发上限设置失败");
+    }
+  };
+
   const onDragStart = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -212,7 +225,7 @@ export function TaskMonitorDrawer() {
               <button
                 type="button"
                 disabled={maxConcurrentTasks <= 1}
-                onClick={() => updateNumericSetting("maxConcurrentTasks", maxConcurrentTasks - 1)}
+                onClick={() => void changeConcurrency(maxConcurrentTasks - 1)}
                 className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
               >
                 -
@@ -223,7 +236,7 @@ export function TaskMonitorDrawer() {
               <button
                 type="button"
                 disabled={maxConcurrentTasks >= 10}
-                onClick={() => updateNumericSetting("maxConcurrentTasks", maxConcurrentTasks + 1)}
+                onClick={() => void changeConcurrency(maxConcurrentTasks + 1)}
                 className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
               >
                 +

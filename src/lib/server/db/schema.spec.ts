@@ -105,8 +105,8 @@ function rerunAllMigrations(db: Database.Database) {
 }
 
 export function runSchemaSpecs() {
-  // 0. 确保 schema_version 常量已经升到 15
-  assert.equal(KIKI_DB_SCHEMA_VERSION, 15);
+  // 0. 确保 schema_version 常量已经升到 16
+  assert.equal(KIKI_DB_SCHEMA_VERSION, 16);
 
   const dbA = bootstrapPathA();
   const dbB = bootstrapPathB();

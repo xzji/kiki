@@ -44,7 +44,7 @@ export function getTaskDependencyViews(goal: Goal, task: Task): TaskDependencyVi
   });
 }
 
-function dependencySatisfied(task: Task) {
+export function dependencySatisfied(task: Task) {
   if (task.progress >= 100) return true;
   const latest = task.instances[0];
   if (!latest) return false;

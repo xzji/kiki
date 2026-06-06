@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createOpaqueId } from "@/lib/opaqueIds";
 import { createGeneratedInstance } from "@/lib/goalFactory";
 import { markGoalInstanceRunStarted, upsertGoalTaskInstanceSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
+import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { updateGoalRuntimeJobExecution, writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
@@ -150,7 +151,11 @@ export async function POST(request: NextRequest) {
   }
 
   const goals = readGoalsSnapshot([]);
-  const located = findTaskRef(goals, body.taskRef);
+  // 任务执行结果（completed 状态与 taskResult）由 worker 写入 runtime_jobs，不回写权威 goals snapshot。
+  // 这里用与 UI 任务卡片一致的合成视图来定位与判断实例，避免把 runtime job 已完成的结果误判为"未完成"。
+  // 写入仍以原始 goals 为基（见下方各 update/upsert），保持权威源单写、不物化合成状态。
+  const composedGoals = composeGoalsWithRuntimeJobs(goals);
+  const located = findTaskRef(composedGoals, body.taskRef);
   if (!located) {
     return NextResponse.json({ reason: "未找到被引用的任务结果" }, { status: 404 });
   }

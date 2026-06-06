@@ -1,7 +1,6 @@
-import { randomUUID } from "crypto";
-
 import { normalizeGoalId, normalizeInstanceId, normalizeTaskId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
+import { createEventLogRepository } from "@/lib/server/repositories/eventLogRepositoryFactory";
 import type { GoalEventKind, GoalEventPayload, GoalEventProducer, GoalEventRecord } from "@/types/goalEventLog";
 
 type GoalEventLogRow = {
@@ -29,14 +28,6 @@ export type AppendGoalEventInput<K extends GoalEventKind = GoalEventKind> = {
   createdAt?: string;
 };
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function createEventId() {
-  return `goal-event-${randomUUID()}`;
-}
-
 function mapRow<K extends GoalEventKind = GoalEventKind>(row: GoalEventLogRow): GoalEventRecord<K> {
   return {
     id: row.id,
@@ -52,92 +43,47 @@ function mapRow<K extends GoalEventKind = GoalEventKind>(row: GoalEventLogRow): 
   };
 }
 
-export function appendGoalEvent<K extends GoalEventKind>(input: AppendGoalEventInput<K>) {
-  const db = getDatabase();
-  const eventId = input.eventId ?? createEventId();
-  const createdAt = input.createdAt ?? nowIso();
-  db.prepare(
-    `
-      INSERT INTO goal_event_log (
-        event_id, goal_id, task_id, instance_id, kind, payload_json, produced_by, idempotency_key, created_at
-      ) VALUES (
-        @event_id, @goal_id, @task_id, @instance_id, @kind, @payload_json, @produced_by, @idempotency_key, @created_at
-      )
-      ON CONFLICT(event_id) DO NOTHING
-    `,
-  ).run({
-    event_id: eventId,
+const repository = createEventLogRepository<GoalEventLogRow, GoalEventRecord, AppendGoalEventInput>({
+  table: "goal_event_log",
+  eventIdPrefix: "goal-event",
+  ownerColumns: ["goal_id", "task_id", "instance_id"],
+  toOwnerParams: (input) => ({
     goal_id: normalizeGoalId(input.goalId),
     task_id: input.taskId ? normalizeTaskId(input.taskId) : null,
     instance_id: input.instanceId ? normalizeInstanceId(input.instanceId) : null,
-    kind: input.kind,
-    payload_json: JSON.stringify(input.payload),
-    produced_by: input.producedBy,
-    idempotency_key: input.idempotencyKey ?? null,
-    created_at: createdAt,
-  });
-  const row = db
-    .prepare(`SELECT * FROM goal_event_log WHERE event_id = ? LIMIT 1`)
-    .get(eventId) as GoalEventLogRow | undefined;
-  return row ? mapRow<K>(row) : null;
+  }),
+  mapRow,
+});
+
+export function appendGoalEvent<K extends GoalEventKind>(input: AppendGoalEventInput<K>) {
+  return repository.append(input) as GoalEventRecord<K> | null;
 }
 
 export function getGoalEventByIdempotencyKey<K extends GoalEventKind = GoalEventKind>(idempotencyKey: string) {
-  const db = getDatabase();
-  const row = db
-    .prepare(`SELECT * FROM goal_event_log WHERE idempotency_key = ? LIMIT 1`)
-    .get(idempotencyKey) as GoalEventLogRow | undefined;
-  return row ? mapRow<K>(row) : null;
+  return repository.getByIdempotencyKey(idempotencyKey) as GoalEventRecord<K> | null;
 }
 
 export function appendGoalEventOnce<K extends GoalEventKind>(input: AppendGoalEventInput<K>) {
-  if (!input.idempotencyKey) return appendGoalEvent(input);
-  const db = getDatabase();
-  const existing = getGoalEventByIdempotencyKey<K>(input.idempotencyKey);
-  if (existing) return existing;
-  const eventId = input.eventId ?? createEventId();
-  const createdAt = input.createdAt ?? nowIso();
-  db.prepare(
-    `
-      INSERT OR IGNORE INTO goal_event_log (
-        event_id, goal_id, task_id, instance_id, kind, payload_json, produced_by, idempotency_key, created_at
-      ) VALUES (
-        @event_id, @goal_id, @task_id, @instance_id, @kind, @payload_json, @produced_by, @idempotency_key, @created_at
-      )
-    `,
-  ).run({
-    event_id: eventId,
-    goal_id: normalizeGoalId(input.goalId),
-    task_id: input.taskId ? normalizeTaskId(input.taskId) : null,
-    instance_id: input.instanceId ? normalizeInstanceId(input.instanceId) : null,
-    kind: input.kind,
-    payload_json: JSON.stringify(input.payload),
-    produced_by: input.producedBy,
-    idempotency_key: input.idempotencyKey,
-    created_at: createdAt,
-  });
-  const row = db
-    .prepare(`SELECT * FROM goal_event_log WHERE idempotency_key = ? LIMIT 1`)
-    .get(input.idempotencyKey) as GoalEventLogRow | undefined;
-  return row ? mapRow<K>(row) : null;
+  return repository.appendOnce(input) as GoalEventRecord<K> | null;
 }
 
 export function getGoalEvents(input: { goalId: string; fromId?: number; limit?: number }) {
   const db = getDatabase();
   const normalizedGoalId = normalizeGoalId(input.goalId);
+  const limit = Math.min(Math.max(input.limit ?? 200, 1), 500);
+  // 把 goal_id 过滤与 LIMIT 下推到 SQL，命中 idx_goal_event_log_goal(goal_id, id)，
+  // 避免全表 SELECT * + JS 端逐行 JSON.parse 再 filter/slice。
   const rows = db
     .prepare(
       `
         SELECT * FROM goal_event_log
-        WHERE id > ?
+        WHERE goal_id = ? AND id > ?
         ORDER BY id ASC
+        LIMIT ?
       `,
     )
-    .all(input.fromId ?? 0) as GoalEventLogRow[];
-  return rows
-    .map((row) => mapRow(row))
-    .filter((event) => event.goalId === normalizedGoalId)
-    .slice(0, input.limit ?? 200);
+    .all(normalizedGoalId, input.fromId ?? 0, limit) as GoalEventLogRow[];
+  return rows.map((row) => mapRow(row));
 }
 
 export function getGoalEventsSince(input: { fromId?: number; limit?: number }) {
@@ -159,7 +105,9 @@ export function getGoalEventsSince(input: { fromId?: number; limit?: number }) {
 export function getLatestGoalEventId(goalId: string) {
   const db = getDatabase();
   const normalizedGoalId = normalizeGoalId(goalId);
-  const rows = db.prepare(`SELECT * FROM goal_event_log ORDER BY id DESC`).all() as GoalEventLogRow[];
-  const row = rows.find((candidate) => mapRow(candidate).goalId === normalizedGoalId);
-  return row?.id ?? 0;
+  // 用聚合 MAX(id) 命中索引取最新 id，避免全表 SELECT * + 逐行 mapRow（与 conversationEventLog 写法对齐）。
+  const row = db
+    .prepare(`SELECT MAX(id) AS id FROM goal_event_log WHERE goal_id = ?`)
+    .get(normalizedGoalId) as { id: number | null };
+  return row.id ?? 0;
 }

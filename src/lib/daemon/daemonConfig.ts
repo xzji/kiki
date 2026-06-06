@@ -20,6 +20,8 @@ export type RuntimeDaemonConfig = {
   authorizedDirectories: string[];
   schedulerIntervalMs: number;
   heartbeatIntervalMs: number;
+  /** 同一时刻最多并行执行的 goal task 数量上限，超出的任务在队列中等待空位。 */
+  maxConcurrentTasks: number;
   /** 单个 goal task 执行的总时长上限（毫秒），超时即 abort 并标记 failed。 */
   jobMaxDurationMs: number;
   /** 单个 goal task 执行的空闲超时（毫秒），期间无任何进展事件即判定卡死并 abort。 */
@@ -38,6 +40,7 @@ const DEFAULT_CONFIG: RuntimeDaemonConfig = {
   authorizedDirectories: [process.cwd()],
   schedulerIntervalMs: 60_000,
   heartbeatIntervalMs: 15_000,
+  maxConcurrentTasks: 3,
   jobMaxDurationMs: 30 * 60_000,
   jobIdleTimeoutMs: 5 * 60_000,
   updatedAt: new Date().toISOString(),
@@ -45,6 +48,14 @@ const DEFAULT_CONFIG: RuntimeDaemonConfig = {
 
 function ensureParentDir(filePath: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+/** 与 EASTER_EGG_SETTING_META.maxConcurrentTasks 的 1~10 边界保持一致。 */
+function clampMaxConcurrentTasks(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_CONFIG.maxConcurrentTasks;
+  }
+  return Math.min(Math.max(Math.round(value), 1), 10);
 }
 
 export function getDefaultRuntimeDaemonConfig() {
@@ -60,6 +71,7 @@ export function readRuntimeDaemonConfig() {
       ...DEFAULT_CONFIG,
       ...parsed,
       filePolicy: normalizeRuntimeFilePolicy(parsed.filePolicy),
+      maxConcurrentTasks: clampMaxConcurrentTasks(parsed.maxConcurrentTasks),
       authorizedDirectories:
         parsed.authorizedDirectories?.filter((item): item is string => Boolean(item?.trim())) ??
         DEFAULT_CONFIG.authorizedDirectories,

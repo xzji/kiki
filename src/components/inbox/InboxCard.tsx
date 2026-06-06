@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
+import { formatMessageTime } from "@/lib/date";
 import { resolveInboxTaskContext } from "@/lib/inboxItem";
 import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
       ? awaitingDisplay.notice
       : taskContext?.instance.notification?.userMessage ?? taskContext?.instance.intro ?? item.snippet;
   const unread = item.unreadCount > 0;
+  const timeLabel = formatMessageTime(item.createdAt);
 
   const closeMenu = () => setMenuOpen(false);
   const runAction = (fn: () => void) => {
@@ -92,7 +94,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
             {item.favorite ? <Star className="h-3.5 w-3.5 shrink-0 fill-[#F5A623] text-[#F5A623]" /> : null}
             <h3 className="truncate text-sm font-semibold">{item.title}</h3>
           </button>
-          <span className="shrink-0 text-[11px] text-[#6B7280]">{item.timeLabel}</span>
+          <span className="shrink-0 text-[11px] text-[#6B7280]">{timeLabel}</span>
           <div className="relative shrink-0">
             <button
               type="button"

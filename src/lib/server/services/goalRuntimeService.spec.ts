@@ -266,7 +266,7 @@ export function runGoalRuntimeServiceSpecs() {
       event.kind === "instance.status_changed",
   );
   assert.ok(statusEvents.some((event) => (event.payload as { nextStatus?: unknown }).nextStatus === "in_progress"));
-  assert.ok(statusEvents.some((event) => (event.payload as { nextStatus?: unknown }).nextStatus === "pending"));
+  // queued 投影时 previousStatus===nextStatus==="pending"，shouldEmit=false 不发事件，故此处不应断言存在 pending 事件。
   assert.ok(statusEvents.some((event) => (event.payload as { nextStatus?: unknown }).nextStatus === "error"));
 
   seedGoals([buildGoal(), buildAwaitingProjectionGoal()]);
