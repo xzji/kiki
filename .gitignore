@@ -48,5 +48,8 @@ next-env.d.ts
 # local agent workspace documents
 /.trae/
 
+# project documents are kept outside git
+/docs/
+
 # local analysis exports
 /Trump_Donald_J_2026_278T2*
