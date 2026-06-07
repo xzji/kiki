@@ -532,6 +532,7 @@ export type ConversationMessage =
       unread?: boolean;
       status?: "streaming" | "done" | "error";
       source?: "user" | "kiki" | "system";
+      sagaRequestId?: string;
       goalRef: {
         goalId: string;
         title: string;

@@ -47,6 +47,14 @@ const EMPTY_REVISION: RuntimeStateRevision = {
   scheduleEvents: 0,
 };
 
+const SAGA_STEP_PAINT_DELAY_MS = 450;
+
+function delaySagaStepPaint() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, SAGA_STEP_PAINT_DELAY_MS);
+  });
+}
+
 const appliedGoalEventIds = new Set<number>();
 const pendingGoalEvents = new Map<number, GoalEventRecord>();
 // 已应用事件 id 仅作 cursor 之外的二级去重；事件 id 全局单调递增，且 applyGoalEventAndAdvance
@@ -410,7 +418,8 @@ export function RuntimeEventBridge() {
     const deferRefresh = options?.deferRefresh ?? false;
     let needGoalsRefresh = false;
     let needScheduleRefresh = false;
-    for (const event of events) {
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
       // 仅当事件是「首次应用」时才计入收敛刷新需求。SSE 初始回填会重发已在启动回放中应用过的事件，
       // 这些重复事件不应再触发全量快照拉取，否则会形成多次冗余的串行 /api/runtime/state。
       const isDuplicate =
@@ -420,6 +429,9 @@ export function RuntimeEventBridge() {
       if (isDuplicate) continue;
       if (eventNeedsGoalsRefresh(event)) needGoalsRefresh = true;
       if (eventNeedsScheduleRefresh(event)) needScheduleRefresh = true;
+      if (event.kind === "saga.step.advanced" && index < events.length - 1) {
+        await delaySagaStepPaint();
+      }
     }
     if (!deferRefresh) {
       if (needGoalsRefresh) await refreshGoalsFromSnapshot();

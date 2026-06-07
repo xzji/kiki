@@ -51,7 +51,9 @@ export function ConversationMessageItem({
 }) {
   const goals = useGoalStore(selectVisibleGoals);
   const sagaRequestId =
-    message.kind === "text" ? message.sagaRequestId : undefined;
+    message.kind === "text" || message.kind === "goal_plan_card"
+      ? message.sagaRequestId
+      : undefined;
   const saga = useSagaInstancesStore((state) =>
     sagaRequestId
       ? (Object.values(state.sagas).find(
@@ -211,7 +213,7 @@ export function ConversationMessageItem({
           )}
         </div>
 
-        {sagaRequestId && message.status === "streaming" ? (
+        {sagaRequestId && (message.status === "streaming" || saga) ? (
           <SagaProgressCard saga={saga} />
         ) : null}
 
@@ -939,7 +941,7 @@ const SAGA_STEPS = [
 ] as const;
 
 function SagaProgressCard({ saga }: { saga: SagaInstance | null }) {
-  const currentStep = saga?.currentStep ?? "interview";
+  const currentStep = normalizeSagaProgressStep(saga?.currentStep);
   const currentIndex = SAGA_STEPS.findIndex((step) => step.key === currentStep);
   const activeIndex = currentIndex >= 0 ? currentIndex : 0;
   const isTerminal = saga?.status === "completed" || saga?.status === "failed";
@@ -1022,8 +1024,13 @@ function formatSagaStatus(saga: SagaInstance) {
   if (saga.status === "awaiting_user") return "等待补充信息";
   if (saga.status === "completed") return "已完成";
   if (saga.status === "failed") return "执行失败";
-  const step = SAGA_STEPS.find((item) => item.key === saga.currentStep);
+  const step = SAGA_STEPS.find((item) => item.key === normalizeSagaProgressStep(saga.currentStep));
   return step ? `进行中：${step.title}` : "进行中";
+}
+
+function normalizeSagaProgressStep(step: string | undefined) {
+  if (step === "spec") return "present";
+  return step ?? "interview";
 }
 
 function formatSagaStepState(state: ReturnType<typeof resolveSagaStepState>) {

@@ -946,6 +946,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           unread: message.unread,
           status: "done",
           source: "kiki",
+          sagaRequestId,
           goalRef: {
             goalId: committed.goalId,
             title: committed.goalTitle,
