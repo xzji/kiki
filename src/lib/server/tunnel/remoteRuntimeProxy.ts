@@ -2,17 +2,15 @@ import os from "os";
 
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { isServerLocalCliDisabled } from "@/lib/server/runtime/cloudExecutionPolicy";
-import { getOnlineMachinesForUser } from "@/lib/server/services/machineService";
 import type { RuntimeDiscoveryResult, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
 
 import { getTunnelHub } from "./tunnelHub";
 
 export function pickOnlineMachineIdForUser(userId: string): string | null {
   const hub = getTunnelHub();
-  for (const machine of getOnlineMachinesForUser(userId)) {
-    if (hub.isMachineOnline(machine.id)) {
-      return machine.id;
-    }
+  const connected = hub.getOnlineMachineIdsForUser(userId);
+  if (connected.length > 0) {
+    return connected[0];
   }
   return null;
 }

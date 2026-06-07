@@ -49,7 +49,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
 
   const connect = () =>
     new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(wsUrl);
+      const socket = new WebSocket(wsUrl, { perMessageDeflate: false });
       socket.once("open", () => resolve(socket));
       socket.once("error", reject);
     });
@@ -61,7 +61,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       type: "register",
       machineId: "pending",
       os: osFingerprint(),
-      daemonVersion: "0.1.1",
+      daemonVersion: "0.1.2",
       fingerprint: osFingerprint(),
     }),
   );

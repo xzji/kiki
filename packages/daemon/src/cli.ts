@@ -89,6 +89,7 @@ async function main() {
       scriptPath,
       serverUrl,
       apiKey,
+      pathEnv: process.env.PATH,
     });
     console.log(`已安装并启动后台服务（${result.kind}）：${result.path}`);
     console.log("现在可以关闭终端，daemon 将在后台常驻并随开机自启。");

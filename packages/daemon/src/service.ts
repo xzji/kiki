@@ -16,6 +16,8 @@ export type InstallContext = {
   scriptPath: string;
   serverUrl: string;
   apiKey: string;
+  /** 安装时的 PATH，写入 LaunchAgent 以便后台进程能找到 claude/codex 等 CLI */
+  pathEnv?: string;
 };
 
 function kikiHome() {
@@ -77,6 +79,10 @@ ${argXml}
     <dict>
       <key>KIKI_DATA_DIR</key>
       <string>${xmlEscape(dataDir())}</string>
+      <key>PATH</key>
+      <string>${xmlEscape(ctx.pathEnv || "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")}</string>
+      <key>HOME</key>
+      <string>${xmlEscape(os.homedir())}</string>
     </dict>
 
     <key>RunAtLoad</key>
@@ -108,6 +114,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=KIKI_DATA_DIR=${escape(dataDir())}
+Environment=HOME=${escape(os.homedir())}
+Environment=PATH=${escape(ctx.pathEnv || "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")}
 ExecStart=${execStart}
 Restart=always
 RestartSec=5
