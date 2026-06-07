@@ -44,7 +44,7 @@ function printHelp() {
   kiki-daemon help                                             显示本帮助
 
 示例:
-  npx @kiki/daemon@latest install --server-url https://kiki.example.com --api-key sk_machine_xxx
+  npx @kiki_agent/daemon@latest install --server-url https://kiki.example.com --api-key sk_machine_xxx
 `);
 }
 
@@ -81,7 +81,7 @@ async function main() {
     if (scriptPath.includes(`${path.sep}_npx${path.sep}`)) {
       console.warn(
         "⚠️  检测到通过 npx 临时缓存运行，该路径可能被清理导致后台服务失效。\n" +
-          "    建议先全局安装再 install：npm i -g @kiki/daemon && kiki-daemon install ...",
+          "    建议先全局安装再 install：npm i -g @kiki_agent/daemon && kiki-daemon install ...",
       );
     }
     const result = await installService({

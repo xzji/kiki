@@ -1,4 +1,4 @@
-# @kiki/daemon
+# @kiki_agent/daemon
 
 Kiki 本地执行节点。把你的电脑注册成 Kiki 云端的执行机：云端编排器通过反向隧道把任务派发到本机，由本机的 Claude CLI 实际执行。
 
@@ -12,7 +12,7 @@ Kiki 本地执行节点。把你的电脑注册成 Kiki 云端的执行机：云
 ## 快速连接（前台运行）
 
 ```bash
-npx @kiki/daemon@latest run \
+npx @kiki_agent/daemon@latest run \
   --server-url https://<your-kiki-domain> \
   --api-key sk_machine_xxx
 ```
@@ -23,7 +23,7 @@ npx @kiki/daemon@latest run \
 
 ```bash
 # 建议先全局安装，获得稳定的可执行路径
-npm i -g @kiki/daemon
+npm i -g @kiki_agent/daemon
 
 kiki-daemon install \
   --server-url https://<your-kiki-domain> \
@@ -63,7 +63,7 @@ npm run build   # esbuild 打包 src/cli.ts -> dist/cli.cjs（除 better-sqlite3
 **前置条件**
 
 1. [npm 账号](https://www.npmjs.com/signup) 已登录：`npm login`
-2. 拥有 `@kiki` 作用域权限（在 [npm 创建组织 `kiki`](https://www.npmjs.com/org/create)，或将账号加入该组织）
+2. 属于 `@kiki_agent` 组织（https://www.npmjs.com/settings/kiki_agent）
 
 **本地发布**
 
@@ -74,7 +74,7 @@ npm run build   # esbuild 打包 src/cli.ts -> dist/cli.cjs（除 better-sqlite3
 **GitHub Actions 发布**
 
 1. 在 GitHub 仓库 Settings → Secrets 添加 `NPM_TOKEN`（npm Access Token，类型 Automation）
-2. Actions →「Publish @kiki/daemon」→ Run workflow
+2. Actions →「Publish @kiki_agent/daemon」→ Run workflow
 
 或打 tag 触发：
 

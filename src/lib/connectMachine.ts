@@ -7,5 +7,5 @@ export function buildConnectCommand(input: {
 }) {
   const serverUrl = input.serverUrl.replace(/\/$/, "");
   const subcommand = input.mode === "run" ? "run" : "install";
-  return `npx @kiki/daemon@latest ${subcommand} --server-url ${serverUrl} --api-key ${input.apiKey}`;
+  return `npx @kiki_agent/daemon@latest ${subcommand} --server-url ${serverUrl} --api-key ${input.apiKey}`;
 }

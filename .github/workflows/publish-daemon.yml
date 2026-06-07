@@ -1,4 +1,4 @@
-name: Publish @kiki/daemon
+name: Publish @kiki_agent/daemon
 
 on:
   workflow_dispatch:

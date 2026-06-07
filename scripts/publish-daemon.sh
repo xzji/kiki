@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKG_DIR="$ROOT/packages/daemon"
 
-echo "==> 构建 @kiki/daemon"
+echo "==> 构建 @kiki_agent/daemon"
 cd "$PKG_DIR"
 npm run build
 
@@ -13,8 +13,7 @@ if ! npm whoami >/dev/null 2>&1; then
   echo "未登录 npm。请先执行："
   echo "  npm login"
   echo ""
-  echo "若使用 @kiki 作用域，还需在 https://www.npmjs.com/org/create 创建组织 kiki，"
-  echo "或将你的 npm 账号加入该组织。"
+  echo "请确认已登录且属于 @kiki_agent 组织（https://www.npmjs.com/settings/kiki_agent）。"
   exit 1
 fi
 
@@ -28,4 +27,4 @@ npm publish --access public
 
 echo ""
 echo "✅ 发布成功。用户可使用："
-echo "   npx @kiki/daemon@latest install --server-url <url> --api-key <key>"
+echo "   npx @kiki_agent/daemon@latest install --server-url <url> --api-key <key>"
