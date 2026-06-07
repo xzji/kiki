@@ -61,7 +61,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       type: "register",
       machineId: "pending",
       os: osFingerprint(),
-      daemonVersion: "0.1.2",
+      daemonVersion: "0.1.3",
       fingerprint: osFingerprint(),
     }),
   );

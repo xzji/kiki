@@ -2,6 +2,7 @@ import path from "path";
 
 import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
 
+import { collectDaemonServiceEnv } from "./pathEnv";
 import { installService, serviceStatus, uninstallService } from "./service";
 
 type Subcommand = "run" | "install" | "uninstall" | "status" | "help";
@@ -89,9 +90,11 @@ async function main() {
       scriptPath,
       serverUrl,
       apiKey,
-      pathEnv: process.env.PATH,
+      environment: collectDaemonServiceEnv(process.env),
     });
+    const pathDirs = (collectDaemonServiceEnv(process.env).PATH || "").split(path.delimiter).length;
     console.log(`已安装并启动后台服务（${result.kind}）：${result.path}`);
+    console.log(`后台 PATH 已写入 ${pathDirs} 个目录（含 ~/.local/bin、Homebrew 等常见路径）。`);
     console.log("现在可以关闭终端，daemon 将在后台常驻并随开机自启。");
     console.log("查看状态：kiki-daemon status");
     return;

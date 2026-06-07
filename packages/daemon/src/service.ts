@@ -4,6 +4,8 @@ import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
+import { collectDaemonServiceEnv } from "./pathEnv";
+
 const execFileAsync = promisify(execFile);
 
 const MAC_LABEL = "com.kiki.daemon";
@@ -16,8 +18,8 @@ export type InstallContext = {
   scriptPath: string;
   serverUrl: string;
   apiKey: string;
-  /** 安装时的 PATH，写入 LaunchAgent 以便后台进程能找到 claude/codex 等 CLI */
-  pathEnv?: string;
+  /** 安装时捕获的完整环境变量；未提供则用当前 process.env 生成 */
+  environment?: Record<string, string>;
 };
 
 function kikiHome() {
@@ -52,7 +54,21 @@ function xmlEscape(value: string) {
     .replaceAll(">", "&gt;");
 }
 
+function resolveServiceEnvironment(ctx: InstallContext) {
+  const base = ctx.environment ?? collectDaemonServiceEnv(process.env);
+  return {
+    ...base,
+    KIKI_DATA_DIR: dataDir(),
+    HOME: base.HOME || os.homedir(),
+  };
+}
+
 function buildMacPlist(ctx: InstallContext) {
+  const serviceEnv = resolveServiceEnvironment(ctx);
+  const envXml = Object.entries(serviceEnv)
+    .map(([key, value]) => `      <key>${xmlEscape(key)}</key>\n      <string>${xmlEscape(value)}</string>`)
+    .join("\n");
+
   const args = [
     ctx.nodePath,
     ctx.scriptPath,
@@ -77,12 +93,7 @@ ${argXml}
 
     <key>EnvironmentVariables</key>
     <dict>
-      <key>KIKI_DATA_DIR</key>
-      <string>${xmlEscape(dataDir())}</string>
-      <key>PATH</key>
-      <string>${xmlEscape(ctx.pathEnv || "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")}</string>
-      <key>HOME</key>
-      <string>${xmlEscape(os.homedir())}</string>
+${envXml}
     </dict>
 
     <key>RunAtLoad</key>
@@ -103,6 +114,10 @@ ${argXml}
 
 function buildLinuxUnit(ctx: InstallContext) {
   const escape = (value: string) => value.replaceAll("%", "%%");
+  const serviceEnv = resolveServiceEnvironment(ctx);
+  const envLines = Object.entries(serviceEnv)
+    .map(([key, value]) => `Environment=${key}=${escape(value)}`)
+    .join("\n");
   const execStart = [ctx.nodePath, ctx.scriptPath, "run", "--server-url", ctx.serverUrl, "--api-key", ctx.apiKey]
     .map((part) => `'${part.replaceAll("'", "'\\''")}'`)
     .join(" ");
@@ -113,9 +128,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=KIKI_DATA_DIR=${escape(dataDir())}
-Environment=HOME=${escape(os.homedir())}
-Environment=PATH=${escape(ctx.pathEnv || "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")}
+${envLines}
 ExecStart=${execStart}
 Restart=always
 RestartSec=5
