@@ -256,6 +256,13 @@ function handleClientMessage(connection: MachineConnection, raw: string) {
       connection.fingerprint = message.fingerprint;
     }
     touchMachineHeartbeat(connection.machine.machineId, connection.fingerprint);
+    connection.socket.send(
+      serializeTunnelMessage({
+        type: "registered",
+        machineId: connection.machine.machineId,
+        userId: connection.machine.userId,
+      }),
+    );
     return;
   }
   if (message.type === "heartbeat") {
@@ -326,13 +333,6 @@ function bindSocket(connection: MachineConnection) {
     getState().connections.delete(machine.machineId);
     handleMachineDisconnected(machine.machineId);
   });
-  socket.send(
-    serializeTunnelMessage({
-      type: "registered",
-      machineId: machine.machineId,
-      userId: machine.userId,
-    }),
-  );
 }
 
 function acceptMachineConnection(socket: WebSocket, requestUrl: string | undefined) {
@@ -370,8 +370,16 @@ export function startTunnelHub(port: number) {
   return wss;
 }
 
+const ATTACHED_KEY = Symbol.for("kiki.server.tunnelHub.attached");
+
 /** Railway 生产：Tunnel 与 Next 共用 HTTP 端口（WSS upgrade） */
 export function attachTunnelHub(server: HttpServer) {
+  const globalRef = globalThis as typeof globalThis & {
+    [ATTACHED_KEY]?: WebSocketServer;
+  };
+  if (globalRef[ATTACHED_KEY]) {
+    return globalRef[ATTACHED_KEY];
+  }
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
   server.on("upgrade", (request, socket, head) => {
     if (!parseTunnelUpgradeUrl(request.url)) {
@@ -382,5 +390,6 @@ export function attachTunnelHub(server: HttpServer) {
       acceptMachineConnection(ws, request.url);
     });
   });
+  globalRef[ATTACHED_KEY] = wss;
   return wss;
 }
