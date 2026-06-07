@@ -4,7 +4,14 @@ const LEGACY_GOALS_API_PREFIX = "/api/goals";
 const LEGACY_GOALS_API_SUNSET = "Tue, 16 Jun 2026 00:00:00 GMT";
 const SESSION_COOKIE_NAME = process.env.KIKI_AUTH_COOKIE_NAME?.trim() || "kiki_session";
 
-const PUBLIC_PATH_PREFIXES = ["/api/auth/", "/login", "/register", "/_next/", "/favicon"];
+const PUBLIC_PATH_PREFIXES = [
+  "/api/auth/",
+  "/api/machine-tunnel/",
+  "/login",
+  "/register",
+  "/_next/",
+  "/favicon",
+];
 
 function successorPath(pathname: string) {
   return pathname.replace(LEGACY_GOALS_API_PREFIX, "/api/topics");

@@ -9,7 +9,7 @@ import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 import type { RuntimeJobPayload } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { TunnelServerMessage } from "@/lib/server/tunnel/tunnelProtocol";
-import { TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
+import { MACHINE_TUNNEL_WS_PATH, TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
 function toWsUrl(serverUrl: string, apiKey: string) {
@@ -17,7 +17,7 @@ function toWsUrl(serverUrl: string, apiKey: string) {
   const protocol = base.startsWith("https://")
     ? base.replace("https://", "wss://")
     : base.replace("http://", "ws://");
-  return `${protocol}/?api-key=${encodeURIComponent(apiKey)}`;
+  return `${protocol}${MACHINE_TUNNEL_WS_PATH}?api-key=${encodeURIComponent(apiKey)}`;
 }
 
 function osFingerprint() {
@@ -44,7 +44,7 @@ async function executeRemoteJob(input: {
   });
 }
 
-const DAEMON_VERSION = "0.1.5";
+const DAEMON_VERSION = "0.1.6";
 const RECONNECT_DELAY_MS = 5_000;
 
 function sleep(ms: number) {

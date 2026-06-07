@@ -10,7 +10,7 @@ import {
 } from "@/lib/server/services/machineService";
 import type { RuntimeDiscoveryItem, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
 import { parseTunnelMessage, serializeTunnelMessage } from "@/lib/server/tunnel/tunnelProtocol";
-import { TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
+import { MACHINE_TUNNEL_WS_PATH, TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
 
 type MachineConnection = {
   socket: WebSocket;
@@ -67,11 +67,14 @@ function getState(): TunnelHubState {
   return globalRef[HUB_STATE_KEY];
 }
 
-function extractApiKey(requestUrl: string | undefined) {
+function parseTunnelUpgradeUrl(requestUrl: string | undefined) {
   if (!requestUrl) return null;
   try {
     const url = new URL(requestUrl, "http://localhost");
-    return url.searchParams.get("api-key") ?? url.searchParams.get("apiKey");
+    if (url.pathname !== MACHINE_TUNNEL_WS_PATH) return null;
+    const apiKey = url.searchParams.get("api-key") ?? url.searchParams.get("apiKey");
+    if (!apiKey) return null;
+    return apiKey;
   } catch {
     return null;
   }
@@ -333,7 +336,7 @@ function bindSocket(connection: MachineConnection) {
 }
 
 function acceptMachineConnection(socket: WebSocket, requestUrl: string | undefined) {
-  const apiKey = extractApiKey(requestUrl);
+  const apiKey = parseTunnelUpgradeUrl(requestUrl);
   if (!apiKey) {
     socket.close(4401, "missing api-key");
     return;
@@ -371,7 +374,7 @@ export function startTunnelHub(port: number) {
 export function attachTunnelHub(server: HttpServer) {
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
   server.on("upgrade", (request, socket, head) => {
-    if (!extractApiKey(request.url)) {
+    if (!parseTunnelUpgradeUrl(request.url)) {
       socket.destroy();
       return;
     }
