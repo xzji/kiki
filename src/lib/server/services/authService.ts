@@ -2,6 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 import { SESSION_COOKIE_NAME, SESSION_RENEW_INTERVAL_MS, SESSION_TTL_DAYS } from "@/lib/server/auth/authConfig";
 import { getRegistryDatabase } from "@/lib/server/db/registryClient";
+import { consumeInviteCodeInTransaction } from "@/lib/server/services/inviteCodeService";
 import { createOpaqueUserId, provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 
 const SCRYPT_KEYLEN = 64;
@@ -126,7 +127,8 @@ export function registerUser(input: {
   password: string;
   confirmPassword: string;
   displayName?: string;
-}): { ok: true; session: AuthSession } | { ok: false; reason: string; field?: "email" } {
+  inviteCode: string;
+}): { ok: true; session: AuthSession } | { ok: false; reason: string; field?: "email" | "inviteCode" } {
   const validated = validateRegisterInput(input);
   if (!validated.ok) {
     return { ok: false, reason: validated.reason };
@@ -144,17 +146,35 @@ export function registerUser(input: {
   const salt = randomBytes(16).toString("hex");
   const passwordHash = hashPassword(input.password, salt);
   const timestamp = nowIso();
-  try {
+
+  const registerTx = db.transaction(() => {
+    const inviteResult = consumeInviteCodeInTransaction(db, {
+      code: input.inviteCode,
+      userId,
+    });
+    if (!inviteResult.ok) return inviteResult;
+
     db.prepare(
       `
         INSERT INTO users (id, email, password_hash, password_salt, display_name, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
       `,
     ).run(userId, validated.email, passwordHash, salt, validated.displayName, timestamp, timestamp);
+    return { ok: true as const };
+  });
 
+  const txResult = registerTx();
+  if (!txResult.ok) {
+    return txResult;
+  }
+
+  try {
     provisionUserWorkspace(userId);
   } catch (error) {
     db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
+    db.prepare(`UPDATE invite_codes SET used_at = NULL, used_by_user_id = NULL WHERE used_by_user_id = ?`).run(
+      userId,
+    );
     const message = error instanceof Error ? error.message : "用户工作区初始化失败";
     return { ok: false, reason: message };
   }

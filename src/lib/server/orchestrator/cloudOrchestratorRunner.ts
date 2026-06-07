@@ -9,7 +9,8 @@ import { listUsersForOrchestratorTick } from "@/lib/server/orchestrator/listUser
 import { getOrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { runOrchestratorUserFrame } from "@/lib/server/orchestrator/runOrchestratorUserFrame";
 import { registerTunnelDispatchCallbacks } from "@/lib/server/worker/dispatchReadyTasksToMachines";
-import { startTunnelHub } from "@/lib/server/tunnel/tunnelHub";
+import { attachTunnelHub, startTunnelHub } from "@/lib/server/tunnel/tunnelHub";
+import type { Server as HttpServer } from "http";
 
 const ORCHESTRATOR_LEASE_OWNER = "cloud-orchestrator";
 
@@ -17,13 +18,9 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function runCloudOrchestratorLoop() {
+export async function runCloudOrchestratorScheduler() {
   const config = getOrchestratorConfig();
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
-
-  startTunnelHub(config.tunnelPort);
-  registerTunnelDispatchCallbacks();
-  appendRuntimeDaemonLog(`云端编排器已启动（Tunnel :${config.tunnelPort}）`);
 
   setInterval(() => {
     for (const candidate of listUsersForOrchestratorTick()) {
@@ -68,4 +65,28 @@ export async function runCloudOrchestratorLoop() {
     }
     await sleep(config.schedulerIntervalMs);
   }
+}
+
+/** 本地开发：Tunnel 独立端口 + 编排循环 */
+export async function runCloudOrchestratorLoop() {
+  const config = getOrchestratorConfig();
+  process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
+
+  startTunnelHub(config.tunnelPort);
+  registerTunnelDispatchCallbacks();
+  appendRuntimeDaemonLog(`云端编排器已启动（Tunnel :${config.tunnelPort}）`);
+
+  await runCloudOrchestratorScheduler();
+}
+
+/** Railway 生产：Tunnel 挂到 HTTP server，再跑编排循环 */
+export function bootstrapCloudControlPlane(server: HttpServer) {
+  process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
+  attachTunnelHub(server);
+  registerTunnelDispatchCallbacks();
+  appendRuntimeDaemonLog("云端控制面已启动（Tunnel 与 Web 同端口）");
+  void runCloudOrchestratorScheduler().catch((error) => {
+    console.error("[kiki-cloud-orchestrator] fatal error", error);
+    process.exitCode = 1;
+  });
 }

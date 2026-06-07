@@ -1,3 +1,4 @@
+import type { Server as HttpServer } from "http";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
@@ -195,31 +196,51 @@ function bindSocket(connection: MachineConnection) {
   );
 }
 
+function acceptMachineConnection(socket: WebSocket, requestUrl: string | undefined) {
+  const apiKey = extractApiKey(requestUrl);
+  if (!apiKey) {
+    socket.close(4401, "missing api-key");
+    return;
+  }
+  const machine = authenticateMachineApiKey(apiKey);
+  if (!machine) {
+    socket.close(4401, "invalid api-key");
+    return;
+  }
+  const existing = connections.get(machine.machineId);
+  if (existing) {
+    try {
+      existing.socket.close(4000, "replaced");
+    } catch {
+      // ignore
+    }
+  }
+  const connection: MachineConnection = { socket, machine };
+  connections.set(machine.machineId, connection);
+  touchMachineHeartbeat(machine.machineId);
+  bindSocket(connection);
+}
+
+/** 本地开发：Tunnel 独立端口（:3001） */
 export function startTunnelHub(port: number) {
   const wss = new WebSocketServer({ port });
   wss.on("connection", (socket, request) => {
-    const apiKey = extractApiKey(request.url);
-    if (!apiKey) {
-      socket.close(4401, "missing api-key");
+    acceptMachineConnection(socket, request.url);
+  });
+  return wss;
+}
+
+/** Railway 生产：Tunnel 与 Next 共用 HTTP 端口（WSS upgrade） */
+export function attachTunnelHub(server: HttpServer) {
+  const wss = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    if (!extractApiKey(request.url)) {
+      socket.destroy();
       return;
     }
-    const machine = authenticateMachineApiKey(apiKey);
-    if (!machine) {
-      socket.close(4401, "invalid api-key");
-      return;
-    }
-    const existing = connections.get(machine.machineId);
-    if (existing) {
-      try {
-        existing.socket.close(4000, "replaced");
-      } catch {
-        // ignore
-      }
-    }
-    const connection: MachineConnection = { socket, machine };
-    connections.set(machine.machineId, connection);
-    touchMachineHeartbeat(machine.machineId);
-    bindSocket(connection);
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      acceptMachineConnection(ws, request.url);
+    });
   });
   return wss;
 }

@@ -83,6 +83,7 @@ export function AuthCard() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [bannerError, setBannerError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -97,8 +98,14 @@ export function AuthCard() {
     return errors;
   }
 
+  function isValidInviteCode(code: string) {
+    const normalized = code.trim().toUpperCase();
+    return /^[A-Z0-9]{8}$/.test(normalized) && /[A-Z]/.test(normalized) && /[0-9]/.test(normalized);
+  }
+
   function validateRegister() {
     const errors: FieldErrors = {};
+    if (!isValidInviteCode(inviteCode)) errors.inviteCode = "请输入 8 位字母与数字组合的邀请码";
     if (!isValidEmail(email.trim())) errors.email = "请输入有效邮箱";
     if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
       errors.password = "密码至少 8 位且包含字母和数字";
@@ -119,7 +126,13 @@ export function AuthCard() {
     setBannerError("");
     const errors = view === "login" ? validateLogin() : validateRegister();
     setFieldErrors(errors);
-    setTouched({ email: true, password: true, confirmPassword: true, displayName: true });
+    setTouched({
+      email: true,
+      password: true,
+      confirmPassword: true,
+      displayName: true,
+      inviteCode: view === "register",
+    });
     if (Object.keys(errors).length > 0) return;
 
     setLoading(true);
@@ -128,7 +141,13 @@ export function AuthCard() {
       const payload =
         view === "login"
           ? { email, password }
-          : { email, password, confirmPassword, displayName: displayName.trim() || undefined };
+          : {
+              email,
+              password,
+              confirmPassword,
+              displayName: displayName.trim() || undefined,
+              inviteCode: inviteCode.trim().toUpperCase(),
+            };
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,8 +159,11 @@ export function AuthCard() {
         field?: string;
       };
       if (!response.ok || !data.ok) {
-        if (view === "register" && data.field === "email") {
-          setFieldErrors((prev) => ({ ...prev, email: data.reason || "该邮箱已被注册" }));
+        if (view === "register" && (data.field === "email" || data.field === "inviteCode")) {
+          setFieldErrors((prev) => ({
+            ...prev,
+            [data.field!]: data.reason || (data.field === "email" ? "该邮箱已被注册" : "邀请码无效"),
+          }));
           return;
         }
         setBannerError(data.reason || (view === "login" ? "邮箱或密码不正确" : "注册失败"));
@@ -161,6 +183,7 @@ export function AuthCard() {
     setBannerError("");
     setFieldErrors({});
     setTouched({});
+    if (next === "login") setInviteCode("");
   }
 
   return (
@@ -169,7 +192,7 @@ export function AuthCard() {
         {view === "login" ? "账号登录" : "创建账号"}
       </h1>
       <p className="mt-1.5 text-[13px] text-[#6B7280]">
-        {view === "login" ? "登录以进入你的工作空间" : "注册即获得一个完全独立的工作空间"}
+        {view === "login" ? "登录以进入你的工作空间" : "需要有效邀请码方可注册独立工作空间"}
       </p>
 
       {bannerError ? (
@@ -229,6 +252,32 @@ export function AuthCard() {
 
         {view === "register" ? (
           <>
+            <div className="mb-4">
+              <label htmlFor="inviteCode" className="mb-1.5 block text-[13px] text-[#374151]">
+                邀请码
+              </label>
+              <input
+                id="inviteCode"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={8}
+                value={inviteCode}
+                onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+                onBlur={() => markTouched("inviteCode")}
+                placeholder="8 位字母与数字"
+                aria-invalid={Boolean(touched.inviteCode && fieldErrors.inviteCode)}
+                aria-describedby={fieldErrors.inviteCode ? "inviteCode-error" : undefined}
+                className={`h-10 w-full rounded-lg border bg-white px-3 font-mono text-sm tracking-widest outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
+                  touched.inviteCode && fieldErrors.inviteCode ? "border-[#FECACA]" : "border-[#D0D7DE]"
+                }`}
+              />
+              {touched.inviteCode && fieldErrors.inviteCode ? (
+                <p id="inviteCode-error" className="mt-1.5 text-xs text-[#B42318]">
+                  {fieldErrors.inviteCode}
+                </p>
+              ) : null}
+            </div>
             <PasswordField
               id="confirmPassword"
               label="确认密码"

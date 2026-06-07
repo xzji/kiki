@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { withAuth } from "@/lib/server/http/withAuth";
+import { getPublicBaseUrl } from "@/lib/server/http/publicBaseUrl";
 import { createMachineForUser, listMachinesForUser } from "@/lib/server/services/machineService";
 
 export const runtime = "nodejs";
@@ -24,7 +25,7 @@ async function POSTHandler(request: NextRequest, context: { userId: string }) {
     ok: true,
     machine,
     apiKey,
-    connectCommand: `pnpm daemon:remote --server-url ${process.env.KIKI_PUBLIC_URL ?? "http://localhost:3001"} --api-key ${apiKey}`,
+    connectCommand: `pnpm daemon:remote --server-url ${getPublicBaseUrl()} --api-key ${apiKey}`,
   });
 }
 

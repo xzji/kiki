@@ -30,4 +30,12 @@ CREATE TABLE IF NOT EXISTS machines (
   created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_machines_user ON machines(user_id);
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+  code             TEXT PRIMARY KEY,
+  created_at       TEXT NOT NULL,
+  used_at          TEXT,
+  used_by_user_id  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invite_codes_used ON invite_codes(used_at);
 `;

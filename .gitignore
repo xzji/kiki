@@ -20,18 +20,18 @@
 .DS_Store
 *.pem
 
-# local SQLite runtime data
-/data/*.db
-/data/*.db-shm
-/data/*.db-wal
+# local SQLite runtime data & all tenant workspaces
+/data/
 
 # debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
-.env*.local
+# secrets & local env (never commit)
+.env
+.env.*
+!.env.example
 
 # vercel
 .vercel
@@ -39,11 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-# local runtime state and task workspaces
-/data/storage/
-/data/workspaces/
-/data/system/
-/data/users/
+# railway CLI local link state
+.railway/
 
 # local agent workspace documents
 /.trae/

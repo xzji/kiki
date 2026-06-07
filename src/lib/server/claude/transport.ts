@@ -9,6 +9,7 @@ import type {
 } from "@/types/runtime";
 
 import { buildClaudeEnv } from "@/lib/server/claudeEnv";
+import { assertServerLocalCliAllowed } from "@/lib/server/runtime/cloudExecutionPolicy";
 import { normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimePath";
 import { createClaudeTrace } from "@/lib/server/claude/traceStore";
 import {
@@ -199,6 +200,7 @@ export async function runPromptJson(input: {
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
 }): Promise<ClaudePromptJsonResult> {
+  assertServerLocalCliAllowed();
   const cwd = normalizeWorkingDirectory(input.cwd);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   const startedAt = Date.now();
@@ -318,6 +320,7 @@ export async function runPromptText(input: {
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
 }): Promise<ClaudePromptJsonResult> {
+  assertServerLocalCliAllowed();
   const cwd = normalizeWorkingDirectory(input.cwd);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   const startedAt = Date.now();
@@ -641,6 +644,7 @@ function summarizeToolCall(toolName: string, input: unknown) {
 }
 
 export async function streamPrompt(options: ClaudeStreamOptions) {
+  assertServerLocalCliAllowed();
   const cwd = normalizeWorkingDirectory(options.workingDirectory);
   const cliPath = await resolveCliPath(options.cliPath);
 

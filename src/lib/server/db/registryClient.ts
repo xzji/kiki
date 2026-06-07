@@ -4,6 +4,8 @@ import Database from "better-sqlite3";
 
 import { getRegistryDatabaseFilePath } from "@/lib/server/storage/paths";
 
+import { seedInviteCodesFromEnv } from "@/lib/server/services/inviteCodeService";
+
 import { REGISTRY_DB_BOOTSTRAP_SQL } from "./registrySchema";
 
 let registryDb: Database.Database | null = null;
@@ -12,6 +14,7 @@ function bootstrap(database: Database.Database) {
   database.pragma("journal_mode = WAL");
   database.pragma("busy_timeout = 5000");
   database.exec(REGISTRY_DB_BOOTSTRAP_SQL);
+  seedInviteCodesFromEnv(database);
 }
 
 function openRegistryDatabase(): Database.Database {
