@@ -10,6 +10,7 @@ import {
 } from "@/lib/server/services/machineService";
 import type { RuntimeDiscoveryItem, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
 import { parseTunnelMessage, serializeTunnelMessage } from "@/lib/server/tunnel/tunnelProtocol";
+import { TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
 
 type MachineConnection = {
   socket: WebSocket;
@@ -359,8 +360,7 @@ function acceptMachineConnection(socket: WebSocket, requestUrl: string | undefin
 
 /** 本地开发：Tunnel 独立端口（:3001） */
 export function startTunnelHub(port: number) {
-  // 禁用 perMessageDeflate，避免 Railway/部分代理下发 RSV1 压缩帧导致客户端 ws 库断连
-  const wss = new WebSocketServer({ port, perMessageDeflate: false });
+  const wss = new WebSocketServer({ port, perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
   wss.on("connection", (socket, request) => {
     acceptMachineConnection(socket, request.url);
   });
@@ -369,7 +369,7 @@ export function startTunnelHub(port: number) {
 
 /** Railway 生产：Tunnel 与 Next 共用 HTTP 端口（WSS upgrade） */
 export function attachTunnelHub(server: HttpServer) {
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
   server.on("upgrade", (request, socket, head) => {
     if (!extractApiKey(request.url)) {
       socket.destroy();

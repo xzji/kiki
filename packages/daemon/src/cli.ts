@@ -1,3 +1,5 @@
+import { execFileSync } from "child_process";
+import fs from "fs";
 import path from "path";
 
 import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
@@ -22,6 +24,23 @@ function resolveSubcommand(): Subcommand {
   }
   if (process.argv.includes("--help") || process.argv.includes("-h")) return "help";
   return "run";
+}
+
+/** install 时写入 plist 的脚本路径；若通过 npx 调用但已全局安装，优先用全局路径。 */
+function resolveInstallScriptPath() {
+  const current = __filename;
+  if (!current.includes(`${path.sep}_npx${path.sep}`)) {
+    return current;
+  }
+  try {
+    const bin = execFileSync("which", ["kiki-daemon"], { encoding: "utf8" }).trim();
+    if (bin && !bin.includes("_npx")) {
+      return fs.realpathSync(bin);
+    }
+  } catch {
+    // ignore
+  }
+  return current;
 }
 
 function requireConnectionArgs() {
@@ -78,7 +97,7 @@ async function main() {
 
   if (subcommand === "install") {
     const { serverUrl, apiKey } = requireConnectionArgs();
-    const scriptPath = __filename;
+    const scriptPath = resolveInstallScriptPath();
     if (scriptPath.includes(`${path.sep}_npx${path.sep}`)) {
       console.warn(
         "⚠️  检测到通过 npx 临时缓存运行，该路径可能被清理导致后台服务失效。\n" +
@@ -102,6 +121,13 @@ async function main() {
 
   const { serverUrl, apiKey } = requireConnectionArgs();
   console.log(`[kiki-daemon] 前台运行，连接 ${serverUrl}`);
+  // 守护进程兜底：偶发的未捕获异常不应让进程退出，交由重连循环恢复。
+  process.on("unhandledRejection", (reason) => {
+    console.error("[kiki-daemon] unhandledRejection:", reason instanceof Error ? reason.message : reason);
+  });
+  process.on("uncaughtException", (error) => {
+    console.error("[kiki-daemon] uncaughtException:", error instanceof Error ? error.message : error);
+  });
   await runRemoteDaemonLoop({ serverUrl, apiKey });
 }
 
