@@ -57,3 +57,28 @@ kiki-daemon uninstall   # 停止并移除后台服务
 npm install
 npm run build   # esbuild 打包 src/cli.ts -> dist/cli.cjs（除 better-sqlite3 外全部内联）
 ```
+
+## 发布到 npm
+
+**前置条件**
+
+1. [npm 账号](https://www.npmjs.com/signup) 已登录：`npm login`
+2. 拥有 `@kiki` 作用域权限（在 [npm 创建组织 `kiki`](https://www.npmjs.com/org/create)，或将账号加入该组织）
+
+**本地发布**
+
+```bash
+./scripts/publish-daemon.sh
+```
+
+**GitHub Actions 发布**
+
+1. 在 GitHub 仓库 Settings → Secrets 添加 `NPM_TOKEN`（npm Access Token，类型 Automation）
+2. Actions →「Publish @kiki/daemon」→ Run workflow
+
+或打 tag 触发：
+
+```bash
+git tag daemon-v0.1.0
+git push origin daemon-v0.1.0
+```

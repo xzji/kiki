@@ -1,0 +1,45 @@
+name: Publish @kiki/daemon
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本号（留空则使用 package.json 当前版本）"
+        required: false
+        type: string
+  push:
+    tags:
+      - "daemon-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install daemon package deps
+        working-directory: packages/daemon
+        run: npm ci
+
+      - name: Build daemon bundle
+        working-directory: packages/daemon
+        run: npm run build
+
+      - name: Bump version (optional)
+        if: inputs.version != ''
+        working-directory: packages/daemon
+        run: npm version "${{ inputs.version }}" --no-git-tag-version
+
+      - name: Publish to npm
+        working-directory: packages/daemon
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
