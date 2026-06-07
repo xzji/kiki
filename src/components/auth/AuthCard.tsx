@@ -200,6 +200,35 @@ export function AuthCard() {
       ) : null}
 
       <form className="mt-5" onSubmit={handleSubmit}>
+        {view === "register" ? (
+          <div className="mb-4">
+            <label htmlFor="inviteCode" className="mb-1.5 block text-[13px] text-[#374151]">
+              邀请码
+            </label>
+            <input
+              id="inviteCode"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={8}
+              value={inviteCode}
+              onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+              onBlur={() => markTouched("inviteCode")}
+              placeholder="8 位字母与数字"
+              aria-invalid={Boolean(touched.inviteCode && fieldErrors.inviteCode)}
+              aria-describedby={fieldErrors.inviteCode ? "inviteCode-error" : undefined}
+              className={`h-10 w-full rounded-lg border bg-white px-3 font-mono text-sm tracking-widest outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
+                touched.inviteCode && fieldErrors.inviteCode ? "border-[#FECACA]" : "border-[#D0D7DE]"
+              }`}
+            />
+            {touched.inviteCode && fieldErrors.inviteCode ? (
+              <p id="inviteCode-error" className="mt-1.5 text-xs text-[#B42318]">
+                {fieldErrors.inviteCode}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="mb-4">
           <label htmlFor="email" className="mb-1.5 block text-[13px] text-[#374151]">
             邮箱
@@ -252,32 +281,6 @@ export function AuthCard() {
 
         {view === "register" ? (
           <>
-            <div className="mb-4">
-              <label htmlFor="inviteCode" className="mb-1.5 block text-[13px] text-[#374151]">
-                邀请码
-              </label>
-              <input
-                id="inviteCode"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={8}
-                value={inviteCode}
-                onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
-                onBlur={() => markTouched("inviteCode")}
-                placeholder="8 位字母与数字"
-                aria-invalid={Boolean(touched.inviteCode && fieldErrors.inviteCode)}
-                aria-describedby={fieldErrors.inviteCode ? "inviteCode-error" : undefined}
-                className={`h-10 w-full rounded-lg border bg-white px-3 font-mono text-sm tracking-widest outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
-                  touched.inviteCode && fieldErrors.inviteCode ? "border-[#FECACA]" : "border-[#D0D7DE]"
-                }`}
-              />
-              {touched.inviteCode && fieldErrors.inviteCode ? (
-                <p id="inviteCode-error" className="mt-1.5 text-xs text-[#B42318]">
-                  {fieldErrors.inviteCode}
-                </p>
-              ) : null}
-            </div>
             <PasswordField
               id="confirmPassword"
               label="确认密码"
