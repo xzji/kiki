@@ -1,8 +1,9 @@
 "use client";
 
-import { Laptop, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Laptop, Loader2, Monitor, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { listMachines, type MachineRecord } from "@/lib/api/machines";
 import {
   fetchRuntimeDaemonStatus,
   setRuntimeDaemonAutoStart,
@@ -28,6 +29,7 @@ import type {
   RuntimeToolCapability,
 } from "@/types/runtime";
 
+import { ConnectMachineDialog } from "./ConnectMachineDialog";
 import { LocalRuntimeWizard } from "./LocalRuntimeWizard";
 import { RuntimeStatusBadge } from "./RuntimeStatusBadge";
 
@@ -123,6 +125,9 @@ export function RuntimeEnvironmentPanel() {
   const setFilePolicyCustomCapability = useRuntimeEnvStore((state) => state.setFilePolicyCustomCapability);
   const removeEnvironment = useRuntimeEnvStore((state) => state.removeEnvironment);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [machines, setMachines] = useState<MachineRecord[]>([]);
+  const [machinesLoading, setMachinesLoading] = useState(false);
   const [daemonStatus, setDaemonStatus] = useState<RuntimeDaemonStatusPayload | null>(null);
   const [daemonActionMessage, setDaemonActionMessage] = useState<string | null>(null);
   const [daemonActionError, setDaemonActionError] = useState<string | null>(null);
@@ -304,6 +309,18 @@ export function RuntimeEnvironmentPanel() {
     });
   }, [environments, refreshEnvironment]);
 
+  const loadMachines = useCallback(async () => {
+    setMachinesLoading(true);
+    try {
+      const result = await listMachines();
+      setMachines(result.machines);
+    } catch {
+      // 机器列表加载失败不阻断设置页
+    } finally {
+      setMachinesLoading(false);
+    }
+  }, []);
+
   const loadDaemonStatus = useCallback(async () => {
     const next = await fetchRuntimeDaemonStatus();
     setDaemonStatus(next);
@@ -385,6 +402,14 @@ export function RuntimeEnvironmentPanel() {
   }, [daemonRefreshFeedback]);
 
   useEffect(() => {
+    void loadMachines();
+    const timer = window.setInterval(() => {
+      void loadMachines();
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [loadMachines]);
+
+  useEffect(() => {
     let cancelled = false;
     const safeLoadDaemonStatus = async () => {
       try {
@@ -411,22 +436,22 @@ export function RuntimeEnvironmentPanel() {
           <div>
             <div className="text-[15px] font-medium text-[#111]">连接 Runtime</div>
             <div className="mt-1 text-[13px] text-[#6B7280]">
-              添加云端 Runtime 环境或本地环境，让 KiKi 助手和会话页连接到你的设备。
+              连接本机电脑作为执行节点，或添加本地 CLI 环境供会话使用。
             </div>
           </div>
-          <div className="flex flex-none items-center gap-2">
+          <div className="flex flex-none flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              disabled
-              className="inline-flex h-9 min-w-[128px] shrink-0 cursor-not-allowed items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#E5E7EB] bg-[#F8F9FB] px-3 text-[13px] text-[#9AA0A6]"
+              onClick={() => setConnectDialogOpen(true)}
+              className="inline-flex h-9 min-w-[128px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#111] bg-[#111] px-3 text-[13px] text-white hover:bg-[#222]"
             >
-              <Plus className="h-4 w-4" />
-              添加云端 Runtime
+              <Monitor className="h-4 w-4" />
+              连接本机电脑
             </button>
             <button
               type="button"
               onClick={() => setWizardOpen(true)}
-              className="inline-flex h-9 min-w-[128px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#111] bg-[#111] px-3 text-[13px] text-white hover:bg-[#222]"
+              className="inline-flex h-9 min-w-[128px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#111] hover:bg-[#F8F9FB]"
             >
               <Plus className="h-4 w-4" />
               添加本地环境
@@ -434,6 +459,87 @@ export function RuntimeEnvironmentPanel() {
           </div>
         </div>
       </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[15px] font-medium text-[#111]">已连接电脑</div>
+            <div className="mt-1 text-[13px] text-[#6B7280]">
+              云端任务会下发到在线的本机电脑，由你本机的 CLI 执行。
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadMachines()}
+            disabled={machinesLoading}
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#475467] hover:bg-[#F8F9FB] disabled:opacity-70"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", machinesLoading && "animate-spin")} />
+            刷新
+          </button>
+        </div>
+        <div className="grid gap-3">
+          {machines.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[#E5E7EB] bg-[#FAFAFB] px-5 py-6 text-center">
+              <div className="text-[13px] text-[#6B7280]">还没有连接的本机电脑</div>
+              <button
+                type="button"
+                onClick={() => setConnectDialogOpen(true)}
+                className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-[#111] bg-[#111] px-3 text-[13px] text-white hover:bg-[#222]"
+              >
+                <Monitor className="h-4 w-4" />
+                连接本机电脑
+              </button>
+            </div>
+          ) : (
+            machines.map((machine) => (
+              <div
+                key={machine.id}
+                className={cn(
+                  "rounded-2xl border bg-white px-5 py-4",
+                  machine.online ? "border-[#111]" : "border-[#E5E7EB]",
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-[#F8F9FB] text-[#1F2328]">
+                      <Monitor className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-[14px] font-medium text-[#111]">
+                        {machine.name || "本机电脑"}
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-[#6B7280]">
+                        {machine.fingerprint || "未知平台"} · {formatLocalDateTime(machine.lastSeenAt ?? undefined)}
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-1 text-[11px]",
+                      machine.online
+                        ? "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]"
+                        : "border-[#E5E7EB] bg-[#FAFAFB] text-[#6B7280]",
+                    )}
+                  >
+                    {machine.online ? "在线" : "离线"}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {connectDialogOpen ? (
+        <ConnectMachineDialog
+          open={connectDialogOpen}
+          onClose={() => setConnectDialogOpen(false)}
+          onConnected={() => {
+            void loadMachines();
+          }}
+        />
+      ) : null}
 
       {wizardOpen ? (
         <LocalRuntimeWizard

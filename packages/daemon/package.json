@@ -1,0 +1,29 @@
+{
+  "name": "@kiki/daemon",
+  "version": "0.1.0",
+  "description": "Kiki 本地执行节点 daemon：连接云端编排器并在本机运行任务。",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "kiki-daemon": "dist/cli.cjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

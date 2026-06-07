@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildConnectCommand } from "@/lib/connectMachine";
 import { withAuth } from "@/lib/server/http/withAuth";
 import { getPublicBaseUrl } from "@/lib/server/http/publicBaseUrl";
 import { createMachineForUser, listMachinesForUser } from "@/lib/server/services/machineService";
@@ -25,7 +26,11 @@ async function POSTHandler(request: NextRequest, context: { userId: string }) {
     ok: true,
     machine,
     apiKey,
-    connectCommand: `pnpm daemon:remote --server-url ${getPublicBaseUrl()} --api-key ${apiKey}`,
+    connectCommand: buildConnectCommand({
+      serverUrl: getPublicBaseUrl(),
+      apiKey,
+      mode: "install",
+    }),
   });
 }
 

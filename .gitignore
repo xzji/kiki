@@ -6,6 +6,10 @@
 .pnp.js
 .yarn/install-state.gz
 
+# nested package deps & build output
+packages/*/node_modules
+packages/*/dist
+
 # testing
 /coverage
 
