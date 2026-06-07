@@ -28,6 +28,17 @@ export async function listMachines(): Promise<ListMachinesResult> {
   return (await response.json()) as ListMachinesResult;
 }
 
+export async function deleteMachine(machineId: string): Promise<{ ok: boolean }> {
+  const response = await fetch(`/api/machines/${encodeURIComponent(machineId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || "删除机器失败");
+  }
+  return (await response.json()) as { ok: boolean };
+}
+
 export async function createMachine(input?: { name?: string }): Promise<CreateMachineResult> {
   const response = await fetch("/api/machines", {
     method: "POST",

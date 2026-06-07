@@ -57,12 +57,27 @@ function toMachineRecord(row: MachineRow): MachineRecord {
   };
 }
 
+/** 清理从未连上过（无心跳）的占位记录，避免反复打开弹窗堆积 My Machine */
+export function deleteNeverConnectedMachinesForUser(userId: string) {
+  const db = getRegistryDatabase();
+  db.prepare(`DELETE FROM machines WHERE user_id = ? AND last_seen_at IS NULL`).run(userId);
+}
+
+export function deleteMachineForUser(input: { userId: string; machineId: string }) {
+  const db = getRegistryDatabase();
+  const result = db
+    .prepare(`DELETE FROM machines WHERE id = ? AND user_id = ?`)
+    .run(input.machineId, input.userId);
+  return result.changes > 0;
+}
+
 export function createMachineForUser(input: {
   userId: string;
   name?: string;
   fingerprint?: string;
 }): { machine: MachineRecord; apiKey: string } {
   const db = getRegistryDatabase();
+  deleteNeverConnectedMachinesForUser(input.userId);
   const machineId = createMachineId();
   const apiKey = createApiKey();
   const createdAt = nowIso();

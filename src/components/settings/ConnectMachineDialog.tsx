@@ -6,6 +6,35 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createMachine, listMachines, type MachineRecord } from "@/lib/api/machines";
 import { cn } from "@/lib/utils";
 
+const PENDING_CONNECT_KEY = "kiki-connect-machine-pending";
+
+type PendingConnect = {
+  machineId: string;
+  apiKey: string;
+  connectCommand: string;
+};
+
+function readPendingConnect(): PendingConnect | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_CONNECT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingConnect;
+    if (!parsed.machineId || !parsed.apiKey || !parsed.connectCommand) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingConnect(pending: PendingConnect) {
+  window.sessionStorage.setItem(PENDING_CONNECT_KEY, JSON.stringify(pending));
+}
+
+function clearPendingConnect() {
+  window.sessionStorage.removeItem(PENDING_CONNECT_KEY);
+}
+
 function formatRelativeTime(value?: string | null) {
   if (!value) return "暂无";
   const date = new Date(value);
@@ -61,7 +90,27 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
     setError(null);
     setCopied(false);
     try {
+      const cached = readPendingConnect();
+      if (cached) {
+        const listed = await listMachines();
+        const stillPending = listed.machines.find(
+          (machine) => machine.id === cached.machineId && !machine.lastSeenAt,
+        );
+        if (stillPending) {
+          setConnectCommand(cached.connectCommand);
+          setPendingMachineId(cached.machineId);
+          setConnectedMachine(null);
+          return;
+        }
+        clearPendingConnect();
+      }
+
       const result = await createMachine();
+      writePendingConnect({
+        machineId: result.machine.id,
+        apiKey: result.apiKey,
+        connectCommand: result.connectCommand,
+      });
       setConnectCommand(result.connectCommand);
       setPendingMachineId(result.machine.id);
       setConnectedMachine(null);
@@ -87,6 +136,7 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
         if (cancelled) return;
         const matched = result.machines.find((machine) => machine.id === pendingMachineId && machine.online);
         if (matched) {
+          clearPendingConnect();
           setConnectedMachine(matched);
           onConnectedRef.current?.(matched);
         }

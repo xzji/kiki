@@ -3,7 +3,7 @@
 import { Laptop, Loader2, Monitor, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { listMachines, type MachineRecord } from "@/lib/api/machines";
+import { deleteMachine, listMachines, type MachineRecord } from "@/lib/api/machines";
 import {
   fetchRuntimeDaemonStatus,
   setRuntimeDaemonAutoStart,
@@ -150,6 +150,10 @@ export function RuntimeEnvironmentPanel() {
       localEnvironments[0] ??
       null,
     [localEnvironments],
+  );
+  const connectedMachines = useMemo(
+    () => machines.filter((machine) => machine.lastSeenAt !== null),
+    [machines],
   );
 
   const handleRuntimeCommandError = useCallback((error: unknown, fallback: string) => {
@@ -479,7 +483,7 @@ export function RuntimeEnvironmentPanel() {
           </button>
         </div>
         <div className="grid gap-3">
-          {machines.length === 0 ? (
+          {connectedMachines.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[#E5E7EB] bg-[#FAFAFB] px-5 py-6 text-center">
               <div className="text-[13px] text-[#6B7280]">还没有连接的本机电脑</div>
               <button
@@ -492,7 +496,7 @@ export function RuntimeEnvironmentPanel() {
               </button>
             </div>
           ) : (
-            machines.map((machine) => (
+            connectedMachines.map((machine) => (
               <div
                 key={machine.id}
                 className={cn(
@@ -514,16 +518,36 @@ export function RuntimeEnvironmentPanel() {
                       </div>
                     </div>
                   </div>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-1 text-[11px]",
-                      machine.online
-                        ? "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]"
-                        : "border-[#E5E7EB] bg-[#FAFAFB] text-[#6B7280]",
-                    )}
-                  >
-                    {machine.online ? "在线" : "离线"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "rounded-full border px-2 py-1 text-[11px]",
+                        machine.online
+                          ? "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]"
+                          : "border-[#E5E7EB] bg-[#FAFAFB] text-[#6B7280]",
+                      )}
+                    >
+                      {machine.online ? "在线" : "离线"}
+                    </span>
+                    {!machine.online ? (
+                      <button
+                        type="button"
+                        aria-label="移除本机电脑"
+                        onClick={() => {
+                          const ok = window.confirm(`移除本机电脑「${machine.name || "本机电脑"}」？`);
+                          if (!ok) return;
+                          void deleteMachine(machine.id)
+                            .then(() => loadMachines())
+                            .catch((error) => {
+                              console.error("删除本机电脑失败", error);
+                            });
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#B42318] hover:bg-[#FEF2F2]"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             ))
