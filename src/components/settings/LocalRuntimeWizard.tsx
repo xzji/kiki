@@ -167,7 +167,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
           <div>
             <div className="text-[15px] font-medium text-[#111]">添加本地运行环境</div>
             <div className="mt-0.5 text-[12px] text-[#6B7280]">
-              检测本机 Runtime，选择后绑定为 KiKi 的本地执行环境。后续配合本机 daemon，可在关闭浏览器后继续运行任务。
+              通过已连接的本机电脑扫描 CLI，选择后绑定为执行环境。请保持本机 daemon 在线。
             </div>
           </div>
           <button
@@ -352,7 +352,7 @@ function ScanStep({
       <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
         <Loader2 className="h-6 w-6 animate-spin text-[#111]" />
         <div className="mt-4 text-[14px] font-medium text-[#111]">正在检测本地 Runtimes</div>
-        <div className="mt-1 text-[12px] text-[#6B7280]">检测 Codex、Claude CLI、Gemini CLI 是否已安装。</div>
+        <div className="mt-1 text-[12px] text-[#6B7280]">正在通过已连接电脑扫描 Claude / Codex / Gemini CLI…</div>
       </div>
     );
   }

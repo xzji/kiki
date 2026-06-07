@@ -1,12 +1,15 @@
+import os from "os";
 import WebSocket from "ws";
 
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
 import { enterUserContext, runWithUserContext } from "@/lib/server/context/userContext";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
+import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 import type { RuntimeJobPayload } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { TunnelServerMessage } from "@/lib/server/tunnel/tunnelProtocol";
+import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
 function toWsUrl(serverUrl: string, apiKey: string) {
   const base = serverUrl.replace(/\/$/, "");
@@ -58,7 +61,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       type: "register",
       machineId: "pending",
       os: osFingerprint(),
-      daemonVersion: "0.1.0",
+      daemonVersion: "0.1.1",
       fingerprint: osFingerprint(),
     }),
   );
@@ -80,6 +83,57 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       provisionUserWorkspace(message.userId);
       enterUserContext(message.userId);
       appendRuntimeDaemonLog(`machine 已注册：${message.machineId}（用户 ${message.userId}）`);
+      return;
+    }
+    if (message.type === "discover_runtimes") {
+      void (async () => {
+        try {
+          const result = await discoverLocalRuntimes();
+          socket.send(
+            JSON.stringify({
+              type: "discover_runtimes_result",
+              requestId: message.requestId,
+              ok: true,
+              items: result.items,
+              workingDirectory: os.homedir(),
+            }),
+          );
+        } catch (error) {
+          socket.send(
+            JSON.stringify({
+              type: "discover_runtimes_result",
+              requestId: message.requestId,
+              ok: false,
+              error: error instanceof Error ? error.message : "扫描失败",
+            }),
+          );
+        }
+      })();
+      return;
+    }
+    if (message.type === "check_runtime") {
+      void (async () => {
+        try {
+          const result = await validateRuntimeEnvironment(message.payload as RuntimeEnvironmentCheckInput);
+          socket.send(
+            JSON.stringify({
+              type: "check_runtime_result",
+              requestId: message.requestId,
+              ok: result.ok,
+              result,
+            }),
+          );
+        } catch (error) {
+          socket.send(
+            JSON.stringify({
+              type: "check_runtime_result",
+              requestId: message.requestId,
+              ok: false,
+              error: error instanceof Error ? error.message : "检测失败",
+            }),
+          );
+        }
+      })();
       return;
     }
     if (message.type !== "execute") return;

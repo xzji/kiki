@@ -41,11 +41,11 @@ export async function getRuntimeEnvStatus(input: {
   return data;
 }
 
-export async function discoverRuntimeEnvs(): Promise<RuntimeDiscoveryResult> {
+export async function discoverRuntimeEnvs(): Promise<RuntimeDiscoveryResult & { source?: "remote" | "local" }> {
   const response = await fetch("/api/runtime-envs/discover");
-  const data = (await response.json()) as RuntimeDiscoveryResult;
+  const data = (await response.json()) as RuntimeDiscoveryResult & { reason?: string; source?: "remote" | "local" };
   if (!response.ok) {
-    throw new Error("本地 Runtime 扫描失败");
+    throw new Error(data.reason || "本地 Runtime 扫描失败");
   }
   return data;
 }

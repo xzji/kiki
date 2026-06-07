@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { discoverLocalRuntimes } from "@/lib/server/runtimeEnvValidation";
+import { discoverRuntimesForUser } from "@/lib/server/tunnel/remoteRuntimeProxy";
 import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-async function GETHandler() {
-  const result = await discoverLocalRuntimes();
-  const payload = {
-    ...result,
-    workingDirectory: process.cwd(),
-  };
-  return NextResponse.json(payload);
+async function GETHandler(_request: Request, context: { userId: string }) {
+  try {
+    const result = await discoverRuntimesForUser(context.userId);
+    return NextResponse.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Runtime 扫描失败";
+    return NextResponse.json({ ok: false, reason: message }, { status: 400 });
+  }
 }
 
 export const GET = withAuth(GETHandler);

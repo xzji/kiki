@@ -8,6 +8,7 @@ import {
   touchMachineHeartbeat,
   type AuthenticatedMachine,
 } from "@/lib/server/services/machineService";
+import type { RuntimeDiscoveryItem, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
 import { parseTunnelMessage, serializeTunnelMessage } from "@/lib/server/tunnel/tunnelProtocol";
 
 type MachineConnection = {
@@ -23,11 +24,20 @@ type PendingExecute = {
   timer: NodeJS.Timeout;
 };
 
+type PendingTunnelRequest<T> = {
+  machineId: string;
+  resolve: (result: T) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
 type ExecuteResultListener = (input: { jobId: string; ok: boolean; error?: string }) => void;
 type MachineDisconnectListener = (machineId: string) => void;
 
 const connections = new Map<string, MachineConnection>();
 const pendingExecutes = new Map<string, PendingExecute>();
+const pendingDiscover = new Map<string, PendingTunnelRequest<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>>();
+const pendingCheckRuntime = new Map<string, PendingTunnelRequest<RuntimeEnvironmentCheckResult>>();
 let executeResultListener: ExecuteResultListener | null = null;
 let machineDisconnectListener: MachineDisconnectListener | null = null;
 
@@ -46,6 +56,18 @@ function rejectPendingForMachine(machineId: string, reason: string) {
     if (pending.machineId !== machineId) return;
     clearTimeout(pending.timer);
     pendingExecutes.delete(jobId);
+    pending.reject(new Error(reason));
+  });
+  Array.from(pendingDiscover.entries()).forEach(([requestId, pending]) => {
+    if (pending.machineId !== machineId) return;
+    clearTimeout(pending.timer);
+    pendingDiscover.delete(requestId);
+    pending.reject(new Error(reason));
+  });
+  Array.from(pendingCheckRuntime.entries()).forEach(([requestId, pending]) => {
+    if (pending.machineId !== machineId) return;
+    clearTimeout(pending.timer);
+    pendingCheckRuntime.delete(requestId);
     pending.reject(new Error(reason));
   });
 }
@@ -96,6 +118,62 @@ export function getTunnelHub() {
           payload: input.payload,
         }),
       );
+    },
+    requestDiscoverRuntimes(input: { machineId: string; timeoutMs?: number }) {
+      const connection = connections.get(input.machineId);
+      if (!connection || connection.socket.readyState !== connection.socket.OPEN) {
+        throw new Error(`machine ${input.machineId} 不在线`);
+      }
+      const requestId = `discover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 60_000;
+      return new Promise<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingDiscover.delete(requestId);
+          reject(
+            new Error(
+              "本机扫描超时。请确认 daemon 已更新到最新版（npx @kiki_agent/daemon@latest），并保持在线。",
+            ),
+          );
+        }, timeoutMs);
+        pendingDiscover.set(requestId, {
+          machineId: input.machineId,
+          resolve,
+          reject,
+          timer,
+        });
+        connection.socket.send(serializeTunnelMessage({ type: "discover_runtimes", requestId }));
+      });
+    },
+    requestCheckRuntime(input: {
+      machineId: string;
+      payload: RuntimeEnvironmentCheckInput;
+      timeoutMs?: number;
+    }) {
+      const connection = connections.get(input.machineId);
+      if (!connection || connection.socket.readyState !== connection.socket.OPEN) {
+        throw new Error(`machine ${input.machineId} 不在线`);
+      }
+      const requestId = `check-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 90_000;
+      return new Promise<RuntimeEnvironmentCheckResult>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingCheckRuntime.delete(requestId);
+          reject(new Error("本机 Runtime 检测超时，请确认 daemon 在线且为最新版"));
+        }, timeoutMs);
+        pendingCheckRuntime.set(requestId, {
+          machineId: input.machineId,
+          resolve,
+          reject,
+          timer,
+        });
+        connection.socket.send(
+          serializeTunnelMessage({
+            type: "check_runtime",
+            requestId,
+            payload: input.payload,
+          }),
+        );
+      });
     },
     async dispatchExecute(input: {
       machineId: string;
@@ -166,6 +244,33 @@ function handleClientMessage(connection: MachineConnection, raw: string) {
       ok: message.ok,
       error: message.error,
     });
+    return;
+  }
+  if (message.type === "discover_runtimes_result") {
+    const pending = pendingDiscover.get(message.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingDiscover.delete(message.requestId);
+    if (!message.ok || !message.items) {
+      pending.reject(new Error(message.error || "本机 Runtime 扫描失败"));
+      return;
+    }
+    pending.resolve({
+      items: message.items,
+      workingDirectory: message.workingDirectory || "",
+    });
+    return;
+  }
+  if (message.type === "check_runtime_result") {
+    const pending = pendingCheckRuntime.get(message.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingCheckRuntime.delete(message.requestId);
+    if (!message.result) {
+      pending.reject(new Error(message.error || "本机 Runtime 检测失败"));
+      return;
+    }
+    pending.resolve(message.result);
     return;
   }
   if (message.type === "event") {

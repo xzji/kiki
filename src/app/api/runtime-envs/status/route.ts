@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
+import { validateRuntimeEnvironmentForUser } from "@/lib/server/tunnel/remoteRuntimeProxy";
 import type { LocalRuntimeKind } from "@/types/runtime";
 import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-async function GETHandler(request: NextRequest) {
+async function GETHandler(request: NextRequest, context: { userId: string }) {
   const workingDirectory = request.nextUrl.searchParams.get("workingDirectory") || "";
   const cliPath = request.nextUrl.searchParams.get("cliPath") || "claude";
   const runtimeKind = (request.nextUrl.searchParams.get("runtimeKind") || "claude") as LocalRuntimeKind;
 
-  const result = await validateRuntimeEnvironment({
+  const result = await validateRuntimeEnvironmentForUser(context.userId, {
     name: "Runtime Status Check",
     runtimeKind,
     workingDirectory,
