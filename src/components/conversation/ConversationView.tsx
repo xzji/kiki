@@ -14,7 +14,12 @@ import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { streamClaudeChat } from "@/lib/api/claude";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { generateTopicSagaPlan } from "@/lib/api/topics";
-import { submitTaskResultFeedback, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import {
+  applyConversationGovernance,
+  judgeConversationGovernance,
+  submitTaskResultFeedback,
+  waitForTaskRunCompletion,
+} from "@/lib/api/taskRuns";
 import { buildTaskQuoteContent } from "@/lib/taskFeedback";
 import {
   commitGoalDraftToStores,
@@ -162,7 +167,7 @@ function buildQuotedMessageContext(message: ConversationMessage, goals: Goal[]):
     roleLabel: message.role === "user" ? "你" : "KiKi",
     content: message.content,
     messageId: message.id,
-    messageKind: message.kind,
+    messageKind: message.kind === "goal_plan_card" ? "goal_plan_card" : "text",
   };
 }
 
@@ -205,6 +210,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const firstUnreadMarkerRef = useRef<HTMLDivElement>(null);
   const initializedConversationRef = useRef<string | null>(null);
+  const applyingGovernanceRef = useRef<Set<string>>(new Set());
   const [entryUnreadIds, setEntryUnreadIds] = useState<string[]>([]);
   const [showUnreadJump, setShowUnreadJump] = useState(false);
   const [hasLocalActiveStream, setHasLocalActiveStream] = useState(false);
@@ -395,6 +401,162 @@ export function ConversationView({ conversationId }: { conversationId: string })
     });
   };
 
+  const appendGovernanceConfirmation = (input: {
+    assistantId: string;
+    summary: string;
+    proposal: NonNullable<Awaited<ReturnType<typeof judgeConversationGovernance>>["proposal"]>;
+    userMessage: string;
+    quotedMessage: QuotedConversationMessageContext | null;
+  }) => {
+    updateMessage(conversation.id, input.assistantId, () => ({
+      id: input.assistantId,
+      kind: "governance_confirmation",
+      role: "kiki",
+      content: input.summary,
+      createdAt: new Date().toISOString(),
+      unread: true,
+      status: "done",
+      source: "kiki",
+      governance: {
+        status: "pending",
+        summary: input.summary,
+        diffs: input.proposal.diffs,
+        payload: input.proposal.payload ?? {
+          intent: input.proposal.intent,
+        },
+        userMessage: input.userMessage,
+        quotedMessage: input.quotedMessage
+          ? {
+              roleLabel: input.quotedMessage.roleLabel,
+              content: input.quotedMessage.content,
+              messageId: input.quotedMessage.messageId,
+              messageKind: input.quotedMessage.messageKind,
+              taskRef: input.quotedMessage.taskRef,
+            }
+          : undefined,
+      },
+    }));
+  };
+
+  const appendGovernanceTaskCard = (applied: Awaited<ReturnType<typeof applyConversationGovernance>>) => {
+    if (!applied.taskCardMessage?.taskRef) return;
+    const taskCardId = `local-task-governance-${applied.taskCardMessage.taskRef.instanceId}`;
+    if (conversation.messages.some((message) => message.id === taskCardId)) return;
+    appendMessage(conversation.id, {
+      id: taskCardId,
+      kind: "task_card",
+      role: "kiki",
+      content: applied.taskCardMessage.content || "已根据你的要求执行任务。",
+      createdAt: new Date().toISOString(),
+      unread: true,
+      status: "done",
+      source: "system",
+      taskRef: applied.taskCardMessage.taskRef,
+      taskSnapshot: applied.taskCardMessage.taskSnapshot,
+    });
+  };
+
+  const onGovernanceConfirm = async (sourceMessage: ConversationMessage) => {
+    if (sourceMessage.kind !== "governance_confirmation") return;
+    if (sourceMessage.governance.status !== "pending" && sourceMessage.governance.status !== "error") return;
+    if (applyingGovernanceRef.current.has(sourceMessage.id)) return;
+    const payload = sourceMessage.governance.payload;
+    if (!payload.intent || !payload.taskRef) {
+      updateMessage(conversation.id, sourceMessage.id, (message) =>
+        message.kind === "governance_confirmation"
+          ? {
+              ...message,
+              governance: {
+                ...message.governance,
+                status: "error",
+                error: "缺少可执行的治理命令或任务引用。",
+              },
+            }
+          : message,
+      );
+      return;
+    }
+    updateMessage(conversation.id, sourceMessage.id, (message) =>
+      message.kind === "governance_confirmation"
+        ? {
+            ...message,
+            governance: {
+              ...message.governance,
+              status: "confirmed",
+              error: undefined,
+            },
+          }
+        : message,
+    );
+    try {
+      applyingGovernanceRef.current.add(sourceMessage.id);
+      const applied = await applyConversationGovernance({
+        conversationId: conversation.id,
+        intent: payload.intent,
+        taskRef: payload.taskRef,
+        patch: payload.patch,
+        revisionHint: payload.revisionHint,
+        userMessage: sourceMessage.governance.userMessage,
+        runtimeEnv: activeRuntimeEnv ?? undefined,
+        quotedMessage: sourceMessage.governance.quotedMessage,
+        idempotencyKey: `governance:${sourceMessage.id}:${payload.intent}`,
+      });
+      updateMessage(conversation.id, sourceMessage.id, (message) =>
+        message.kind === "governance_confirmation"
+          ? {
+              ...message,
+              governance: {
+                ...message.governance,
+                status: "applied",
+              },
+            }
+          : message,
+      );
+      appendMessage(conversation.id, {
+        id: `msg-kiki-governance-${Date.now()}`,
+        kind: "text",
+        role: "kiki",
+        content: applied.assistantMessage || "已执行任务治理操作。",
+        createdAt: new Date().toISOString(),
+        status: "done",
+        source: "kiki",
+      });
+      void refreshGoalsFromSnapshot();
+      appendGovernanceTaskCard(applied);
+    } catch (error) {
+      updateMessage(conversation.id, sourceMessage.id, (message) =>
+        message.kind === "governance_confirmation"
+          ? {
+              ...message,
+              governance: {
+                ...message.governance,
+                status: "error",
+                error: getErrorMessage(error, "治理命令执行失败"),
+              },
+            }
+          : message,
+      );
+    } finally {
+      applyingGovernanceRef.current.delete(sourceMessage.id);
+    }
+  };
+
+  const onGovernanceCancel = (sourceMessage: ConversationMessage) => {
+    if (sourceMessage.kind !== "governance_confirmation") return;
+    if (sourceMessage.governance.status !== "pending" && sourceMessage.governance.status !== "error") return;
+    updateMessage(conversation.id, sourceMessage.id, (message) =>
+      message.kind === "governance_confirmation"
+        ? {
+            ...message,
+            governance: {
+              ...message.governance,
+              status: "cancelled",
+            },
+          }
+        : message,
+    );
+  };
+
   const onTaskOptionalFeedback = async (sourceMessage: ConversationMessage, text: string) => {
     if (sourceMessage.kind !== "task_card") return;
     const now = new Date().toISOString();
@@ -514,6 +676,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         createdAt: now,
         source: "user",
         status: "done",
+        quotedMessage: quoted ?? undefined,
       });
       appendMessage(conversation.id, {
         id: assistantId,
@@ -626,6 +789,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         createdAt: now,
         source: "user",
         status: "done",
+        quotedMessage: quoted ?? undefined,
       });
       appendMessage(conversation.id, {
         id: assistantId,
@@ -727,6 +891,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         createdAt: now,
         source: "user",
         status: "done",
+        quotedMessage: quoted ?? undefined,
       });
       appendMessage(conversation.id, {
         id: assistantId,
@@ -830,6 +995,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         createdAt: now,
         source: "user",
         status: "done",
+        quotedMessage: quoted ?? undefined,
       });
       appendMessage(conversation.id, {
         id: assistantId,
@@ -901,6 +1067,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         createdAt: now,
         source: "user",
         status: "done",
+        quotedMessage: quoted ?? undefined,
       };
       appendMessage(conversation.id, userMessage);
       appendMessage(conversation.id, {
@@ -909,8 +1076,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
         role: "kiki",
         content:
           quotedTaskInfo.instance.status === "completed" || quotedTaskInfo.instance.result?.taskResult
-            ? "正在理解你对任务结果的反馈..."
-            : "这条任务还没有完成，我先检查当前状态...",
+            ? "正在判断这是结果反馈还是任务调整..."
+            : "正在检查这条任务的当前状态...",
         createdAt: now,
         status: "streaming",
         source: "kiki",
@@ -918,6 +1085,112 @@ export function ConversationView({ conversationId }: { conversationId: string })
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
       try {
+        const feedbackTaskRef = quotedTaskInfo.message.taskRef;
+        const governance =
+          activeRuntimeEnv && activeRuntimeEnv.type === "local" && activeRuntimeEnv.health?.status === "online"
+            ? await judgeConversationGovernance({
+                message: text,
+                conversationId: conversation.id,
+                runtimeEnv: activeRuntimeEnv,
+                source: "conversation",
+                workspaceMode: "conversation",
+                taskRef: feedbackTaskRef,
+                contextSnapshot: {
+                  conversation: {
+                    ...conversation,
+                    messages: [...conversation.messages, userMessage],
+                  },
+                  goal: contextGoal,
+                },
+                quotedMessage: quoted ?? undefined,
+              })
+            : null;
+        if (governance?.shouldHandle && governance.proposal) {
+          if (
+            governance.proposal.intent === "rerun_current" &&
+            quotedTaskInfo.instance.status !== "completed" &&
+            !quotedTaskInfo.instance.result?.taskResult
+          ) {
+            updateMessage(conversation.id, assistantId, (message) => ({
+              ...message,
+              content: "这条任务还没有完成，建议等它完成后再引用结果让我判断是否需要重做。",
+              status: "done",
+            }));
+            setConversationStatus(conversation.id, "idle");
+            setQuotedMessage(null);
+            return;
+          }
+          if (!governance.proposal.supported) {
+            updateMessage(conversation.id, assistantId, (message) => ({
+              ...message,
+              content: governance.proposal?.summary || "我已识别这个操作，但当前版本暂未支持执行。",
+              status: "done",
+            }));
+            setConversationStatus(conversation.id, "idle");
+            setQuotedMessage(null);
+            return;
+          }
+          if (governance.proposal.confirmLevel === "required") {
+            appendGovernanceConfirmation({
+              assistantId,
+              summary: governance.proposal.summary,
+              proposal: governance.proposal,
+              userMessage: text,
+              quotedMessage: quoted ?? null,
+            });
+            setConversationStatus(conversation.id, "idle");
+            setQuotedMessage(null);
+            return;
+          }
+          const payload = governance.proposal.payload;
+          if (!payload?.intent || !payload.taskRef) {
+            updateMessage(conversation.id, assistantId, (message) => ({
+              ...message,
+              content: "我识别到了任务操作意图，但缺少可执行的任务引用。",
+              status: "done",
+            }));
+            setConversationStatus(conversation.id, "idle");
+            setQuotedMessage(null);
+            return;
+          }
+          const applied = await applyConversationGovernance({
+            conversationId: conversation.id,
+            intent: payload.intent,
+            taskRef: payload.taskRef,
+            patch: payload.patch,
+            revisionHint: payload.revisionHint,
+            userMessage: text,
+            runtimeEnv: activeRuntimeEnv ?? undefined,
+            quotedMessage: quoted ?? undefined,
+            idempotencyKey: `governance:${userId}:${payload.intent}`,
+          });
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: applied.assistantMessage || governance.proposal?.summary || "已执行任务治理操作。",
+            status: "done",
+          }));
+          void refreshGoalsFromSnapshot();
+          if (applied.taskCardMessage?.taskRef) {
+            const taskCardId = `local-task-governance-${applied.taskCardMessage.taskRef.instanceId}`;
+            if (!conversation.messages.some((message) => message.id === taskCardId)) {
+              appendMessage(conversation.id, {
+                id: taskCardId,
+                kind: "task_card",
+                role: "kiki",
+                content: applied.taskCardMessage.content || "已根据你的要求重新执行任务。",
+                createdAt: new Date().toISOString(),
+                unread: true,
+                status: "done",
+                source: "system",
+                taskRef: applied.taskCardMessage.taskRef,
+                taskSnapshot: applied.taskCardMessage.taskSnapshot,
+              });
+            }
+          }
+          setConversationStatus(conversation.id, "idle");
+          setQuotedMessage(null);
+          return;
+        }
         if (quotedTaskInfo.instance.status === "awaiting_user" || quotedTaskInfo.instance.awaitingUser) {
           updateMessage(conversation.id, assistantId, (message) => ({
             ...message,
@@ -948,7 +1221,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
           setQuotedMessage(null);
           return;
         }
-        const feedbackTaskRef = quotedTaskInfo.message.taskRef;
         const feedback = await submitTaskResultFeedback({
           conversationId: conversation.id,
           message: text,
@@ -956,6 +1228,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           feedbackId: `feedback-${userId}`,
           taskRef: feedbackTaskRef,
           runtimeEnv: activeRuntimeEnv ?? undefined,
+          quotedMessage: quoted ?? undefined,
         });
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
@@ -1040,6 +1313,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       createdAt: now,
       source: "user",
       status: "done",
+      quotedMessage: quoted ?? undefined,
     };
     streamAbortRef.current = controller;
     activeAssistantMessageIdRef.current = assistantId;
@@ -1052,7 +1326,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       id: assistantId,
       kind: "text",
       role: "kiki",
-      content: "",
+      content: "正在判断这是否需要调整任务...",
       createdAt: new Date().toISOString(),
       status: "streaming",
       source: "kiki",
@@ -1062,6 +1336,103 @@ export function ConversationView({ conversationId }: { conversationId: string })
     setStreamError(null);
 
     try {
+      const governance = await judgeConversationGovernance({
+        message: text,
+        conversationId: conversation.id,
+        runtimeEnv: activeRuntimeEnv,
+        source: "conversation",
+        workspaceMode: "conversation",
+        contextSnapshot: {
+          conversation: {
+            ...conversation,
+            messages: [...conversation.messages, userMessage],
+          },
+          goal: contextGoal,
+        },
+        quotedMessage: quoted,
+      });
+      if (governance.shouldHandle && governance.proposal) {
+        if (!governance.proposal.supported) {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: governance.proposal?.summary || "我已识别这个操作，但当前版本暂未支持执行。",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          streamAbortRef.current = null;
+          activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
+          setQuotedMessage(null);
+          return;
+        }
+        if (governance.proposal.confirmLevel === "required") {
+          appendGovernanceConfirmation({
+            assistantId,
+            summary: governance.proposal.summary,
+            proposal: governance.proposal,
+            userMessage: text,
+            quotedMessage: quoted ?? null,
+          });
+          setConversationStatus(conversation.id, "idle");
+          streamAbortRef.current = null;
+          activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
+          setQuotedMessage(null);
+          return;
+        }
+        const payload = governance.proposal.payload;
+        if (!payload?.intent || !payload.taskRef) {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: "我识别到了任务操作意图，但还不能确定目标任务。请引用任务卡片，或明确任务名称。",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          streamAbortRef.current = null;
+          activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
+          setQuotedMessage(null);
+          return;
+        }
+        const applied = await applyConversationGovernance({
+          conversationId: conversation.id,
+          intent: payload.intent,
+          taskRef: payload.taskRef,
+          patch: payload.patch,
+          revisionHint: payload.revisionHint,
+          userMessage: text,
+          runtimeEnv: activeRuntimeEnv,
+          quotedMessage: quoted,
+          idempotencyKey: `governance:${userId}:${payload.intent}`,
+        });
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: applied.assistantMessage || governance.proposal?.summary || "已执行任务治理操作。",
+          status: "done",
+        }));
+        void refreshGoalsFromSnapshot();
+        if (applied.taskCardMessage?.taskRef) {
+          const taskCardId = `local-task-governance-${applied.taskCardMessage.taskRef.instanceId}`;
+          appendMessage(conversation.id, {
+            id: taskCardId,
+            kind: "task_card",
+            role: "kiki",
+            content: applied.taskCardMessage.content || "已根据你的要求重新执行任务。",
+            createdAt: new Date().toISOString(),
+            unread: true,
+            status: "done",
+            source: "system",
+            taskRef: applied.taskCardMessage.taskRef,
+            taskSnapshot: applied.taskCardMessage.taskSnapshot,
+          });
+        }
+        setConversationStatus(conversation.id, "idle");
+        streamAbortRef.current = null;
+        activeAssistantMessageIdRef.current = null;
+        setHasLocalActiveStream(false);
+        setQuotedMessage(null);
+        return;
+      }
       await streamClaudeChat(
         {
           message: text,
@@ -1253,6 +1624,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
                         setPlanOpen(true);
                       }}
                       onTaskOptionalFeedback={onTaskOptionalFeedback}
+                      onGovernanceConfirm={onGovernanceConfirm}
+                      onGovernanceCancel={onGovernanceCancel}
                       onDelete={(messageId) => {
                         deleteMessage(conversation.id, messageId);
                         if (quotedMessage?.id === messageId) {

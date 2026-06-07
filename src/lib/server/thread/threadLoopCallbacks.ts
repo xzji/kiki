@@ -29,6 +29,7 @@ import {
 } from "@/lib/server/services/dispatchTaskFromThread";
 import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type {
   CollectActiveThreadsCallback,
   CollectCurrentThreadTasksCallback,
@@ -201,12 +202,12 @@ export const recordTickOutcome: RecordTickOutcomeCallback = async ({
 // ---------------------------------------------------------------------------
 // 6. dispatchTask — 调用 dispatchTaskFromThread；idempotencyKey 含 frame 与 task draft 标记
 // ---------------------------------------------------------------------------
-export function buildDispatchTask(frameStartedAt: Date): DispatchTaskCallback {
+export function buildDispatchTask(frameStartedAt: Date, invoke?: LlmInvoke): DispatchTaskCallback {
   let counter = 0;
   return async (request) => {
     counter += 1;
     const idempotencyKey = `dispatch-task:${request.threadId}:${frameStartedAt.toISOString()}:${counter}`;
-    return dispatchTaskFromThread(request, { idempotencyKey });
+    return dispatchTaskFromThread(request, { idempotencyKey, invoke });
   };
 }
 
@@ -276,7 +277,7 @@ export type ThreadLoopFrameCallbacks = {
   sendThreadMessage: SendThreadMessageCallback;
 };
 
-export function buildThreadLoopFrameCallbacks(frameStartedAt: Date): ThreadLoopFrameCallbacks {
+export function buildThreadLoopFrameCallbacks(frameStartedAt: Date, invoke?: LlmInvoke): ThreadLoopFrameCallbacks {
   return {
     collectActiveThreads,
     collectRecentTaskInstances,
@@ -284,7 +285,7 @@ export function buildThreadLoopFrameCallbacks(frameStartedAt: Date): ThreadLoopF
     prepareAgentRun: buildPrepareAgentRun(frameStartedAt),
     persistThreadPatch,
     recordTickOutcome,
-    dispatchTask: buildDispatchTask(frameStartedAt),
+    dispatchTask: buildDispatchTask(frameStartedAt, invoke),
     updateTask: buildUpdateTask(frameStartedAt),
     cancelTask: buildCancelTask(frameStartedAt),
     sendThreadMessage: buildSendThreadMessage(frameStartedAt),

@@ -14,6 +14,7 @@ export type GoalEventKind =
   | "instance.user_response"
   | "instance.timeout_paused"
   | "instance.user_command"
+  | "task.definition_amended"
   | "schedule.event_synthesized"
   // Topic/Thread runtime events — Plan ref: §10.6 problem 26
   | "agent.run.started"
@@ -94,6 +95,11 @@ export type GoalEventPayloadMap = {
   "instance.user_command": {
     command: "pause" | "resume" | "retry" | "cancel" | "transition";
     reason?: string;
+  };
+  "task.definition_amended": {
+    source: "conversation_governance";
+    message?: string;
+    patch?: unknown;
   };
   "schedule.event_synthesized": {
     scheduleEventId: string;

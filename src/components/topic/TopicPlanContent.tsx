@@ -623,30 +623,11 @@ function executionPhaseLabel(phase: TaskExecutionPhase | undefined) {
 function WorkflowProgressPanel({ progress }: { progress: WorkflowProgress }) {
   const visibleUpcoming = progress.upcomingTasks.slice(0, 5);
   const hiddenUpcomingCount = Math.max(0, progress.upcomingTasks.length - visibleUpcoming.length);
-  const activeCount = progress.counts.running + progress.counts.awaiting;
 
   return (
     <div className="mt-4 border-t border-[#E5E7EB] pt-4">
-      {progress.counts.total > 0 ? (
-        <div>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#6B7280]">
-            <span>执行进展</span>
-            <span>
-              已结束 {progress.counts.completed} · 进行中 {activeCount} · 待开始 {progress.counts.pending}
-              {progress.counts.error > 0 ? ` · 失败 ${progress.counts.error}` : ""}
-            </span>
-          </div>
-          <div className="flex h-2 overflow-hidden rounded-full bg-[#E5E7EB]">
-            <ProgressSegment count={progress.counts.completed} total={progress.counts.total} className="bg-[#1F2328]" />
-            <ProgressSegment count={activeCount} total={progress.counts.total} className="bg-[#7C8794]" />
-            <ProgressSegment count={progress.counts.error} total={progress.counts.total} className="bg-[#B42318]" />
-            <ProgressSegment count={progress.counts.pending} total={progress.counts.total} className="bg-[#D0D7DE]" />
-          </div>
-        </div>
-      ) : null}
-
       {progress.attentionTasks.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-[#F2C7C3] bg-[#FFF7F6] px-3 py-2">
+        <div className="rounded-xl border border-[#F2C7C3] bg-[#FFF7F6] px-3 py-2">
           <div className="mb-2 text-[12px] font-medium text-[#B42318]">需关注</div>
           <div className="space-y-2">
             {progress.attentionTasks.map((item) => (
@@ -656,7 +637,7 @@ function WorkflowProgressPanel({ progress }: { progress: WorkflowProgress }) {
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className={`${progress.attentionTasks.length > 0 ? "mt-4 " : ""}grid gap-4 md:grid-cols-2`}>
         <WorkflowTaskGroup
           title="正在执行"
           emptyText="暂无正在执行的任务"
@@ -673,19 +654,6 @@ function WorkflowProgressPanel({ progress }: { progress: WorkflowProgress }) {
       </div>
     </div>
   );
-}
-
-function ProgressSegment({
-  count,
-  total,
-  className,
-}: {
-  count: number;
-  total: number;
-  className: string;
-}) {
-  if (count <= 0 || total <= 0) return null;
-  return <div className={className} style={{ width: `${(count / total) * 100}%` }} />;
 }
 
 function WorkflowTaskGroup({

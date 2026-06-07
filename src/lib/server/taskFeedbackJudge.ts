@@ -3,7 +3,7 @@ import { tryExtractJsonObject } from "@/lib/server/jsonExtraction";
 import { buildTaskQuoteContent, summarizeTaskResult } from "@/lib/taskFeedback";
 import type { TaskFeedbackDecision } from "@/lib/taskFeedback";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
 export type TaskFeedbackJudgeResult = {
   decision: TaskFeedbackDecision;
@@ -67,6 +67,7 @@ function buildFeedbackJudgePrompt(input: {
   task: Task;
   instance: TaskInstance;
   userMessage: string;
+  quotedMessage?: QuotedConversationMessageContext;
 }) {
   return `你是 KiKi 的任务结果反馈判断器。你只能判断用户对“被引用任务结果”的反馈下一步应该怎么处理，不要执行任务本身。
 
@@ -99,6 +100,9 @@ ${buildTaskQuoteContent(input.task, input.instance)}
 原结果结构摘要：
 ${summarizeTaskResult(input.instance.result?.taskResult) || "无结构化结果摘要"}
 
+用户发送时引用内容：
+${input.quotedMessage ? `[${input.quotedMessage.roleLabel}] ${input.quotedMessage.content}` : "无"}
+
 用户反馈：
 ${input.userMessage}`;
 }
@@ -109,6 +113,7 @@ export async function judgeTaskFeedback(input: {
   task: Task;
   instance: TaskInstance;
   userMessage: string;
+  quotedMessage?: QuotedConversationMessageContext;
   runtimeEnv: RuntimeEnvironment;
   workingDirectory: string;
 }) {

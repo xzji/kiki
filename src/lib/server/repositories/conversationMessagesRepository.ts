@@ -26,6 +26,12 @@ function parseJson<T>(value: string | null): T | undefined {
 }
 
 function messageRefs(message: ConversationMessage) {
+  if (message.kind === "text") {
+    return {
+      refJson: message.quotedMessage ? JSON.stringify({ quotedMessage: message.quotedMessage }) : null,
+      snapshotJson: null,
+    };
+  }
   if (message.kind === "goal_plan_card") {
     return {
       refJson: JSON.stringify({ goalRef: message.goalRef }),
@@ -36,6 +42,12 @@ function messageRefs(message: ConversationMessage) {
     return {
       refJson: JSON.stringify({ taskRef: message.taskRef }),
       snapshotJson: message.taskSnapshot ? JSON.stringify({ taskSnapshot: message.taskSnapshot }) : null,
+    };
+  }
+  if (message.kind === "governance_confirmation") {
+    return {
+      refJson: JSON.stringify({ governance: message.governance }),
+      snapshotJson: null,
     };
   }
   return { refJson: null, snapshotJson: null };
@@ -75,10 +87,29 @@ export function mapConversationMessageRow(row: ConversationMessageRow): Conversa
       taskSnapshot: snapshot?.taskSnapshot,
     };
   }
+  if (row.kind === "governance_confirmation") {
+    const refs = parseJson<{
+      governance: Extract<ConversationMessage, { kind: "governance_confirmation" }>["governance"];
+    }>(row.ref_json);
+    return {
+      ...base,
+      kind: "governance_confirmation",
+      role: "kiki",
+      governance: refs?.governance ?? {
+        status: "error",
+        summary: row.content,
+        payload: { intent: "" },
+        userMessage: "",
+        error: "确认卡数据缺失，请重新发起任务治理操作。",
+      },
+    };
+  }
+  const refs = parseJson<{ quotedMessage: Extract<ConversationMessage, { kind: "text" }>["quotedMessage"] }>(row.ref_json);
   return {
     ...base,
     kind: "text",
     role: row.role,
+    quotedMessage: refs?.quotedMessage,
   };
 }
 

@@ -12,7 +12,7 @@ import { ensureConversationWorkspace, ensureTaskWorkspace } from "@/lib/server/w
 import { buildTaskQuoteContent, getFeedbackHistory, withFeedbackRecord } from "@/lib/taskFeedback";
 import type { TaskFeedbackRecord } from "@/lib/taskFeedback";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +31,7 @@ type RequestBody = {
   feedbackId?: string;
   taskRef: TaskRef;
   runtimeEnv?: RuntimeEnvironment;
+  quotedMessage?: QuotedConversationMessageContext;
 };
 
 function nowIso() {
@@ -97,12 +98,14 @@ function buildRevisionContext(input: {
   sourceInstance: TaskInstance;
   userMessage: string;
   revisionContext: string;
+  quotedMessage?: QuotedConversationMessageContext;
 }) {
   return [
     "【用户反馈驱动的修订重跑】",
     `原实例：${input.sourceInstance.id}`,
     `原任务：${input.task.title}`,
     "",
+    input.quotedMessage ? `用户发送时引用内容：\n[${input.quotedMessage.roleLabel}] ${input.quotedMessage.content}\n` : "",
     "用户反馈：",
     input.userMessage,
     "",
@@ -219,6 +222,7 @@ export async function POST(request: NextRequest) {
     task: located.task,
     instance: located.instance,
     userMessage: body.message,
+    quotedMessage: body.quotedMessage,
     runtimeEnv: body.runtimeEnv,
     workingDirectory: workspace.workspaceDir,
   });
@@ -248,6 +252,7 @@ export async function POST(request: NextRequest) {
     sourceInstance: located.instance,
     userMessage: body.message,
     revisionContext: judge.revisionContext ?? "",
+    quotedMessage: body.quotedMessage,
   });
   const nextInstance: TaskInstance = {
     ...baseInstance,

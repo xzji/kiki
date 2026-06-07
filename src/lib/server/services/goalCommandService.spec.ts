@@ -58,4 +58,87 @@ export function runGoalCommandServiceSpecs() {
     "stale revisions should fail before any command event is written",
   );
   assert.equal(getGoalEventByIdempotencyKey(staleKey), null);
+
+  const expectedResultGoalId = "goal-command-service-expected-result";
+  const expectedResultSubGoalId = "sg-expected-result";
+  applyGoalCommand({
+    command: {
+      type: "create_goal",
+      goal: {
+        ...makeGoal(expectedResultGoalId),
+        subGoals: [
+          {
+            id: expectedResultSubGoalId,
+            goalId: expectedResultGoalId,
+            title: "SubGoal",
+            tasks: [],
+          },
+        ],
+      },
+    },
+    idempotencyKey: "goal-command-service:expected-result-goal",
+  });
+  const created = applyGoalCommand({
+    command: {
+      type: "create_task",
+      goalId: expectedResultGoalId,
+      subGoalId: expectedResultSubGoalId,
+      task: {
+        title: "信息监测",
+        description: "监测信息",
+        expectedOutcome: "输出信息清单",
+        expectedResult: {
+          type: "deliverable",
+          description: "结构化清单",
+          format: "markdown",
+          completionCriteria: "必须包含来源 URL",
+          requiredBlocks: ["list"],
+        },
+        taskType: "repeat",
+        triggerRule: "每周一 09:00",
+        executionKind: "generic_result",
+        taskSpec: {
+          content: "原规格",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          sourceRevision: "rev-1",
+        },
+      },
+    },
+    idempotencyKey: "goal-command-service:expected-result-create-task",
+  });
+  const createdTask = created.goals
+    .find((goal) => goal.id === normalizeGoalId(expectedResultGoalId))
+    ?.subGoals[0]?.tasks[0];
+  assert.equal(createdTask?.expectedResult?.completionCriteria, "必须包含来源 URL");
+  assert.deepEqual(createdTask?.expectedResult?.requiredBlocks, ["list"]);
+
+  const updated = applyGoalCommand({
+    command: {
+      type: "update_task",
+      goalId: expectedResultGoalId,
+      taskId: createdTask?.id ?? "",
+      task: {
+        title: "信息监测",
+        description: "监测信息",
+        expectedOutcome: "输出信息清单",
+        expectedResult: {
+          type: "deliverable",
+          description: "结构化清单",
+          format: "markdown",
+          completionCriteria: "必须包含 AI 产品扫描和来源 URL",
+          requiredBlocks: ["list", "markdown"],
+        },
+        taskType: "repeat",
+        triggerRule: "每周一 09:00",
+        executionKind: "generic_result",
+      },
+    },
+    idempotencyKey: "goal-command-service:expected-result-update-task",
+  });
+  const updatedTask = updated.goals
+    .find((goal) => goal.id === normalizeGoalId(expectedResultGoalId))
+    ?.subGoals[0]?.tasks[0];
+  assert.equal(updatedTask?.expectedResult?.completionCriteria, "必须包含 AI 产品扫描和来源 URL");
+  assert.deepEqual(updatedTask?.expectedResult?.requiredBlocks, ["list", "markdown"]);
+  assert.equal(updatedTask?.taskSpec?.stale, true);
 }

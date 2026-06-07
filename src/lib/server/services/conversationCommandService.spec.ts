@@ -11,7 +11,7 @@ import {
 } from "@/lib/server/services/conversationCommandService";
 import type { ConversationMessage } from "@/types/kiki";
 
-function textMessage(id: string, content: string): ConversationMessage {
+function textMessage(id: string, content: string): Extract<ConversationMessage, { kind: "text" }> {
   return {
     id,
     kind: "text",
@@ -52,16 +52,81 @@ export function runConversationCommandServiceSpecs() {
   );
 
   const appended = applyConversationCommand({
-    command: { type: "append_message", conversationId, message: textMessage("msg-spec-1", "hello") },
+    command: {
+      type: "append_message",
+      conversationId,
+      message: {
+        ...textMessage("msg-spec-1", "hello"),
+        quotedMessage: {
+          roleLabel: "KiKi",
+          content: "上一条任务结果摘要",
+          messageId: "msg-task-spec",
+          messageKind: "task_card",
+          taskRef: {
+            goalId: "goal-spec",
+            subGoalId: "sub-spec",
+            taskId: "task-spec",
+            instanceId: "inst-spec",
+          },
+        },
+      },
+    },
     idempotencyKey: createIdempotencyKey("conversation.spec.message", conversationId, "msg-spec-1"),
   });
   assert.equal(appended.conversation?.messages.length, 1);
+  assert.equal(
+    (appended.conversation?.messages[0]?.kind === "text" && appended.conversation.messages[0].quotedMessage?.content) || "",
+    "上一条任务结果摘要",
+  );
+
+  const confirmationMessage: Extract<ConversationMessage, { kind: "governance_confirmation" }> = {
+    id: "msg-governance-confirm-1",
+    kind: "governance_confirmation",
+    role: "kiki",
+    content: "确认修改任务标准",
+    createdAt: new Date().toISOString(),
+    status: "done",
+    governance: {
+      status: "pending",
+      summary: "给任务增加来源 URL 要求",
+      diffs: [{ field: "expectedResult.completionCriteria", before: "包含事件", after: "包含事件\n包含来源 URL" }],
+      payload: {
+        intent: "amend_task",
+        taskRef: {
+          goalId: "goal-spec",
+          subGoalId: "sub-spec",
+          taskId: "task-spec",
+        },
+        patch: {
+          expectedResult: {
+            completionCriteria: "包含来源 URL",
+          },
+        },
+      },
+      userMessage: "下次增加来源 URL",
+    },
+  };
+  applyConversationCommand({
+    command: {
+      type: "append_message",
+      conversationId,
+      message: confirmationMessage,
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.governance.confirm", conversationId),
+  });
+  const confirmationMessages = listConversationMessages({ conversationId, afterSeq: 1, limit: 10 });
+  const restoredConfirmation = confirmationMessages.find((message) => message.id === confirmationMessage.id);
+  assert.equal(restoredConfirmation?.kind, "governance_confirmation");
+  assert.equal(
+    restoredConfirmation?.kind === "governance_confirmation" && restoredConfirmation.governance.payload.intent,
+    "amend_task",
+  );
 
   const duplicateAppend = applyConversationCommand({
     command: { type: "append_message", conversationId, message: textMessage("msg-spec-1", "hello") },
     idempotencyKey: createIdempotencyKey("conversation.spec.message.retry", conversationId, "msg-spec-1"),
   });
-  assert.equal(duplicateAppend.conversation?.messages.length, 1);
+  assert.equal(duplicateAppend.conversation?.messages.length, 2);
 
   const updated = applyConversationCommand({
     command: {
@@ -97,7 +162,7 @@ export function runConversationCommandServiceSpecs() {
   const paged = listConversationMessages({ conversationId, afterSeq: 1, limit: 10 });
   assert.deepEqual(
     paged.map((message) => message.id),
-    ["msg-spec-2"],
+    ["msg-governance-confirm-1", "msg-spec-2"],
   );
 
   const cascadeConversationId = "conv-command-cascade-spec";

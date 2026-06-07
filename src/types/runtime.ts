@@ -92,18 +92,7 @@ export type RuntimeDiscoveryResult = {
   workingDirectory: string;
 };
 
-export type QuotedConversationMessageContext = {
-  roleLabel: string;
-  content: string;
-  messageId?: string;
-  messageKind?: import("@/types/kiki").ConversationMessage["kind"];
-  taskRef?: {
-    goalId: string;
-    subGoalId: string;
-    taskId: string;
-    instanceId: string;
-  };
-};
+export type QuotedConversationMessageContext = import("@/types/kiki").ConversationMessageQuote;
 
 export type ClaudeChatRequest = {
   message: string;

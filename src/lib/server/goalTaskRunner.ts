@@ -66,7 +66,7 @@ import type {
   TaskRunErrorCategory,
 } from "@/types/kiki";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { ArtifactRef } from "@/types/artifact";
+import type { Artifact, ArtifactRef } from "@/types/artifact";
 import type { RuntimeEnvironment } from "@/types/runtime";
 import type { AcceptanceReport, LocalValidationReport, TaskAcceptanceRuntimeState } from "@/types/taskAcceptance";
 import type { ResultBlock, TaskResult } from "@/types/taskResult";
@@ -1633,6 +1633,55 @@ function attachAgentRunPlan<T extends ParsedTaskRunnerResult>(result: T, agentRu
   };
 }
 
+type AppendTrajectoryFn = (
+  step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string },
+) => ExecutionTrajectoryStep[];
+
+/**
+ * webapp 与 external_embed 两种交互产物落盘的逻辑逐行同构：running 轨迹 → persist → toArtifactRef →
+ * 合并 taskResult.artifactRefs/meta（追加 interactive surface）→ 同步 structuredOutput.artifactRefs →
+ * completed 轨迹。此 helper 收敛公共流程，差异（具体 persist 调用与轨迹文案）由调用方注入。
+ * 直接原地写入 result.taskResult / result.structuredOutput，与原内联逻辑等价。
+ */
+function applyInteractiveArtifactResult(options: {
+  result: TaskRunAttemptResult;
+  appendTrajectory: AppendTrajectoryFn;
+  runningTitle: string;
+  completedTitle: string;
+  thought: string;
+  persist: () => Artifact;
+}) {
+  const { result, appendTrajectory, runningTitle, completedTitle, thought, persist } = options;
+  if (!result.taskResult) return;
+  appendTrajectory({
+    type: "system",
+    status: "running",
+    title: runningTitle,
+    thought,
+  });
+  const artifactRef = toArtifactRef(persist());
+  result.taskResult = {
+    ...result.taskResult,
+    artifactRefs: [...(result.taskResult.artifactRefs ?? []), artifactRef],
+    meta: {
+      ...result.taskResult.meta,
+      surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "interactive" as const])),
+      interactiveSurfaceKind: "webapp",
+    },
+  };
+  result.structuredOutput = {
+    ...(result.structuredOutput ?? {}),
+    artifactRefs: result.taskResult.artifactRefs,
+  };
+  appendTrajectory({
+    type: "system",
+    status: "completed",
+    title: completedTitle,
+    thought,
+    endedAt: new Date().toISOString(),
+  });
+}
+
 async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
   let finalMessage = "";
   let fallbackMessage = "";
@@ -2762,81 +2811,43 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   const files = extractFileWriteSpecs(finalMessage);
   if (expectedSurfaces.includes("interactive") && webapp && result.taskResult) {
     const conversationId = input.goal.conversationId ?? `goal-${input.goal.id}`;
-    appendTrajectory({
-      type: "system",
-      status: "running",
-      title: "正在写入可执行小应用",
+    applyInteractiveArtifactResult({
+      result,
+      appendTrajectory,
+      runningTitle: "正在写入可执行小应用",
+      completedTitle: "已生成可执行小应用",
       thought: webapp.title,
-    });
-    const artifact = persistWebAppArtifact({
-      conversationId,
-      taskId: input.task.id,
-      instanceId: input.instance.id,
-      runtimeJobId: `job-${input.instance.id}`,
-      title: webapp.title,
-      description: webapp.description || result.summary,
-      html: webapp.html,
-      initialState: webapp.initialState,
-      networkPolicy: webapp.networkPolicy,
-    });
-    const artifactRef = toArtifactRef(artifact);
-    result.taskResult = {
-      ...result.taskResult,
-      artifactRefs: [...(result.taskResult.artifactRefs ?? []), artifactRef],
-      meta: {
-        ...result.taskResult.meta,
-        surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "interactive" as const])),
-        interactiveSurfaceKind: "webapp",
-      },
-    };
-    result.structuredOutput = {
-      ...(result.structuredOutput ?? {}),
-      artifactRefs: result.taskResult.artifactRefs,
-    };
-    appendTrajectory({
-      type: "system",
-      status: "completed",
-      title: "已生成可执行小应用",
-      thought: webapp.title,
-      endedAt: new Date().toISOString(),
+      persist: () =>
+        persistWebAppArtifact({
+          conversationId,
+          taskId: input.task.id,
+          instanceId: input.instance.id,
+          runtimeJobId: `job-${input.instance.id}`,
+          title: webapp.title,
+          description: webapp.description || result.summary,
+          html: webapp.html,
+          initialState: webapp.initialState,
+          networkPolicy: webapp.networkPolicy,
+        }),
     });
   } else if (expectedSurfaces.includes("interactive") && externalEmbed && result.taskResult) {
     const conversationId = input.goal.conversationId ?? `goal-${input.goal.id}`;
-    appendTrajectory({
-      type: "system",
-      status: "running",
-      title: "正在写入外部嵌入",
+    applyInteractiveArtifactResult({
+      result,
+      appendTrajectory,
+      runningTitle: "正在写入外部嵌入",
+      completedTitle: "已生成外部嵌入",
       thought: externalEmbed.title,
-    });
-    const artifact = persistExternalEmbedArtifact({
-      conversationId,
-      taskId: input.task.id,
-      instanceId: input.instance.id,
-      runtimeJobId: `job-${input.instance.id}`,
-      label: externalEmbed.title,
-      summary: externalEmbed.description || result.summary,
-      url: externalEmbed.url,
-    });
-    const artifactRef = toArtifactRef(artifact);
-    result.taskResult = {
-      ...result.taskResult,
-      artifactRefs: [...(result.taskResult.artifactRefs ?? []), artifactRef],
-      meta: {
-        ...result.taskResult.meta,
-        surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "interactive" as const])),
-        interactiveSurfaceKind: "webapp",
-      },
-    };
-    result.structuredOutput = {
-      ...(result.structuredOutput ?? {}),
-      artifactRefs: result.taskResult.artifactRefs,
-    };
-    appendTrajectory({
-      type: "system",
-      status: "completed",
-      title: "已生成外部嵌入",
-      thought: externalEmbed.title,
-      endedAt: new Date().toISOString(),
+      persist: () =>
+        persistExternalEmbedArtifact({
+          conversationId,
+          taskId: input.task.id,
+          instanceId: input.instance.id,
+          runtimeJobId: `job-${input.instance.id}`,
+          label: externalEmbed.title,
+          summary: externalEmbed.description || result.summary,
+          url: externalEmbed.url,
+        }),
     });
   } else if (webapp) {
     appendGoalLog({
@@ -2991,6 +3002,14 @@ export async function runGoalTask(input: RunGoalTaskInput) {
     agentRunFinalized = true;
     finishGoalTaskAgentRun(agentRunId, status);
   };
+  // 本任务执行链路上 telemetry / 日志的公共定位字段，避免在每个调用点重复手填。
+  const telemetryContext = {
+    requestId: input.requestId,
+    scope: "goal_task_execute" as const,
+    goalId: input.goal.id,
+    taskId: input.task.id,
+    taskInstanceId: input.instance.id,
+  };
   appendGoalTaskAgentEvent(tracedInput, "message", {
     phase: "goal_task_started",
     runtimeJobId: getGoalTaskRuntimeJobId(tracedInput),
@@ -2998,13 +3017,9 @@ export async function runGoalTask(input: RunGoalTaskInput) {
   });
   try {
   beginGoalTelemetry({
-    requestId: tracedInput.requestId,
-    scope: "goal_task_execute",
+    ...telemetryContext,
     phase: "executing",
     message: `KiKi 已自动启动任务「${tracedInput.task.title.replace(/^任务\d+：/, "")}」`,
-    goalId: tracedInput.goal.id,
-    taskId: tracedInput.task.id,
-    taskInstanceId: tracedInput.instance.id,
     attemptCount: 1,
   });
 
@@ -3075,39 +3090,27 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       notificationDecision,
     } satisfies Record<string, unknown>;
     updateGoalTelemetry({
-      requestId: input.requestId,
-      scope: "goal_task_execute",
+      ...telemetryContext,
       phase: "reviewing",
       message: readiness.summary,
-      goalId: input.goal.id,
-      taskId: input.task.id,
-      taskInstanceId: input.instance.id,
       attemptCount: 1,
       summary: result.summary,
       resultPayload,
     });
     finishGoalTelemetry({
-      requestId: input.requestId,
-      scope: "goal_task_execute",
+      ...telemetryContext,
       phase: "reviewing",
       message: "任务执行已暂停，等待用户补充必要信息",
-      goalId: input.goal.id,
-      taskId: input.task.id,
-      taskInstanceId: input.instance.id,
       summary: result.summary,
       resultPayload,
     });
     appendGoalLog({
-      requestId: input.requestId,
-      scope: "goal_task_execute",
+      ...telemetryContext,
       level: "info",
       phase: "reviewing",
       message: readiness.summary,
       eventType: "await_user",
       status: "awaiting_user",
-      goalId: input.goal.id,
-      taskId: input.task.id,
-      taskInstanceId: input.instance.id,
     });
     if (blocker) {
       updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
@@ -3177,28 +3180,20 @@ export async function runGoalTask(input: RunGoalTaskInput) {
           errorCategory: "logic",
         } satisfies Record<string, unknown>;
         failGoalTelemetry({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
+          ...telemetryContext,
           phase: "reviewing",
           message: "任务缺少组件化产出，未完成",
           error: errorMessage,
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
           summary: result.summary,
           resultPayload: failedResultPayload,
         });
         appendGoalLog({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
+          ...telemetryContext,
           level: "error",
           phase: "reviewing",
           message: "任务未产出可视化组件结果，已标记为未完成",
           details: errorMessage,
           status: "failed",
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
         });
         updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
           result: failedResultPayload,
@@ -3215,52 +3210,36 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       }
       if (result.awaitingUser) {
         updateGoalTelemetry({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
+          ...telemetryContext,
           phase: "reviewing",
           message: result.awaitingReason || "任务需要用户参与后才能继续",
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
           attemptCount,
           summary: result.summary,
           resultPayload,
         });
         appendGoalLog({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
+          ...telemetryContext,
           level: "info",
           phase: "reviewing",
           message: result.awaitingReason || "Agent 等待用户参与",
           eventType: "await_user",
           status: "awaiting_user",
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
         });
       }
       finishGoalTelemetry({
-        requestId: input.requestId,
-        scope: "goal_task_execute",
+        ...telemetryContext,
         phase: result.awaitingUser ? "reviewing" : "completed",
         message: result.awaitingUser ? "任务执行已暂停，等待用户参与" : "任务执行完成",
-        goalId: input.goal.id,
-        taskId: input.task.id,
-        taskInstanceId: input.instance.id,
         summary: result.summary,
         resultPayload,
       });
       appendGoalLog({
-        requestId: input.requestId,
-        scope: "goal_task_execute",
+        ...telemetryContext,
         level: "info",
         phase: result.awaitingUser ? "reviewing" : "completed",
         message: result.summary,
         eventType: "result_ready",
         status: result.awaitingUser ? "awaiting_user" : "completed",
-        goalId: input.goal.id,
-        taskId: input.task.id,
-        taskInstanceId: input.instance.id,
       });
       appendGoalTaskAgentEvent(enhancedInput, "decision", {
         phase: result.awaitingUser ? "goal_task_awaiting_user" : "goal_task_completed",
@@ -3279,57 +3258,41 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       });
       if (shouldRetry(category, attemptCount)) {
         appendGoalLog({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
+          ...telemetryContext,
           level: "warn",
           phase: "executing",
           message: `执行失败，准备自动重试第 ${attemptCount + 1} 次`,
           details: errorMessage,
           eventType: "retry_scheduled",
           status: "running",
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
         });
         updateGoalTelemetry({
-          requestId: input.requestId,
-          scope: "goal_task_execute",
+          ...telemetryContext,
           phase: "executing",
           message: `遇到瞬时错误，准备自动重试第 ${attemptCount + 1} 次`,
           details: errorMessage,
-          goalId: input.goal.id,
-          taskId: input.task.id,
-          taskInstanceId: input.instance.id,
           attemptCount: attemptCount + 1,
         });
         attemptCount += 1;
         continue;
       }
       failGoalTelemetry({
-        requestId: input.requestId,
-        scope: "goal_task_execute",
+        ...telemetryContext,
         phase: "error",
         message: "任务执行失败",
         error: errorMessage,
-        goalId: input.goal.id,
-        taskId: input.task.id,
-        taskInstanceId: input.instance.id,
         resultPayload: {
           errorCategory: category,
           errorMessage,
         },
       });
       appendGoalLog({
-        requestId: input.requestId,
-        scope: "goal_task_execute",
+        ...telemetryContext,
         level: "error",
         phase: "error",
         message: "任务执行失败",
         details: errorMessage,
         status: "failed",
-        goalId: input.goal.id,
-        taskId: input.task.id,
-        taskInstanceId: input.instance.id,
       });
       finishCurrentAgentRun("failed");
       throw error;

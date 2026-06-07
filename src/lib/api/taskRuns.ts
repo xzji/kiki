@@ -2,7 +2,7 @@ import { sleep } from "@/lib/utils";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
 function createTaskRequestId() {
   return `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -239,6 +239,7 @@ export async function submitTaskResultFeedback(input: {
     instanceId: string;
   };
   runtimeEnv?: RuntimeEnvironment;
+  quotedMessage?: QuotedConversationMessageContext;
 }) {
   const response = await fetch("/api/goals/tasks/feedback", {
     method: "POST",
@@ -281,4 +282,106 @@ export async function submitTaskResultFeedback(input: {
     taskInstanceId: data.taskInstanceId,
     taskCardMessage: data.taskCardMessage,
   };
+}
+
+export async function judgeConversationGovernance(input: {
+  message: string;
+  conversationId: string;
+  runtimeEnv: RuntimeEnvironment;
+  source: "assistant-sidebar" | "conversation";
+  workspaceMode?: "conversation" | "task";
+  taskRef?: {
+    goalId: string;
+    subGoalId: string;
+    taskId: string;
+    instanceId: string;
+  };
+  contextSnapshot?: {
+    conversation: import("@/types/kiki").Conversation;
+    goal?: import("@/types/kiki").Goal | null;
+  };
+  quotedMessage?: QuotedConversationMessageContext | null;
+}) {
+  const response = await fetch("/api/governance/judge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json()) as {
+    ok?: boolean;
+    reason?: string;
+    shouldHandle?: boolean;
+    proposal?: {
+      intent: string;
+      supported: boolean;
+      confirmLevel: "required" | "light";
+      summary: string;
+      diffs?: Array<{ field: string; before: string; after: string }>;
+      payload?: {
+        intent: string;
+        taskRef?: {
+          goalId: string;
+          subGoalId: string;
+          taskId: string;
+          instanceId?: string;
+        } | null;
+        patch?: unknown;
+        revisionHint?: string;
+      };
+    } | null;
+  };
+  if (!response.ok || !data.ok) {
+    throw new Error(data.reason || "治理意图判断失败");
+  }
+  return data;
+}
+
+export async function applyConversationGovernance(input: {
+  conversationId: string;
+  intent: string;
+  taskRef: {
+    goalId: string;
+    subGoalId: string;
+    taskId: string;
+    instanceId?: string;
+  };
+  patch?: unknown;
+  revisionHint?: string;
+  userMessage: string;
+  runtimeEnv?: RuntimeEnvironment;
+  quotedMessage?: QuotedConversationMessageContext | null;
+  idempotencyKey: string;
+}) {
+  const response = await fetch("/api/governance/apply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json()) as {
+    ok?: boolean;
+    reason?: string;
+    unsupported?: boolean;
+    assistantMessage?: string;
+    taskInstanceId?: string;
+    taskCardMessage?: {
+      content?: string;
+      taskRef: {
+        goalId: string;
+        subGoalId: string;
+        taskId: string;
+        instanceId: string;
+      };
+      taskSnapshot?: {
+        task: Task;
+        instance: TaskInstance;
+      };
+    };
+  };
+  if (!response.ok || !data.ok) {
+    throw new Error(data.reason || "治理命令执行失败");
+  }
+  return data;
 }

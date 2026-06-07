@@ -226,6 +226,13 @@ export type TaskExpectedResult = {
   completionCriteria?: string;
 };
 
+export type TaskSpec = {
+  content: string;
+  generatedAt: string;
+  sourceRevision: string;
+  stale?: boolean;
+};
+
 export type TaskExecutionStep = {
   id: string;
   title: string;
@@ -388,6 +395,7 @@ export type Task = {
   autoRunDisabled?: boolean;
   requiresConfirmation?: boolean;
   collaboration?: TaskCollaborationRequirements;
+  taskSpec?: TaskSpec;
 };
 
 export type ThreadGovernanceStatus = "active" | "paused" | "archived";
@@ -489,6 +497,19 @@ export type KikiMessage = {
  * - text：纯文本（KiKi 或用户发言）
  * - task_card：KiKi 推送的任务执行消息，带任务卡片
  */
+export type ConversationMessageQuote = {
+  roleLabel: string;
+  content: string;
+  messageId?: string;
+  messageKind?: "text" | "goal_plan_card" | "task_card";
+  taskRef?: {
+    goalId: string;
+    subGoalId: string;
+    taskId: string;
+    instanceId: string;
+  };
+};
+
 export type ConversationMessage =
   | {
       id: string;
@@ -500,6 +521,7 @@ export type ConversationMessage =
       status?: "streaming" | "done" | "error";
       source?: "user" | "kiki" | "system";
       sagaRequestId?: string;
+      quotedMessage?: ConversationMessageQuote;
     }
   | {
       id: string;
@@ -536,6 +558,35 @@ export type ConversationMessage =
       taskSnapshot?: {
         task: Task;
         instance: TaskInstance;
+      };
+    }
+  | {
+      id: string;
+      kind: "governance_confirmation";
+      role: "kiki";
+      content: string;
+      createdAt: string;
+      unread?: boolean;
+      status?: "streaming" | "done" | "error";
+      source?: "user" | "kiki" | "system";
+      governance: {
+        status: "pending" | "confirmed" | "cancelled" | "applied" | "error";
+        summary: string;
+        diffs?: Array<{ field: string; before: string; after: string }>;
+        payload: {
+          intent: string;
+          taskRef?: {
+            goalId: string;
+            subGoalId: string;
+            taskId: string;
+            instanceId?: string;
+          } | null;
+          patch?: unknown;
+          revisionHint?: string;
+        };
+        userMessage: string;
+        quotedMessage?: ConversationMessageQuote;
+        error?: string;
       };
     };
 
@@ -597,6 +648,7 @@ export type GoalBreakdownDraft = {
       autoRunDisabled?: boolean;
       requiresConfirmation?: boolean;
       collaboration?: TaskCollaborationRequirements;
+      taskSpec?: TaskSpec;
     }[];
   }[];
 };

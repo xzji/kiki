@@ -255,7 +255,13 @@ export function createDefaultTopicInitSagaInvokes(
     validator: passthroughValidator,
   });
 
-  return { interview, plan, critic, refine, present };
+  const spec = createClaudeJsonInvoke({
+    ...baseConfig,
+    validator: passthroughValidator,
+    degradedFallback: () => ({ specs: [] }),
+  });
+
+  return { interview, plan, critic, refine, spec, present };
 }
 
 export type RunTopicInitSagaWithDefaultsInput = TopicInitSagaSeed & {
@@ -357,6 +363,7 @@ export async function runTopicInitSagaWithDefaults(
   return runTopicInitSaga({
     sagaInstanceId: sagaInstance.id,
     topicId: input.topicId,
+    goalContext: { goalTitle: input.topicText, goalSummary: input.conversationContext },
     prompts,
     invokes,
     maxRefineLoops: input.maxRefineLoops,

@@ -31,6 +31,12 @@ function resolveRequiredBlocks(task: Task) {
     : (["heading", "paragraph"] as const);
 }
 
+function renderTaskSpecSection(task: Task) {
+  if (!task.taskSpec?.content) return "";
+  const staleNotice = task.taskSpec.stale ? "\n\n> 注意：任务定义已更新，此规格可能需要人工复核。" : "";
+  return `\n## 任务内容规格\n${task.taskSpec.content}${staleNotice}\n`;
+}
+
 function formatExpectedResult(task: Task) {
   const expectedResult = task.expectedResult;
   const normalizedPresentation = normalizeResultPresentation(expectedResult);
@@ -208,6 +214,7 @@ ${resumeContext ? `\n用户恢复上下文（必须纳入本轮执行）：\n${r
 任务标题：${task.title}
 任务描述：${task.description}
 任务执行目标：${task.executionObjective || task.description}
+${renderTaskSpecSection(task)}
 建议工作目录：${context.workspace?.taskWorkspaceDir || task.recommendedWorkingDirectory || "使用 Runtime 当前 working directory"}
 ${renderWorkspaceHint(context)}
 依赖任务：

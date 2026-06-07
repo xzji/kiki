@@ -26,16 +26,18 @@ import {
   type ApplyGoalCommandResult,
   type GoalCommand,
 } from "@/lib/server/services/goalCommandService";
-import type { ExecutionKind, Goal, Task } from "@/types/kiki";
+import type { ExecutionKind, Goal, Task, TaskExpectedResult, TaskSpec } from "@/types/kiki";
 
 type TaskCommandInput = {
   title: string;
   description?: string;
   expectedOutcome: string;
+  expectedResult?: TaskExpectedResult;
   taskType: Task["taskType"];
   triggerRule: string;
   deadline?: string;
   executionKind: ExecutionKind;
+  taskSpec?: TaskSpec;
 };
 
 /**

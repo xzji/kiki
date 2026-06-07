@@ -29,6 +29,7 @@ import { runAgentRunCommandServiceSpecs } from "../src/lib/server/services/agent
 import { runLegacyGoalToTopicSpecs } from "../src/lib/migration/legacyGoalToTopic.spec";
 import { runSchemaSpecs } from "../src/lib/server/db/schema.spec";
 import { runGoalCommandServiceSpecs } from "../src/lib/server/services/goalCommandService.spec";
+import { runTaskPatchMergeSpecs } from "../src/lib/server/governance/taskPatchMerge.spec";
 import { runGoalRuntimeServiceSpecs } from "../src/lib/server/services/goalRuntimeService.spec";
 import { runTopicCommandServiceSpecs } from "../src/lib/server/services/topicCommandService.spec";
 import { runTopicInitSagaSpecs } from "../src/lib/server/goalPlanning/topicInitSaga.spec";
@@ -48,6 +49,7 @@ import { runDispatchTaskFromThreadSpecs } from "../src/lib/server/services/dispa
 import { runThreadLoopDaemonSpecs } from "../src/lib/server/scheduler/threadLoopDaemon.spec";
 import { runDevPanelDataSpecs } from "../src/lib/server/repositories/agentRuntime/sagaInstancesRepository.spec";
 import { runDaemonRunnerSpecs } from "../src/lib/daemon/daemonRunner.spec";
+import { runSpecWriterSpecs } from "../src/lib/server/taskExecution/runSpecWriter.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -78,6 +80,7 @@ runAgentRunCommandServiceSpecs();
 runLegacyGoalToTopicSpecs();
 runSchemaSpecs();
 runGoalCommandServiceSpecs();
+runTaskPatchMergeSpecs();
 runGoalRuntimeServiceSpecs();
 runTopicCommandServiceSpecs();
 runSagaDraftAdapterSpecs();
@@ -89,6 +92,7 @@ runDaemonRunnerSpecs();
 (async () => {
   await runAgentExecutorSpecs();
   await runClaudeJsonInvokeSpecs();
+  await runSpecWriterSpecs();
   await runTopicInitSagaSpecs();
   await runTopicInitSagaDefaultsSpecs();
   await runThreadsRepositorySpecs();

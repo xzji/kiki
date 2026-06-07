@@ -1,4 +1,5 @@
 import type { TopicInitSagaResult } from "@/lib/server/goalPlanning/topicInitSaga";
+import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
 import type { GoalAnalysis, GoalBreakdownDraft, TaskPriority } from "@/types/kiki";
 
 type LooseRecord = Record<string, unknown>;
@@ -65,8 +66,10 @@ function normalizeDependencies(value: unknown) {
 function normalizeTask(
   value: unknown,
   index: number,
+  context: { subGoalId: string; specs?: Record<string, string> },
 ): GoalBreakdownDraft["subGoals"][number]["tasks"][number] {
   const record = asRecord(value) ?? {};
+  const id = String(record.id ?? record.index ?? index + 1);
   const title = readString(record.title) ?? `任务 ${index + 1}`;
   const description = readString(record.description) ?? readString(record.objective) ?? title;
   const expectedOutcome = readString(record.expectedOutcome) ?? readString(record.deliverable) ?? description;
@@ -75,23 +78,39 @@ function normalizeTask(
     readString(record.cadence) ??
     (readString(record.triggerCondition) ? `满足条件：${readString(record.triggerCondition)}` : undefined) ??
     "手动触发";
+  const taskType =
+    record.taskType === "repeat" || readString(record.cadence) || readString(record.triggerCondition)
+      ? "repeat"
+      : "one_shot";
+  const specContent = context.specs?.[`${context.subGoalId}#${id}`];
   return {
-    id: String(record.id ?? record.index ?? index + 1),
+    id,
     title,
     description,
     expectedOutcome,
-    taskType:
-      record.taskType === "repeat" || readString(record.cadence) || readString(record.triggerCondition)
-        ? "repeat"
-        : "one_shot",
+    taskType,
     triggerRule,
     executionKind: "generic_result",
     priority: normalizePriority(record.priority ?? record.priorityHint),
+    taskSpec: specContent
+      ? {
+          content: specContent,
+          generatedAt: new Date().toISOString(),
+          sourceRevision: computeTaskSpecSourceRevision({
+            title,
+            description,
+            expectedOutcome,
+            taskType,
+            triggerRule,
+          }),
+        }
+      : undefined,
   };
 }
 
 function normalizeSubGoals(
   value: unknown,
+  specs?: Record<string, string>,
 ): GoalBreakdownDraft["subGoals"] {
   if (!Array.isArray(value)) return [];
   return value
@@ -106,7 +125,7 @@ function normalizeSubGoals(
       const description = readString(record.description) ?? readString(record.intent);
       const successCriteria = normalizeSuccessCriteria(record.successCriteria);
       const rawTasks = Array.isArray(record.tasks) ? record.tasks : [];
-      const tasks = rawTasks.map((task, taskIndex) => normalizeTask(task, taskIndex));
+      const tasks = rawTasks.map((task, taskIndex) => normalizeTask(task, taskIndex, { subGoalId: id, specs }));
       return {
         id,
         title,
@@ -144,7 +163,7 @@ export function adaptTopicInitSagaToGoalDraft(input: {
     throw new Error("TopicInitSaga 缺少 Presenter 产物，无法生成规划草案");
   }
 
-  const subGoals = normalizeSubGoals(plan.subGoals ?? plan.threads);
+  const subGoals = normalizeSubGoals(plan.subGoals ?? plan.threads, input.result.artifacts.specs);
   if (subGoals.length === 0) {
     throw new Error("TopicInitSaga 未返回任何可落库的子目标/线程");
   }

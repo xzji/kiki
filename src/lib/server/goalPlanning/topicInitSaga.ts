@@ -23,6 +23,8 @@ import { findSagaInstanceById } from "@/lib/server/repositories/agentRuntime/sag
 import type { SagaInstance } from "@/types/agentRuntime";
 
 import { executeAgentRun, type LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
+import { runSpecWriter } from "@/lib/server/taskExecution/runSpecWriter";
+import type { SpecWriterTaskInput } from "@/lib/server/taskExecution/taskSpecPrompt";
 import {
   advanceSaga,
   markAwaitingUser,
@@ -35,6 +37,7 @@ export type TopicInitSagaStep =
   | "plan"
   | "critic"
   | "refine"
+  | "spec"
   | "present"
   | "completed";
 
@@ -54,6 +57,7 @@ export type InterviewerDecisionPayload = {
 export type TopicInitSagaInput = {
   sagaInstanceId: string;
   topicId: string;
+  goalContext?: { goalTitle: string; goalSummary?: string };
   /** Initial prompt builders, one per role. Saga is agnostic to their content. */
   prompts: {
     interview: string;
@@ -71,6 +75,7 @@ export type TopicInitSagaInput = {
     plan: LlmInvoke;
     critic: LlmInvoke;
     refine: LlmInvoke;
+    spec: LlmInvoke;
     present: LlmInvoke;
   };
   /** Cap Critic↔Refiner loops to avoid runaway saga. Default 2. */
@@ -87,6 +92,7 @@ export type TopicInitSagaResult = {
     plan?: Record<string, unknown>;
     critic?: CriticDecisionPayload;
     refinedPlan?: Record<string, unknown>;
+    specs?: Record<string, string>;
     presentation?: Record<string, unknown>;
   };
   /** Number of Critic↔Refiner loops actually executed (0 means accept on first review). */
@@ -123,6 +129,49 @@ function asCriticDecision(value: unknown): CriticDecisionPayload {
     verdict,
     notes: typeof v.notes === "string" ? v.notes : undefined,
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function extractSpecTasksFromPlan(planParsed: Record<string, unknown>): SpecWriterTaskInput[] {
+  const subGoals = planParsed.subGoals ?? planParsed.threads;
+  if (!Array.isArray(subGoals)) return [];
+  return subGoals.flatMap((subGoal, subGoalIndex) => {
+    const subGoalRecord = asRecord(subGoal) ?? {};
+    const subGoalId = String(subGoalRecord.id ?? subGoalIndex + 1);
+    const tasks = Array.isArray(subGoalRecord.tasks) ? subGoalRecord.tasks : [];
+    return tasks.flatMap((task, taskIndex) => {
+      const record = asRecord(task) ?? {};
+      const rawTaskId = String(record.id ?? record.index ?? taskIndex + 1);
+      const title = readString(record.title) ?? `任务 ${taskIndex + 1}`;
+      const description = readString(record.description) ?? readString(record.objective) ?? title;
+      const expectedOutcome = readString(record.expectedOutcome) ?? readString(record.deliverable) ?? description;
+      const triggerRule =
+        readString(record.triggerRule) ??
+        readString(record.cadence) ??
+        (readString(record.triggerCondition) ? `满足条件：${readString(record.triggerCondition)}` : undefined) ??
+        "手动触发";
+      return [{
+        taskId: `${subGoalId}#${rawTaskId}`,
+        title,
+        description,
+        expectedOutcome,
+        taskType:
+          record.taskType === "repeat" || readString(record.cadence) || readString(record.triggerCondition)
+            ? "repeat"
+            : "one_shot",
+        triggerRule,
+        expectedResult: (asRecord(record.expectedResult) as SpecWriterTaskInput["expectedResult"]) ?? undefined,
+        collaboration: (asRecord(record.collaboration) as SpecWriterTaskInput["collaboration"]) ?? undefined,
+      }];
+    });
+  });
 }
 
 async function runRole(input: {
@@ -266,7 +315,26 @@ export async function runTopicInitSaga(
     refineLoops += 1;
   }
 
-  // --- 5. Presenter ---
+  // --- 5. Spec Writer ---
+  try {
+    advanceSaga({ sagaInstanceId: input.sagaInstanceId, toStep: "spec" });
+    const specTasks = extractSpecTasksFromPlan(currentPlan);
+    if (specTasks.length > 0) {
+      const specResult = await runSpecWriter({
+        tasks: specTasks,
+        goalContext: input.goalContext ?? { goalTitle: input.topicId },
+        attribution: { topicId: input.topicId, sagaInstanceId: input.sagaInstanceId },
+        invoke: input.invokes.spec,
+      });
+      if (specResult.specs.length > 0) {
+        artifacts.specs = Object.fromEntries(specResult.specs.map((spec) => [spec.taskId, spec.content]));
+      }
+    }
+  } catch {
+    // Task specs are an enhancement; planning should continue when generation fails.
+  }
+
+  // --- 6. Presenter ---
   try {
     advanceSaga({ sagaInstanceId: input.sagaInstanceId, toStep: "present" });
     artifacts.presentation = await runRole({

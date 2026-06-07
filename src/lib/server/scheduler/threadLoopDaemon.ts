@@ -39,7 +39,7 @@ export type ThreadLoopDaemonConfig = {
   /** stop() 等待 in-flight tick 的最长时间，默认 30_000ms。 */
   stopTimeoutMs?: number;
   /** 自定义 callbacks 工厂（默认使用仓库层装配工厂）。 */
-  buildCallbacks?: (frameStartedAt: Date) => ThreadLoopFrameCallbacks;
+  buildCallbacks?: (frameStartedAt: Date, invoke?: LlmInvoke) => ThreadLoopFrameCallbacks;
 };
 
 export type ThreadLoopDaemonDeps = {
@@ -74,7 +74,7 @@ export function createThreadLoopDaemon(
 
   const tickOnce = async (): Promise<ThreadLoopFrameOutcome> => {
     const now = clock();
-    const callbacks = buildCallbacks(now);
+    const callbacks = buildCallbacks(now, deps.invoke);
     const outcome = await runThreadLoopFrame({
       now,
       invoke: deps.invoke,

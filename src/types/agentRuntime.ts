@@ -16,7 +16,8 @@ export type AgentRunRole =
   | "refiner"
   | "presenter"
   | "thread_runner"
-  | "goal_task";
+  | "goal_task"
+  | "spec_writer";
 
 export type AgentRunStatus =
   | "pending"

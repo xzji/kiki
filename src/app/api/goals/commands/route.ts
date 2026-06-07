@@ -8,7 +8,7 @@ import {
   type GoalCommand,
 } from "@/lib/server/services/goalCommandService";
 import { normalizeExecutionKind } from "@/types/kiki";
-import type { Goal, Task } from "@/types/kiki";
+import type { Goal, Task, TaskExpectedResult } from "@/types/kiki";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,10 +38,12 @@ function parseTaskInput(value: unknown) {
   if (!title || !expectedOutcome || !taskType || !triggerRule) return null;
   const description = typeof record.description === "string" ? record.description : undefined;
   const deadline = typeof record.deadline === "string" ? record.deadline : undefined;
+  const expectedResult = asRecord(record.expectedResult) ? (record.expectedResult as TaskExpectedResult) : undefined;
   return {
     title,
     description,
     expectedOutcome,
+    expectedResult,
     taskType,
     triggerRule,
     deadline,

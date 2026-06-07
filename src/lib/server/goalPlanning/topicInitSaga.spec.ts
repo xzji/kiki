@@ -53,9 +53,12 @@ export async function runTopicInitSagaSpecs() {
       prompts: buildPrompts(),
       invokes: {
         interview: constInvoke({ collectedInfo: { goal: "x" } }),
-        plan: constInvoke({ threads: [{ id: "t1" }] }),
+        plan: constInvoke({
+          threads: [{ id: "t1", tasks: [{ id: "1", title: "任务", objective: "完成任务", deliverable: "交付物" }] }],
+        }),
         critic: constInvoke({ verdict: "accept" } as CriticDecisionPayload),
         refine: constInvoke({}),
+        spec: constInvoke({ specs: [{ taskId: "t1#1", content: "## 任务目标\n生成规格" }] }),
         present: constInvoke({ goalTitle: "Topic A", summary: "..." }),
       },
     });
@@ -66,6 +69,7 @@ export async function runTopicInitSagaSpecs() {
     assert.ok(result.artifacts.interview, "happy: interview artifact recorded");
     assert.ok(result.artifacts.plan, "happy: plan artifact recorded");
     assert.equal(result.artifacts.critic?.verdict, "accept");
+    assert.deepEqual(result.artifacts.specs, { "t1#1": "## 任务目标\n生成规格" });
     assert.ok(result.artifacts.presentation, "happy: presentation artifact recorded");
     assert.equal(result.saga.status, "completed");
   }
@@ -96,6 +100,7 @@ export async function runTopicInitSagaSpecs() {
         plan: constInvoke({ threads: [{ id: "t1" }] }),
         critic: criticInvoke,
         refine: constInvoke({ threads: [{ id: "t1", refined: true }] }),
+        spec: constInvoke({ specs: [] }),
         present: constInvoke({ summary: "ok" }),
       },
       maxRefineLoops: 2,
@@ -126,6 +131,7 @@ export async function runTopicInitSagaSpecs() {
         plan: constInvoke({}),
         critic: constInvoke({ verdict: "accept" }),
         refine: constInvoke({}),
+        spec: constInvoke({ specs: [] }),
         present: constInvoke({}),
       },
     });
@@ -163,6 +169,7 @@ export async function runTopicInitSagaSpecs() {
         plan: constInvoke({ threads: [] }),
         critic: criticInvoke,
         refine: constInvoke({ threads: [{ refined: true }] }),
+        spec: constInvoke({ specs: [] }),
         present: constInvoke({ summary: "force-accepted" }),
       },
       maxRefineLoops: 1,
@@ -194,6 +201,7 @@ export async function runTopicInitSagaSpecs() {
         plan: planInvoke,
         critic: constInvoke({ verdict: "accept" }),
         refine: constInvoke({}),
+        spec: constInvoke({ specs: [] }),
         present: constInvoke({}),
       },
     });

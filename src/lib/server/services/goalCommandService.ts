@@ -10,16 +10,18 @@ import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import { writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
 import type { GoalEventRecord } from "@/types/goalEventLog";
 import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
-import type { ExecutionKind, Goal, GoalWorkflow, SubGoal, Task } from "@/types/kiki";
+import type { ExecutionKind, Goal, GoalWorkflow, SubGoal, Task, TaskExpectedResult, TaskSpec } from "@/types/kiki";
 
 type TaskCommandInput = {
   title: string;
   description?: string;
   expectedOutcome: string;
+  expectedResult?: TaskExpectedResult;
   taskType: Task["taskType"];
   triggerRule: string;
   deadline?: string;
   executionKind: ExecutionKind;
+  taskSpec?: TaskSpec;
 };
 
 export type GoalCommand =
@@ -232,6 +234,7 @@ function createTask(input: { subGoalId: string; task: TaskCommandInput; idempote
     title: task.title.startsWith("任务") ? task.title : `任务${input.index}：${task.title}`,
     description: task.description ?? "",
     expectedOutcome: task.expectedOutcome,
+    expectedResult: task.expectedResult,
     taskType: task.taskType,
     triggerRule: task.triggerRule,
     deadline: task.deadline,
@@ -241,7 +244,26 @@ function createTask(input: { subGoalId: string; task: TaskCommandInput; idempote
     resultViewKind: normalizeTaskResultViewKind(task.executionKind),
     executionStrategy: "agent_autonomous",
     executionObjective: task.description ?? "",
+    taskSpec: task.taskSpec,
   };
+}
+
+function hasTaskDefinitionChanged(task: Task, next: TaskCommandInput) {
+  return hashValue({
+    title: task.title,
+    description: task.description ?? "",
+    expectedOutcome: task.expectedOutcome,
+    expectedResult: task.expectedResult,
+    taskType: task.taskType,
+    triggerRule: task.triggerRule,
+  }) !== hashValue({
+    title: next.title,
+    description: next.description ?? "",
+    expectedOutcome: next.expectedOutcome,
+    expectedResult: next.expectedResult,
+    taskType: next.taskType,
+    triggerRule: next.triggerRule,
+  });
 }
 
 function applyCommandToGoals(goals: Goal[], command: GoalCommand, idempotencyKey: string) {
@@ -327,18 +349,25 @@ function applyCommandToGoals(goals: Goal[], command: GoalCommand, idempotencyKey
             ...subGoal,
             tasks: subGoal.tasks.map((task) =>
               normalizeTaskId(task.id) === normalizedTaskId
-                ? {
-                    ...task,
-                    title: nextTaskInput.title,
-                    description: nextTaskInput.description ?? "",
-                    expectedOutcome: nextTaskInput.expectedOutcome,
-                    taskType: nextTaskInput.taskType,
-                    triggerRule: nextTaskInput.triggerRule,
-                    deadline: nextTaskInput.deadline,
-                    executionKind: nextTaskInput.executionKind,
-                    resultViewKind: normalizeTaskResultViewKind(nextTaskInput.executionKind),
-                    executionObjective: nextTaskInput.description ?? "",
-                  }
+                ? (() => {
+                    const definitionChanged = hasTaskDefinitionChanged(task, nextTaskInput);
+                    return {
+                      ...task,
+                      title: nextTaskInput.title,
+                      description: nextTaskInput.description ?? "",
+                      expectedOutcome: nextTaskInput.expectedOutcome,
+                      expectedResult: nextTaskInput.expectedResult,
+                      taskType: nextTaskInput.taskType,
+                      triggerRule: nextTaskInput.triggerRule,
+                      deadline: nextTaskInput.deadline,
+                      executionKind: nextTaskInput.executionKind,
+                      resultViewKind: normalizeTaskResultViewKind(nextTaskInput.executionKind),
+                      executionObjective: nextTaskInput.description ?? "",
+                      taskSpec:
+                        nextTaskInput.taskSpec ??
+                        (task.taskSpec && definitionChanged ? { ...task.taskSpec, stale: true } : task.taskSpec),
+                    };
+                  })()
                 : task,
             ),
           })),

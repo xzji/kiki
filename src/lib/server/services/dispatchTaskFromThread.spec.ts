@@ -18,6 +18,7 @@ import { deriveOpaqueId, normalizeSubGoalId } from "@/lib/opaqueIds";
 import type { Goal } from "@/types/kiki";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
 import type { DispatchTaskRequest } from "@/lib/server/thread/dispatchActions";
+import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
 import { dispatchTaskFromThread } from "./dispatchTaskFromThread";
 
@@ -136,5 +137,35 @@ export async function runDispatchTaskFromThreadSpecs() {
       () => dispatchTaskFromThread(makeRequest(), { idempotencyKey: "" }),
       /idempotencyKey required/,
     );
+  }
+
+  // 6. 传入 invoke 时生成 taskSpec；invoke 失败时不阻断创建。
+  {
+    const invoke: LlmInvoke = async () => ({
+      rawText: "{}",
+      parsed: { specs: [{ taskId: "0", content: "## 任务目标\n输出行情摘要" }] },
+    });
+    const result = await dispatchTaskFromThread(makeRequest(), {
+      idempotencyKey: "dispatch-with-spec",
+      invoke,
+    });
+    const task = readGoalsSnapshot([])[0]?.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((candidate) => candidate.id === result.taskId);
+    assert.equal(task?.taskSpec?.content, "## 任务目标\n输出行情摘要");
+    assert.ok(task?.taskSpec?.sourceRevision, "sourceRevision should be populated");
+  }
+
+  {
+    const result = await dispatchTaskFromThread(makeRequest(), {
+      idempotencyKey: "dispatch-spec-fallback",
+      invoke: async () => {
+        throw new Error("spec invoke failed");
+      },
+    });
+    const task = readGoalsSnapshot([])[0]?.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((candidate) => candidate.id === result.taskId);
+    assert.equal(task?.taskSpec, undefined);
   }
 }

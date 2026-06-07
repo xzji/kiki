@@ -2,7 +2,7 @@
 
 import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import type { GoalEventRecord } from "@/types/goalEventLog";
-import type { ExecutionKind, Goal, Task, TaskInstanceStatus } from "@/types/kiki";
+import type { ExecutionKind, Goal, Task, TaskExpectedResult, TaskInstanceStatus } from "@/types/kiki";
 
 export class GoalCommandError extends Error {
   constructor(
@@ -27,6 +27,7 @@ type TaskCommandInput = {
   title: string;
   description?: string;
   expectedOutcome: string;
+  expectedResult?: TaskExpectedResult;
   taskType: Task["taskType"];
   triggerRule: string;
   deadline?: string;

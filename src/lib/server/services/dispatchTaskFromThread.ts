@@ -18,7 +18,12 @@
  */
 
 import { deriveOpaqueId, normalizeGoalId, normalizeSubGoalId } from "@/lib/opaqueIds";
+import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
+import { mergeTaskPatch } from "@/lib/server/governance/taskPatchMerge";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { applyTopicCommand } from "@/lib/server/services/topicCommandService";
+import { runSpecWriter } from "@/lib/server/taskExecution/runSpecWriter";
+import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
 import type {
   CancelTaskRequest,
   DispatchTaskRequest,
@@ -26,7 +31,7 @@ import type {
 } from "@/lib/server/thread/dispatchActions";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
 import { normalizeConcreteTriggerRule } from "@/lib/taskTriggerTime";
-import { normalizeExecutionKind, type Task } from "@/types/kiki";
+import { normalizeExecutionKind, type Task, type TaskSpec } from "@/types/kiki";
 
 export type DispatchTaskFromThreadResult = {
   taskId: string;
@@ -85,7 +90,7 @@ function inferTaskTiming(draft: Partial<TaskDraft>, fallback?: Pick<Task, "taskT
   };
 }
 
-function buildTaskCommandInput(draft: TaskDraft) {
+function buildTaskCommandInput(draft: TaskDraft, taskSpec?: TaskSpec) {
   const description = descriptionFromDraft(draft, draft.title);
   const timing = inferTaskTiming(draft);
   return {
@@ -95,21 +100,53 @@ function buildTaskCommandInput(draft: TaskDraft) {
     taskType: timing.taskType,
     triggerRule: timing.triggerRule,
     executionKind: normalizeExecutionKind(undefined),
+    taskSpec,
   };
 }
 
-function buildMergedTaskCommandInput(task: Task, patch: Partial<TaskDraft>) {
-  const description = descriptionFromDraft(patch, task.description);
-  const timing = inferTaskTiming(patch, task);
-  return {
-    title: patch.title?.trim() || task.title,
-    description,
-    expectedOutcome: patch.deliverable?.trim() || task.expectedOutcome,
-    taskType: timing.taskType,
-    triggerRule: timing.triggerRule,
-    deadline: task.deadline,
-    executionKind: normalizeExecutionKind(task.executionKind),
-  };
+function findTopicTitle(topicId: string) {
+  const normalizedTopicId = normalizeGoalId(topicId);
+  return readGoalsSnapshot([]).find((goal) => normalizeGoalId(goal.id) === normalizedTopicId)?.title;
+}
+
+async function buildTaskSpecForDraft(input: {
+  request: DispatchTaskRequest;
+  invoke?: LlmInvoke;
+}): Promise<TaskSpec | undefined> {
+  if (!input.invoke) return undefined;
+  try {
+    const draft = input.request.taskDraft;
+    const description = descriptionFromDraft(draft, draft.title);
+    const timing = inferTaskTiming(draft);
+    const result = await runSpecWriter({
+      tasks: [{
+        taskId: "0",
+        title: draft.title || "未命名任务",
+        description,
+        expectedOutcome: draft.deliverable || description || draft.title,
+        taskType: timing.taskType,
+        triggerRule: timing.triggerRule,
+      }],
+      goalContext: { goalTitle: findTopicTitle(input.request.topicId) ?? draft.title ?? input.request.topicId },
+      attribution: { topicId: input.request.topicId, threadId: input.request.threadId },
+      invoke: input.invoke,
+    });
+    const content = result.specs[0]?.content;
+    if (!content) return undefined;
+    return {
+      content,
+      generatedAt: new Date().toISOString(),
+      sourceRevision: computeTaskSpecSourceRevision({
+        title: draft.title || "未命名任务",
+        description,
+        expectedOutcome: draft.deliverable || description || draft.title,
+        taskType: timing.taskType,
+        triggerRule: timing.triggerRule,
+      }),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -125,7 +162,7 @@ function buildMergedTaskCommandInput(task: Task, patch: Partial<TaskDraft>) {
  */
 export async function dispatchTaskFromThread(
   request: DispatchTaskRequest,
-  options: { idempotencyKey: string },
+  options: { idempotencyKey: string; invoke?: LlmInvoke },
 ): Promise<DispatchTaskFromThreadResult> {
   if (!request.threadId) {
     throw new Error("dispatchTaskFromThread: threadId required");
@@ -134,12 +171,14 @@ export async function dispatchTaskFromThread(
     throw new Error("dispatchTaskFromThread: idempotencyKey required");
   }
 
+  const taskSpec = await buildTaskSpecForDraft({ request, invoke: options.invoke });
+
   const result = applyTopicCommand({
     command: {
       type: "create_task",
       topicId: request.topicId,
       threadId: request.threadId,
-      task: buildTaskCommandInput(request.taskDraft),
+      task: buildTaskCommandInput(request.taskDraft, taskSpec),
     },
     idempotencyKey: options.idempotencyKey,
   });
@@ -186,7 +225,7 @@ export async function updateTaskFromThread(
       type: "update_task",
       topicId: request.topicId,
       taskId: request.taskId,
-      task: buildMergedTaskCommandInput(request.currentTask, request.patch),
+      task: mergeTaskPatch(request.currentTask, request.patch),
     },
     idempotencyKey: options.idempotencyKey,
   });
