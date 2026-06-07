@@ -16,7 +16,7 @@ import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { ensureConversationWorkspace, ensureTaskWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import { buildTaskQuoteContent } from "@/lib/taskFeedback";
 import { normalizeExecutionKind } from "@/types/kiki";
-import type { Goal, SubGoal, Task, TaskInstance, TaskInstanceStatus } from "@/types/kiki";
+import type { Goal, Task, TaskInstance, TaskInstanceStatus } from "@/types/kiki";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
 export type GovernanceApplyResult = {

@@ -6,10 +6,11 @@ import {
 } from "@/lib/server/runtime/stateSnapshot";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { readComposedGoalsSnapshotMeta } from "@/lib/server/runtime/instanceComposition";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+async function GETHandler() {
   const goals = readComposedGoalsSnapshotMeta([]);
   const runtimeEnvironments = readRuntimeEnvironmentsSnapshotMeta(INITIAL_RUNTIME_ENVIRONMENTS);
   const scheduleEvents = readScheduleEventsSnapshotMeta([]);
@@ -31,3 +32,5 @@ export async function GET() {
     },
   });
 }
+
+export const GET = withAuth(GETHandler);

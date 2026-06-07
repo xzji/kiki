@@ -13,6 +13,7 @@ import { buildTaskQuoteContent, getFeedbackHistory, withFeedbackRecord } from "@
 import type { TaskFeedbackRecord } from "@/lib/taskFeedback";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -147,7 +148,7 @@ function buildQueuedProgress(input: {
   };
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
   if (!body.conversationId || !body.taskRef || !body.message?.trim()) {
     return NextResponse.json({ reason: "反馈参数不完整" }, { status: 400 });
@@ -380,3 +381,5 @@ export async function POST(request: NextRequest) {
     },
   });
 }
+
+export const POST = withAuth(POSTHandler);

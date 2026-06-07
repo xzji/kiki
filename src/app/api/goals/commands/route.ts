@@ -9,6 +9,7 @@ import {
 } from "@/lib/server/services/goalCommandService";
 import { normalizeExecutionKind } from "@/types/kiki";
 import type { Goal, Task, TaskExpectedResult } from "@/types/kiki";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,7 +105,7 @@ function parseGoalCommand(value: unknown): GoalCommand | null {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const idempotencyKey = request.headers.get("Idempotency-Key")?.trim();
   if (!idempotencyKey) {
     return NextResponse.json({ ok: false, reason: "缺少 Idempotency-Key" }, { status: 400 });
@@ -145,3 +146,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "目标命令执行失败" }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

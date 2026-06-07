@@ -40,6 +40,8 @@ export type ThreadLoopDaemonConfig = {
   stopTimeoutMs?: number;
   /** 自定义 callbacks 工厂（默认使用仓库层装配工厂）。 */
   buildCallbacks?: (frameStartedAt: Date, invoke?: LlmInvoke) => ThreadLoopFrameCallbacks;
+  /** 每帧 tick 外包一层（多租户场景下注入用户上下文）。 */
+  wrapTick?: <T>(fn: () => Promise<T>) => Promise<T>;
 };
 
 export type ThreadLoopDaemonDeps = {
@@ -73,14 +75,16 @@ export function createThreadLoopDaemon(
   let inFlight = false;
 
   const tickOnce = async (): Promise<ThreadLoopFrameOutcome> => {
-    const now = clock();
-    const callbacks = buildCallbacks(now, deps.invoke);
-    const outcome = await runThreadLoopFrame({
-      now,
-      invoke: deps.invoke,
-      callbacks,
-    });
-    return outcome;
+    const run = async (): Promise<ThreadLoopFrameOutcome> => {
+      const now = clock();
+      const callbacks = buildCallbacks(now, deps.invoke);
+      return runThreadLoopFrame({
+        now,
+        invoke: deps.invoke,
+        callbacks,
+      });
+    };
+    return config.wrapTick ? config.wrapTick(run) : run();
   };
 
   const wrappedTick = async (): Promise<void> => {

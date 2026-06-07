@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import { resumeBlockedTask } from "@/lib/server/taskExecution/resumeBlockedTask";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = await request.json();
   const result = await resumeBlockedTask(body);
   return withDeprecatedApiHeaders(
@@ -14,3 +15,5 @@ export async function POST(request: NextRequest) {
     "/api/goals/instances/{instanceId}/respond",
   );
 }
+
+export const POST = withAuth(POSTHandler);

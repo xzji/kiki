@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { readRuntimeDaemonConfig, writeRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -8,7 +9,7 @@ type ConcurrencyPayload = {
   maxConcurrentTasks?: number;
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   try {
     const body = (await request.json()) as ConcurrencyPayload;
     if (typeof body.maxConcurrentTasks !== "number" || !Number.isFinite(body.maxConcurrentTasks)) {
@@ -32,3 +33,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

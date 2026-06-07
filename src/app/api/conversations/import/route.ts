@@ -6,11 +6,12 @@ import {
   importConversations,
 } from "@/lib/server/services/conversationCommandService";
 import type { Conversation } from "@/types/kiki";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as { conversations?: unknown };
   if (!Array.isArray(body.conversations)) {
     return NextResponse.json({ ok: false, reason: "缺少 conversations" }, { status: 400 });
@@ -28,3 +29,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "导入会话失败" }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

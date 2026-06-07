@@ -1,4 +1,5 @@
 import { migrateConversationIds } from "@/lib/opaqueIds";
+import { resolveCurrentUserId } from "@/lib/server/context/resolveUserId";
 import { getDatabase } from "@/lib/server/db/client";
 import { listConversationMessages } from "@/lib/server/repositories/conversationMessagesRepository";
 import type { Conversation, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
@@ -468,7 +469,7 @@ export function insertConversation(conversation: Conversation) {
       revision: 1,
       created_at: normalized.updatedAt || now,
       updated_at: normalized.updatedAt || now,
-      user_id: "local-user",
+      user_id: resolveCurrentUserId(),
     });
   return getConversation(normalized.id);
 }

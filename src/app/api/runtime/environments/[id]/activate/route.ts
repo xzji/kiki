@@ -4,6 +4,7 @@ import {
   applyRuntimeEnvironmentCommand,
   RuntimeEnvironmentCommandError,
 } from "@/lib/server/services/runtimeEnvironmentCommandService";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ function commandErrorResponse(error: RuntimeEnvironmentCommandError) {
   return NextResponse.json({ ok: false, reason: error.message, ...error.details }, { status: error.status });
 }
 
-export async function POST(request: NextRequest, { params }: Params) {
+async function POSTHandler(request: NextRequest, { params }: Params) {
   try {
     const { id } = params;
     const result = applyRuntimeEnvironmentCommand({
@@ -39,3 +40,5 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: false, reason: "Runtime 环境切换失败" }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

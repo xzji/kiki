@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { ConversationCommandValidationError, readConversationMessages } from "@/lib/server/services/conversationCommandService";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest, { params }: { params: { conversationId: string } }) {
+async function GETHandler(request: NextRequest, { params }: { params: { conversationId: string } }) {
   const { searchParams } = new URL(request.url);
   const afterSeq = Number(searchParams.get("after") ?? 0);
   const limit = Number(searchParams.get("limit") ?? 200);
@@ -23,3 +24,5 @@ export async function GET(request: NextRequest, { params }: { params: { conversa
     return NextResponse.json({ ok: false, reason: "读取会话消息失败" }, { status: 500 });
   }
 }
+
+export const GET = withAuth(GETHandler);

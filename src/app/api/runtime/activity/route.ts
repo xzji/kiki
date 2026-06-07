@@ -10,6 +10,7 @@ import {
   type RuntimeJobActivityRow,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { SagaInstance } from "@/types/agentRuntime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 /**
  * GET /api/runtime/activity — 任务执行情况监控面板的运行时执行源。
@@ -30,7 +31,7 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   const sinceIsoRaw = request.nextUrl.searchParams.get("sinceIso")?.trim();
   const sinceIso =
     sinceIsoRaw && !Number.isNaN(Date.parse(sinceIsoRaw))
@@ -52,3 +53,5 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export const GET = withAuth(GETHandler);

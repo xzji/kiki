@@ -5,10 +5,11 @@ import { readRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import { readRuntimeDaemonDeviceState, readRuntimeDaemonState } from "@/lib/daemon/daemonState";
 import { getDatabase, getDatabaseRuntimeInfo } from "@/lib/server/db/client";
 import { getLaunchAgentPlistPath } from "@/lib/server/storage/paths";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+async function GETHandler() {
   const config = readRuntimeDaemonConfig();
   const state = readRuntimeDaemonState();
   const device = readRuntimeDaemonDeviceState();
@@ -34,3 +35,5 @@ export async function GET() {
     launchAgentPath: getLaunchAgentPlistPath(),
   });
 }
+
+export const GET = withAuth(GETHandler);

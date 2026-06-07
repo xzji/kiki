@@ -14,6 +14,7 @@ import {
   writeTextFileAtomic,
 } from "@/lib/server/workspace/conversationWorkspace";
 import type { Conversation, Goal } from "@/types/kiki";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ type ContextRequest = {
   goal?: Goal | null;
 };
 
-export async function POST(request: NextRequest, context: { params: Promise<{ conversationId: string }> }) {
+async function POSTHandler(request: NextRequest, context: { params: Promise<{ conversationId: string }> }) {
   try {
     const { conversationId } = await context.params;
     const body = (await request.json()) as ContextRequest;
@@ -57,3 +58,5 @@ export async function POST(request: NextRequest, context: { params: Promise<{ co
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

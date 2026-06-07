@@ -12,6 +12,7 @@ import type {
 } from "@/lib/server/governance/governanceIntent";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { ClaudeChatRequest } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,7 +112,7 @@ function buildProposal(input: {
   };
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as ClaudeChatRequest;
   if (!body.conversationId || !body.message?.trim()) {
     return NextResponse.json(
@@ -190,3 +191,5 @@ export async function POST(request: NextRequest) {
     proposal,
   });
 }
+
+export const POST = withAuth(POSTHandler);

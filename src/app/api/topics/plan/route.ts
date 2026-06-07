@@ -4,6 +4,7 @@ import { runTopicInitSagaWithDefaults } from "@/lib/server/topicPlanning";
 import { adaptTopicInitSagaToGoalDraft } from "@/lib/server/goalPlanning/sagaDraftAdapter";
 import { ensureConversationWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ type RequestBody = {
   maxRefineLoops?: number;
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
   const topicText = body.topicText?.trim();
 
@@ -84,3 +85,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

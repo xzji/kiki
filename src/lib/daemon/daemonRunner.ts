@@ -1,3 +1,8 @@
+import {
+  DEFAULT_LOCAL_USER_ID,
+  hasUserContext,
+  runWithUserContext,
+} from "@/lib/server/context/userContext";
 import { readRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import { appendRuntimeDaemonLog, readRuntimeDaemonState, writeRuntimeDaemonState } from "@/lib/daemon/daemonState";
 import { getDatabase, getDatabaseRuntimeInfo } from "@/lib/server/db/client";
@@ -24,6 +29,11 @@ const RECONCILE_INTERVAL_MS = 30 * 1000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withDaemonUserContext<T>(fn: () => T): T {
+  if (hasUserContext()) return fn();
+  return runWithUserContext(DEFAULT_LOCAL_USER_ID, fn);
 }
 
 function selectLocalRuntimeEnv(): RuntimeEnvironment | null {
@@ -70,22 +80,25 @@ export async function runRuntimeDaemonLoop() {
   // 启动自检：记录 worker 实际打开的数据库路径与 inode，便于排查
   // 「worker 与前端读写不同物理文件」的 inode 漂移问题。
   try {
-    getDatabase();
-    const info = getDatabaseRuntimeInfo();
-    appendRuntimeDaemonLog(`db 自检：path=${info.path} inode=${info.inode}`);
+    withDaemonUserContext(() => {
+      getDatabase();
+      const info = getDatabaseRuntimeInfo();
+      appendRuntimeDaemonLog(`db 自检：path=${info.path} inode=${info.inode}`);
+    });
   } catch (err) {
     appendRuntimeDaemonLog(`db 自检失败 ${err instanceof Error ? err.message : String(err)}`);
   }
-  runRecoveryWorker();
+  withDaemonUserContext(() => runRecoveryWorker());
   // 启动时立即做一次对账，避免到首个 reconcile 节拍（30s）前 lease 过期任务无人回收。
   try {
-    reconcileRuntimeJobLeasesAndProjections();
+    withDaemonUserContext(() => reconcileRuntimeJobLeasesAndProjections());
   } catch (err) {
     appendRuntimeDaemonLog(
       `startup runtime job reconcile error ${err instanceof Error ? err.message : String(err)}`,
     );
   }
   setInterval(() => {
+    withDaemonUserContext(() => {
     const now = new Date().toISOString();
     const current = readRuntimeDaemonState();
     const dbInfo = getDatabaseRuntimeInfo();
@@ -100,6 +113,7 @@ export async function runRuntimeDaemonLoop() {
       dbInode: dbInfo.inode,
       updatedAt: now,
     });
+    });
   }, config.heartbeatIntervalMs);
 
   // ThreadLoopDaemon 在主循环之外独立 setInterval；它内部的 invoke
@@ -108,6 +122,7 @@ export async function runRuntimeDaemonLoop() {
     { invoke: buildThreadRunnerInvoke() },
     {
       tickIntervalMs: config.schedulerIntervalMs,
+      wrapTick: async (fn) => withDaemonUserContext(() => fn()),
       onError: (err) => {
         appendRuntimeDaemonLog(
           `threadLoopDaemon: frame error ${err instanceof Error ? err.message : String(err)}`,
@@ -123,7 +138,7 @@ export async function runRuntimeDaemonLoop() {
   // `maxConcurrentTasks - 在执行数` 领取并 fire-and-forget 并行执行，领取后立即返回，
   // 因此每帧可安全重入以补位空闲并发额度；这里不再需要 in-flight 串行护栏。
   const runDispatchFrame = () => {
-    void runTaskDispatchWorker(config.deviceId).catch((err) => {
+    void withDaemonUserContext(() => runTaskDispatchWorker(config.deviceId)).catch((err) => {
       appendRuntimeDaemonLog(
         `dispatch frame error ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -135,6 +150,7 @@ export async function runRuntimeDaemonLoop() {
   // 命中即中止对应子进程（进程组强杀）。这是「删会话 ≤30s 杀进程」与
   // 「空闲看门狗」真正生效的驱动节拍。
   setInterval(() => {
+    withDaemonUserContext(() => {
     try {
       // 全量对账下沉到本低频节拍：lease 过期回收 + runtime job 状态投影对账。
       // dispatch 帧只做领取与启动，不再每帧重复执行重量级全表对账。
@@ -151,27 +167,35 @@ export async function runRuntimeDaemonLoop() {
         `supervisor reconcile error ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    });
   }, RECONCILE_INTERVAL_MS);
 
   while (true) {
-    const runtimeEnvironments = readRuntimeEnvironmentsSnapshot(INITIAL_RUNTIME_ENVIRONMENTS);
+    const runtimeEnvironments = withDaemonUserContext(() =>
+      readRuntimeEnvironmentsSnapshot(INITIAL_RUNTIME_ENVIRONMENTS),
+    );
     const runtimeEnv =
       runtimeEnvironments.find((environment) => environment.isDefault && environment.type === "local") ??
       runtimeEnvironments.find((environment) => environment.type === "local") ??
       null;
-    const goals = readGoalsSnapshot([]);
+    const goals = withDaemonUserContext(() => readGoalsSnapshot([]));
 
-    const schedulerResult = runGoalSchedulerEngine({
-      goals,
-      runtimeEnv,
-      config,
-    });
-    const sideEffectsResult = runGoalDaemonSideEffects(readGoalsSnapshot(goals));
+    const schedulerResult = withDaemonUserContext(() =>
+      runGoalSchedulerEngine({
+        goals,
+        runtimeEnv,
+        config,
+      }),
+    );
+    const sideEffectsResult = withDaemonUserContext(() =>
+      runGoalDaemonSideEffects(readGoalsSnapshot(goals)),
+    );
 
     // 调度帧刚创建 queued job 后立即触发一次执行帧，但不 await；
     // 否则新建任务最坏要等到下一个 dispatch interval 才开始执行。
     runDispatchFrame();
 
+    withDaemonUserContext(() => {
     const now = new Date().toISOString();
     const current = readRuntimeDaemonState();
     const dbInfo = getDatabaseRuntimeInfo();
@@ -185,6 +209,7 @@ export async function runRuntimeDaemonLoop() {
       dbPath: dbInfo.path,
       dbInode: dbInfo.inode,
       updatedAt: now,
+    });
     });
     appendRuntimeDaemonLog(
       `本轮调度结束，新增队列任务 ${schedulerResult.createdJobs} 个，跳过 ${schedulerResult.skipped} 个，派生日程 ${sideEffectsResult.schedule.synthesized} 个，投递通知 ${sideEffectsResult.notifications.delivered} 个，暂停超时 ${sideEffectsResult.watchdog.paused} 个`,

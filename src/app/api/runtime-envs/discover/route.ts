@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { discoverLocalRuntimes } from "@/lib/server/runtimeEnvValidation";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+async function GETHandler() {
   const result = await discoverLocalRuntimes();
   const payload = {
     ...result,
@@ -12,3 +13,5 @@ export async function GET() {
   };
   return NextResponse.json(payload);
 }
+
+export const GET = withAuth(GETHandler);

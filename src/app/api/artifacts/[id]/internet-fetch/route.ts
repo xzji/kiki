@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { safeInternetFetch } from "@/lib/server/network/safeInternetFetch";
 import { getArtifactById } from "@/lib/server/repositories/artifactsRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ function currentOriginFromRequest(request: Request) {
   return url.origin;
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function POSTHandler(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const artifact = getArtifactById(id);
   if (!artifact && id !== MOCK_INTERNET_WEBAPP_ID) return NextResponse.json({ ok: false, reason: "产物不存在" }, { status: 404 });
@@ -50,3 +51,5 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }, { status: 400 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

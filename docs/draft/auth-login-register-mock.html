@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KiKi · 登录 / 注册 Mock</title>
+<style>
+  :root {
+    --background-app: #F5F6F8;
+    --background-surface: #FFFFFF;
+    --background-subtle: #F6F8FA;
+    --text-primary: #1F2328;
+    --text-body: #374151;
+    --text-secondary: #6B7280;
+    --text-muted: #8C9198;
+    --border-default: #E5E7EB;
+    --border-strong: #D0D7DE;
+    --brand-dark: #1F2328;
+    --brand-hover: #374151;
+    --danger-text: #B42318;
+    --danger-border: #FECACA;
+    --danger-bg: #FEF2F2;
+    --warning-text: #8A6D3B;
+    --avatar-bg: #E9E6FF;
+    --avatar-text: #5F5AA2;
+    --avatar-border: rgba(83, 79, 105, 0.25);
+    --ok: #1A7F37;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro", "PingFang SC", system-ui, sans-serif;
+    background: var(--background-app);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .app-logo {
+    position: fixed;
+    top: 28px;
+    left: 32px;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+
+  .card {
+    width: 100%;
+    max-width: 400px;
+    background: var(--background-surface);
+    border: 1px solid var(--border-default);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.04);
+    padding: 32px 28px;
+  }
+
+  .title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .subtitle { margin-top: 6px; font-size: 13px; color: var(--text-secondary); }
+
+  form { margin-top: 22px; }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-body);
+    margin-bottom: 6px;
+  }
+  .label-row { display: flex; align-items: baseline; justify-content: space-between; }
+  .optional { font-size: 12px; color: var(--text-muted); }
+
+  .input-wrap { position: relative; }
+  .input {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+    color: var(--text-primary);
+    background: var(--background-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .input::placeholder { color: var(--text-muted); }
+  .input:focus { border-color: var(--border-strong); box-shadow: 0 0 0 3px rgba(208, 215, 222, 0.45); }
+  .input.has-toggle { padding-right: 40px; }
+  .input.error { border-color: var(--danger-border); }
+  .input.error:focus { box-shadow: 0 0 0 3px rgba(254, 202, 202, 0.5); }
+
+  .toggle-visibility {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 28px;
+    width: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 6px;
+  }
+  .toggle-visibility:hover { background: var(--background-subtle); color: var(--text-secondary); }
+
+  .error-text {
+    display: none;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--danger-text);
+  }
+  .field.invalid .error-text { display: block; }
+
+  /* 密码强度条 */
+  .strength { margin-top: 8px; display: none; }
+  .strength.show { display: block; }
+  .strength-track {
+    display: flex;
+    gap: 4px;
+  }
+  .strength-seg {
+    height: 4px;
+    flex: 1;
+    border-radius: 999px;
+    background: var(--border-default);
+    transition: background .2s;
+  }
+  .strength-label { margin-top: 5px; font-size: 12px; color: var(--text-muted); }
+
+  .alert {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    font-size: 13px;
+    border-radius: 8px;
+    background: var(--danger-bg);
+    color: var(--danger-text);
+    border: 1px solid var(--danger-border);
+  }
+  .alert.show { display: block; }
+
+  .submit {
+    width: 100%;
+    height: 42px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #fff;
+    background: var(--brand-dark);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .submit:hover { background: var(--brand-hover); }
+  .submit:disabled { opacity: .6; cursor: not-allowed; }
+
+  .spinner {
+    width: 15px; height: 15px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: none;
+  }
+  .submit.loading .spinner { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .switch-row {
+    margin-top: 20px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .switch-row a {
+    color: var(--text-primary);
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .switch-row a:hover { text-decoration: underline; }
+
+  .hidden { display: none !important; }
+
+  .footnote {
+    margin-top: 26px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  /* mock 提示条 */
+  .mock-banner {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    border: 1px solid var(--border-default);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    box-shadow: 0 1px 2px rgba(16,24,40,.05);
+  }
+  .success-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--text-primary);
+    color: #fff;
+    font-size: 13px;
+    padding: 10px 18px;
+    border-radius: 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s, transform .25s;
+  }
+  .success-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="mock-banner">交互 Mock · 可在登录 / 注册间切换</div>
+
+<div class="app-logo">KiKi</div>
+
+<div class="card">
+  <!-- ============ 登录视图 ============ -->
+  <div id="view-login">
+    <h1 class="title">账号登录</h1>
+    <p class="subtitle">登录以进入你的工作空间</p>
+
+    <div class="alert" id="login-alert"></div>
+
+    <form id="login-form" novalidate>
+      <div class="field" id="lf-email">
+        <label for="login-email">邮箱</label>
+        <div class="input-wrap">
+          <input class="input" id="login-email" type="email" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="error-text" data-msg>请输入有效的邮箱地址</div>
+      </div>
+
+      <div class="field" id="lf-password">
+        <label for="login-password">密码</label>
+        <div class="input-wrap">
+          <input class="input has-toggle" id="login-password" type="password" placeholder="输入密码" autocomplete="current-password" />
+          <button type="button" class="toggle-visibility" data-toggle="login-password" aria-label="显示密码">
+            <span data-eye>👁</span>
+          </button>
+        </div>
+        <div class="error-text" data-msg>请输入密码</div>
+      </div>
+
+      <button type="submit" class="submit" id="login-submit">
+        <span class="spinner"></span>
+        <span data-label>登录</span>
+      </button>
+    </form>
+
+    <div class="switch-row">
+      还没有账号？<a id="to-register">创建账号</a>
+    </div>
+  </div>
+
+  <!-- ============ 注册视图 ============ -->
+  <div id="view-register" class="hidden">
+    <h1 class="title">创建账号</h1>
+    <p class="subtitle">注册即获得一个完全独立的工作空间</p>
+
+    <div class="alert" id="register-alert"></div>
+
+    <form id="register-form" novalidate>
+      <div class="field" id="rf-email">
+        <label for="reg-email">邮箱</label>
+        <div class="input-wrap">
+          <input class="input" id="reg-email" type="email" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="error-text" data-msg>请输入有效的邮箱地址</div>
+      </div>
+
+      <div class="field" id="rf-password">
+        <label for="reg-password">密码</label>
+        <div class="input-wrap">
+          <input class="input has-toggle" id="reg-password" type="password" placeholder="至少 8 位，含字母和数字" autocomplete="new-password" />
+          <button type="button" class="toggle-visibility" data-toggle="reg-password" aria-label="显示密码">
+            <span data-eye>👁</span>
+          </button>
+        </div>
+        <div class="strength" id="reg-strength">
+          <div class="strength-track">
+            <div class="strength-seg"></div>
+            <div class="strength-seg"></div>
+            <div class="strength-seg"></div>
+          </div>
+          <div class="strength-label" id="reg-strength-label">密码强度</div>
+        </div>
+        <div class="error-text" data-msg>密码至少 8 位，且需包含字母和数字</div>
+      </div>
+
+      <div class="field" id="rf-confirm">
+        <label for="reg-confirm">确认密码</label>
+        <div class="input-wrap">
+          <input class="input has-toggle" id="reg-confirm" type="password" placeholder="再次输入密码" autocomplete="new-password" />
+          <button type="button" class="toggle-visibility" data-toggle="reg-confirm" aria-label="显示密码">
+            <span data-eye>👁</span>
+          </button>
+        </div>
+        <div class="error-text" data-msg>两次输入的密码不一致</div>
+      </div>
+
+      <div class="field" id="rf-name">
+        <div class="label-row">
+          <label for="reg-name">昵称</label>
+          <span class="optional">可选</span>
+        </div>
+        <div class="input-wrap">
+          <input class="input" id="reg-name" type="text" placeholder="留空将使用邮箱前缀" autocomplete="nickname" maxlength="30" />
+        </div>
+        <div class="error-text" data-msg>昵称不能超过 30 个字符</div>
+      </div>
+
+      <button type="submit" class="submit" id="register-submit">
+        <span class="spinner"></span>
+        <span data-label>创建账号</span>
+      </button>
+    </form>
+
+    <div class="switch-row">
+      已有账号？<a id="to-login">去登录</a>
+    </div>
+
+    <p class="footnote">注册即代表你同意我们的服务条款与隐私政策</p>
+  </div>
+</div>
+
+<div class="success-toast" id="toast"></div>
+
+<script>
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // mock：模拟一个已存在的邮箱，用于演示后端错误回填
+  const EXISTING_EMAIL = "taken@example.com";
+
+  function setFieldError(fieldEl, message) {
+    fieldEl.classList.add("invalid");
+    fieldEl.querySelector(".input").classList.add("error");
+    if (message) fieldEl.querySelector("[data-msg]").textContent = message;
+  }
+  function clearFieldError(fieldEl) {
+    fieldEl.classList.remove("invalid");
+    fieldEl.querySelector(".input").classList.remove("error");
+  }
+  function showAlert(el, msg) { el.textContent = msg; el.classList.add("show"); }
+  function hideAlert(el) { el.classList.remove("show"); }
+
+  // 密码可见切换
+  document.querySelectorAll(".toggle-visibility").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = document.getElementById(btn.dataset.toggle);
+      const eye = btn.querySelector("[data-eye]");
+      if (input.type === "password") { input.type = "text"; eye.textContent = "🙈"; }
+      else { input.type = "password"; eye.textContent = "👁"; }
+    });
+  });
+
+  // 视图切换
+  const viewLogin = document.getElementById("view-login");
+  const viewRegister = document.getElementById("view-register");
+  document.getElementById("to-register").addEventListener("click", () => {
+    viewLogin.classList.add("hidden"); viewRegister.classList.remove("hidden");
+  });
+  document.getElementById("to-login").addEventListener("click", () => {
+    viewRegister.classList.add("hidden"); viewLogin.classList.remove("hidden");
+  });
+
+  function toast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 2600);
+  }
+
+  // ---------- 登录 ----------
+  const lfEmail = document.getElementById("lf-email");
+  const lfPassword = document.getElementById("lf-password");
+  document.getElementById("login-email").addEventListener("blur", (e) => {
+    if (!EMAIL_RE.test(e.target.value.trim())) setFieldError(lfEmail); else clearFieldError(lfEmail);
+  });
+  document.getElementById("login-password").addEventListener("blur", (e) => {
+    if (!e.target.value) setFieldError(lfPassword); else clearFieldError(lfPassword);
+  });
+  document.getElementById("login-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    hideAlert(document.getElementById("login-alert"));
+    const email = document.getElementById("login-email").value.trim();
+    const pwd = document.getElementById("login-password").value;
+    let ok = true;
+    if (!EMAIL_RE.test(email)) { setFieldError(lfEmail); ok = false; }
+    if (!pwd) { setFieldError(lfPassword); ok = false; }
+    if (!ok) return;
+
+    const btn = document.getElementById("login-submit");
+    btn.classList.add("loading"); btn.disabled = true; btn.querySelector("[data-label]").textContent = "登录中…";
+    setTimeout(() => {
+      btn.classList.remove("loading"); btn.disabled = false; btn.querySelector("[data-label]").textContent = "登录";
+      // mock：演示登录失败
+      showAlert(document.getElementById("login-alert"), "邮箱或密码不正确");
+    }, 1100);
+  });
+
+  // ---------- 注册 ----------
+  const rfEmail = document.getElementById("rf-email");
+  const rfPassword = document.getElementById("rf-password");
+  const rfConfirm = document.getElementById("rf-confirm");
+  const rfName = document.getElementById("rf-name");
+
+  function validPassword(p) { return p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p); }
+  function passwordScore(p) {
+    let s = 0;
+    if (p.length >= 8) s++;
+    if (/[a-zA-Z]/.test(p) && /\d/.test(p)) s++;
+    if (p.length >= 12 || /[^a-zA-Z0-9]/.test(p)) s++;
+    return s; // 0..3
+  }
+
+  const strengthBox = document.getElementById("reg-strength");
+  const strengthSegs = strengthBox.querySelectorAll(".strength-seg");
+  const strengthLabel = document.getElementById("reg-strength-label");
+  const STRENGTH = [
+    { txt: "强度：弱", color: "var(--danger-text)" },
+    { txt: "强度：中", color: "var(--warning-text)" },
+    { txt: "强度：强", color: "var(--ok)" },
+  ];
+
+  document.getElementById("reg-password").addEventListener("input", (e) => {
+    const v = e.target.value;
+    if (!v) { strengthBox.classList.remove("show"); return; }
+    strengthBox.classList.add("show");
+    const score = passwordScore(v); // 0..3
+    strengthSegs.forEach((seg, i) => {
+      seg.style.background = i < score ? STRENGTH[Math.max(0, score - 1)].color : "var(--border-default)";
+    });
+    const meta = STRENGTH[Math.max(0, score - 1)] || STRENGTH[0];
+    strengthLabel.textContent = meta.txt;
+    strengthLabel.style.color = meta.color;
+  });
+
+  document.getElementById("reg-email").addEventListener("blur", (e) => {
+    if (!EMAIL_RE.test(e.target.value.trim())) setFieldError(rfEmail, "请输入有效的邮箱地址"); else clearFieldError(rfEmail);
+  });
+  document.getElementById("reg-password").addEventListener("blur", (e) => {
+    if (!validPassword(e.target.value)) setFieldError(rfPassword); else clearFieldError(rfPassword);
+  });
+  document.getElementById("reg-confirm").addEventListener("blur", (e) => {
+    const p = document.getElementById("reg-password").value;
+    if (e.target.value !== p || !e.target.value) setFieldError(rfConfirm); else clearFieldError(rfConfirm);
+  });
+
+  document.getElementById("register-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    hideAlert(document.getElementById("register-alert"));
+    const email = document.getElementById("reg-email").value.trim().toLowerCase();
+    const pwd = document.getElementById("reg-password").value;
+    const confirm = document.getElementById("reg-confirm").value;
+    const name = document.getElementById("reg-name").value.trim();
+
+    let ok = true;
+    if (!EMAIL_RE.test(email)) { setFieldError(rfEmail, "请输入有效的邮箱地址"); ok = false; }
+    if (!validPassword(pwd)) { setFieldError(rfPassword); ok = false; }
+    if (confirm !== pwd || !confirm) { setFieldError(rfConfirm); ok = false; }
+    if (name.length > 30) { setFieldError(rfName); ok = false; }
+    if (!ok) return;
+
+    const btn = document.getElementById("register-submit");
+    btn.classList.add("loading"); btn.disabled = true; btn.querySelector("[data-label]").textContent = "创建中…";
+    setTimeout(() => {
+      btn.classList.remove("loading"); btn.disabled = false; btn.querySelector("[data-label]").textContent = "创建账号";
+      // mock：演示邮箱已存在的后端错误回填
+      if (email === EXISTING_EMAIL) {
+        setFieldError(rfEmail, "该邮箱已被注册，换一个或直接去登录");
+        return;
+      }
+      // 成功：自动登录并跳首页（此处仅 toast 模拟）
+      toast("账号创建成功，正在进入工作空间…");
+    }, 1300);
+  });
+</script>
+</body>
+</html>

@@ -1,4 +1,6 @@
+import { resolveCurrentUserId } from "@/lib/server/context/resolveUserId";
 import { getDatabase } from "@/lib/server/db/client";
+import { isCloudOrchestratorMode } from "@/lib/server/orchestrator/orchestratorConfig";
 import {
   createIdempotencyKey,
   migrateGoalIds,
@@ -301,12 +303,12 @@ export function createQueuedRuntimeJobInternal(
     taskId: payload.task.id,
     goalId: payload.goal.id,
     conversationId: payload.goal.conversationId,
-    userId: "local-user",
+    userId: resolveCurrentUserId(),
     kind: "goal_task",
     status: "queued",
     requestId: input?.requestId,
     runtimeEnvId: payload.runtimeEnv.id,
-    runtimeTransport: "local_daemon",
+    runtimeTransport: isCloudOrchestratorMode() ? "cloud_control_plane" : "local_daemon",
     payload,
     progress: null,
     logs: [],
@@ -533,24 +535,42 @@ export function getRuntimeJobByRequestId(requestId: string) {
   return row ? mapRow(row) : null;
 }
 
-export function claimQueuedRuntimeJobs(input: { leaseOwner: string; limit: number; leaseMs?: number }) {
+export function claimQueuedRuntimeJobs(input: {
+  leaseOwner: string;
+  limit: number;
+  leaseMs?: number;
+  runtimeTransport?: RuntimeJobRecord["runtimeTransport"];
+}) {
   const db = getDatabase();
   const leaseExpiresAt = new Date(Date.now() + (input.leaseMs ?? 2 * 60 * 1000)).toISOString();
   const now = nowIso();
   // SELECT 候选行 + 逐行 CAS UPDATE 包进单事务：消除 select 与 update 之间的 TOCTOU 窗口，
   // 同时把 N 次写收敛到一笔事务，降低锁竞争。
   const claim = db.transaction(() => {
-    const rows = db
-      .prepare(
-        `
-          SELECT * FROM runtime_jobs
-          WHERE status = 'queued'
-            AND (available_at IS NULL OR available_at <= ?)
-          ORDER BY created_at ASC
-          LIMIT ?
-        `,
-      )
-      .all(now, input.limit) as RuntimeJobRow[];
+    const rows = input.runtimeTransport
+      ? (db
+          .prepare(
+            `
+              SELECT * FROM runtime_jobs
+              WHERE status = 'queued'
+                AND runtime_transport = ?
+                AND (available_at IS NULL OR available_at <= ?)
+              ORDER BY created_at ASC
+              LIMIT ?
+            `,
+          )
+          .all(input.runtimeTransport, now, input.limit) as RuntimeJobRow[])
+      : (db
+          .prepare(
+            `
+              SELECT * FROM runtime_jobs
+              WHERE status = 'queued'
+                AND (available_at IS NULL OR available_at <= ?)
+              ORDER BY created_at ASC
+              LIMIT ?
+            `,
+          )
+          .all(now, input.limit) as RuntimeJobRow[]);
     const update = db.prepare(
       `
         UPDATE runtime_jobs

@@ -2,17 +2,24 @@ import fs from "fs";
 
 import Database from "better-sqlite3";
 
+import { getCurrentUserId } from "@/lib/server/context/userContext";
 import { getDatabaseFilePath } from "@/lib/server/storage/paths";
 
 import { KIKI_DB_BOOTSTRAP_SQL, KIKI_DB_MIGRATIONS, KIKI_DB_SCHEMA_VERSION } from "./schema";
 
-let db: Database.Database | null = null;
-let dbPath: string | null = null;
-let dbInode: number | null = null;
-let lastInodeCheckAt = 0;
+type CachedDatabase = {
+  database: Database.Database;
+  path: string;
+  inode: number | null;
+  lastInodeCheckAt: number;
+  lastAccessAt: number;
+};
 
-// 低频校验间隔：getDatabase() 调用极频繁，避免每次都 stat。
 const INODE_CHECK_INTERVAL_MS = 5_000;
+const DEFAULT_CACHE_MAX = Number(process.env.KIKI_DB_CACHE_MAX ?? "32");
+const DEFAULT_CACHE_IDLE_MS = Number(process.env.KIKI_DB_CACHE_IDLE_MS ?? String(10 * 60 * 1000));
+
+const dbCache = new Map<string, CachedDatabase>();
 
 function statInode(filePath: string): number | null {
   try {
@@ -71,58 +78,113 @@ function bootstrap(database: Database.Database) {
     .run(String(KIKI_DB_SCHEMA_VERSION));
 }
 
-function openDatabase(): Database.Database {
+function openDatabase(userId: string): CachedDatabase {
   const filePath = getDatabaseFilePath();
+  fs.mkdirSync(filePath.replace(/[/\\][^/\\]+$/, ""), { recursive: true });
   const database = new Database(filePath);
   bootstrap(database);
-  db = database;
-  dbPath = filePath;
-  dbInode = statInode(filePath);
-  lastInodeCheckAt = Date.now();
-  return database;
+  const entry: CachedDatabase = {
+    database,
+    path: filePath,
+    inode: statInode(filePath),
+    lastInodeCheckAt: Date.now(),
+    lastAccessAt: Date.now(),
+  };
+  dbCache.set(userId, entry);
+  evictIdleDatabases(userId);
+  return entry;
+}
+
+function evictIdleDatabases(exceptUserId?: string) {
+  const now = Date.now();
+  for (const [userId, entry] of Array.from(dbCache.entries())) {
+    if (userId === exceptUserId) continue;
+    if (now - entry.lastAccessAt < DEFAULT_CACHE_IDLE_MS) continue;
+    try {
+      entry.database.close();
+    } catch {
+      // ignore
+    }
+    dbCache.delete(userId);
+  }
+  if (dbCache.size <= DEFAULT_CACHE_MAX) return;
+  const sorted = Array.from(dbCache.entries())
+    .filter(([userId]) => userId !== exceptUserId)
+    .sort((a, b) => a[1].lastAccessAt - b[1].lastAccessAt);
+  while (dbCache.size > DEFAULT_CACHE_MAX && sorted.length > 0) {
+    const [userId, entry] = sorted.shift()!;
+    try {
+      entry.database.close();
+    } catch {
+      // ignore
+    }
+    dbCache.delete(userId);
+  }
+}
+
+function reopenIfDrifted(userId: string, entry: CachedDatabase): CachedDatabase {
+  const now = Date.now();
+  if (now - entry.lastInodeCheckAt < INODE_CHECK_INTERVAL_MS) {
+    return entry;
+  }
+  entry.lastInodeCheckAt = now;
+  const currentPath = getDatabaseFilePath();
+  const currentInode = statInode(currentPath);
+  const drifted =
+    currentPath !== entry.path ||
+    (currentInode !== null && entry.inode !== null && currentInode !== entry.inode);
+  if (!drifted) {
+    return entry;
+  }
+  console.warn(
+    `[db] database file changed for user ${userId} (path: ${entry.path} -> ${currentPath}, inode: ${entry.inode} -> ${currentInode}); reopening connection`,
+  );
+  try {
+    entry.database.close();
+  } catch {
+    // ignore
+  }
+  dbCache.delete(userId);
+  return openDatabase(userId);
 }
 
 export function getDatabase() {
-  if (!db) {
-    return openDatabase();
+  const userId = getCurrentUserId();
+  let entry = dbCache.get(userId);
+  if (!entry) {
+    entry = openDatabase(userId);
+  } else {
+    entry.lastAccessAt = Date.now();
+    entry = reopenIfDrifted(userId, entry);
   }
-
-  // inode 自检：若 getDatabaseFilePath() 指向的文件被替换/删除（inode 漂移），
-  // 当前句柄会变成写不到磁盘路径的"幽灵 fd"。检测到后关闭旧句柄并重开，避免读写分裂。
-  const now = Date.now();
-  if (now - lastInodeCheckAt >= INODE_CHECK_INTERVAL_MS) {
-    lastInodeCheckAt = now;
-    const currentPath = getDatabaseFilePath();
-    const currentInode = statInode(currentPath);
-    const drifted =
-      currentPath !== dbPath || (currentInode !== null && dbInode !== null && currentInode !== dbInode);
-    if (drifted) {
-      console.warn(
-        `[db] database file changed (path: ${dbPath} -> ${currentPath}, inode: ${dbInode} -> ${currentInode}); reopening connection`,
-      );
-      try {
-        db.close();
-      } catch {
-        // 旧句柄可能已不可用，忽略关闭异常。
-      }
-      db = null;
-      return openDatabase();
-    }
-  }
-
-  return db;
+  return entry.database;
 }
 
 export function getDatabaseRuntimeInfo() {
-  return { path: dbPath, inode: dbInode };
+  const userId = getCurrentUserId();
+  const entry = dbCache.get(userId);
+  return { path: entry?.path ?? null, inode: entry?.inode ?? null };
 }
 
-export function closeDatabaseForReset() {
-  if (db) {
-    db.close();
+export function closeDatabaseForReset(userId?: string) {
+  if (userId) {
+    const entry = dbCache.get(userId);
+    if (entry) {
+      try {
+        entry.database.close();
+      } catch {
+        // ignore
+      }
+      dbCache.delete(userId);
+    }
+    return;
   }
-  db = null;
-  dbPath = null;
-  dbInode = null;
-  lastInodeCheckAt = 0;
+  for (const [, entry] of Array.from(dbCache.entries())) {
+    try {
+      entry.database.close();
+    } catch {
+      // ignore
+    }
+  }
+  dbCache.clear();
 }

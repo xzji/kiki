@@ -6,6 +6,7 @@ import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtime
 import { resumeBlockedTask } from "@/lib/server/taskExecution/resumeBlockedTask";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal } from "@/types/kiki";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ function findInstance(goals: Goal[], instanceId: string) {
   return null;
 }
 
-export async function POST(
+async function POSTHandler(
   request: NextRequest,
   context: {
     params: {
@@ -96,3 +97,5 @@ export async function POST(
     trajectory: resumeResult.body.trajectory ?? [],
   });
 }
+
+export const POST = withAuth(POSTHandler);

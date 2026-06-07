@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getGoalEvents, getLatestGoalEventId } from "@/lib/server/repositories/goalEventLogRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const goalId = searchParams.get("goalId")?.trim();
   if (!goalId) {
@@ -24,3 +25,4 @@ export async function GET(request: NextRequest) {
   });
 }
 
+export const GET = withAuth(GETHandler);

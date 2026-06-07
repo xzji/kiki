@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { getConversationEvents } from "@/lib/server/repositories/conversationEventLogRepository";
 import { getGoalEventsSince } from "@/lib/server/repositories/goalEventLogRepository";
 import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
+import { bindUserContextTick } from "@/lib/server/sse/userContextTick";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +17,8 @@ function parseCursor(value: string | null): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest, context: { userId: string }) {
+  const { userId } = context;
   const { searchParams } = new URL(request.url);
   let goalCursor = parseCursor(searchParams.get("goalCursor"));
   let conversationCursor = parseCursor(searchParams.get("conversationCursor"));
@@ -73,8 +76,9 @@ export async function GET(request: NextRequest) {
         }
       };
 
-      timer = setInterval(tick, POLL_INTERVAL_MS);
-      tick();
+      const boundTick = bindUserContextTick(userId, tick);
+      boundTick();
+      timer = setInterval(boundTick, POLL_INTERVAL_MS);
 
       if (request.signal.aborted) {
         cleanup();
@@ -91,3 +95,5 @@ export async function GET(request: NextRequest) {
     headers: createSseHeaders(),
   });
 }
+
+export const GET = withAuth(GETHandler);

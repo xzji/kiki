@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 
 import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,7 +12,7 @@ function normalizeSelectedPath(path: string) {
   return trimmed.replace(/\/+$/, "");
 }
 
-export async function POST() {
+async function POSTHandler() {
   try {
     const { stdout } = await execFileAsync(
       "osascript",
@@ -42,3 +43,5 @@ export async function POST() {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

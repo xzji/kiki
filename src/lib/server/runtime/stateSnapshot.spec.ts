@@ -3,18 +3,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { enterUserContext } from "@/lib/server/context/userContext";
 import {
   readRuntimeEnvironmentsSnapshotMeta,
   upsertRuntimeEnvironmentsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
+const PLANNING_SPEC_USER_ID = "spec-test-user";
+
 let isolatedDataDirInitialized = false;
 
 export function ensureIsolatedPlanningSpecDataDir() {
-  if (isolatedDataDirInitialized) return;
-  process.env.KIKI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "kiki-planning-spec-"));
-  isolatedDataDirInitialized = true;
+  if (!isolatedDataDirInitialized) {
+    process.env.KIKI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "kiki-planning-spec-"));
+    isolatedDataDirInitialized = true;
+  }
+  enterUserContext(PLANNING_SPEC_USER_ID);
 }
 
 function environment(id: string): RuntimeEnvironment {

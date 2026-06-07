@@ -94,7 +94,8 @@ export class ExecutionSupervisor {
   }
 
   /** 收到流式进展事件（delta/tool_call/status/message）时刷新活跃时间，重置空闲判定。 */
-  markProgress(requestId: string, _kind: string) {
+  markProgress(requestId: string, kind?: string) {
+    void kind;
     const job = this.jobs.get(requestId);
     if (!job) return;
     job.lastProgressAt = Date.now();

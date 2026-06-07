@@ -5,11 +5,12 @@ import { NextResponse } from "next/server";
 
 import { getArtifactById } from "@/lib/server/repositories/artifactsRepository";
 import { resolveArtifactFilePath } from "@/lib/server/workspace/artifactStorage";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function GETHandler(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const artifact = getArtifactById(id);
   if (!artifact) {
@@ -59,3 +60,5 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     },
   });
 }
+
+export const GET = withAuth(GETHandler);

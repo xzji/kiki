@@ -5,6 +5,7 @@ import {
   RuntimeEnvironmentCommandError,
 } from "@/lib/server/services/runtimeEnvironmentCommandService";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ function commandErrorResponse(error: RuntimeEnvironmentCommandError) {
   return NextResponse.json({ ok: false, reason: error.message, ...error.details }, { status: error.status });
 }
 
-export async function PATCH(request: NextRequest, { params }: Params) {
+async function PATCHHandler(request: NextRequest, { params }: Params) {
   try {
     const { id } = params;
     const body = (await request.json()) as { patch?: Partial<RuntimeEnvironment>; expectedRevision?: unknown };
@@ -47,7 +48,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: Params) {
+async function DELETEHandler(request: NextRequest, { params }: Params) {
   try {
     const { id } = params;
     const result = applyRuntimeEnvironmentCommand({
@@ -64,3 +65,6 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: false, reason: "Runtime 环境删除失败" }, { status: 500 });
   }
 }
+
+export const PATCH = withAuth(PATCHHandler);
+export const DELETE = withAuth(DELETEHandler);

@@ -5,6 +5,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 
 import { unloadLaunchAgentOnly } from "@/lib/daemon/launchAgent";
+import { getCurrentUserId } from "@/lib/server/context/userContext";
 import { closeDatabaseForReset } from "@/lib/server/db/client";
 import {
   getConversationWorkspacesRootDir,
@@ -126,8 +127,12 @@ function assertSafeDataDir(dataDir: string) {
 
   const configured = process.env.KIKI_DATA_DIR?.trim();
   const defaultDataDir = path.resolve(projectRoot, "data");
-  if (!configured && resolved !== defaultDataDir) {
+  const defaultUserDir = path.resolve(defaultDataDir, "users");
+  if (!configured && !resolved.startsWith(`${defaultDataDir}${path.sep}`) && resolved !== defaultDataDir) {
     throw new Error(`默认数据目录异常：${resolved}`);
+  }
+  if (!configured && resolved.startsWith(`${defaultUserDir}${path.sep}`)) {
+    return;
   }
 }
 
@@ -263,8 +268,9 @@ export async function resetLocalDataForDev(): Promise<LocalDataResetResult> {
   assertSafeDataDir(dataDir);
 
   await stopRuntimeProcesses(result, dataDir);
+  const userId = getCurrentUserId();
   await assertNoExternalDatabaseHandles(getDatabaseFilePath());
-  closeDatabaseForReset();
+  closeDatabaseForReset(userId);
 
   deleteKnownDataPaths(dataDir, result);
   deleteRuntimeStateAndLogs(result);

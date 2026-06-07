@@ -6,6 +6,7 @@ import {
   type ListSagaInstancesInput,
 } from "@/lib/server/repositories/agentRuntime/sagaInstancesRepository";
 import type { SagaStatus, SagaType } from "@/types/agentRuntime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 /**
  * GET /api/dev/runtime/sagas — DevPanel saga 列表（PR15 §12.5.2）。
@@ -68,7 +69,7 @@ function parsePositiveInt(value: string | null, fallback: number, max: number): 
   return Math.min(n, max);
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const statuses = parseStatuses(sp.get("status"));
   const types = parseTypes(sp.get("type"));
@@ -93,3 +94,5 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export const GET = withAuth(GETHandler);

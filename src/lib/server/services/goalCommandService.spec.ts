@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { normalizeGoalId } from "@/lib/opaqueIds";
 import { getGoalEventByIdempotencyKey } from "@/lib/server/repositories/goalEventLogRepository";
+import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import {
   applyGoalCommand,
@@ -22,6 +23,7 @@ function makeGoal(id: string): Goal {
 }
 
 export function runGoalCommandServiceSpecs() {
+  ensureIsolatedPlanningSpecDataDir();
   const createKey = "goal-command-service:create-normalized-response";
   const rawGoalId = "goal-command-service-normalized";
   const result = applyGoalCommand({

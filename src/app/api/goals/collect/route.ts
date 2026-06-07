@@ -9,6 +9,7 @@ import {
 } from "@/lib/server/goalTelemetry";
 import { advanceGoalInfoCollectionWithClaude } from "@/lib/server/goalPlanning";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ type RequestBody = {
   maxRounds?: number;
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
   const goalText = body.goalText?.trim();
   const requestId =
@@ -97,3 +98,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

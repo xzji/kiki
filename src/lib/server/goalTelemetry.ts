@@ -13,7 +13,10 @@ import type {
 import type { GoalWorkflowPhase } from "@/types/kiki";
 
 const MAX_LOGS = 2000;
-const TELEMETRY_FILE = getTelemetryFilePath();
+
+function telemetryFilePath() {
+  return getTelemetryFilePath();
+}
 
 const progressByRequest = new Map<string, GoalServerProgress>();
 const logBuffer: GoalServerLogEntry[] = [];
@@ -24,7 +27,7 @@ function nowIso() {
 
 function readTelemetryFromFile() {
   try {
-    const raw = fs.readFileSync(TELEMETRY_FILE, "utf8");
+    const raw = fs.readFileSync(telemetryFilePath(), "utf8");
     const parsed = JSON.parse(raw) as {
       progressByRequest?: Record<string, GoalServerProgress>;
       logs?: GoalServerLogEntry[];
@@ -50,7 +53,7 @@ function writeTelemetryToFile() {
       logs: logBuffer.slice(0, MAX_LOGS),
       progressByRequest: Object.fromEntries(progressByRequest.entries()),
     };
-    fs.writeFileSync(TELEMETRY_FILE, JSON.stringify(payload), "utf8");
+    fs.writeFileSync(telemetryFilePath(), JSON.stringify(payload), "utf8");
   } catch {
     // ignore write errors
   }

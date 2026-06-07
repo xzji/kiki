@@ -37,6 +37,7 @@ function DrawerTaskIdSyncer() {
 export function AppShell({ children }: { children: ReactNode }) {
   useTriggerEngine();
   const pathname = usePathname();
+  const isAuthPage = pathname === "/login" || pathname === "/register";
   const isWide = pathname.startsWith("/schedule");
   const isConversation = pathname.startsWith("/conversations");
   const isFullscreenResult =
@@ -73,6 +74,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const contentClassName = useImmersiveShell
     ? "h-full w-full"
     : `mx-auto w-full ${contentWidth}`;
+
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="h-screen overflow-hidden bg-[#F5F6F8] text-[#1F2328]">

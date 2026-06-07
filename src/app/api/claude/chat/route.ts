@@ -15,11 +15,12 @@ import {
 } from "@/lib/server/workspace/conversationWorkspace";
 import type { ConversationMessage } from "@/types/kiki";
 import type { ClaudeChatRequest } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as ClaudeChatRequest;
   if (!body.conversationId) {
     return new Response(JSON.stringify({ ok: false, reason: "缺少 conversationId" }), {
@@ -80,3 +81,5 @@ export async function POST(request: NextRequest) {
     headers: createSseHeaders(),
   });
 }
+
+export const POST = withAuth(POSTHandler);

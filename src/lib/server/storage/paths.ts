@@ -2,6 +2,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
+import { getCurrentUserId } from "@/lib/server/context/userContext";
+
 const DATA_DIR_ENV = "KIKI_DATA_DIR";
 const RUNTIME_HOME_DIR = path.join(os.homedir(), ".kiki", "runtime");
 
@@ -10,10 +12,24 @@ function ensureDir(dirPath: string) {
   return dirPath;
 }
 
-export function getProjectRootDataDir() {
+function getDataBaseDir() {
   const configured = process.env[DATA_DIR_ENV]?.trim();
-  const resolved = configured ? path.resolve(configured) : path.resolve(process.cwd(), "data");
-  return ensureDir(resolved);
+  return ensureDir(configured ? path.resolve(configured) : path.resolve(process.cwd(), "data"));
+}
+
+/** 系统级路径（context-free）：registry、全局配置等 */
+export function getSystemDataDir() {
+  return ensureDir(path.join(getDataBaseDir(), "system"));
+}
+
+export function getRegistryDatabaseFilePath() {
+  return path.join(getSystemDataDir(), "registry.db");
+}
+
+/** 用户级数据根目录（要求 ALS 用户上下文） */
+export function getProjectRootDataDir() {
+  const userId = getCurrentUserId();
+  return ensureDir(path.join(getDataBaseDir(), "users", userId));
 }
 
 export function getDatabaseFilePath() {

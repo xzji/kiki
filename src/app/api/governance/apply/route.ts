@@ -4,6 +4,7 @@ import { applyGovernanceCommand } from "@/lib/server/governance/governanceComman
 import type { GovernanceIntent, TaskRef } from "@/lib/server/governance/governanceIntent";
 import type { TaskPatch } from "@/lib/server/governance/taskPatchMerge";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ type RequestBody = {
   quotedMessage?: QuotedConversationMessageContext | null;
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const idempotencyKey = request.headers.get("Idempotency-Key")?.trim();
   if (!idempotencyKey) {
     return NextResponse.json({ ok: false, reason: "缺少 Idempotency-Key" }, { status: 400 });
@@ -48,3 +49,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

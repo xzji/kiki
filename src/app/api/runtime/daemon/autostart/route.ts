@@ -9,6 +9,7 @@ import { readRuntimeDaemonConfig, writeRuntimeDaemonConfig } from "@/lib/daemon/
 import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { getLaunchAgentPlistPath } from "@/lib/server/storage/paths";
 import type { RuntimeFilePolicy, RuntimePermissionMode } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,7 @@ type TogglePayload = {
   };
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   try {
     const body = (await request.json()) as TogglePayload;
 
@@ -80,3 +81,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getGoalTelemetryProgress, getTaskTelemetryLogs, getTaskTelemetryProgress } from "@/lib/server/goalTelemetry";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +53,7 @@ function buildWaitingReason(input: {
   return undefined;
 }
 
-export async function GET(
+async function GETHandler(
   request: Request,
   context: {
     params: {
@@ -117,3 +118,5 @@ export async function GET(
     waitingReason,
   });
 }
+
+export const GET = withAuth(GETHandler);

@@ -9,6 +9,7 @@ import {
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
 import type { Goal, TaskInstanceStatus } from "@/types/kiki";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -56,7 +57,7 @@ function toRuntimeJobStatus(status: TaskInstanceStatus): RuntimeJobStatus {
   return "queued";
 }
 
-export async function POST(
+async function POSTHandler(
   request: NextRequest,
   context: {
     params: {
@@ -127,3 +128,5 @@ export async function POST(
     event: statusEvent,
   });
 }
+
+export const POST = withAuth(POSTHandler);

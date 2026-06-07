@@ -4,6 +4,7 @@ import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import { getGoalTelemetryProgress, getTaskTelemetryLogs, getTaskTelemetryProgress } from "@/lib/server/goalTelemetry";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ function buildWaitingReason(input: {
   return undefined;
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   const requestId = request.nextUrl.searchParams.get("requestId")?.trim();
   const taskInstanceId = request.nextUrl.searchParams.get("taskInstanceId")?.trim();
 
@@ -117,3 +118,5 @@ export async function GET(request: NextRequest) {
     "/api/goals/instances/{instanceId}/runtime",
   );
 }
+
+export const GET = withAuth(GETHandler);

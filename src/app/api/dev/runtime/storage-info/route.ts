@@ -7,11 +7,12 @@ import {
   getStorageRootDir,
   getTelemetryFilePath,
 } from "@/lib/server/storage/paths";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function GETHandler() {
   return NextResponse.json({
     ok: true,
     paths: {
@@ -26,3 +27,5 @@ export async function GET() {
     },
   });
 }
+
+export const GET = withAuth(GETHandler);

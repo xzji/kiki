@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 
 import { installAndLoadLaunchAgent, isLaunchAgentInstalled } from "@/lib/daemon/launchAgent";
 import { getLaunchAgentPlistPath } from "@/lib/server/storage/paths";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+async function POSTHandler() {
   try {
     const targetPath = await installAndLoadLaunchAgent();
     return NextResponse.json({
@@ -26,3 +27,5 @@ export async function POST() {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

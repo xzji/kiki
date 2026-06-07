@@ -5,6 +5,7 @@ import {
   ScheduleEventCommandError,
 } from "@/lib/server/services/scheduleEventCommandService";
 import type { AgentEvent } from "@/types/schedule";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ function commandErrorResponse(error: ScheduleEventCommandError) {
   return NextResponse.json({ ok: false, reason: error.message, ...error.details }, { status: error.status });
 }
 
-export async function PATCH(request: NextRequest, { params }: Params) {
+async function PATCHHandler(request: NextRequest, { params }: Params) {
   try {
     const { id } = params;
     const body = (await request.json()) as { event?: AgentEvent; expectedRevision?: unknown };
@@ -46,7 +47,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: Params) {
+async function DELETEHandler(request: NextRequest, { params }: Params) {
   try {
     const { id } = params;
     const result = applyScheduleEventCommand({
@@ -63,3 +64,6 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: false, reason: "日程事件删除失败" }, { status: 500 });
   }
 }
+
+export const PATCH = withAuth(PATCHHandler);
+export const DELETE = withAuth(DELETEHandler);

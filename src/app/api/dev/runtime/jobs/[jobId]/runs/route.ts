@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { listAgentRunsByRuntimeJobId } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import { getRuntimeJob } from "@/lib/server/repositories/runtimeJobsRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
+async function GETHandler(
   _request: NextRequest,
   context: { params: Promise<{ jobId: string }> },
 ) {
@@ -28,3 +29,5 @@ export async function GET(
     );
   }
 }
+
+export const GET = withAuth(GETHandler);

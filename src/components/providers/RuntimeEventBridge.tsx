@@ -33,7 +33,7 @@ import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { useScheduleStore } from "@/stores/scheduleStore";
 import { useAgentRunsStore } from "@/stores/agentRunsStore";
 import { useSagaInstancesStore } from "@/stores/sagaInstancesStore";
-import type { Conversation, InboxItem, TaskInstance } from "@/types/kiki";
+import type { Conversation, InboxItem } from "@/types/kiki";
 import type { GoalEventRecord } from "@/types/goalEventLog";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
 

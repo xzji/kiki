@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { DEFAULT_LOCAL_USER_ID, runWithUserContext } from "../src/lib/server/context/userContext";
 import { normalizeGoalId, normalizeSubGoalId, normalizeTaskId } from "../src/lib/opaqueIds";
 import { getDatabase } from "../src/lib/server/db/client";
 import { readGoalsSnapshotMeta } from "../src/lib/server/runtime/stateSnapshot";
@@ -174,10 +175,12 @@ function parseArgs() {
 async function main() {
   const input = parseArgs();
   const runId = input.runId || `dogfood-${Date.now()}`;
-  if (input.seed) seedFixtureGoal(runId);
   const deadline = Date.now() + input.hours * 60 * 60 * 1000;
+  if (input.seed) {
+    runWithUserContext(DEFAULT_LOCAL_USER_ID, () => seedFixtureGoal(runId));
+  }
   do {
-    const metrics = collectMetrics(runId);
+    const metrics = runWithUserContext(DEFAULT_LOCAL_USER_ID, () => collectMetrics(runId));
     appendMetrics(runId, metrics);
     console.log(JSON.stringify(metrics));
     if (input.once) break;

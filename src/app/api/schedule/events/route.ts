@@ -5,6 +5,7 @@ import {
   ScheduleEventCommandError,
 } from "@/lib/server/services/scheduleEventCommandService";
 import type { AgentEvent } from "@/types/schedule";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ function commandErrorResponse(error: ScheduleEventCommandError) {
   return NextResponse.json({ ok: false, reason: error.message, ...error.details }, { status: error.status });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   try {
     const body = (await request.json()) as { event?: AgentEvent; expectedRevision?: unknown };
     if (!body.event) {
@@ -40,3 +41,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "日程事件创建失败" }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

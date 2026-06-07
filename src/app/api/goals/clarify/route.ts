@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { EasterEggSettings } from "@/lib/goalSystemConfig";
 import { generateGoalClarificationQuestionsWithClaude } from "@/lib/server/goalPlanning";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ type RequestBody = {
   conversationContext?: string;
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
   const goalText = body.goalText?.trim();
 
@@ -46,3 +47,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);

@@ -7,11 +7,12 @@ import {
   updateGoalRuntimeJobExecution,
 } from "@/lib/server/services/goalRuntimeService";
 import type { GoalServerProgress } from "@/types/goalTelemetry";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as {
     requestId?: string;
     taskInstanceId?: string;
@@ -87,3 +88,5 @@ export async function POST(request: NextRequest) {
     "/api/goals/instances/{instanceId}/cancel",
   );
 }
+
+export const POST = withAuth(POSTHandler);

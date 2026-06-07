@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import type { LocalRuntimeKind } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   const workingDirectory = request.nextUrl.searchParams.get("workingDirectory") || "";
   const cliPath = request.nextUrl.searchParams.get("cliPath") || "claude";
   const runtimeKind = (request.nextUrl.searchParams.get("runtimeKind") || "claude") as LocalRuntimeKind;
@@ -22,3 +23,5 @@ export async function GET(request: NextRequest) {
     status: result.ok ? 200 : 400,
   });
 }
+
+export const GET = withAuth(GETHandler);

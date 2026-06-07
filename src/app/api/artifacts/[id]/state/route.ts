@@ -5,6 +5,7 @@ import {
   appendArtifactInteractionEvent,
   getArtifactInteractionState,
 } from "@/lib/server/repositories/artifactInteractionRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ function normalizeEvent(value: unknown) {
   return jsonSize(event) <= MAX_EVENT_BYTES ? event : null;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function GETHandler(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const artifact = getArtifactById(id);
   if (!artifact) {
@@ -64,7 +65,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   });
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function POSTHandler(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const artifact = getArtifactById(id);
   if (!artifact) {
@@ -161,3 +162,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     updatedAt: saved?.updatedAt,
   });
 }
+
+export const GET = withAuth(GETHandler);
+export const POST = withAuth(POSTHandler);

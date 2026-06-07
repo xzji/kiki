@@ -122,6 +122,7 @@ function dispatchFrame(leaseOwner: string): { processed: number; inFlight: numbe
   const claimed = claimQueuedRuntimeJobs({
     leaseOwner,
     limit: available,
+    runtimeTransport: "local_daemon",
   });
   if (claimed.length === 0) {
     if (inFlightJobs.size === 0) {

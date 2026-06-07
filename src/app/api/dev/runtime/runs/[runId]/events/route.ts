@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { findAgentRunById } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import { listAgentEvents } from "@/lib/server/repositories/agentRuntime/agentEventsRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 /**
  * GET /api/dev/runtime/runs/[runId]/events — 增量拉取 agent_events（PR15 §12.5.2）。
@@ -23,7 +24,7 @@ function parseNonNegativeInt(value: string | null, fallback: number, max: number
   return Math.min(n, max);
 }
 
-export async function GET(
+async function GETHandler(
   request: NextRequest,
   context: { params: Promise<{ runId: string }> },
 ) {
@@ -50,3 +51,5 @@ export async function GET(
     );
   }
 }
+
+export const GET = withAuth(GETHandler);

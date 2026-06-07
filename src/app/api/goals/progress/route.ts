@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getGoalTelemetryProgress } from "@/lib/server/goalTelemetry";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   const requestId = request.nextUrl.searchParams.get("requestId")?.trim();
   if (!requestId) {
     return NextResponse.json({ reason: "requestId 不能为空" }, { status: 400 });
@@ -18,3 +19,5 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({ progress });
 }
+
+export const GET = withAuth(GETHandler);

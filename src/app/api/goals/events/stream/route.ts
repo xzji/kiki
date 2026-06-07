@@ -2,13 +2,16 @@ import { NextRequest } from "next/server";
 
 import { getGoalEvents } from "@/lib/server/repositories/goalEventLogRepository";
 import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
+import { bindUserContextTick } from "@/lib/server/sse/userContextTick";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const POLL_INTERVAL_MS = 2000;
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest, context: { userId: string }) {
+  const { userId } = context;
   const { searchParams } = new URL(request.url);
   const goalId = searchParams.get("goalId")?.trim();
   if (!goalId) {
@@ -52,7 +55,9 @@ export async function GET(request: NextRequest) {
           });
         }
       };
-      timer = setInterval(tick, POLL_INTERVAL_MS);
+      const boundTick = bindUserContextTick(userId, tick);
+      boundTick();
+      timer = setInterval(boundTick, POLL_INTERVAL_MS);
       if (request.signal.aborted) {
         cleanup();
         return;
@@ -68,3 +73,5 @@ export async function GET(request: NextRequest) {
     headers: createSseHeaders(),
   });
 }
+
+export const GET = withAuth(GETHandler);

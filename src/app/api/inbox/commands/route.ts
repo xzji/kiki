@@ -4,6 +4,7 @@ import {
   upsertInboxItemState,
   type UpsertInboxItemStateInput,
 } from "@/lib/server/repositories/inboxItemStateRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ function buildUpsertInput(
   }
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as Body;
   const inboxItemId = typeof body.inboxItemId === "string" ? body.inboxItemId.trim() : "";
   const action = typeof body.action === "string" ? (body.action as InboxCommandAction) : null;
@@ -81,3 +82,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "inbox 命令执行失败" }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

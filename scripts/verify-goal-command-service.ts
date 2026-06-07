@@ -2,6 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
+import { DEFAULT_LOCAL_USER_ID, runWithUserContext } from "../src/lib/server/context/userContext";
 import type { Goal, Task } from "../src/types/kiki";
 
 type GoalCommandServiceModule = typeof import("../src/lib/server/services/goalCommandService");
@@ -74,6 +75,7 @@ async function main() {
   dbClient = await import("../src/lib/server/db/client");
 
   try {
+  runWithUserContext(DEFAULT_LOCAL_USER_ID, () => {
   const goal = goalFixture();
   const createResult = service.applyGoalCommand({
     command: { type: "create_goal", goal },
@@ -189,6 +191,7 @@ async function main() {
   assert(eventCount() === 2, "invalid create_goal must not append event");
 
   console.log("Goal command service verification passed.");
+  });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

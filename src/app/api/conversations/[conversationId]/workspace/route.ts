@@ -11,17 +11,18 @@ import {
   ensureConversationWorkspace,
   getConversationWorkspaceDir,
 } from "@/lib/server/workspace/conversationWorkspace";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(_: NextRequest, context: { params: Promise<{ conversationId: string }> }) {
+async function POSTHandler(_: NextRequest, context: { params: Promise<{ conversationId: string }> }) {
   const { conversationId } = await context.params;
   const workspace = ensureConversationWorkspace(conversationId);
   return NextResponse.json({ ok: true, workspaceDir: workspace.workspaceDir, workspace });
 }
 
-export async function DELETE(request: NextRequest, context: { params: Promise<{ conversationId: string }> }) {
+async function DELETEHandler(request: NextRequest, context: { params: Promise<{ conversationId: string }> }) {
   try {
     const { conversationId } = await context.params;
     const body = (await request.json().catch(() => ({}))) as { claudeSessionId?: string };
@@ -49,3 +50,6 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     );
   }
 }
+
+export const POST = withAuth(POSTHandler);
+export const DELETE = withAuth(DELETEHandler);

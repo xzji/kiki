@@ -15,5 +15,16 @@ export function runMiddlewareSpecs() {
 
   const canonical = middleware(new NextRequest("https://kiki.local/api/topics/commands"));
   assert.equal(canonical.headers.get("Deprecation"), null);
-  assert.deepEqual(config.matcher, ["/api/goals/:path*"]);
+
+  const unauthApi = middleware(new NextRequest("https://kiki.local/api/topics/commands"));
+  assert.equal(unauthApi.status, 401);
+
+  const unauthPage = middleware(new NextRequest("https://kiki.local/"));
+  assert.equal(unauthPage.status, 307);
+  assert.equal(unauthPage.headers.get("location"), "https://kiki.local/login");
+
+  const loginPage = middleware(new NextRequest("https://kiki.local/login"));
+  assert.equal(loginPage.status, 200);
+
+  assert.ok(config.matcher.length > 0);
 }

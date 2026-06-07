@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { resetLocalDataForDev } from "@/lib/server/dev/localDataReset";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST() {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ ok: false, message: "该接口仅允许在开发环境使用" }, { status: 403 });
-  }
-
+async function POSTHandler() {
   try {
     const result = await resetLocalDataForDev();
     return NextResponse.json({ ok: true, result });
@@ -18,3 +15,5 @@ export async function POST() {
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

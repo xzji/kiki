@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { findSagaInstanceById } from "@/lib/server/repositories/agentRuntime/sagaInstancesRepository";
 import { listAgentRunsBySaga } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 /**
  * GET /api/dev/runtime/sagas/[sagaId]/runs — 返回选中 saga 的 agent_runs
@@ -13,7 +14,7 @@ import { listAgentRunsBySaga } from "@/lib/server/repositories/agentRuntime/agen
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
+async function GETHandler(
   _request: NextRequest,
   context: { params: Promise<{ sagaId: string }> },
 ) {
@@ -35,3 +36,5 @@ export async function GET(
     );
   }
 }
+
+export const GET = withAuth(GETHandler);

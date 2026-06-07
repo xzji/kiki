@@ -5,6 +5,7 @@ import {
   RuntimeEnvironmentCommandError,
 } from "@/lib/server/services/runtimeEnvironmentCommandService";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ function commandErrorResponse(error: RuntimeEnvironmentCommandError) {
   return NextResponse.json({ ok: false, reason: error.message, ...error.details }, { status: error.status });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   try {
     const body = (await request.json()) as {
       environment?: Omit<RuntimeEnvironment, "id"> | RuntimeEnvironment;
@@ -43,3 +44,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "Runtime 环境写入失败" }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

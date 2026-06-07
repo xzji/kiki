@@ -4,6 +4,7 @@ import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ type RequestBody = {
   runtimeEnv: RuntimeEnvironment;
 };
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   const requestId =
     request.headers.get("x-goal-request-id")?.trim() ||
     `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -84,3 +85,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ reason, requestId }, { status: 500 });
   }
 }
+
+export const POST = withAuth(POSTHandler);

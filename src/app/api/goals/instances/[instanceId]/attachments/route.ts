@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getStorageAdapter } from "@/lib/server/adapters/storage";
+import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ function safeFileName(value: string) {
     .slice(0, 120) || "attachment";
 }
 
-export async function POST(
+async function POSTHandler(
   request: NextRequest,
   context: {
     params: {
@@ -48,3 +49,5 @@ export async function POST(
     },
   });
 }
+
+export const POST = withAuth(POSTHandler);
