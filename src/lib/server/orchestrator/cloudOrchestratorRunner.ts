@@ -9,7 +9,6 @@ import { listUsersForOrchestratorTick } from "@/lib/server/orchestrator/listUser
 import { getOrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { runOrchestratorUserFrame } from "@/lib/server/orchestrator/runOrchestratorUserFrame";
 import { registerTunnelDispatchCallbacks } from "@/lib/server/worker/dispatchReadyTasksToMachines";
-import { attachTunnelHub, startTunnelHub } from "@/lib/server/tunnel/tunnelHub";
 import type { Server as HttpServer } from "http";
 
 const ORCHESTRATOR_LEASE_OWNER = "cloud-orchestrator";
@@ -67,24 +66,22 @@ export async function runCloudOrchestratorScheduler() {
   }
 }
 
-/** 本地开发：Tunnel 独立端口 + 编排循环 */
+/** 本地开发：编排循环（Tunnel 走 HTTP 长轮询 API，无需独立端口） */
 export async function runCloudOrchestratorLoop() {
-  const config = getOrchestratorConfig();
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
 
-  startTunnelHub(config.tunnelPort);
   registerTunnelDispatchCallbacks();
-  appendRuntimeDaemonLog(`云端编排器已启动（Tunnel :${config.tunnelPort}）`);
+  appendRuntimeDaemonLog("云端编排器已启动（Tunnel 走 HTTP 长轮询）");
 
   await runCloudOrchestratorScheduler();
 }
 
-/** Railway 生产：Tunnel 挂到 HTTP server，再跑编排循环 */
-export function bootstrapCloudControlPlane(server: HttpServer) {
+/** Railway 生产：Tunnel 走 HTTP 长轮询 API（/api/machine-tunnel/*），再跑编排循环 */
+export function bootstrapCloudControlPlane(_server?: HttpServer) {
+  void _server;
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
-  attachTunnelHub(server);
   registerTunnelDispatchCallbacks();
-  appendRuntimeDaemonLog("云端控制面已启动（Tunnel 与 Web 同端口）");
+  appendRuntimeDaemonLog("云端控制面已启动（Tunnel 走 HTTP 长轮询）");
   void runCloudOrchestratorScheduler().catch((error) => {
     console.error("[kiki-cloud-orchestrator] fatal error", error);
     process.exitCode = 1;

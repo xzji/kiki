@@ -9,7 +9,7 @@ import type {
 } from "@/types/runtime";
 
 import { buildClaudeEnv } from "@/lib/server/claudeEnv";
-import { assertServerLocalCliAllowed } from "@/lib/server/runtime/cloudExecutionPolicy";
+import { shouldProxyCliToMachine } from "@/lib/server/runtime/cliExecutionMode";
 import { normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimePath";
 import { createClaudeTrace } from "@/lib/server/claude/traceStore";
 import {
@@ -111,6 +111,7 @@ export type ClaudeStreamOptions = {
   quotedMessage?: QuotedConversationMessageContext | null;
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
+  conversationId?: string;
   signal?: AbortSignal;
   onEvent: (event: ClaudeStreamEvent) => void;
   /** spawn 成功后回传子进程 pid，供上层（如 ExecutionSupervisor）绑定 OS 进程做生命周期管理。 */
@@ -187,6 +188,7 @@ export async function runPromptJson(input: {
   runtimeEnv: RuntimeEnvironment;
   abortSignal?: AbortSignal;
   cwd: string;
+  conversationId?: string;
   permissionMode?: RuntimePermissionMode;
   abortMessage?: string;
   failureMessage?: string;
@@ -200,7 +202,10 @@ export async function runPromptJson(input: {
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
 }): Promise<ClaudePromptJsonResult> {
-  assertServerLocalCliAllowed();
+  if (shouldProxyCliToMachine()) {
+    const { proxyRunPromptJson } = await import("@/lib/server/tunnel/remoteCliProxy");
+    return proxyRunPromptJson(input);
+  }
   const cwd = normalizeWorkingDirectory(input.cwd);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   const startedAt = Date.now();
@@ -307,6 +312,7 @@ export async function runPromptText(input: {
   runtimeEnv: RuntimeEnvironment;
   abortSignal?: AbortSignal;
   cwd: string;
+  conversationId?: string;
   permissionMode?: RuntimePermissionMode;
   abortMessage?: string;
   failureMessage?: string;
@@ -320,7 +326,10 @@ export async function runPromptText(input: {
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
 }): Promise<ClaudePromptJsonResult> {
-  assertServerLocalCliAllowed();
+  if (shouldProxyCliToMachine()) {
+    const { proxyRunPromptText } = await import("@/lib/server/tunnel/remoteCliProxy");
+    return proxyRunPromptText(input);
+  }
   const cwd = normalizeWorkingDirectory(input.cwd);
   const cliPath = await resolveCliPath(input.runtimeEnv.cliPath);
   const startedAt = Date.now();
@@ -644,7 +653,10 @@ function summarizeToolCall(toolName: string, input: unknown) {
 }
 
 export async function streamPrompt(options: ClaudeStreamOptions) {
-  assertServerLocalCliAllowed();
+  if (shouldProxyCliToMachine()) {
+    const { proxyStreamPrompt } = await import("@/lib/server/tunnel/remoteCliProxy");
+    return proxyStreamPrompt(options);
+  }
   const cwd = normalizeWorkingDirectory(options.workingDirectory);
   const cliPath = await resolveCliPath(options.cliPath);
 

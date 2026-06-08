@@ -1,29 +1,81 @@
-import type { Server as HttpServer } from "http";
-import type { WebSocket } from "ws";
-import { WebSocketServer } from "ws";
-
 import {
   assertMachineFingerprint,
   authenticateMachineApiKey,
+  getOnlineMachinesForUser,
   touchMachineHeartbeat,
   type AuthenticatedMachine,
 } from "@/lib/server/services/machineService";
-import type { RuntimeDiscoveryItem, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
-import { parseTunnelMessage, serializeTunnelMessage } from "@/lib/server/tunnel/tunnelProtocol";
-import { MACHINE_TUNNEL_WS_PATH, TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
+import type { ClaudeJsonToolPolicy, ClaudePromptJsonResult } from "@/lib/server/claude/transport";
+import type { ToolChannelPolicy } from "@/lib/runtime/toolPolicy";
+import type {
+  QuotedConversationMessageContext,
+  RuntimeDiscoveryItem,
+  RuntimeEnvironment,
+  RuntimeEnvironmentCheckInput,
+  RuntimeEnvironmentCheckResult,
+  RuntimeFilePolicy,
+  RuntimePermissionMode,
+} from "@/types/runtime";
 
-type MachineConnection = {
-  socket: WebSocket;
-  machine: AuthenticatedMachine;
-  fingerprint?: string;
+export type RemotePromptJsonPayload = {
+  prompt: string;
+  runtimeEnv: RuntimeEnvironment;
+  cwd: string;
+  conversationId?: string;
+  permissionMode?: RuntimePermissionMode;
+  toolPolicy?: ClaudeJsonToolPolicy;
+  filePolicy?: RuntimeFilePolicy;
+  channelPolicy?: ToolChannelPolicy;
+  traceContext?: {
+    requestId?: string;
+    scope?: string;
+    phase?: string;
+    stepLabel?: string;
+  };
 };
 
-type PendingExecute = {
-  machineId: string;
-  resolve: (result: { ok: boolean; error?: string }) => void;
-  reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
+export type RemoteStreamPromptPayload = {
+  message: string;
+  workingDirectory: string;
+  cliPath: string;
+  permissionMode: RuntimePermissionMode;
+  conversationId?: string;
+  claudeSessionId?: string;
+  contextPack?: string;
+  workspacePolicy?: "conversation" | "task" | string;
+  quotedMessage?: QuotedConversationMessageContext | null;
+  filePolicy?: RuntimeFilePolicy;
+  channelPolicy?: ToolChannelPolicy;
 };
+
+/**
+ * 机器 Tunnel —— HTTP 长轮询实现。
+ *
+ * 早期版本用 WebSocket（Next 自定义 server + server.on("upgrade")），但在 Railway
+ * 边缘代理下，HTTP 500 会串入已升级的 WS 流（表现为 RSV1/FIN/502，本地无法复现）。
+ * 改为标准 HTTP 长轮询：daemon 轮询 /api/machine-tunnel/poll 取命令，执行后
+ * POST /api/machine-tunnel/result 回传。在线判定统一用 DB 心跳（每次 poll 刷新）。
+ */
+
+/** 下发给本机 daemon 的命令 */
+export type MachineCommand =
+  | { type: "execute"; requestId: string; jobId: string; payload: Record<string, unknown> }
+  | { type: "discover_runtimes"; requestId: string }
+  | { type: "check_runtime"; requestId: string; payload: RuntimeEnvironmentCheckInput }
+  | { type: "select_directory"; requestId: string }
+  | { type: "run_prompt_json"; requestId: string; payload: RemotePromptJsonPayload }
+  | { type: "run_prompt_text"; requestId: string; payload: RemotePromptJsonPayload }
+  | { type: "stream_prompt"; sessionId: string; payload: RemoteStreamPromptPayload }
+  | { type: "cancel"; requestId: string; jobId: string };
+
+/** daemon 回传的命令结果 */
+export type MachineResult =
+  | { type: "execute"; jobId: string; ok: boolean; error?: string }
+  | { type: "discover_runtimes"; requestId: string; ok: boolean; items?: RuntimeDiscoveryItem[]; workingDirectory?: string; error?: string }
+  | { type: "check_runtime"; requestId: string; ok: boolean; result?: RuntimeEnvironmentCheckResult; error?: string }
+  | { type: "select_directory"; requestId: string; ok: boolean; path?: string; canceled?: boolean; error?: string }
+  | { type: "run_prompt_json"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string }
+  | { type: "run_prompt_text"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string };
 
 type PendingTunnelRequest<T> = {
   machineId: string;
@@ -32,34 +84,43 @@ type PendingTunnelRequest<T> = {
   timer: NodeJS.Timeout;
 };
 
+type WaitingPoll = {
+  resolve: (commands: MachineCommand[]) => void;
+  timer: NodeJS.Timeout;
+};
+
 type ExecuteResultListener = (input: { jobId: string; ok: boolean; error?: string }) => void;
 type MachineDisconnectListener = (machineId: string) => void;
 
 type TunnelHubState = {
-  connections: Map<string, MachineConnection>;
-  pendingExecutes: Map<string, PendingExecute>;
+  queues: Map<string, MachineCommand[]>;
+  waiting: Map<string, WaitingPoll>;
+  pendingExecutes: Map<string, PendingTunnelRequest<{ ok: boolean; error?: string }>>;
   pendingDiscover: Map<string, PendingTunnelRequest<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>>;
   pendingCheckRuntime: Map<string, PendingTunnelRequest<RuntimeEnvironmentCheckResult>>;
+  pendingSelectDirectory: Map<string, PendingTunnelRequest<{ path: string } | { canceled: true }>>;
+  pendingRunPromptJson: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
+  pendingRunPromptText: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   executeResultListener: ExecuteResultListener | null;
   machineDisconnectListener: MachineDisconnectListener | null;
 };
 
-// 生产入口 `tsx src/bin/kiki-production.ts` 与 Next 预构建的 API route bundle
-// 是两份不同的模块实例，模块级 `const` 单例不共享。tunnel 的连接表必须挂到
-// globalThis，保证同一进程内（WS 服务端 + API route）访问同一份状态，否则
-// WebSocket 连到一份、discover/dispatch 读另一份空表，导致「在线但扫不到」。
-const HUB_STATE_KEY = Symbol.for("kiki.server.tunnelHub.state");
+// 自定义 server 入口与 Next API route bundle 是两份模块实例，模块级 const 不共享。
+// 状态挂到 globalThis，保证 poll/result 路由与编排器访问同一份队列。
+const HUB_STATE_KEY = Symbol.for("kiki.server.machineTunnel.state");
 
 function getState(): TunnelHubState {
-  const globalRef = globalThis as typeof globalThis & {
-    [HUB_STATE_KEY]?: TunnelHubState;
-  };
+  const globalRef = globalThis as typeof globalThis & { [HUB_STATE_KEY]?: TunnelHubState };
   if (!globalRef[HUB_STATE_KEY]) {
     globalRef[HUB_STATE_KEY] = {
-      connections: new Map(),
+      queues: new Map(),
+      waiting: new Map(),
       pendingExecutes: new Map(),
       pendingDiscover: new Map(),
       pendingCheckRuntime: new Map(),
+      pendingSelectDirectory: new Map(),
+      pendingRunPromptJson: new Map(),
+      pendingRunPromptText: new Map(),
       executeResultListener: null,
       machineDisconnectListener: null,
     };
@@ -67,43 +128,145 @@ function getState(): TunnelHubState {
   return globalRef[HUB_STATE_KEY];
 }
 
-function parseTunnelUpgradeUrl(requestUrl: string | undefined) {
-  if (!requestUrl) return null;
-  try {
-    const url = new URL(requestUrl, "http://localhost");
-    if (url.pathname !== MACHINE_TUNNEL_WS_PATH) return null;
-    const apiKey = url.searchParams.get("api-key") ?? url.searchParams.get("apiKey");
-    if (!apiKey) return null;
-    return apiKey;
-  } catch {
-    return null;
+function isMachineOnlineDb(userId: string, machineId: string) {
+  return getOnlineMachinesForUser(userId).some((machine) => machine.id === machineId);
+}
+
+function enqueueCommand(machineId: string, command: MachineCommand) {
+  const state = getState();
+  const waiting = state.waiting.get(machineId);
+  if (waiting) {
+    clearTimeout(waiting.timer);
+    state.waiting.delete(machineId);
+    waiting.resolve([command]);
+    return;
+  }
+  const queue = state.queues.get(machineId) ?? [];
+  queue.push(command);
+  state.queues.set(machineId, queue);
+}
+
+/** 长轮询取命令：有则立即返回，否则挂起最多 timeoutMs，期间有命令入队即唤醒。 */
+export function takeMachineCommands(machineId: string, timeoutMs: number): Promise<MachineCommand[]> {
+  const state = getState();
+  const queue = state.queues.get(machineId);
+  if (queue && queue.length > 0) {
+    state.queues.set(machineId, []);
+    return Promise.resolve(queue);
+  }
+  // 同一机器只允许一个等待中的 poll，新 poll 顶替旧的（旧的返回空）。
+  const existing = state.waiting.get(machineId);
+  if (existing) {
+    clearTimeout(existing.timer);
+    existing.resolve([]);
+    state.waiting.delete(machineId);
+  }
+  return new Promise<MachineCommand[]>((resolve) => {
+    const timer = setTimeout(() => {
+      state.waiting.delete(machineId);
+      resolve([]);
+    }, timeoutMs);
+    state.waiting.set(machineId, { resolve, timer });
+  });
+}
+
+/** 处理 daemon 回传的命令结果 */
+export function submitMachineResult(result: MachineResult) {
+  const state = getState();
+  if (result.type === "execute") {
+    const pending = state.pendingExecutes.get(result.jobId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      state.pendingExecutes.delete(result.jobId);
+      pending.resolve({ ok: result.ok, error: result.error });
+    }
+    state.executeResultListener?.({ jobId: result.jobId, ok: result.ok, error: result.error });
+    return;
+  }
+  if (result.type === "discover_runtimes") {
+    const pending = state.pendingDiscover.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingDiscover.delete(result.requestId);
+    if (!result.ok || !result.items) {
+      pending.reject(new Error(result.error || "本机 Runtime 扫描失败"));
+      return;
+    }
+    pending.resolve({ items: result.items, workingDirectory: result.workingDirectory || "" });
+    return;
+  }
+  if (result.type === "check_runtime") {
+    const pending = state.pendingCheckRuntime.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingCheckRuntime.delete(result.requestId);
+    if (!result.result) {
+      pending.reject(new Error(result.error || "本机 Runtime 检测失败"));
+      return;
+    }
+    pending.resolve(result.result);
+    return;
+  }
+  if (result.type === "select_directory") {
+    const pending = state.pendingSelectDirectory.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingSelectDirectory.delete(result.requestId);
+    if (result.canceled) {
+      pending.resolve({ canceled: true });
+      return;
+    }
+    if (!result.ok || !result.path) {
+      pending.reject(new Error(result.error || "本机目录选择失败"));
+      return;
+    }
+    pending.resolve({ path: result.path });
+    return;
+  }
+  if (result.type === "run_prompt_json") {
+    const pending = state.pendingRunPromptJson.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingRunPromptJson.delete(result.requestId);
+    if (!result.ok || !result.result) {
+      pending.reject(new Error(result.error || "本机 Claude JSON 调用失败"));
+      return;
+    }
+    pending.resolve(result.result);
+    return;
+  }
+  if (result.type === "run_prompt_text") {
+    const pending = state.pendingRunPromptText.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingRunPromptText.delete(result.requestId);
+    if (!result.ok || !result.result) {
+      pending.reject(new Error(result.error || "本机 Claude 文本调用失败"));
+      return;
+    }
+    pending.resolve(result.result);
   }
 }
 
-function rejectPendingForMachine(machineId: string, reason: string) {
-  const state = getState();
-  Array.from(state.pendingExecutes.entries()).forEach(([jobId, pending]) => {
-    if (pending.machineId !== machineId) return;
-    clearTimeout(pending.timer);
-    state.pendingExecutes.delete(jobId);
-    pending.reject(new Error(reason));
-  });
-  Array.from(state.pendingDiscover.entries()).forEach(([requestId, pending]) => {
-    if (pending.machineId !== machineId) return;
-    clearTimeout(pending.timer);
-    state.pendingDiscover.delete(requestId);
-    pending.reject(new Error(reason));
-  });
-  Array.from(state.pendingCheckRuntime.entries()).forEach(([requestId, pending]) => {
-    if (pending.machineId !== machineId) return;
-    clearTimeout(pending.timer);
-    state.pendingCheckRuntime.delete(requestId);
-    pending.reject(new Error(reason));
-  });
+/** poll 入口：鉴权 + 心跳 + 取命令。返回 null 表示鉴权失败。 */
+export async function pollMachineCommands(input: {
+  apiKey: string;
+  fingerprint?: string;
+  timeoutMs: number;
+}): Promise<{ machine: AuthenticatedMachine; commands: MachineCommand[] } | { error: string } > {
+  const machine = authenticateMachineApiKey(input.apiKey);
+  if (!machine) return { error: "invalid api-key" };
+  if (input.fingerprint) {
+    const check = assertMachineFingerprint(machine.machineId, input.fingerprint);
+    if (!check.ok) return { error: check.reason };
+  }
+  touchMachineHeartbeat(machine.machineId, input.fingerprint);
+  const commands = await takeMachineCommands(machine.machineId, input.timeoutMs);
+  return { machine, commands };
 }
 
-function notifyExecuteResult(input: { jobId: string; ok: boolean; error?: string }) {
-  getState().executeResultListener?.(input);
+export function authenticateMachineForResult(apiKey: string) {
+  return authenticateMachineApiKey(apiKey);
 }
 
 export function setTunnelExecuteResultListener(listener: ExecuteResultListener | null) {
@@ -114,76 +277,51 @@ export function setMachineDisconnectListener(listener: MachineDisconnectListener
   getState().machineDisconnectListener = listener;
 }
 
-function handleMachineDisconnected(machineId: string) {
-  rejectPendingForMachine(machineId, `machine ${machineId} 连接已断开`);
-  getState().machineDisconnectListener?.(machineId);
+/** machine 离线时由编排器调用，重新入队其在途任务 */
+export function notifyMachineOffline(machineId: string) {
+  const state = getState();
+  Array.from(state.pendingExecutes.entries()).forEach(([jobId, pending]) => {
+    if (pending.machineId !== machineId) return;
+    clearTimeout(pending.timer);
+    state.pendingExecutes.delete(jobId);
+    pending.reject(new Error(`machine ${machineId} 离线`));
+  });
+  state.queues.delete(machineId);
+  state.machineDisconnectListener?.(machineId);
 }
 
 export function getTunnelHub() {
   const state = getState();
   return {
-    isMachineOnline(machineId: string) {
-      const connection = state.connections.get(machineId);
-      return Boolean(connection && connection.socket.readyState === connection.socket.OPEN);
+    isMachineOnline(machineId: string, userId: string) {
+      return isMachineOnlineDb(userId, machineId);
     },
     getOnlineMachineIdsForUser(userId: string) {
-      return Array.from(state.connections.values())
-        .filter((entry) => entry.machine.userId === userId && entry.socket.readyState === entry.socket.OPEN)
-        .map((entry) => entry.machine.machineId);
+      return getOnlineMachinesForUser(userId).map((machine) => machine.id);
     },
-    sendExecute(input: {
-      machineId: string;
-      jobId: string;
-      requestId: string;
-      payload: Record<string, unknown>;
-    }) {
-      const connection = state.connections.get(input.machineId);
-      if (!connection || connection.socket.readyState !== connection.socket.OPEN) {
-        throw new Error(`machine ${input.machineId} 不在线`);
-      }
-      connection.socket.send(
-        serializeTunnelMessage({
-          type: "execute",
-          jobId: input.jobId,
-          requestId: input.requestId,
-          payload: input.payload,
-        }),
-      );
+    sendExecute(input: { machineId: string; jobId: string; requestId: string; payload: Record<string, unknown> }) {
+      enqueueCommand(input.machineId, {
+        type: "execute",
+        jobId: input.jobId,
+        requestId: input.requestId,
+        payload: input.payload,
+      });
     },
     requestDiscoverRuntimes(input: { machineId: string; timeoutMs?: number }) {
-      const connection = state.connections.get(input.machineId);
-      if (!connection || connection.socket.readyState !== connection.socket.OPEN) {
-        throw new Error(`machine ${input.machineId} 不在线`);
-      }
       const requestId = `discover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const timeoutMs = input.timeoutMs ?? 60_000;
       return new Promise<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>((resolve, reject) => {
         const timer = setTimeout(() => {
           state.pendingDiscover.delete(requestId);
           reject(
-            new Error(
-              "本机扫描超时。请确认 daemon 已更新到最新版（npx @kiki_agent/daemon@latest），并保持在线。",
-            ),
+            new Error("本机扫描超时。请确认 daemon 已更新到最新版（npx @kiki_agent/daemon@latest）并保持在线。"),
           );
         }, timeoutMs);
-        state.pendingDiscover.set(requestId, {
-          machineId: input.machineId,
-          resolve,
-          reject,
-          timer,
-        });
-        connection.socket.send(serializeTunnelMessage({ type: "discover_runtimes", requestId }));
+        state.pendingDiscover.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "discover_runtimes", requestId });
       });
     },
-    requestCheckRuntime(input: {
-      machineId: string;
-      payload: RuntimeEnvironmentCheckInput;
-      timeoutMs?: number;
-    }) {
-      const connection = state.connections.get(input.machineId);
-      if (!connection || connection.socket.readyState !== connection.socket.OPEN) {
-        throw new Error(`machine ${input.machineId} 不在线`);
-      }
+    requestCheckRuntime(input: { machineId: string; payload: RuntimeEnvironmentCheckInput; timeoutMs?: number }) {
       const requestId = `check-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const timeoutMs = input.timeoutMs ?? 90_000;
       return new Promise<RuntimeEnvironmentCheckResult>((resolve, reject) => {
@@ -191,205 +329,52 @@ export function getTunnelHub() {
           state.pendingCheckRuntime.delete(requestId);
           reject(new Error("本机 Runtime 检测超时，请确认 daemon 在线且为最新版"));
         }, timeoutMs);
-        state.pendingCheckRuntime.set(requestId, {
-          machineId: input.machineId,
-          resolve,
-          reject,
-          timer,
-        });
-        connection.socket.send(
-          serializeTunnelMessage({
-            type: "check_runtime",
-            requestId,
-            payload: input.payload,
-          }),
-        );
+        state.pendingCheckRuntime.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "check_runtime", requestId, payload: input.payload });
       });
     },
-    async dispatchExecute(input: {
-      machineId: string;
-      jobId: string;
-      requestId: string;
-      payload: Record<string, unknown>;
-      timeoutMs?: number;
-    }) {
-      const connection = state.connections.get(input.machineId);
-      if (!connection || connection.socket.readyState !== connection.socket.OPEN) {
-        throw new Error(`machine ${input.machineId} 不在线`);
-      }
-      const timeoutMs = input.timeoutMs ?? 30 * 60_000;
-      return new Promise<{ ok: boolean; error?: string }>((resolve, reject) => {
+    requestSelectDirectory(input: { machineId: string; timeoutMs?: number }) {
+      const requestId = `select-dir-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 6 * 60 * 1000;
+      return new Promise<{ path: string } | { canceled: true }>((resolve, reject) => {
         const timer = setTimeout(() => {
-          state.pendingExecutes.delete(input.jobId);
-          reject(new Error(`machine ${input.machineId} 执行超时`));
+          state.pendingSelectDirectory.delete(requestId);
+          reject(new Error("本机目录选择超时。请确认 daemon 已更新到最新版并保持在线。"));
         }, timeoutMs);
-        state.pendingExecutes.set(input.jobId, {
-          machineId: input.machineId,
-          resolve,
-          reject,
-          timer,
-        });
-        connection.socket.send(
-          serializeTunnelMessage({
-            type: "execute",
-            jobId: input.jobId,
-            requestId: input.requestId,
-            payload: input.payload,
-          }),
-        );
+        state.pendingSelectDirectory.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "select_directory", requestId });
+      });
+    },
+    requestRunPromptJson(input: { machineId: string; payload: RemotePromptJsonPayload; timeoutMs?: number }) {
+      const requestId = `json-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 10 * 60 * 1000;
+      return new Promise<ClaudePromptJsonResult>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingRunPromptJson.delete(requestId);
+          reject(new Error("本机 Claude JSON 调用超时，请确认 daemon 在线且为最新版"));
+        }, timeoutMs);
+        state.pendingRunPromptJson.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "run_prompt_json", requestId, payload: input.payload });
+      });
+    },
+    requestRunPromptText(input: { machineId: string; payload: RemotePromptJsonPayload; timeoutMs?: number }) {
+      const requestId = `text-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 10 * 60 * 1000;
+      return new Promise<ClaudePromptJsonResult>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingRunPromptText.delete(requestId);
+          reject(new Error("本机 Claude 文本调用超时，请确认 daemon 在线且为最新版"));
+        }, timeoutMs);
+        state.pendingRunPromptText.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "run_prompt_text", requestId, payload: input.payload });
+      });
+    },
+    sendStreamPrompt(input: { machineId: string; sessionId: string; payload: RemoteStreamPromptPayload }) {
+      enqueueCommand(input.machineId, {
+        type: "stream_prompt",
+        sessionId: input.sessionId,
+        payload: input.payload,
       });
     },
   };
-}
-
-function handleClientMessage(connection: MachineConnection, raw: string) {
-  const message = parseTunnelMessage(raw);
-  if (!message) return;
-  if (message.type === "register") {
-    if (message.fingerprint) {
-      const fingerprintCheck = assertMachineFingerprint(connection.machine.machineId, message.fingerprint);
-      if (!fingerprintCheck.ok) {
-        getState().connections.delete(connection.machine.machineId);
-        connection.socket.close(4403, fingerprintCheck.reason);
-        return;
-      }
-      connection.fingerprint = message.fingerprint;
-    }
-    touchMachineHeartbeat(connection.machine.machineId, connection.fingerprint);
-    connection.socket.send(
-      serializeTunnelMessage({
-        type: "registered",
-        machineId: connection.machine.machineId,
-        userId: connection.machine.userId,
-      }),
-    );
-    return;
-  }
-  if (message.type === "heartbeat") {
-    touchMachineHeartbeat(connection.machine.machineId, connection.fingerprint);
-    connection.socket.send(serializeTunnelMessage({ type: "pong", ts: new Date().toISOString() }));
-    return;
-  }
-  if (message.type === "execute_result") {
-    const state = getState();
-    const pending = state.pendingExecutes.get(message.jobId);
-    if (pending) {
-      clearTimeout(pending.timer);
-      state.pendingExecutes.delete(message.jobId);
-      pending.resolve({ ok: message.ok, error: message.error });
-    }
-    notifyExecuteResult({
-      jobId: message.jobId,
-      ok: message.ok,
-      error: message.error,
-    });
-    return;
-  }
-  if (message.type === "discover_runtimes_result") {
-    const state = getState();
-    const pending = state.pendingDiscover.get(message.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingDiscover.delete(message.requestId);
-    if (!message.ok || !message.items) {
-      pending.reject(new Error(message.error || "本机 Runtime 扫描失败"));
-      return;
-    }
-    pending.resolve({
-      items: message.items,
-      workingDirectory: message.workingDirectory || "",
-    });
-    return;
-  }
-  if (message.type === "check_runtime_result") {
-    const state = getState();
-    const pending = state.pendingCheckRuntime.get(message.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingCheckRuntime.delete(message.requestId);
-    if (!message.result) {
-      pending.reject(new Error(message.error || "本机 Runtime 检测失败"));
-      return;
-    }
-    pending.resolve(message.result);
-    return;
-  }
-  if (message.type === "event") {
-    // P3b 后续：归一后写入 goal_event_log。MVP 先忽略。
-    return;
-  }
-}
-
-function bindSocket(connection: MachineConnection) {
-  const { socket, machine } = connection;
-  socket.on("message", (data) => {
-    handleClientMessage(connection, String(data));
-  });
-  socket.on("close", () => {
-    getState().connections.delete(machine.machineId);
-    handleMachineDisconnected(machine.machineId);
-  });
-  socket.on("error", () => {
-    getState().connections.delete(machine.machineId);
-    handleMachineDisconnected(machine.machineId);
-  });
-}
-
-function acceptMachineConnection(socket: WebSocket, requestUrl: string | undefined) {
-  const apiKey = parseTunnelUpgradeUrl(requestUrl);
-  if (!apiKey) {
-    socket.close(4401, "missing api-key");
-    return;
-  }
-  const machine = authenticateMachineApiKey(apiKey);
-  if (!machine) {
-    socket.close(4401, "invalid api-key");
-    return;
-  }
-  const state = getState();
-  const existing = state.connections.get(machine.machineId);
-  if (existing) {
-    try {
-      existing.socket.close(4000, "replaced");
-    } catch {
-      // ignore
-    }
-  }
-  const connection: MachineConnection = { socket, machine };
-  state.connections.set(machine.machineId, connection);
-  touchMachineHeartbeat(machine.machineId);
-  bindSocket(connection);
-}
-
-/** 本地开发：Tunnel 独立端口（:3001） */
-export function startTunnelHub(port: number) {
-  const wss = new WebSocketServer({ port, perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
-  wss.on("connection", (socket, request) => {
-    acceptMachineConnection(socket, request.url);
-  });
-  return wss;
-}
-
-const ATTACHED_KEY = Symbol.for("kiki.server.tunnelHub.attached");
-
-/** Railway 生产：Tunnel 与 Next 共用 HTTP 端口（WSS upgrade） */
-export function attachTunnelHub(server: HttpServer) {
-  const globalRef = globalThis as typeof globalThis & {
-    [ATTACHED_KEY]?: WebSocketServer;
-  };
-  if (globalRef[ATTACHED_KEY]) {
-    return globalRef[ATTACHED_KEY];
-  }
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
-  server.on("upgrade", (request, socket, head) => {
-    if (!parseTunnelUpgradeUrl(request.url)) {
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      acceptMachineConnection(ws, request.url);
-    });
-  });
-  globalRef[ATTACHED_KEY] = wss;
-  return wss;
 }

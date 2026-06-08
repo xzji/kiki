@@ -1075,10 +1075,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         id: assistantId,
         kind: "text",
         role: "kiki",
-        content:
-          quotedTaskInfo.instance.status === "completed" || quotedTaskInfo.instance.result?.taskResult
-            ? "正在判断这是结果反馈还是任务调整..."
-            : "正在检查这条任务的当前状态...",
+        content: "",
         createdAt: now,
         status: "streaming",
         source: "kiki",
@@ -1327,7 +1324,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       id: assistantId,
       kind: "text",
       role: "kiki",
-      content: "正在判断这是否需要调整任务...",
+      content: "",
       createdAt: new Date().toISOString(),
       status: "streaming",
       source: "kiki",
@@ -1434,6 +1431,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
         setQuotedMessage(null);
         return;
       }
+      updateMessage(conversation.id, assistantId, (message) => ({
+        ...message,
+        content: "",
+        status: "streaming",
+      }));
       await streamClaudeChat(
         {
           message: text,

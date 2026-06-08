@@ -1,5 +1,6 @@
 import os from "os";
 
+import { pickDirectoryWithOsascript } from "@/lib/server/runtime/selectWorkingDirectory";
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { isServerLocalCliDisabled } from "@/lib/server/runtime/cloudExecutionPolicy";
 import type { RuntimeDiscoveryResult, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
@@ -56,4 +57,20 @@ export async function validateRuntimeEnvironmentForUser(
 
 export function defaultRemoteWorkingDirectory() {
   return os.homedir();
+}
+
+export async function selectWorkingDirectoryForUser(userId: string): Promise<string | null> {
+  if (isServerLocalCliDisabled()) {
+    const machineId = pickOnlineMachineIdForUser(userId);
+    if (!machineId) {
+      throw new Error("请先连接本机电脑并保持在线，再选择工作目录");
+    }
+    const result = await getTunnelHub().requestSelectDirectory({ machineId });
+    if ("canceled" in result) return null;
+    return result.path;
+  }
+
+  const result = await pickDirectoryWithOsascript();
+  if ("canceled" in result) return null;
+  return result.path;
 }

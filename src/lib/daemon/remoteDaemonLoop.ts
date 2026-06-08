@@ -1,23 +1,28 @@
 import os from "os";
-import WebSocket from "ws";
+
+process.env.KIKI_MACHINE_EXECUTOR = "true";
 
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
 import { enterUserContext, runWithUserContext } from "@/lib/server/context/userContext";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
+import { pickDirectoryWithOsascript } from "@/lib/server/runtime/selectWorkingDirectory";
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 import type { RuntimeJobPayload } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { TunnelServerMessage } from "@/lib/server/tunnel/tunnelProtocol";
-import { MACHINE_TUNNEL_WS_PATH, TUNNEL_PER_MESSAGE_DEFLATE } from "@/lib/server/tunnel/tunnelWsOptions";
+import { runPromptJson, runPromptText, streamPrompt, type ClaudeStreamEvent } from "@/lib/server/claude/transport";
+import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
+import type { MachineCommand, MachineResult, RemotePromptJsonPayload, RemoteStreamPromptPayload } from "@/lib/server/tunnel/tunnelHub";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-function toWsUrl(serverUrl: string, apiKey: string) {
-  const base = serverUrl.replace(/\/$/, "");
-  const protocol = base.startsWith("https://")
-    ? base.replace("https://", "wss://")
-    : base.replace("http://", "ws://");
-  return `${protocol}${MACHINE_TUNNEL_WS_PATH}?api-key=${encodeURIComponent(apiKey)}`;
+const DAEMON_VERSION = "0.2.2";
+const POLL_PATH = "/api/machine-tunnel/poll";
+const RESULT_PATH = "/api/machine-tunnel/result";
+const STREAM_CHUNK_PATH = "/api/machine-tunnel/stream-chunk";
+const RECONNECT_DELAY_MS = 5_000;
+
+function normalizeBaseUrl(serverUrl: string) {
+  return serverUrl.replace(/\/$/, "");
 }
 
 function osFingerprint() {
@@ -44,116 +49,206 @@ async function executeRemoteJob(input: {
   });
 }
 
-const DAEMON_VERSION = "0.1.6";
-const RECONNECT_DELAY_MS = 5_000;
+export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: string }) {
+  const base = normalizeBaseUrl(input.serverUrl);
+  const pollUrl = `${base}${POLL_PATH}`;
+  const resultUrl = `${base}${RESULT_PATH}`;
+  const fingerprint = osFingerprint();
+  appendRuntimeDaemonLog(`远程 daemon（HTTP 长轮询 v${DAEMON_VERSION}）连接 ${pollUrl}`);
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
+  let boundUserId: string | null = null;
+  const runningJobs = new Set<string>();
 
-/** 建立一次连接并处理消息；连接关闭或握手失败时 resolve，由外层循环重连。 */
-function runOneConnection(wsUrl: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
+  async function postResult(result: MachineResult) {
+    try {
+      await fetch(resultUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
+        body: JSON.stringify(result),
+      });
+    } catch (error) {
+      appendRuntimeDaemonLog(`回传结果失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
-    const socket = new WebSocket(wsUrl, { perMessageDeflate: TUNNEL_PER_MESSAGE_DEFLATE });
-    let boundUserId: string | null = null;
-    let heartbeat: NodeJS.Timeout | null = null;
+  async function postStreamChunk(sessionId: string, event: ClaudeStreamEvent) {
+    try {
+      await fetch(`${base}${STREAM_CHUNK_PATH}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
+        body: JSON.stringify({ sessionId, event }),
+      });
+    } catch (error) {
+      appendRuntimeDaemonLog(`流式回传失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
-    socket.on("open", () => {
-      socket.send(
-        JSON.stringify({
-          type: "register",
-          machineId: "pending",
-          os: osFingerprint(),
-          daemonVersion: DAEMON_VERSION,
-          fingerprint: osFingerprint(),
-        }),
-      );
-      heartbeat = setInterval(() => {
-        if (socket.readyState !== WebSocket.OPEN) return;
-        socket.send(JSON.stringify({ type: "heartbeat", ts: new Date().toISOString() }));
-      }, 15_000);
+  async function runPromptOnMachine(payload: RemotePromptJsonPayload, mode: "json" | "text") {
+    const cwd = resolveLocalCliCwd({
+      cwd: payload.cwd,
+      fallbackWorkingDirectory: payload.runtimeEnv.workingDirectory,
+      conversationId: payload.conversationId,
     });
+    const runner = mode === "json" ? runPromptJson : runPromptText;
+    return runner({
+      prompt: payload.prompt,
+      runtimeEnv: payload.runtimeEnv,
+      cwd,
+      conversationId: payload.conversationId,
+      permissionMode: payload.permissionMode,
+      toolPolicy: payload.toolPolicy,
+      filePolicy: payload.filePolicy,
+      channelPolicy: payload.channelPolicy,
+      traceContext: payload.traceContext,
+    });
+  }
 
-    socket.on("message", (raw) => {
-      let message: TunnelServerMessage | null = null;
+  function bindUser(userId: string) {
+    if (boundUserId === userId) return;
+    boundUserId = userId;
+    provisionUserWorkspace(userId);
+    enterUserContext(userId);
+    appendRuntimeDaemonLog(`machine 已绑定用户 ${userId}`);
+  }
+
+  async function handleCommand(command: MachineCommand) {
+    if (command.type === "discover_runtimes") {
       try {
-        message = JSON.parse(String(raw)) as TunnelServerMessage;
-      } catch {
-        return;
+        const result = await discoverLocalRuntimes();
+        await postResult({
+          type: "discover_runtimes",
+          requestId: command.requestId,
+          ok: true,
+          items: result.items,
+          workingDirectory: os.homedir(),
+        });
+      } catch (error) {
+        await postResult({
+          type: "discover_runtimes",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "扫描失败",
+        });
       }
-      if (message.type === "registered") {
-        boundUserId = message.userId;
-        provisionUserWorkspace(message.userId);
-        enterUserContext(message.userId);
-        appendRuntimeDaemonLog(`machine 已注册：${message.machineId}（用户 ${message.userId}）`);
-        return;
+      return;
+    }
+    if (command.type === "check_runtime") {
+      try {
+        const result = await validateRuntimeEnvironment(command.payload as RuntimeEnvironmentCheckInput);
+        await postResult({ type: "check_runtime", requestId: command.requestId, ok: result.ok, result });
+      } catch (error) {
+        await postResult({
+          type: "check_runtime",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "检测失败",
+        });
       }
-      if (message.type === "discover_runtimes") {
-        void (async () => {
-          try {
-            const result = await discoverLocalRuntimes();
-            socket.send(
-              JSON.stringify({
-                type: "discover_runtimes_result",
-                requestId: message.requestId,
-                ok: true,
-                items: result.items,
-                workingDirectory: os.homedir(),
-              }),
-            );
-          } catch (error) {
-            socket.send(
-              JSON.stringify({
-                type: "discover_runtimes_result",
-                requestId: message.requestId,
-                ok: false,
-                error: error instanceof Error ? error.message : "扫描失败",
-              }),
-            );
-          }
-        })();
-        return;
+      return;
+    }
+    if (command.type === "select_directory") {
+      try {
+        const picked = await pickDirectoryWithOsascript();
+        if ("canceled" in picked) {
+          await postResult({
+            type: "select_directory",
+            requestId: command.requestId,
+            ok: true,
+            canceled: true,
+          });
+          return;
+        }
+        await postResult({
+          type: "select_directory",
+          requestId: command.requestId,
+          ok: true,
+          path: picked.path,
+        });
+      } catch (error) {
+        await postResult({
+          type: "select_directory",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "目录选择失败",
+        });
       }
-      if (message.type === "check_runtime") {
-        void (async () => {
-          try {
-            const result = await validateRuntimeEnvironment(message.payload as RuntimeEnvironmentCheckInput);
-            socket.send(
-              JSON.stringify({
-                type: "check_runtime_result",
-                requestId: message.requestId,
-                ok: result.ok,
-                result,
-              }),
-            );
-          } catch (error) {
-            socket.send(
-              JSON.stringify({
-                type: "check_runtime_result",
-                requestId: message.requestId,
-                ok: false,
-                error: error instanceof Error ? error.message : "检测失败",
-              }),
-            );
-          }
-        })();
-        return;
+      return;
+    }
+    if (command.type === "run_prompt_json") {
+      try {
+        const result = await runPromptOnMachine(command.payload, "json");
+        await postResult({ type: "run_prompt_json", requestId: command.requestId, ok: true, result });
+      } catch (error) {
+        await postResult({
+          type: "run_prompt_json",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "JSON 调用失败",
+        });
       }
-      if (message.type !== "execute") return;
+      return;
+    }
+    if (command.type === "run_prompt_text") {
+      try {
+        const result = await runPromptOnMachine(command.payload, "text");
+        await postResult({ type: "run_prompt_text", requestId: command.requestId, ok: true, result });
+      } catch (error) {
+        await postResult({
+          type: "run_prompt_text",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "文本调用失败",
+        });
+      }
+      return;
+    }
+    if (command.type === "stream_prompt") {
+      void (async () => {
+        const payload = command.payload as RemoteStreamPromptPayload;
+        const cwd = resolveLocalCliCwd({
+          cwd: payload.workingDirectory,
+          fallbackWorkingDirectory: payload.workingDirectory,
+          conversationId: payload.conversationId,
+        });
+        try {
+          await streamPrompt({
+            message: payload.message,
+            workingDirectory: cwd,
+            cliPath: payload.cliPath,
+            permissionMode: payload.permissionMode,
+            claudeSessionId: payload.claudeSessionId,
+            contextPack: payload.contextPack,
+            workspacePolicy: payload.workspacePolicy,
+            quotedMessage: payload.quotedMessage,
+            filePolicy: payload.filePolicy,
+            channelPolicy: payload.channelPolicy,
+            conversationId: payload.conversationId,
+            onEvent: (event) => {
+              void postStreamChunk(command.sessionId, event);
+            },
+          });
+        } catch (error) {
+          await postStreamChunk(command.sessionId, {
+            type: "error",
+            message: error instanceof Error ? error.message : "流式调用失败",
+          });
+          await postStreamChunk(command.sessionId, { type: "done" });
+        }
+      })();
+      return;
+    }
+    if (command.type === "execute") {
+      // 异步执行，不阻塞 poll 循环（保持心跳与并发）。
+      if (runningJobs.has(command.jobId)) return;
+      runningJobs.add(command.jobId);
       void (async () => {
         try {
-          const raw = message.payload as Partial<RuntimeJobPayload> & {
-            trajectory?: ExecutionTrajectoryStep[];
-          };
+          const raw = command.payload as Partial<RuntimeJobPayload> & { trajectory?: ExecutionTrajectoryStep[] };
           if (!raw.goal || !raw.subGoal || !raw.task || !raw.instance || !raw.runtimeEnv) {
             throw new Error("execute payload 不完整");
+          }
+          if (!boundUserId) {
+            throw new Error("machine 尚未绑定用户");
           }
           const payload: RuntimeJobPayload = {
             goal: raw.goal,
@@ -164,70 +259,56 @@ function runOneConnection(wsUrl: string): Promise<void> {
             resumeContext: raw.resumeContext,
           };
           const initialTrajectory = Array.isArray(raw.trajectory) ? raw.trajectory : [];
-          if (!boundUserId) {
-            throw new Error("machine 尚未完成注册");
-          }
           await runWithUserContext(boundUserId, () =>
             executeRemoteJob({
-              jobId: message.jobId,
-              requestId: message.requestId,
+              jobId: command.jobId,
+              requestId: command.requestId,
               payload,
               initialTrajectory,
             }),
           );
-          socket.send(
-            JSON.stringify({
-              type: "execute_result",
-              jobId: message.jobId,
-              ok: true,
-            }),
-          );
+          await postResult({ type: "execute", jobId: command.jobId, ok: true });
         } catch (error) {
-          socket.send(
-            JSON.stringify({
-              type: "execute_result",
-              jobId: message.jobId,
-              ok: false,
-              error: error instanceof Error ? error.message : "执行失败",
-            }),
-          );
+          await postResult({
+            type: "execute",
+            jobId: command.jobId,
+            ok: false,
+            error: error instanceof Error ? error.message : "执行失败",
+          });
+        } finally {
+          runningJobs.delete(command.jobId);
         }
       })();
-    });
+      return;
+    }
+    // cancel 等其它命令暂忽略
+  }
 
-    // 握手失败（如部署期间 502）会触发 error 而非 open；必须按重连处理，不能让进程崩溃退出。
-    socket.on("unexpected-response", (_req, res) => {
-      appendRuntimeDaemonLog(`Tunnel 握手被拒绝（HTTP ${res.statusCode}），${RECONNECT_DELAY_MS / 1000}s 后重连…`);
-      try {
-        socket.terminate();
-      } catch {
-        // ignore
-      }
-      done();
-    });
-
-    socket.on("error", (error) => {
-      appendRuntimeDaemonLog(
-        `Tunnel 连接错误：${error instanceof Error ? error.message : String(error)}，${RECONNECT_DELAY_MS / 1000}s 后重连…`,
-      );
-      done();
-    });
-
-    socket.on("close", () => {
-      if (heartbeat) clearInterval(heartbeat);
-      appendRuntimeDaemonLog(`Tunnel 连接断开，${RECONNECT_DELAY_MS / 1000}s 后重连…`);
-      done();
-    });
-  });
-}
-
-export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: string }) {
-  const wsUrl = toWsUrl(input.serverUrl, input.apiKey);
-  appendRuntimeDaemonLog(`远程 daemon 连接 ${wsUrl}`);
-
-  // 永不退出：任何断开/握手失败都进入重连，避免部署切换期间进程崩溃。
+  // 永不退出：网络/服务端错误都按重试处理。
   for (;;) {
-    await runOneConnection(wsUrl);
-    await sleep(RECONNECT_DELAY_MS);
+    try {
+      const response = await fetch(pollUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
+        body: JSON.stringify({ fingerprint, daemonVersion: DAEMON_VERSION }),
+      });
+      if (!response.ok) {
+        appendRuntimeDaemonLog(`poll 返回 HTTP ${response.status}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
+        await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+        continue;
+      }
+      const data = (await response.json()) as {
+        ok: boolean;
+        userId?: string;
+        commands?: MachineCommand[];
+      };
+      if (data.userId) bindUser(data.userId);
+      for (const command of data.commands ?? []) {
+        await handleCommand(command);
+      }
+    } catch (error) {
+      appendRuntimeDaemonLog(`poll 失败：${error instanceof Error ? error.message : String(error)}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
+      await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+    }
   }
 }

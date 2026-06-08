@@ -1,45 +1,28 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
-
 import { NextResponse } from "next/server";
+
 import { withAuth } from "@/lib/server/http/withAuth";
+import { selectWorkingDirectoryForUser } from "@/lib/server/tunnel/remoteRuntimeProxy";
 
-const execFileAsync = promisify(execFile);
-
-function normalizeSelectedPath(path: string) {
-  const trimmed = path.trim();
-  if (trimmed === "/") return trimmed;
-  return trimmed.replace(/\/+$/, "");
-}
-
-async function POSTHandler() {
+async function POSTHandler(_request: Request, context: { userId: string }) {
   try {
-    const { stdout } = await execFileAsync(
-      "osascript",
-      [
-        "-e",
-        'set selectedFolder to choose folder with prompt "选择 KiKi Runtime 工作目录"',
-        "-e",
-        "POSIX path of selectedFolder",
-      ],
-      {
-        timeout: 5 * 60 * 1000,
-        maxBuffer: 1024 * 1024,
-      },
-    );
-
-    return NextResponse.json({
-      path: normalizeSelectedPath(stdout),
-    });
+    const path = await selectWorkingDirectoryForUser(context.userId);
+    if (!path) {
+      return NextResponse.json({ canceled: true, reason: "已取消选择目录" }, { status: 400 });
+    }
+    return NextResponse.json({ path });
   } catch (error) {
     const message = error instanceof Error ? error.message : "目录选择失败";
-    const canceled = message.includes("User canceled");
+    const useManualInput =
+      message.includes("不支持原生目录选择器") ||
+      message.includes("ENOENT") ||
+      message.includes("osascript");
     return NextResponse.json(
       {
-        canceled,
-        reason: canceled ? "已取消选择目录" : message,
+        canceled: false,
+        useManualInput,
+        reason: useManualInput ? "无法打开本机目录选择器，请手动输入路径" : message,
       },
-      { status: canceled ? 400 : 500 },
+      { status: useManualInput ? 400 : 500 },
     );
   }
 }

@@ -23,6 +23,7 @@ export async function judgeGovernanceIntent(input: {
   quotedMessage?: QuotedConversationMessageContext | null;
   runtimeEnv: RuntimeEnvironment;
   workingDirectory: string;
+  conversationId?: string;
   fallbackRef?: TaskRef;
   signal?: AbortSignal;
 }): Promise<GovernanceJudgeResult> {
@@ -31,6 +32,7 @@ export async function judgeGovernanceIntent(input: {
       prompt: buildGovernanceJudgePrompt(input),
       runtimeEnv: input.runtimeEnv,
       cwd: input.workingDirectory,
+      conversationId: input.conversationId,
       permissionMode: "readonly",
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "readonly_json" },

@@ -55,6 +55,7 @@ async function POSTHandler(request: NextRequest) {
           permissionMode: body.runtimeEnv.permissionMode,
           filePolicy: body.runtimeEnv.filePolicy,
           claudeSessionId: body.claudeSessionId,
+          conversationId: body.conversationId,
           quotedMessage: body.quotedMessage,
           contextPack,
           workspacePolicy: body.workspaceMode || "conversation",

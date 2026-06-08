@@ -50,19 +50,28 @@ export async function discoverRuntimeEnvs(): Promise<RuntimeDiscoveryResult & { 
   return data;
 }
 
-export async function selectRuntimeWorkingDirectory(): Promise<string | null> {
+export type SelectDirectoryResult =
+  | { kind: "path"; path: string }
+  | { kind: "canceled" }
+  | { kind: "manual"; reason: string };
+
+export async function selectRuntimeWorkingDirectory(): Promise<SelectDirectoryResult> {
   const response = await fetch("/api/runtime-envs/select-directory", {
     method: "POST",
   });
   const data = (await response.json()) as {
     path?: string;
     canceled?: boolean;
+    useManualInput?: boolean;
     reason?: string;
   };
 
-  if (data.canceled) return null;
+  if (data.canceled) return { kind: "canceled" };
+  if (data.useManualInput) {
+    return { kind: "manual", reason: data.reason || "请手动输入本机工作目录路径" };
+  }
   if (!response.ok || !data.path) {
     throw new Error(data.reason || "目录选择失败");
   }
-  return data.path;
+  return { kind: "path", path: data.path };
 }

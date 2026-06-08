@@ -174,6 +174,7 @@ async function POSTHandler(request: NextRequest) {
     quotedMessage: body.quotedMessage,
     runtimeEnv: body.runtimeEnv,
     workingDirectory: workspace.workspaceDir,
+    conversationId: body.conversationId,
     fallbackRef,
     signal: request.signal,
   });

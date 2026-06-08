@@ -44,6 +44,8 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
   const [isScanning, setIsScanning] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isSelectingDirectory, setIsSelectingDirectory] = useState(false);
+  const [showManualDirectoryInput, setShowManualDirectoryInput] = useState(false);
+  const [manualDirectoryDraft, setManualDirectoryDraft] = useState("");
   const [result, setResult] = useState<RuntimeEnvironmentCheckResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,6 +72,8 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
     setIsScanning(false);
     setIsChecking(false);
     setIsSelectingDirectory(false);
+    setShowManualDirectoryInput(false);
+    setManualDirectoryDraft("");
   };
 
   const handleClose = () => {
@@ -125,26 +129,53 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
     }
   };
 
+  const applyWorkingDirectory = async (nextWorkingDirectory: string) => {
+    if (!selectedRuntime?.cliPath) return;
+    setWorkingDirectory(nextWorkingDirectory);
+    setResult(null);
+    const checked = await checkRuntimeEnv({
+      name: selectedRuntime.label,
+      runtimeKind: selectedRuntime.runtimeKind,
+      workingDirectory: nextWorkingDirectory,
+      cliPath: selectedRuntime.cliPath,
+      permissionMode,
+      filePolicy: DEFAULT_RUNTIME_FILE_POLICY,
+    });
+    setResult(checked);
+  };
+
   const changeWorkingDirectory = async () => {
     if (!selectedRuntime?.cliPath) return;
     setIsSelectingDirectory(true);
     setError(null);
+    setShowManualDirectoryInput(false);
 
     try {
-      const nextWorkingDirectory = await selectRuntimeWorkingDirectory();
-      if (!nextWorkingDirectory) return;
-
-      setWorkingDirectory(nextWorkingDirectory);
+      const selection = await selectRuntimeWorkingDirectory();
+      if (selection.kind === "canceled") return;
+      if (selection.kind === "manual") {
+        setManualDirectoryDraft(workingDirectory);
+        setShowManualDirectoryInput(true);
+        setError(selection.reason);
+        return;
+      }
+      await applyWorkingDirectory(selection.path);
+    } catch (selectError) {
       setResult(null);
-      const checked = await checkRuntimeEnv({
-        name: selectedRuntime.label,
-        runtimeKind: selectedRuntime.runtimeKind,
-        workingDirectory: nextWorkingDirectory,
-        cliPath: selectedRuntime.cliPath,
-        permissionMode,
-        filePolicy: DEFAULT_RUNTIME_FILE_POLICY,
-      });
-      setResult(checked);
+      setError(selectError instanceof Error ? selectError.message : "工作目录修改失败");
+    } finally {
+      setIsSelectingDirectory(false);
+    }
+  };
+
+  const submitManualWorkingDirectory = async () => {
+    const nextWorkingDirectory = manualDirectoryDraft.trim();
+    if (!nextWorkingDirectory || !selectedRuntime?.cliPath) return;
+    setIsSelectingDirectory(true);
+    setError(null);
+    try {
+      await applyWorkingDirectory(nextWorkingDirectory);
+      setShowManualDirectoryInput(false);
     } catch (selectError) {
       setResult(null);
       setError(selectError instanceof Error ? selectError.message : "工作目录修改失败");
@@ -240,6 +271,10 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
               workingDirectory={workingDirectory}
               result={result}
               isSelectingDirectory={isSelectingDirectory}
+              showManualDirectoryInput={showManualDirectoryInput}
+              manualDirectoryDraft={manualDirectoryDraft}
+              onManualDirectoryDraftChange={setManualDirectoryDraft}
+              onSubmitManualWorkingDirectory={submitManualWorkingDirectory}
               onChangeWorkingDirectory={changeWorkingDirectory}
             />
           ) : null}
@@ -467,6 +502,10 @@ function ConfirmStep({
   workingDirectory,
   result,
   isSelectingDirectory,
+  showManualDirectoryInput,
+  manualDirectoryDraft,
+  onManualDirectoryDraftChange,
+  onSubmitManualWorkingDirectory,
   onChangeWorkingDirectory,
 }: {
   runtime: RuntimeDiscoveryItem;
@@ -474,6 +513,10 @@ function ConfirmStep({
   workingDirectory: string;
   result: RuntimeEnvironmentCheckResult | null;
   isSelectingDirectory: boolean;
+  showManualDirectoryInput: boolean;
+  manualDirectoryDraft: string;
+  onManualDirectoryDraftChange: (value: string) => void;
+  onSubmitManualWorkingDirectory: () => void;
   onChangeWorkingDirectory: () => void;
 }) {
   return (
@@ -508,6 +551,28 @@ function ConfirmStep({
           </div>
           <div className="mt-1 break-all text-[13px] text-[#111]">{workingDirectory}</div>
           <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">修改后会自动重新检测该目录是否可用。</div>
+          {showManualDirectoryInput ? (
+            <div className="mt-3 space-y-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 py-3">
+              <div className="text-[12px] leading-5 text-[#92400E]">
+                云端无法直接打开目录选择器，请输入你本机上的绝对路径（例如 /Users/你的名字/Projects）。
+              </div>
+              <input
+                type="text"
+                value={manualDirectoryDraft}
+                onChange={(event) => onManualDirectoryDraftChange(event.target.value)}
+                placeholder="/Users/you/Projects"
+                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] text-[#111] outline-none focus:border-[#111]"
+              />
+              <button
+                type="button"
+                onClick={onSubmitManualWorkingDirectory}
+                disabled={!manualDirectoryDraft.trim() || isSelectingDirectory}
+                className="inline-flex h-8 items-center rounded-lg bg-[#111] px-3 text-[12px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-[#C1C7D0]"
+              >
+                确认路径并检测
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
       {result?.ok ? (

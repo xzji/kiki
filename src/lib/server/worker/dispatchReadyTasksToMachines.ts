@@ -126,7 +126,7 @@ export async function dispatchReadyTasksToMachines(input: {
 
   let processed = 0;
   for (const job of claimed) {
-    if (!hub.isMachineOnline(machineId)) {
+    if (!hub.isMachineOnline(machineId, userId)) {
       runWithUserContext(userId, () => {
         updateGoalRuntimeJobExecution(job.id, {
           status: "queued",
@@ -148,6 +148,16 @@ export async function dispatchReadyTasksToMachines(input: {
 
     const requestId = job.requestId ?? `goal-task-${job.id}`;
     const renewTimer = setInterval(() => {
+      // 长轮询下没有"连接断开"事件：machine 不再 poll 即视为离线，
+      // 停止续约并把在途任务重新入队，避免任务卡在 running。
+      if (!hub.isMachineOnline(machineId, userId)) {
+        const active = activeTunnelDispatches.get(job.id);
+        if (active) {
+          requeueTunnelJob(active, `machine ${machineId} 已离线，任务重新入队`);
+          finishTunnelDispatch(job.id);
+        }
+        return;
+      }
       runWithUserContext(userId, () => {
         renewRuntimeJobLease(job.id, {
           leaseOwner: input.leaseOwner,
