@@ -8,6 +8,7 @@ import { appendGoalProgressMessage } from "@/lib/goalProgressLog";
 import { parseSlashCommand } from "@/lib/slashCommands";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
+import type { ArtifactRef } from "@/types/artifact";
 import type { Conversation, ConversationMessage, GoalInfoCollection } from "@/types/kiki";
 import type { ClaudeStreamEvent, RuntimeEnvironment } from "@/types/runtime";
 
@@ -15,6 +16,7 @@ export type AssistantMessage = {
   id: string;
   role: "user" | "kiki";
   content: string;
+  artifactRefs?: ArtifactRef[];
   createdAt: string;
   status?: "streaming" | "done" | "error";
   action?: {
@@ -437,11 +439,21 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
         return;
       }
 
+      if (event.type === "file_artifact") {
+        set({
+          messages: get().messages.map((message) =>
+            message.id === assistantId
+              ? { ...message, artifactRefs: [...(message.artifactRefs ?? []), event.ref] }
+              : message,
+          ),
+        });
+        return;
+      }
+
       if (event.type === "permission_request") {
         set({ permissionRequest: event.reason });
         return;
       }
-
       if (event.type === "error") {
         set({
           error: event.message,

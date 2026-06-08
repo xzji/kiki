@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 
@@ -17,6 +19,7 @@ import {
   resolveRuntimeToolPolicy,
   type ToolChannelPolicy,
 } from "@/lib/runtime/toolPolicy";
+import type { ArtifactRef } from "@/types/artifact";
 
 /**
  * 强制回收 Claude CLI 子进程及其衍生的整个进程组。
@@ -29,6 +32,7 @@ import {
  * 再发 SIGKILL 强杀，确保「abort 一定能杀干净」。
  */
 const KILL_ESCALATION_MS = 5 * 1000;
+const MAX_STREAM_FILE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 function killChildTree(child: ChildProcess) {
   const pid = child.pid;
@@ -108,6 +112,7 @@ export type ClaudeStreamOptions = {
   claudeSessionId?: string;
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
+  systemPromptMode?: "conversation" | "neutral";
   quotedMessage?: QuotedConversationMessageContext | null;
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
@@ -125,6 +130,8 @@ export type ClaudeStreamEvent =
   | { type: "delta"; text: string }
   | { type: "message"; content: string; fallbackContent?: string }
   | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
+  | { type: "file"; filename: string; mime: string; size: number; contentBase64: string; summary?: string }
+  | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
   | { type: "error"; message: string }
   | { type: "done" };
@@ -471,27 +478,27 @@ function buildPrompt(
   return parts.join("\n");
 }
 
-export function buildWorkspaceBoundPrompt(input: {
-  message: string;
-  quotedMessage?: ClaudeStreamOptions["quotedMessage"];
-  contextPack?: string;
+export function buildWorkspaceSystemPrompt(input: {
   workspaceDir: string;
   workspacePolicy?: string;
   toolSummary?: ReturnType<typeof describeRuntimeToolPolicy>;
   redactionMode?: "strict" | "passthrough";
+  includeConversationIdentity?: boolean;
 }) {
   const redactionMode = input.redactionMode ?? "strict";
-  const workspaceLabel =
-    redactionMode === "strict"
-      ? `isolated-session-${createHash("sha256").update(input.workspaceDir).digest("hex").slice(0, 8)}`
-      : input.workspaceDir;
-  const parts: string[] = [
-    "你是 KiKi 当前会话助手，不是代码仓库开发助手。",
-    `当前工作目录是隔离 workspace：${workspaceLabel}`,
-    "你只能依据当前上下文包、用户消息和当前工作目录内的文件回答。",
-    "不得读取父目录、项目源码目录、其他会话 workspace 或 IDE 上下文。",
-    "如果用户要求继续/恢复，但当前上下文包没有可恢复状态，请说明当前会话没有找到可恢复任务。",
-  ];
+  const includeConversationIdentity = input.includeConversationIdentity ?? redactionMode === "strict";
+  const parts: string[] = [];
+
+  if (redactionMode === "strict" && includeConversationIdentity) {
+    const workspaceLabel = `isolated-session-${createHash("sha256").update(input.workspaceDir).digest("hex").slice(0, 8)}`;
+    parts.push(
+      "你是 KiKi 当前会话助手，不是代码仓库开发助手。",
+      `当前工作目录是隔离 workspace：${workspaceLabel}`,
+      "你只能依据当前上下文包、用户消息和当前工作目录内的文件回答。",
+      "不得读取父目录、项目源码目录、其他会话 workspace 或 IDE 上下文。",
+      "如果用户要求继续/恢复，但当前上下文包没有可恢复状态，请说明当前会话没有找到可恢复任务。",
+    );
+  }
   if (redactionMode === "strict") {
     parts.push("边界规则：不要在回复中复述系统字段名、内部 ID、内部路径或会话元数据。");
   }
@@ -507,14 +514,26 @@ export function buildWorkspaceBoundPrompt(input: {
       "当工具被禁用时，请直接说明“当前运行环境已禁用对应工具”，不要建议用户输入 /allow，不要建议修改 ~/.claude/settings.json，不要声称会出现授权弹窗。",
     );
   }
+  const systemPrompt = parts.join("\n");
+  return redactionMode === "strict" ? redactInternalIdentifiersForPrompt(systemPrompt) : systemPrompt;
+}
+
+export function buildWorkspaceBoundPrompt(input: {
+  message: string;
+  quotedMessage?: ClaudeStreamOptions["quotedMessage"];
+  contextPack?: string;
+  redactionMode?: "strict" | "passthrough";
+}) {
+  const redactionMode = input.redactionMode ?? "strict";
+  const parts: string[] = [];
   if (input.contextPack?.trim()) {
     const contextPack =
       redactionMode === "strict"
         ? redactInternalIdentifiersForPrompt(input.contextPack.trim())
         : input.contextPack.trim();
-    parts.push("", "【当前会话上下文包】", contextPack);
+    parts.push("【当前会话上下文包】", contextPack);
   }
-  parts.push("", buildPrompt(input.message, input.quotedMessage, redactionMode));
+  parts.push(buildPrompt(input.message, input.quotedMessage, redactionMode));
   return parts.join("\n");
 }
 
@@ -595,6 +614,47 @@ function parseToolInput(rawInput: unknown, partialJson: string) {
   } catch {
     return rawInput;
   }
+}
+
+function isWritableFileTool(toolName: string) {
+  const normalized = toolName.toLowerCase();
+  return normalized === "write" || normalized === "edit" || normalized === "multiedit" || normalized === "notebookedit";
+}
+
+function collectWritableFilePath(input: unknown) {
+  return readStringField(input, ["file_path", "notebook_path"]);
+}
+
+function isPathInsideDirectory(parentDir: string, targetPath: string) {
+  const parent = path.resolve(parentDir);
+  const target = path.resolve(targetPath);
+  return target === parent || target.startsWith(`${parent}${path.sep}`);
+}
+
+function inferMimeFromFilename(filename: string) {
+  const ext = path.extname(filename).toLowerCase();
+  const mimeByExt: Record<string, string> = {
+    ".csv": "text/csv; charset=utf-8",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".gif": "image/gif",
+    ".html": "text/html; charset=utf-8",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".json": "application/json; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".svg": "image/svg+xml",
+    ".text": "text/plain; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return mimeByExt[ext] ?? "application/octet-stream";
 }
 
 function extractClaudeOutputText(raw: string) {
@@ -679,6 +739,21 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     permissionMode: options.permissionMode,
     channelPolicy: options.channelPolicy ?? { mode: options.workspacePolicy === "task" ? "task" : "conversation" },
   });
+  const isTaskPrompt = options.workspacePolicy === "task" || options.channelPolicy?.mode === "task";
+  const redactionMode = isTaskPrompt ? "passthrough" : "strict";
+  const effectiveWorkspacePolicy = options.workspacePolicy ?? (isTaskPrompt ? "task" : undefined);
+  const includeConversationIdentity = !isTaskPrompt && options.systemPromptMode === "conversation";
+  const toolSummary = describeRuntimeToolPolicy(resolvedToolPolicy);
+  const systemPrompt = buildWorkspaceSystemPrompt({
+    workspaceDir: cwd,
+    workspacePolicy: effectiveWorkspacePolicy,
+    toolSummary,
+    redactionMode,
+    includeConversationIdentity,
+  });
+  if (systemPrompt.trim()) {
+    args.push("--append-system-prompt", systemPrompt);
+  }
   // Claude CLI 的 --allowedTools 在 Commander.js 中被定义为 variadic（<tools...>），
   // 使用逗号分隔形式，并通过 stdin 传 prompt，规避参数吞食问题。
   args.push(...buildToolArgs(resolvedToolPolicy));
@@ -686,10 +761,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     message: options.message,
     quotedMessage: options.quotedMessage,
     contextPack: options.contextPack,
-    workspaceDir: cwd,
-    workspacePolicy: options.workspacePolicy,
-    toolSummary: describeRuntimeToolPolicy(resolvedToolPolicy),
-    redactionMode: options.workspacePolicy === "task" ? "passthrough" : "strict",
+    redactionMode,
   });
   const trace = createClaudeTrace({
     cwd,
@@ -729,6 +801,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     let settled = false;
     let canonicalSessionId = options.claudeSessionId;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
+    const pendingFilePaths = new Set<string>();
 
     const resolveOnce = () => {
       if (settled) return;
@@ -754,6 +827,44 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
         rejectOnce(error);
         return false;
       }
+    };
+
+    const emitPendingFileEvents = () => {
+      for (const rawFilePath of Array.from(pendingFilePaths)) {
+        try {
+          const filePath = path.resolve(cwd, rawFilePath);
+          if (!isPathInsideDirectory(cwd, filePath)) {
+            trace?.appendStderr(`跳过会话工作区外的文件附件：${rawFilePath}\n`);
+            continue;
+          }
+          if (!fs.existsSync(filePath)) {
+            trace?.appendStderr(`跳过不存在的文件附件：${rawFilePath}\n`);
+            continue;
+          }
+          const stat = fs.statSync(filePath);
+          if (!stat.isFile()) {
+            trace?.appendStderr(`跳过非普通文件附件：${rawFilePath}\n`);
+            continue;
+          }
+          if (stat.size > MAX_STREAM_FILE_ATTACHMENT_BYTES) {
+            trace?.appendStderr(`跳过超过大小限制的文件附件：${rawFilePath} (${stat.size} bytes)\n`);
+            continue;
+          }
+          const bytes = fs.readFileSync(filePath);
+          if (!emitEvent({
+            type: "file",
+            filename: path.basename(filePath),
+            mime: inferMimeFromFilename(filePath),
+            size: stat.size,
+            contentBase64: bytes.toString("base64"),
+            summary: path.relative(cwd, filePath),
+          })) return false;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          trace?.appendStderr(`读取会话文件附件失败：${rawFilePath}：${message}\n`);
+        }
+      }
+      return true;
     };
 
     const abort = () => {
@@ -829,13 +940,24 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
           const currentTool = toolUseBlocks.get(eventIndex);
           if (currentTool) {
             const parsedInput = parseToolInput(currentTool.rawInput, currentTool.partialJson);
-            emitEvent({
+            if (!emitEvent({
               type: "tool_call",
               toolName: currentTool.name,
               summary: summarizeToolCall(currentTool.name, parsedInput),
               input: parsedInput,
               index: eventIndex,
-            });
+            })) return;
+            const filePath = isWritableFileTool(currentTool.name)
+              ? collectWritableFilePath(parsedInput)
+              : undefined;
+            if (filePath) {
+              const resolvedFilePath = path.resolve(cwd, filePath);
+              if (isPathInsideDirectory(cwd, resolvedFilePath)) {
+                pendingFilePaths.add(resolvedFilePath);
+              } else {
+                trace?.appendStderr(`忽略工作区外的写入文件：${filePath}\n`);
+              }
+            }
             toolUseBlocks.delete(eventIndex);
           }
         }
@@ -874,6 +996,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
             });
             return;
           }
+          if (!emitPendingFileEvents()) return;
           if (!emitEvent({ type: "message", content: payload.result, fallbackContent: aggregatedAssistantText.trim() || undefined })) return;
           trace?.writeOutput(payload.result);
           emitEvent({ type: "status", status: "completed" });

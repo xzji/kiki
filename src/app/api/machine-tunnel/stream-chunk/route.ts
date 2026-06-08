@@ -27,10 +27,15 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as {
     sessionId?: string;
     event?: ClaudeStreamEvent;
+    seq?: number;
   } | null;
   if (!body?.sessionId || !body.event || typeof body.event.type !== "string") {
     return NextResponse.json({ ok: false, reason: "无效的流式分片" }, { status: 400 });
   }
-  pushStreamChunk(body.sessionId, body.event);
+  const seq = body.seq;
+  if (seq !== undefined && !(typeof seq === "number" && Number.isInteger(seq) && seq >= 0)) {
+    return NextResponse.json({ ok: false, reason: "无效的流式分片序号" }, { status: 400 });
+  }
+  pushStreamChunk(body.sessionId, body.event, seq);
   return NextResponse.json({ ok: true });
 }

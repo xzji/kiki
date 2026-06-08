@@ -3,6 +3,7 @@ import os from "os";
 import { pickDirectoryWithOsascript } from "@/lib/server/runtime/selectWorkingDirectory";
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { isServerLocalCliDisabled } from "@/lib/server/runtime/cloudExecutionPolicy";
+import { getKikiDefaultSkillsStatus, installKikiDefaultSkills } from "@/lib/server/kikiSkills/installService";
 import type { RuntimeDiscoveryResult, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
 
 import { getTunnelHub } from "./tunnelHub";
@@ -73,4 +74,28 @@ export async function selectWorkingDirectoryForUser(userId: string): Promise<str
   const result = await pickDirectoryWithOsascript();
   if ("canceled" in result) return null;
   return result.path;
+}
+
+export async function getKikiSkillsStatusForUser(userId: string) {
+  if (isServerLocalCliDisabled()) {
+    const machineId = pickOnlineMachineIdForUser(userId);
+    if (!machineId) {
+      throw new Error("请先连接本机电脑并保持在线，再查看 KiKi 默认 skills 状态");
+    }
+    return getTunnelHub().requestKikiSkillsStatus({ machineId });
+  }
+
+  return getKikiDefaultSkillsStatus();
+}
+
+export async function installKikiSkillsForUser(userId: string) {
+  if (isServerLocalCliDisabled()) {
+    const machineId = pickOnlineMachineIdForUser(userId);
+    if (!machineId) {
+      throw new Error("请先连接本机电脑并保持在线，再安装 KiKi 默认 skills");
+    }
+    return getTunnelHub().requestInstallKikiSkills({ machineId });
+  }
+
+  return installKikiDefaultSkills();
 }

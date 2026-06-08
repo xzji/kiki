@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
+import { ArtifactRenderer } from "@/components/execution/ArtifactRenderer";
 import { formatMessageTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
@@ -212,6 +213,11 @@ export function ConversationMessageItem({
             <MarkdownRenderer content={message.content} />
           )}
         </div>
+        {message.kind === "text" && message.artifactRefs?.length ? (
+          <div className="mt-2 max-w-3xl">
+            <ArtifactRenderer refs={message.artifactRefs} hasInteractiveSurface />
+          </div>
+        ) : null}
 
         {sagaRequestId && (message.status === "streaming" || saga) ? (
           <SagaProgressCard saga={saga} />

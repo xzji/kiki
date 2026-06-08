@@ -1485,6 +1485,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
               }));
               return;
             }
+            if (event.type === "file_artifact") {
+              updateMessage(conversation.id, assistantId, (message) =>
+                message.kind === "text"
+                  ? {
+                      ...message,
+                      artifactRefs: [...(message.artifactRefs ?? []), event.ref],
+                    }
+                  : message,
+              );
+              return;
+            }
             if (event.type === "permission_request") {
               setStreamError(event.reason);
               return;

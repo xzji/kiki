@@ -1,4 +1,5 @@
 import type { AgentRole } from "@/types/agentOrchestration";
+import type { ArtifactRef } from "@/types/artifact";
 import type { TaskResult } from "@/types/taskResult";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
@@ -522,6 +523,7 @@ export type ConversationMessage =
       source?: "user" | "kiki" | "system";
       sagaRequestId?: string;
       quotedMessage?: ConversationMessageQuote;
+      artifactRefs?: ArtifactRef[];
     }
   | {
       id: string;

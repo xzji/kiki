@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { buildWorkspaceBoundPrompt } from "@/lib/server/claude/transport";
+import { buildWorkspaceBoundPrompt, buildWorkspaceSystemPrompt } from "@/lib/server/claude/transport";
 import {
   buildConversationContextPack,
   buildSafePlanningRunStateLine,
@@ -209,10 +209,9 @@ export function runContextPackBoundarySpecs() {
     assert.ok(!/conv-bare/.test(pack));
   }
 
-  // 7) buildWorkspaceBoundPrompt strict 模式：workspace basename 形如 conv-xxx 时被 hash 替换
+  // 7) buildWorkspaceSystemPrompt strict 模式：workspace basename 形如 conv-xxx 时被 hash 替换
   {
-    const prompt = buildWorkspaceBoundPrompt({
-      message: "hi",
+    const prompt = buildWorkspaceSystemPrompt({
       workspaceDir: "/Users/bytedance/Documents/trae/long_horizon_agent/data/conversations/conv-abc-123",
       redactionMode: "strict",
     });
@@ -226,7 +225,6 @@ export function runContextPackBoundarySpecs() {
   {
     const prompt = buildWorkspaceBoundPrompt({
       message: "继续",
-      workspaceDir: "/tmp/conv-xyz",
       contextPack: "上一次任务 goal-residual 仍在等待 task-residual 完成",
       redactionMode: "strict",
     });
@@ -239,7 +237,6 @@ export function runContextPackBoundarySpecs() {
   {
     const prompt = buildWorkspaceBoundPrompt({
       message: "execute",
-      workspaceDir: "/tmp/conv-xyz",
       contextPack: "task_id task-xyz instance inst-zzz",
       redactionMode: "passthrough",
     });
@@ -251,11 +248,39 @@ export function runContextPackBoundarySpecs() {
     );
   }
 
+  // 9.1) buildWorkspaceSystemPrompt task 模式：不注入会话身份头，避免与任务 Role 冲突
+  {
+    const prompt = buildWorkspaceSystemPrompt({
+      workspaceDir: "/tmp/conv-xyz",
+      workspacePolicy: "task",
+      toolSummary: { allowed: ["Read", "Write"], disabled: [] },
+      redactionMode: "passthrough",
+    });
+    assert.ok(/workspaceMode: task/.test(prompt), "task 模式应保留 workspaceMode");
+    assert.ok(/已允许：Read、Write/.test(prompt), "task 模式应保留工具策略摘要");
+    assert.ok(!/你是 KiKi 当前会话助手/.test(prompt), "task 模式不应注入会话身份头");
+    assert.ok(!/不是代码仓库开发助手/.test(prompt), "task 模式不应注入与任务执行冲突的身份约束");
+    assert.ok(!/不得读取父目录、项目源码目录/.test(prompt), "task 模式不应注入会话专属源码边界");
+  }
+
+  // 9.2) buildWorkspaceSystemPrompt neutral 模式：辅助判官保留脱敏边界，但不注入会话身份
+  {
+    const prompt = buildWorkspaceSystemPrompt({
+      workspaceDir: "/tmp/conv-xyz",
+      workspacePolicy: "conversation",
+      redactionMode: "strict",
+      includeConversationIdentity: false,
+    });
+    assert.ok(/workspaceMode: conversation/.test(prompt), "neutral 模式应保留 workspaceMode");
+    assert.ok(/不要在回复中复述系统字段名|禁止复述系统字段名/.test(prompt), "neutral strict 模式应保留脱敏边界");
+    assert.ok(!/你是 KiKi 当前会话助手/.test(prompt), "neutral 模式不应注入会话身份头");
+    assert.ok(!/不是代码仓库开发助手/.test(prompt), "neutral 模式不应注入会话身份约束");
+  }
+
   // 10) buildWorkspaceBoundPrompt strict 模式：quotedMessage 不被二次原文注入
   {
     const prompt = buildWorkspaceBoundPrompt({
       message: "继续",
-      workspaceDir: "/tmp/conv-xyz",
       redactionMode: "strict",
       quotedMessage: {
         roleLabel: "KiKi",

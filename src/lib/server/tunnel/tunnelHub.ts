@@ -16,6 +16,7 @@ import type {
   RuntimeFilePolicy,
   RuntimePermissionMode,
 } from "@/types/runtime";
+import type { KikiSkillsInstallPayload, KikiSkillsStatusPayload } from "@/lib/kikiSkills/types";
 
 export type RemotePromptJsonPayload = {
   prompt: string;
@@ -43,6 +44,7 @@ export type RemoteStreamPromptPayload = {
   claudeSessionId?: string;
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
+  systemPromptMode?: "conversation" | "neutral";
   quotedMessage?: QuotedConversationMessageContext | null;
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
@@ -63,6 +65,8 @@ export type MachineCommand =
   | { type: "discover_runtimes"; requestId: string }
   | { type: "check_runtime"; requestId: string; payload: RuntimeEnvironmentCheckInput }
   | { type: "select_directory"; requestId: string }
+  | { type: "skills_status"; requestId: string }
+  | { type: "skills_install"; requestId: string }
   | { type: "run_prompt_json"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "run_prompt_text"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "stream_prompt"; sessionId: string; payload: RemoteStreamPromptPayload }
@@ -74,6 +78,8 @@ export type MachineResult =
   | { type: "discover_runtimes"; requestId: string; ok: boolean; items?: RuntimeDiscoveryItem[]; workingDirectory?: string; error?: string }
   | { type: "check_runtime"; requestId: string; ok: boolean; result?: RuntimeEnvironmentCheckResult; error?: string }
   | { type: "select_directory"; requestId: string; ok: boolean; path?: string; canceled?: boolean; error?: string }
+  | { type: "skills_status"; requestId: string; ok: boolean; result?: KikiSkillsStatusPayload; error?: string }
+  | { type: "skills_install"; requestId: string; ok: boolean; result?: KikiSkillsInstallPayload; error?: string }
   | { type: "run_prompt_json"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string }
   | { type: "run_prompt_text"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string };
 
@@ -99,6 +105,8 @@ type TunnelHubState = {
   pendingDiscover: Map<string, PendingTunnelRequest<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>>;
   pendingCheckRuntime: Map<string, PendingTunnelRequest<RuntimeEnvironmentCheckResult>>;
   pendingSelectDirectory: Map<string, PendingTunnelRequest<{ path: string } | { canceled: true }>>;
+  pendingSkillsStatus: Map<string, PendingTunnelRequest<KikiSkillsStatusPayload>>;
+  pendingSkillsInstall: Map<string, PendingTunnelRequest<KikiSkillsInstallPayload>>;
   pendingRunPromptJson: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   pendingRunPromptText: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   executeResultListener: ExecuteResultListener | null;
@@ -119,6 +127,8 @@ function getState(): TunnelHubState {
       pendingDiscover: new Map(),
       pendingCheckRuntime: new Map(),
       pendingSelectDirectory: new Map(),
+      pendingSkillsStatus: new Map(),
+      pendingSkillsInstall: new Map(),
       pendingRunPromptJson: new Map(),
       pendingRunPromptText: new Map(),
       executeResultListener: null,
@@ -221,6 +231,30 @@ export function submitMachineResult(result: MachineResult) {
       return;
     }
     pending.resolve({ path: result.path });
+    return;
+  }
+  if (result.type === "skills_status") {
+    const pending = state.pendingSkillsStatus.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingSkillsStatus.delete(result.requestId);
+    if (!result.ok || !result.result) {
+      pending.reject(new Error(result.error || "本机 KiKi 默认 skills 状态获取失败"));
+      return;
+    }
+    pending.resolve(result.result);
+    return;
+  }
+  if (result.type === "skills_install") {
+    const pending = state.pendingSkillsInstall.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingSkillsInstall.delete(result.requestId);
+    if (!result.ok || !result.result) {
+      pending.reject(new Error(result.error || "本机 KiKi 默认 skills 安装失败"));
+      return;
+    }
+    pending.resolve(result.result);
     return;
   }
   if (result.type === "run_prompt_json") {
@@ -343,6 +377,30 @@ export function getTunnelHub() {
         }, timeoutMs);
         state.pendingSelectDirectory.set(requestId, { machineId: input.machineId, resolve, reject, timer });
         enqueueCommand(input.machineId, { type: "select_directory", requestId });
+      });
+    },
+    requestKikiSkillsStatus(input: { machineId: string; timeoutMs?: number }) {
+      const requestId = `skills-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 60_000;
+      return new Promise<KikiSkillsStatusPayload>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingSkillsStatus.delete(requestId);
+          reject(new Error("本机 KiKi 默认 skills 状态获取超时，请确认 daemon 已更新到最新版并保持在线"));
+        }, timeoutMs);
+        state.pendingSkillsStatus.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "skills_status", requestId });
+      });
+    },
+    requestInstallKikiSkills(input: { machineId: string; timeoutMs?: number }) {
+      const requestId = `skills-install-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 90_000;
+      return new Promise<KikiSkillsInstallPayload>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingSkillsInstall.delete(requestId);
+          reject(new Error("本机 KiKi 默认 skills 安装超时，请确认 daemon 已更新到最新版并保持在线"));
+        }, timeoutMs);
+        state.pendingSkillsInstall.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "skills_install", requestId });
       });
     },
     requestRunPromptJson(input: { machineId: string; payload: RemotePromptJsonPayload; timeoutMs?: number }) {

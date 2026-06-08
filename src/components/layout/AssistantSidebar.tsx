@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 
 import { openSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { ArtifactRenderer } from "@/components/execution/ArtifactRenderer";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 
@@ -136,6 +137,11 @@ export function AssistantSidebar() {
                       >
                         查看目标规划
                       </button>
+                    ) : null}
+                    {m.artifactRefs?.length ? (
+                      <div className="mt-2">
+                        <ArtifactRenderer refs={m.artifactRefs} hasInteractiveSurface />
+                      </div>
                     ) : null}
                   </div>
                 </div>

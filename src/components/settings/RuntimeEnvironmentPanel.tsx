@@ -18,6 +18,13 @@ import {
   updateEnvironmentCommand,
 } from "@/lib/api/runtime-environment-commands";
 import { getRuntimeEnvStatus } from "@/lib/api/runtime-envs";
+import {
+  fetchKikiSkillsStatus,
+  installKikiDefaultSkills,
+  type KikiSkillInstallStatus,
+  type KikiSkillsInstallPayload,
+  type KikiSkillsStatusPayload,
+} from "@/lib/api/kiki-skills";
 import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { cn } from "@/lib/utils";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -136,6 +143,11 @@ export function RuntimeEnvironmentPanel() {
   const [daemonRefreshFeedback, setDaemonRefreshFeedback] = useState<"success" | "error" | null>(null);
   const [confirm24hOpen, setConfirm24hOpen] = useState(false);
   const [optimisticDaemonEnabled, setOptimisticDaemonEnabled] = useState<boolean | null>(null);
+  const [skillsStatus, setSkillsStatus] = useState<KikiSkillsStatusPayload | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsInstalling, setSkillsInstalling] = useState(false);
+  const [skillsMessage, setSkillsMessage] = useState<string | null>(null);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
   const visibleEnvironments = useMemo(
     () => environments.filter((environment) => environment.type === "local"),
     [environments],
@@ -331,6 +343,37 @@ export function RuntimeEnvironmentPanel() {
     return next;
   }, []);
 
+  const loadKikiSkillsStatus = useCallback(async () => {
+    setSkillsLoading(true);
+    setSkillsError(null);
+    try {
+      const next = await fetchKikiSkillsStatus();
+      setSkillsStatus(next);
+      return next;
+    } catch (error) {
+      setSkillsError(error instanceof Error ? error.message : "KiKi 默认 skills 状态获取失败");
+      return null;
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, []);
+
+  const handleInstallKikiSkills = useCallback(async () => {
+    if (skillsInstalling) return;
+    setSkillsInstalling(true);
+    setSkillsMessage(null);
+    setSkillsError(null);
+    try {
+      const result = await installKikiDefaultSkills();
+      setSkillsStatus(result);
+      setSkillsMessage(formatKikiSkillsInstallMessage(result));
+    } catch (error) {
+      setSkillsError(error instanceof Error ? error.message : "KiKi 默认 skills 安装失败");
+    } finally {
+      setSkillsInstalling(false);
+    }
+  }, [skillsInstalling]);
+
   const daemonEnabled = Boolean(daemonStatus?.config?.autoStart && daemonStatus?.launchAgentInstalled);
   const effectiveDaemonEnabled = optimisticDaemonEnabled ?? daemonEnabled;
 
@@ -432,6 +475,10 @@ export function RuntimeEnvironmentPanel() {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    void loadKikiSkillsStatus();
+  }, [loadKikiSkillsStatus]);
 
   return (
     <div className="space-y-6">
@@ -824,6 +871,17 @@ export function RuntimeEnvironmentPanel() {
         </div>
       </section>
 
+      <KikiDefaultSkillsSection
+        status={skillsStatus}
+        loading={skillsLoading}
+        installing={skillsInstalling}
+        message={skillsMessage}
+        error={skillsError}
+        onRefresh={() => void loadKikiSkillsStatus()}
+        onInstall={() => void handleInstallKikiSkills()}
+        onConnectMachine={() => setConnectDialogOpen(true)}
+      />
+
       <EnableDaemonConfirmDialog
         open={confirm24hOpen}
         environmentName={activeLocalEnvironment?.name || "当前本地 Runtime"}
@@ -848,6 +906,148 @@ function capabilityConstraint(
   if (capability === "shell" && permissionMode !== "execute") return "需要执行权限模式 = 项目内可执行";
   if (capability === "fileWrite" && permissionMode === "readonly") return "只读聊天下不会生效";
   return "";
+}
+
+function formatKikiSkillsInstallMessage(result: KikiSkillsInstallPayload) {
+  return result.message || `已安装 ${result.installedNow} 个，更新 ${result.updatedNow} 个，跳过 ${result.skipped} 个。`;
+}
+
+const kikiSkillStatusLabels: Record<KikiSkillInstallStatus, { label: string; className: string }> = {
+  installed: {
+    label: "已安装",
+    className: "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]",
+  },
+  outdated: {
+    label: "需更新",
+    className: "border-[#FEDF89] bg-[#FFFAEB] text-[#B54708]",
+  },
+  not_installed: {
+    label: "未安装",
+    className: "border-[#E5E7EB] bg-white text-[#6B7280]",
+  },
+  blocked: {
+    label: "冲突",
+    className: "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]",
+  },
+};
+
+function KikiDefaultSkillsSection({
+  status,
+  loading,
+  installing,
+  message,
+  error,
+  onRefresh,
+  onInstall,
+  onConnectMachine,
+}: {
+  status: KikiSkillsStatusPayload | null;
+  loading: boolean;
+  installing: boolean;
+  message: string | null;
+  error: string | null;
+  onRefresh: () => void;
+  onInstall: () => void;
+  onConnectMachine: () => void;
+}) {
+  const installLabel =
+    status && status.notInstalled === 0 && status.outdated === 0
+      ? "重新同步"
+      : "安装 KiKi 默认 skills";
+  const canInstall = !loading && !installing;
+  const targetRoot = status?.targetRoot || "~/.claude/skills";
+
+  return (
+    <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4">
+      <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="min-w-0">
+          <div className="text-[15px] font-medium text-[#111]">KiKi 默认 Skills</div>
+          <div className="mt-1 max-w-[760px] text-[13px] leading-6 text-[#6B7280]">
+            安装后会写入本机 Claude CLI skills 目录；KiKi 只管理 `kiki-*` 副本，不覆盖你的自定义 skills。
+            安装 skill 不等于启用 Skill 工具，若要允许 Claude CLI 调用 skill，请在当前 Runtime 的工具权限策略中开启「子代理」能力。
+          </div>
+        </div>
+        <div className="flex flex-none flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading || installing}
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#475467] hover:bg-[#F8F9FB] disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            刷新状态
+          </button>
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={!canInstall}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#111] bg-[#111] px-3 text-[12px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {installing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {installLabel}
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <InfoField label="目标目录" value={targetRoot} loading={loading && !status} />
+        <InfoField label="已安装" value={String(status?.installed ?? 0)} loading={loading && !status} />
+        <InfoField label="需更新" value={String(status?.outdated ?? 0)} loading={loading && !status} />
+        <InfoField label="未安装" value={String(status?.notInstalled ?? 0)} loading={loading && !status} />
+        <InfoField label="冲突" value={String(status?.blocked ?? 0)} loading={loading && !status} />
+      </div>
+
+      {status?.skills.length ? (
+        <div className="mt-3 grid gap-2">
+          {status.skills.map((skill) => {
+            const statusLabel = kikiSkillStatusLabels[skill.status];
+            return (
+              <div
+                key={skill.sourceSkillId}
+                className="grid gap-2 rounded-xl border border-[#E5E7EB] bg-[#FAFAFB] px-3 py-2 md:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[12px] text-[#111]">{skill.targetName}</span>
+                    <span className="text-[11px] text-[#6B7280]">v{skill.version}</span>
+                    <span className={cn("rounded-full border px-2 py-1 text-[11px]", statusLabel.className)}>
+                      {statusLabel.label}
+                    </span>
+                  </div>
+                  <div className="mt-1 break-all text-[11px] leading-5 text-[#6B7280]">{skill.targetPath}</div>
+                  {skill.reason ? (
+                    <div className="mt-1 text-[11px] leading-5 text-[#B42318]">{skill.reason}</div>
+                  ) : null}
+                </div>
+                <div className="self-center font-mono text-[10px] text-[#98A2B3]">{skill.contentHash.slice(0, 19)}...</div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {message ? (
+        <div className="mt-3 rounded-2xl border border-[#BBF7D0] bg-[#F0FDF4] px-4 py-3 text-[12px] leading-5 text-[#166534]">
+          {message}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="mt-3 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+          <div>{error}</div>
+          {error.includes("本机电脑") || error.includes("daemon") ? (
+            <button
+              type="button"
+              onClick={onConnectMachine}
+              className="mt-2 inline-flex h-8 items-center gap-1 rounded-lg border border-[#B42318] bg-white px-2.5 text-[12px] text-[#B42318] hover:bg-[#FEF2F2]"
+            >
+              <Monitor className="h-3.5 w-3.5" />
+              连接本机电脑
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function ToolPolicySection({

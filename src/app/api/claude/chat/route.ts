@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { streamClaudeCli } from "@/lib/server/claudeCli";
 import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
+import { persistFileArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
 import {
   buildConversationContextPack,
   sanitizeConversationMessages,
@@ -59,8 +60,28 @@ async function POSTHandler(request: NextRequest) {
           quotedMessage: body.quotedMessage,
           contextPack,
           workspacePolicy: body.workspaceMode || "conversation",
+          systemPromptMode: "conversation",
           signal: request.signal,
           onEvent: (event) => {
+            if (event.type === "file") {
+              try {
+                const artifact = persistFileArtifact({
+                  conversationId: body.conversationId,
+                  label: event.filename,
+                  summary: event.summary,
+                  filename: event.filename,
+                  mime: event.mime,
+                  bytes: Buffer.from(event.contentBase64, "base64"),
+                });
+                writeSseEvent(controller, "file_artifact", {
+                  type: "file_artifact",
+                  ref: toArtifactRef(artifact),
+                });
+              } catch (error) {
+                console.error("persist conversation file artifact failed", error);
+              }
+              return;
+            }
             writeSseEvent(controller, event.type, event);
           },
         });

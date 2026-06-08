@@ -1,3 +1,5 @@
+import type { ArtifactRef } from "@/types/artifact";
+
 export type RuntimePermissionMode = "readonly" | "confirm" | "execute";
 export type LocalRuntimeKind = "claude" | "codex" | "gemini";
 export type RuntimeToolCapability =
@@ -120,6 +122,7 @@ export type ClaudeStreamEvent =
   | { type: "status"; status: "checking" | "running" | "completed" }
   | { type: "delta"; text: string }
   | { type: "message"; content: string }
+  | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
   | { type: "error"; message: string }
   | { type: "done" };

@@ -27,8 +27,14 @@ function parseJson<T>(value: string | null): T | undefined {
 
 function messageRefs(message: ConversationMessage) {
   if (message.kind === "text") {
+    const refs: {
+      quotedMessage?: Extract<ConversationMessage, { kind: "text" }>["quotedMessage"];
+      artifactRefs?: Extract<ConversationMessage, { kind: "text" }>["artifactRefs"];
+    } = {};
+    if (message.quotedMessage) refs.quotedMessage = message.quotedMessage;
+    if (message.artifactRefs?.length) refs.artifactRefs = message.artifactRefs;
     return {
-      refJson: message.quotedMessage ? JSON.stringify({ quotedMessage: message.quotedMessage }) : null,
+      refJson: Object.keys(refs).length > 0 ? JSON.stringify(refs) : null,
       snapshotJson: null,
     };
   }
@@ -104,12 +110,16 @@ export function mapConversationMessageRow(row: ConversationMessageRow): Conversa
       },
     };
   }
-  const refs = parseJson<{ quotedMessage: Extract<ConversationMessage, { kind: "text" }>["quotedMessage"] }>(row.ref_json);
+  const refs = parseJson<{
+    quotedMessage: Extract<ConversationMessage, { kind: "text" }>["quotedMessage"];
+    artifactRefs: Extract<ConversationMessage, { kind: "text" }>["artifactRefs"];
+  }>(row.ref_json);
   return {
     ...base,
     kind: "text",
     role: row.role,
     quotedMessage: refs?.quotedMessage,
+    artifactRefs: refs?.artifactRefs,
   };
 }
 

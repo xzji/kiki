@@ -5,6 +5,7 @@ process.env.KIKI_MACHINE_EXECUTOR = "true";
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
 import { enterUserContext, runWithUserContext } from "@/lib/server/context/userContext";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
+import { getKikiDefaultSkillsStatus, installKikiDefaultSkills } from "@/lib/server/kikiSkills/installService";
 import { pickDirectoryWithOsascript } from "@/lib/server/runtime/selectWorkingDirectory";
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
@@ -15,7 +16,7 @@ import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
 import type { MachineCommand, MachineResult, RemotePromptJsonPayload, RemoteStreamPromptPayload } from "@/lib/server/tunnel/tunnelHub";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-const DAEMON_VERSION = "0.2.2";
+const DAEMON_VERSION = "0.2.3";
 const POLL_PATH = "/api/machine-tunnel/poll";
 const RESULT_PATH = "/api/machine-tunnel/result";
 const STREAM_CHUNK_PATH = "/api/machine-tunnel/stream-chunk";
@@ -71,15 +72,24 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
     }
   }
 
-  async function postStreamChunk(sessionId: string, event: ClaudeStreamEvent) {
-    try {
-      await fetch(`${base}${STREAM_CHUNK_PATH}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
-        body: JSON.stringify({ sessionId, event }),
-      });
-    } catch (error) {
-      appendRuntimeDaemonLog(`流式回传失败：${error instanceof Error ? error.message : String(error)}`);
+  async function postStreamChunk(sessionId: string, event: ClaudeStreamEvent, seq: number) {
+    const body = JSON.stringify({ sessionId, event, seq });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(`${base}${STREAM_CHUNK_PATH}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
+          body,
+        });
+        if (response.ok) return;
+        if (attempt === 1) {
+          appendRuntimeDaemonLog(`流式回传失败：HTTP ${response.status}`);
+        }
+      } catch (error) {
+        if (attempt === 1) {
+          appendRuntimeDaemonLog(`流式回传失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
     }
   }
 
@@ -174,6 +184,34 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       }
       return;
     }
+    if (command.type === "skills_status") {
+      try {
+        const result = getKikiDefaultSkillsStatus();
+        await postResult({ type: "skills_status", requestId: command.requestId, ok: true, result });
+      } catch (error) {
+        await postResult({
+          type: "skills_status",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "KiKi 默认 skills 状态获取失败",
+        });
+      }
+      return;
+    }
+    if (command.type === "skills_install") {
+      try {
+        const result = installKikiDefaultSkills();
+        await postResult({ type: "skills_install", requestId: command.requestId, ok: true, result });
+      } catch (error) {
+        await postResult({
+          type: "skills_install",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "KiKi 默认 skills 安装失败",
+        });
+      }
+      return;
+    }
     if (command.type === "run_prompt_json") {
       try {
         const result = await runPromptOnMachine(command.payload, "json");
@@ -205,6 +243,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
     if (command.type === "stream_prompt") {
       void (async () => {
         const payload = command.payload as RemoteStreamPromptPayload;
+        let seq = 0;
         const cwd = resolveLocalCliCwd({
           cwd: payload.workingDirectory,
           fallbackWorkingDirectory: payload.workingDirectory,
@@ -219,20 +258,25 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
             claudeSessionId: payload.claudeSessionId,
             contextPack: payload.contextPack,
             workspacePolicy: payload.workspacePolicy,
+            systemPromptMode: payload.systemPromptMode,
             quotedMessage: payload.quotedMessage,
             filePolicy: payload.filePolicy,
             channelPolicy: payload.channelPolicy,
             conversationId: payload.conversationId,
             onEvent: (event) => {
-              void postStreamChunk(command.sessionId, event);
+              void postStreamChunk(command.sessionId, event, seq++);
             },
           });
         } catch (error) {
-          await postStreamChunk(command.sessionId, {
-            type: "error",
-            message: error instanceof Error ? error.message : "流式调用失败",
-          });
-          await postStreamChunk(command.sessionId, { type: "done" });
+          await postStreamChunk(
+            command.sessionId,
+            {
+              type: "error",
+              message: error instanceof Error ? error.message : "流式调用失败",
+            },
+            seq++,
+          );
+          await postStreamChunk(command.sessionId, { type: "done" }, seq++);
         }
       })();
       return;
