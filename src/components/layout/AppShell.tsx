@@ -27,10 +27,10 @@ import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 import { useTaskMonitorStore } from "@/stores/taskMonitorStore";
 
 function DrawerTaskIdSyncer() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const searchParams = useSearchParams();
   const openTaskDrawer = useTaskDrawerStore((state) => state.open);
-  const drawerTaskId = searchParams.get("drawerTaskId");
+  const drawerTaskId = searchParams?.get("drawerTaskId") ?? null;
   useEffect(() => {
     const match = pathname.match(/^\/(?:topics|goals)\/([^/]+)$/);
     if (!match || !drawerTaskId) return;
@@ -41,7 +41,7 @@ function DrawerTaskIdSyncer() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   useTriggerEngine();
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const isAuthPage = pathname === "/login" || pathname === "/register";
   const isWide = pathname.startsWith("/schedule");
   const isConversation = pathname.startsWith("/conversations");

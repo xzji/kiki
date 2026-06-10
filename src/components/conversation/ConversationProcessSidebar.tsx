@@ -28,7 +28,8 @@ function statusText(status: ConversationCliProcess["status"]) {
   return "运行中";
 }
 
-function currentConversationId(pathname: string) {
+function currentConversationId(pathname: string | null) {
+  if (!pathname) return null;
   const match = pathname.match(/^\/conversations\/([^/?#]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }

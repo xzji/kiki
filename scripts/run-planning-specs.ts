@@ -53,6 +53,7 @@ import { runDevPanelDataSpecs } from "../src/lib/server/repositories/agentRuntim
 import { runDaemonRunnerSpecs } from "../src/lib/daemon/daemonRunner.spec";
 import { runSpecWriterSpecs } from "../src/lib/server/taskExecution/runSpecWriter.spec";
 import { runConversationStoreSpecs } from "../src/stores/conversationStore.spec";
+import { runInstantConversationEntrySpecs } from "../src/components/layout/instantConversationEntry.spec";
 import { runMemorySpecs } from "../src/lib/server/memory/memory.spec";
 
 runStateSnapshotSpecs();
@@ -112,6 +113,7 @@ runDaemonRunnerSpecs();
   await runThreadLoopDaemonSpecs();
   await runDevPanelDataSpecs();
   await runConversationStoreSpecs();
+  await runInstantConversationEntrySpecs();
   await runMemorySpecs();
   console.log("planning specs passed");
 })().catch((error) => {

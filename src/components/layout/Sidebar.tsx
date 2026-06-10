@@ -26,7 +26,7 @@ export const NAV_SIDEBAR_EXPANDED_WIDTH = 260;
 export const NAV_SIDEBAR_COLLAPSED_WIDTH = 56;
 
 export function Sidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const router = useRouter();
   const conversations = useConversationStore((state) => state.conversations);
   const conversationsHydrated = useConversationStore((state) => state.conversationsHydrated);

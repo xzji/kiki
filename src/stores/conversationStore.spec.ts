@@ -34,12 +34,57 @@ function createJsonResponse(status: number, data: Record<string, unknown>) {
 export async function runConversationStoreSpecs() {
   const originalFetch = globalThis.fetch;
   try {
+    runOptimisticHydrationPreservesLocalNewConversationSpec();
+    runOptimisticHydrationMergesRemoteConversationSpec();
     await runDeleteConversationWaitsForServerConfirmationSpec();
     await runDeleteConversationFailureKeepsLocalConversationSpec();
   } finally {
     globalThis.fetch = originalFetch;
-    useConversationStore.setState({ conversations: [] });
+    useConversationStore.setState({ conversations: [], conversationsHydrated: false });
   }
+}
+
+function runOptimisticHydrationPreservesLocalNewConversationSpec() {
+  const localNew = createConversation("conv-new-local-only");
+  const remoteExisting = createConversation("conv-existing-remote");
+
+  useConversationStore.setState({
+    conversations: [localNew],
+    conversationsHydrated: true,
+  });
+  useConversationStore.getState().hydrateConversations([remoteExisting]);
+
+  const conversations = useConversationStore.getState().conversations;
+  assert.ok(
+    conversations.some((conversation) => conversation.id === localNew.id),
+    "远端旧快照不包含本地 conv-new-* 时，应保留本地乐观会话",
+  );
+  assert.ok(
+    conversations.some((conversation) => conversation.id === remoteExisting.id),
+    "远端快照中的会话仍应正常合入",
+  );
+}
+
+function runOptimisticHydrationMergesRemoteConversationSpec() {
+  const conversationId = "conv-new-remote-catches-up";
+  const localNew = createConversation(conversationId);
+  const remoteNew = {
+    ...createConversation(conversationId),
+    title: "Remote confirmed title",
+    updatedAt: "2026-06-09T00:00:01.000Z",
+  };
+
+  useConversationStore.setState({
+    conversations: [localNew],
+    conversationsHydrated: true,
+  });
+  useConversationStore.getState().hydrateConversations([remoteNew]);
+
+  const conversations = useConversationStore.getState().conversations.filter(
+    (conversation) => conversation.id === conversationId,
+  );
+  assert.equal(conversations.length, 1, "后续远端快照包含同一 conv-new-* 时不应产生重复会话");
+  assert.equal(conversations[0]?.title, remoteNew.title, "远端确认后的字段应合并更新本地乐观会话");
 }
 
 async function runDeleteConversationWaitsForServerConfirmationSpec() {

@@ -295,7 +295,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const [entryUnreadIds, setEntryUnreadIds] = useState<string[]>([]);
   const [showUnreadJump, setShowUnreadJump] = useState(false);
   const [hasLocalActiveStream, setHasLocalActiveStream] = useState(false);
-  const resultMessageIdFromQuery = searchParams.get("resultMessageId");
+  const resultMessageIdFromQuery = searchParams?.get("resultMessageId") ?? null;
   const refreshGoalsFromSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
     applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
