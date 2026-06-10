@@ -38,6 +38,7 @@
 - 移除远端 `docs/` 目录并加入 `.gitignore`，项目文档不再同步到仓库。
 - 清理远端当前树中的 `.trae/`、本地 diagnostics、task audit 和历史备份分支中的本地数据库文件。
 - 过滤本地调试目录与 debug markdown，避免 `.dbg/`、`debug-*.md` 和本地调试上报地址进入提交。
+- 删除历史残留的 `debug-project-restart-error.md` 调试记录，避免本地排障过程进入远端当前树。
 
 ### Verification
 - 通过 `pnpm tsc --noEmit`。
