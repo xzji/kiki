@@ -4,6 +4,7 @@ import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import { resumeBlockedTask } from "@/lib/server/taskExecution/resumeBlockedTask";
+import { buildTaskRunView, toTaskRunResponse } from "@/lib/server/taskExecution/taskRunView";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal } from "@/types/kiki";
 import { withAuth } from "@/lib/server/http/withAuth";
@@ -70,11 +71,13 @@ async function POSTHandler(
     return NextResponse.json({ reason: "用户响应事件写入失败" }, { status: 500 });
   }
   if (!job || !job.blocker) {
+    const view = job ? buildTaskRunView({ taskInstanceId: located.instance.id, runtimeJob: job }) : null;
     return NextResponse.json({
       ok: true,
       event,
       resumed: false,
       reason: "已记录用户响应，但当前任务没有等待恢复的 runtime job。",
+      ...(view ? toTaskRunResponse(view) : {}),
     });
   }
   const resumeResult = await resumeBlockedTask({
@@ -88,13 +91,14 @@ async function POSTHandler(
   if (resumeResult.status < 200 || resumeResult.status >= 300) {
     return NextResponse.json(resumeResult.body, { status: resumeResult.status });
   }
+  const view = buildTaskRunView({ taskInstanceId: located.instance.id });
   return NextResponse.json({
     ok: true,
     event,
     resumed: resumeResult.body.resumed ?? false,
     completed: resumeResult.body.completed ?? false,
-    progress: resumeResult.body.progress ?? null,
-    trajectory: resumeResult.body.trajectory ?? [],
+    alreadyResumed: resumeResult.body.alreadyResumed ?? false,
+    ...toTaskRunResponse(view),
   });
 }
 

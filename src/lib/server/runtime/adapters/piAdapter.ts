@@ -110,11 +110,41 @@ function extractAgentEndText(line: PiJsonLine) {
   const messages = line.messages;
   if (!Array.isArray(messages)) return "";
   for (let index = messages.length - 1; index >= 0; index -= 1) {
+    // 仅提取 assistant 回复，避免在助手内容为空（如失败轮次）时回退命中 user 消息，把用户输入误当回复。
+    const record = asRecord(messages[index]);
+    if (record?.role !== "assistant") continue;
     const text = extractAssistantTextFromLine({ message: messages[index] });
     if (text.trim()) return text.trim();
   }
   return "";
 }
+
+/**
+ * 从 Pi 的事件行中提取模型/通道层错误信息。
+ * Pi 在模型调用失败时会在 message_end/agent_end/turn_end 携带的 message 上设置
+ * `stopReason: "error"` 与 `errorMessage`，整轮无任何文本产出。若不识别这些信号，
+ * 适配器会把这种失败误判为"等待输出"而永久挂起。
+ */
+function extractStopErrorMessage(line: PiJsonLine) {
+  const message = asRecord(line.message);
+  if (!message) return undefined;
+  if (message.stopReason !== "error") return undefined;
+  const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+  return errorMessage || "模型调用失败";
+}
+
+/** agent_end.messages 中是否存在 stopReason:error 的轮次，返回其错误信息。 */
+function extractAgentEndError(line: PiJsonLine) {
+  const messages = line.messages;
+  if (!Array.isArray(messages)) return undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const error = extractStopErrorMessage({ message: messages[index] });
+    if (error) return error;
+  }
+  return undefined;
+}
+
+const PI_SILENCE_TIMEOUT_MS = 120000;
 
 export function buildPiToolArgs(enabledCapabilities: RuntimeToolCapability[]) {
   const tools = new Set<string>();
@@ -186,6 +216,7 @@ async function runPiPrompt(input: RuntimePromptJsonInput, mode: "json" | "text")
     let stdoutBuffer = "";
     let stderr = "";
     let lastAssistantText = "";
+    let lastModelError: string | undefined;
     let aborted = false;
 
     const abort = () => {
@@ -214,12 +245,33 @@ async function runPiPrompt(input: RuntimePromptJsonInput, mode: "json" | "text")
           if (delta) lastAssistantText += delta;
         }
         if (type === "message_end") {
-          const text = extractAssistantTextFromLine(parsed);
-          if (text.trim()) lastAssistantText = text.trim();
+          // 仅处理 assistant 消息：user 的 message_end 不能当成回复。
+          if (asRecord(parsed.message)?.role === "assistant") {
+            const stopError = extractStopErrorMessage(parsed);
+            if (stopError) {
+              lastModelError = stopError;
+            } else {
+              const text = extractAssistantTextFromLine(parsed);
+              if (text.trim()) lastAssistantText = text.trim();
+            }
+          }
+        }
+        if (type === "auto_retry_start") {
+          const reason = typeof parsed.errorMessage === "string" ? parsed.errorMessage.trim() : "";
+          if (reason) lastModelError = reason;
+        }
+        if (type === "auto_retry_end" && parsed.success !== true) {
+          const finalError = typeof parsed.finalError === "string" ? parsed.finalError.trim() : "";
+          if (finalError) lastModelError = finalError;
         }
         if (type === "agent_end") {
           const text = extractAgentEndText(parsed);
-          if (text) lastAssistantText = text;
+          if (text) {
+            lastAssistantText = text;
+          } else {
+            const error = extractAgentEndError(parsed);
+            if (error) lastModelError = error;
+          }
         }
       } catch {
         // Keep raw stdout in output; Pi may emit incidental non-JSON lines.
@@ -257,8 +309,17 @@ async function runPiPrompt(input: RuntimePromptJsonInput, mode: "json" | "text")
       if (stdoutBuffer.trim()) consumeLine(stdoutBuffer);
       const exitCode = code ?? 0;
       if (exitCode !== 0) {
-        trace?.finish("failed", stderr.trim() || input.failureMessage || "Pi CLI 调用失败");
-        reject(new Error(stderr.trim() || input.failureMessage || "Pi CLI 调用失败"));
+        const message = lastModelError || stderr.trim() || input.failureMessage || "Pi CLI 调用失败";
+        trace?.finish("failed", message);
+        reject(new Error(message));
+        return;
+      }
+      // 模型/通道层失败（如网络不可达）：Pi 重试耗尽后仍可能以 exit 0 退出，
+      // 此时 lastAssistantText 为空、output 仅含错误事件 JSON，不能当作有效结果返回。
+      if (!lastAssistantText.trim() && lastModelError) {
+        const message = `Pi CLI 模型调用失败：${lastModelError}`;
+        trace?.finish("failed", message);
+        reject(new Error(message));
         return;
       }
       const raw = lastAssistantText.trim() || output.trim();
@@ -354,21 +415,35 @@ export const piAdapter: RuntimeAdapter = {
       let emittedFatalError = false;
       let settled = false;
       let terminalResultReceived = false;
+      // 记录最近一次模型/通道层错误信息（来自 stopReason:error），用于在进程退出或静默超时时回传真实原因。
+      let lastModelError: string | undefined;
       const toolCalls = new Map<string, PiToolState>();
       const pendingFilePaths = new Set<string>();
+
+      // 静默超时兜底：当 Pi 因网络 hang 既不产出输出也不退出时，避免云端永久停在"等待 CLI 输出"。
+      let silenceTimer: NodeJS.Timeout | null = null;
+      const clearSilenceTimer = () => {
+        if (silenceTimer) {
+          clearTimeout(silenceTimer);
+          silenceTimer = null;
+        }
+      };
 
       const resolveOnce = () => {
         if (settled) return;
         settled = true;
+        clearSilenceTimer();
         resolve();
       };
       const rejectOnce = (error: unknown) => {
         if (settled) return;
         settled = true;
+        clearSilenceTimer();
         reject(error);
       };
       const emitEvent = (event: RuntimeStreamEvent) => {
-        if (callbackError) return false;
+        // settled 之后（已发 done / 已 reject）不再发任何事件，避免 done 之后还冒出残余事件。
+        if (callbackError || settled) return false;
         try {
           options.onEvent(event);
           return true;
@@ -382,6 +457,7 @@ export const piAdapter: RuntimeAdapter = {
       };
 
       const abort = () => {
+        clearSilenceTimer();
         if (terminalResultReceived) return;
         emittedFatalError = true;
         killChildTree(child);
@@ -389,11 +465,36 @@ export const piAdapter: RuntimeAdapter = {
         if (emitEvent({ type: "done" })) resolveOnce();
       };
 
+      // 统一的致命错误收尾：回传 error 事件、终止子进程并结束本次流。
+      const failFatal = (message: string) => {
+        if (settled || emittedFatalError) return;
+        emittedFatalError = true;
+        killChildTree(child);
+        trace?.finish("failed", message);
+        emitEvent({ type: "error", message });
+        emitEvent({ type: "done" });
+        resolveOnce();
+      };
+
+      // 每次收到输出后重置静默计时器；长时间无任何输出（如网络 hang）则主动报错。
+      const armSilenceTimer = () => {
+        if (settled) return;
+        clearSilenceTimer();
+        silenceTimer = setTimeout(() => {
+          failFatal(
+            lastModelError
+              ? `Pi CLI 长时间无响应：${lastModelError}`
+              : "Pi CLI 长时间无响应，可能是模型服务无法连接。请检查 Pi 的模型配置与网络。",
+          );
+        }, PI_SILENCE_TIMEOUT_MS);
+      };
+
       if (options.signal?.aborted) {
         abort();
         return;
       }
       options.signal?.addEventListener("abort", abort, { once: true });
+      armSilenceTimer();
 
       const finishSuccess = (content: string) => {
         if (
@@ -410,7 +511,7 @@ export const piAdapter: RuntimeAdapter = {
       };
 
       const consumeLine = (rawLine: string) => {
-        if (callbackError) return;
+        if (callbackError || settled) return;
         const line = rawLine.trim();
         if (!line) return;
         try {
@@ -435,8 +536,33 @@ export const piAdapter: RuntimeAdapter = {
             return;
           }
           if (type === "message_end") {
+            // 仅处理 assistant 消息：user 的 message_end 同样会出现，不能把用户输入当成回复。
+            if (asRecord(parsed.message)?.role !== "assistant") return;
+            const stopError = extractStopErrorMessage(parsed);
+            if (stopError) {
+              lastModelError = stopError;
+              return;
+            }
             const text = extractAssistantTextFromLine(parsed);
             if (text.trim()) aggregatedAssistantText = text.trim();
+            return;
+          }
+          if (type === "auto_retry_start") {
+            const attempt = typeof parsed.attempt === "number" ? parsed.attempt : undefined;
+            const maxAttempts = typeof parsed.maxAttempts === "number" ? parsed.maxAttempts : undefined;
+            const reason = typeof parsed.errorMessage === "string" ? parsed.errorMessage.trim() : "";
+            if (reason) lastModelError = reason;
+            const progress = attempt && maxAttempts ? `（${attempt}/${maxAttempts}）` : "";
+            const hint = `模型调用失败${reason ? `：${reason}` : ""}，正在重试${progress}…`;
+            trace?.appendThinking(`${hint}\n`);
+            emitEvent({ type: "thinking", text: hint });
+            return;
+          }
+          if (type === "auto_retry_end") {
+            if (parsed.success !== true) {
+              const finalError = typeof parsed.finalError === "string" ? parsed.finalError.trim() : "";
+              failFatal(`Pi CLI 模型调用失败：${finalError || lastModelError || "重试多次仍未成功"}`);
+            }
             return;
           }
           if (type === "tool_execution_start") {
@@ -459,8 +585,23 @@ export const piAdapter: RuntimeAdapter = {
             return;
           }
           if (type === "agent_end") {
+            // willRetry:true 表示本轮失败但 Pi 仍会自动重试，不能当作终态收尾。
+            if (parsed.willRetry === true) {
+              const error = extractAgentEndError(parsed);
+              if (error) lastModelError = error;
+              return;
+            }
             terminalResultReceived = true;
-            finishSuccess(extractAgentEndText(parsed));
+            const text = extractAgentEndText(parsed);
+            // 整轮无文本且存在模型错误：作为失败回传真实原因，而非空回复。
+            if (!text.trim()) {
+              const error = extractAgentEndError(parsed) ?? lastModelError;
+              if (error) {
+                failFatal(`Pi CLI 模型调用失败：${error}`);
+                return;
+              }
+            }
+            finishSuccess(text);
           }
         } catch (error) {
           trace?.appendStderr(`Pi JSON 行解析失败：${error instanceof Error ? error.message : String(error)}\n`);
@@ -471,6 +612,7 @@ export const piAdapter: RuntimeAdapter = {
         const text = chunk.toString("utf8");
         stdoutBuffer += text;
         trace?.appendStdout(text);
+        armSilenceTimer();
         let lineBreakIndex = stdoutBuffer.indexOf("\n");
         while (lineBreakIndex !== -1) {
           const line = stdoutBuffer.slice(0, lineBreakIndex);
@@ -484,10 +626,12 @@ export const piAdapter: RuntimeAdapter = {
         const text = chunk.toString("utf8");
         stderrBuffer += text;
         trace?.appendStderr(text);
+        armSilenceTimer();
       });
 
       child.on("error", (error) => {
         options.signal?.removeEventListener("abort", abort);
+        clearSilenceTimer();
         emittedFatalError = true;
         trace?.finish("failed", error.message);
         rejectOnce(error);
@@ -495,12 +639,14 @@ export const piAdapter: RuntimeAdapter = {
 
       child.on("close", (code) => {
         options.signal?.removeEventListener("abort", abort);
+        clearSilenceTimer();
         if (stdoutBuffer.trim()) consumeLine(stdoutBuffer);
-        if (callbackError) return;
+        if (callbackError || settled) return;
         const exitCode = code ?? 0;
         if (exitCode !== 0) {
           emittedFatalError = true;
-          const message = stderrBuffer.trim() || "Pi CLI 流式调用失败";
+          // 优先使用解析到的模型错误信息，stderr 通常为空，回退到通用文案。
+          const message = lastModelError || stderrBuffer.trim() || "Pi CLI 流式调用失败";
           if (options.resumeSessionId && /session|not found|invalid/i.test(message)) {
             emitEvent({ type: "session_invalid", sessionId: options.resumeSessionId, message });
           } else {
@@ -508,8 +654,15 @@ export const piAdapter: RuntimeAdapter = {
           }
           trace?.finish("failed", message);
         } else if (!terminalResultReceived && !emittedFatalError) {
-          finishSuccess(aggregatedAssistantText);
-          trace?.finish("completed");
+          // exit 0 但没有终态且记录到模型错误：作为失败回传而非空回复。
+          if (lastModelError && !aggregatedAssistantText.trim()) {
+            emittedFatalError = true;
+            emitEvent({ type: "error", message: `Pi CLI 模型调用失败：${lastModelError}` });
+            trace?.finish("failed", lastModelError);
+          } else {
+            finishSuccess(aggregatedAssistantText);
+            trace?.finish("completed");
+          }
         } else if (!emittedFatalError) {
           trace?.finish("completed");
         }

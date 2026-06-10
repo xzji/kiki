@@ -2,6 +2,7 @@ import { sleep } from "@/lib/utils";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
 function createTaskRequestId() {
@@ -43,16 +44,29 @@ async function getTaskRunProgress(input: { requestId?: string; taskInstanceId?: 
       cache: "no-store",
     });
     if (!response.ok) {
-      return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined as string | undefined };
+      return {
+        progress: null,
+        logs: [] as GoalServerLogEntry[],
+        trajectory: [] as ExecutionTrajectoryStep[],
+        blocker: null as ExecutionBlocker | null,
+        waitingReason: undefined as string | undefined,
+      };
     }
     return (await response.json()) as {
       progress: GoalServerProgress | null;
       logs: GoalServerLogEntry[];
       trajectory: ExecutionTrajectoryStep[];
+      blocker: ExecutionBlocker | null;
       waitingReason?: string;
     };
   }
-  return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined };
+  return {
+    progress: null,
+    logs: [] as GoalServerLogEntry[],
+    trajectory: [] as ExecutionTrajectoryStep[],
+    blocker: null as ExecutionBlocker | null,
+    waitingReason: undefined,
+  };
 }
 
 export async function startTaskRun(input: {
@@ -142,7 +156,13 @@ export async function waitForTaskRunCompletion(input: {
   requestId: string;
   taskInstanceId: string;
   signal?: AbortSignal;
-  onProgress?: (payload: { progress: GoalServerProgress | null; logs: GoalServerLogEntry[]; trajectory: ExecutionTrajectoryStep[]; waitingReason?: string }) => void;
+  onProgress?: (payload: {
+    progress: GoalServerProgress | null;
+    logs: GoalServerLogEntry[];
+    trajectory: ExecutionTrajectoryStep[];
+    blocker: ExecutionBlocker | null;
+    waitingReason?: string;
+  }) => void;
 }) {
   while (!input.signal?.aborted) {
     const state = await getTaskRunProgress({
@@ -156,7 +176,13 @@ export async function waitForTaskRunCompletion(input: {
     }
     await sleep(1000);
   }
-  return { progress: null, logs: [] as GoalServerLogEntry[], trajectory: [] as ExecutionTrajectoryStep[], waitingReason: undefined as string | undefined };
+  return {
+    progress: null,
+    logs: [] as GoalServerLogEntry[],
+    trajectory: [] as ExecutionTrajectoryStep[],
+    blocker: null as ExecutionBlocker | null,
+    waitingReason: undefined as string | undefined,
+  };
 }
 
 export async function fetchTaskRunProgress(input: {
@@ -214,6 +240,7 @@ export async function resumeTaskRun(input: {
     progress?: GoalServerProgress | null;
     logs?: GoalServerLogEntry[];
     trajectory?: ExecutionTrajectoryStep[];
+    blocker?: ExecutionBlocker | null;
     waitingReason?: string;
   };
   if (!response.ok) {
@@ -223,6 +250,7 @@ export async function resumeTaskRun(input: {
     progress: data.progress ?? null,
     logs: data.logs ?? [],
     trajectory: data.trajectory ?? [],
+    blocker: data.blocker ?? null,
     waitingReason: data.waitingReason,
   };
 }

@@ -4,6 +4,7 @@ import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { buildTaskRunView, toTaskRunResponse } from "@/lib/server/taskExecution/taskRunView";
 import type { Goal } from "@/types/kiki";
 import { withAuth } from "@/lib/server/http/withAuth";
 
@@ -55,7 +56,7 @@ async function POSTHandler(
   if (!statusEvent) {
     return NextResponse.json({ reason: "取消事件写入失败" }, { status: 500 });
   }
-  cancelRuntimeJobByTaskRun({
+  const job = cancelRuntimeJobByTaskRun({
     taskInstanceId: located.instance.id,
     requestId: located.instance.runner?.requestId,
   });
@@ -71,10 +72,18 @@ async function POSTHandler(
       reason: body.reason,
     },
   });
+  const view = job
+    ? buildTaskRunView({
+        taskInstanceId: located.instance.id,
+        requestId: located.instance.runner?.requestId,
+        runtimeJob: job,
+      })
+    : null;
   return NextResponse.json({
     ok: true,
     event: statusEvent,
     commandEvent: event,
+    ...(view ? toTaskRunResponse(view) : {}),
   });
 }
 

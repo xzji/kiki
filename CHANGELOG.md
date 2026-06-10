@@ -17,12 +17,15 @@
 - 优化会话 hydration 逻辑，保留本地乐观创建的 `conv-new-*` 会话，避免远端旧快照覆盖本地新会话。
 - 扩展规划测试入口，纳入 memory、runtime adapter、conversation store 与即时会话入口相关规格测试。
 - 增强 Runtime 环境与权限提示，关闭关键权限时明确提示附件能力受限。
+- 统一任务运行状态查询视图，API 返回 progress、logs、trajectory、blocker 与等待原因时使用同一服务端聚合逻辑。
 
 ### Fixed
 - 修复多 runtime 共用会话字段导致的跨 CLI session 泄漏问题，改为按 `runtimeKind` 隔离 `resumeSessionId`。
 - 修复 Railway/WebSocket 压缩、重复 attach、reply 注册时序与 tunnel hub 状态共享等连接稳定性问题。
 - 修复会话页 Suspense/loading、Pages Router `_app` 入口、Next 路由 hook 空值类型与生产构建中的类型兼容问题。
 - 修复任务规格生成与 tick 增量任务路径的降级、重复 ID 检测和 stale 标记遗漏。
+- 修复 Pi CLI 在模型调用失败、自动重试失败、assistant 输出为空或长时间静默时被误判为等待中的问题。
+- 修复任务取消、恢复和进度查询接口中 blocker/取消态/等待原因不一致的问题。
 
 ### Removed
 - 移除远端 `docs/` 目录并加入 `.gitignore`，项目文档不再同步到仓库。

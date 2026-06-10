@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
-import {
-  projectRuntimeJobStatusProjection,
-  updateGoalRuntimeJobExecution,
-} from "@/lib/server/services/goalRuntimeService";
-import type { GoalServerProgress } from "@/types/goalTelemetry";
+import { projectRuntimeJobStatusProjection } from "@/lib/server/services/goalRuntimeService";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { buildTaskRunView, toTaskRunResponse } from "@/lib/server/taskExecution/taskRunView";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,56 +31,23 @@ async function POSTHandler(request: NextRequest) {
     );
   }
 
-  const now = new Date().toISOString();
   projectRuntimeJobStatusProjection({
     job,
     status: "cancelled",
     reason: "用户手动停止任务执行",
   });
-  const progress: GoalServerProgress = {
-    requestId: job.requestId ?? requestId ?? `cancel-${job.id}`,
-    scope: "goal_task_execute",
-    status: "cancelled",
-    phase: "executing",
-    message: "用户已手动停止任务执行。",
-    startedAt: job.startedAt ?? now,
-    updatedAt: now,
-    finishedAt: now,
-    error: "用户手动停止任务执行",
-    goalId: job.goalId,
-    taskId: job.taskId,
-    taskInstanceId: job.taskInstanceId,
-    resultPayload: {
-      errorCategory: "aborted",
-      errorMessage: "用户手动停止任务执行",
-    },
-  };
-
-  if (job.taskId && job.taskInstanceId) {
-    updateGoalRuntimeJobExecution(job.id, {
-      status: "cancelled",
-      progress,
-      logs: job.logs,
-      trajectory: job.trajectory,
-      result:
-        progress.resultPayload && typeof progress.resultPayload === "object"
-          ? progress.resultPayload
-          : null,
-      finishedAt: now,
-      leaseOwner: undefined,
-      leaseExpiresAt: undefined,
-    });
-  }
+  const view = buildTaskRunView({
+    taskInstanceId: job.taskInstanceId ?? taskInstanceId,
+    requestId: job.requestId ?? requestId,
+    runtimeJob: job,
+  });
 
   return withDeprecatedApiHeaders(
     NextResponse.json({
       ok: true,
-      requestId: progress.requestId,
+      requestId: view.progress?.requestId ?? job.requestId ?? requestId,
       taskInstanceId: job.taskInstanceId,
-      progress,
-      logs: job.logs,
-      trajectory: job.trajectory,
-      waitingReason: undefined,
+      ...toTaskRunResponse(view),
     }),
     "/api/goals/instances/{instanceId}/cancel",
   );

@@ -1,58 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
-import { getGoalTelemetryProgress, getTaskTelemetryLogs, getTaskTelemetryProgress } from "@/lib/server/goalTelemetry";
-import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
-import type { GoalServerProgress } from "@/types/goalTelemetry";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { buildTaskRunView, toTaskRunResponse } from "@/lib/server/taskExecution/taskRunView";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function latestProgress(candidates: Array<GoalServerProgress | null | undefined>) {
-  return (
-    candidates
-      .filter((candidate): candidate is GoalServerProgress => Boolean(candidate))
-      .sort((left, right) => +new Date(right.updatedAt) - +new Date(left.updatedAt))[0] ?? null
-  );
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
-function buildWaitingReason(input: {
-  runtimeJob: ReturnType<typeof getRuntimeJobByTaskInstanceId> | null;
-  progress: GoalServerProgress | null;
-}) {
-  const { runtimeJob, progress } = input;
-  if (!runtimeJob) return undefined;
-  if (runtimeJob.status === "queued") {
-    if (runtimeJob.availableAt) {
-      const availableAt = new Date(runtimeJob.availableAt);
-      if (!Number.isNaN(availableAt.getTime()) && availableAt.getTime() > Date.now() + 1000) {
-        return `任务已入队，等待到 ${formatDateTime(runtimeJob.availableAt)} 后进入下一次调度。`;
-      }
-    }
-    return "任务已入队，正在等待后台 Worker 领取执行。可能是当前仍有前序任务在执行，或调度循环尚未轮到该任务。";
-  }
-  if (runtimeJob.status === "running") {
-    const hasStartedTrajectory = runtimeJob.trajectory.length > 0 || Boolean(progress?.message);
-    if (!hasStartedTrajectory) {
-      return "后台 Worker 已领取任务，正在启动 Agent 并初始化执行环境。";
-    }
-  }
-  return undefined;
-}
 
 async function GETHandler(request: NextRequest) {
   const requestId = request.nextUrl.searchParams.get("requestId")?.trim();
@@ -65,56 +18,16 @@ async function GETHandler(request: NextRequest) {
     );
   }
 
-  const runtimeJob = taskInstanceId ? getRuntimeJobByTaskInstanceId(taskInstanceId) : null;
-  const progress = latestProgress([
-    requestId ? getGoalTelemetryProgress(requestId) : null,
-    taskInstanceId ? getTaskTelemetryProgress(taskInstanceId) : null,
-    runtimeJob?.progress,
-  ]);
-  const now = new Date().toISOString();
-  const cancelledProgress =
-    runtimeJob?.status === "cancelled"
-      ? ({
-          requestId: runtimeJob.requestId ?? requestId ?? `cancel-${runtimeJob.id}`,
-          scope: "goal_task_execute",
-          status: "cancelled",
-          phase: "executing",
-          message: "用户已手动停止任务执行。",
-          startedAt: runtimeJob.startedAt ?? now,
-          updatedAt: runtimeJob.updatedAt ?? now,
-          finishedAt: runtimeJob.finishedAt ?? now,
-          error: runtimeJob.lastError || "用户手动停止任务执行",
-          goalId: runtimeJob.goalId,
-          taskId: runtimeJob.taskId,
-          taskInstanceId: runtimeJob.taskInstanceId,
-          resultPayload: {
-            errorCategory: "aborted",
-            errorMessage: runtimeJob.lastError || "用户手动停止任务执行",
-          },
-        } satisfies GoalServerProgress)
-      : null;
-  const telemetryLogs = taskInstanceId ? getTaskTelemetryLogs(taskInstanceId) : [];
-  const logs = telemetryLogs.length > 0 ? telemetryLogs : runtimeJob?.logs ?? [];
-  const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
-    ? progress.resultPayload.trajectory
-    : [];
-  const trajectory = progressTrajectory.length > 0 ? progressTrajectory : runtimeJob?.trajectory ?? [];
-  const effectiveProgress = cancelledProgress ?? progress;
-  const waitingReason = buildWaitingReason({ runtimeJob, progress: effectiveProgress });
-  if (!effectiveProgress && (!logs || logs.length === 0)) {
+  const view = buildTaskRunView({ taskInstanceId, requestId });
+  if (view.isEmpty) {
     return withDeprecatedApiHeaders(
-      NextResponse.json({ progress: null, logs: [], trajectory: [], waitingReason }, { status: 404 }),
+      NextResponse.json(toTaskRunResponse(view), { status: 404 }),
       "/api/goals/instances/{instanceId}/runtime",
     );
   }
 
   return withDeprecatedApiHeaders(
-    NextResponse.json({
-      progress: effectiveProgress,
-      logs,
-      trajectory,
-      waitingReason,
-    }),
+    NextResponse.json(toTaskRunResponse(view)),
     "/api/goals/instances/{instanceId}/runtime",
   );
 }
