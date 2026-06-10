@@ -41,8 +41,15 @@ function messageRefs(message: ConversationMessage) {
     };
   }
   if (message.kind === "goal_plan_card") {
+    const refs: {
+      goalRef: Extract<ConversationMessage, { kind: "goal_plan_card" }>["goalRef"];
+      cliProcess?: Extract<ConversationMessage, { kind: "goal_plan_card" }>["cliProcess"];
+    } = {
+      goalRef: message.goalRef,
+    };
+    if (message.cliProcess) refs.cliProcess = message.cliProcess;
     return {
-      refJson: JSON.stringify({ goalRef: message.goalRef }),
+      refJson: JSON.stringify(refs),
       snapshotJson: null,
     };
   }
@@ -72,14 +79,21 @@ export function mapConversationMessageRow(row: ConversationMessageRow): Conversa
     source: row.source ?? undefined,
   };
   if (row.kind === "goal_plan_card") {
-    const refs = parseJson<{ goalRef: ConversationMessage & { goalRef: never } }>(row.ref_json) as
-      | { goalRef: Extract<ConversationMessage, { kind: "goal_plan_card" }>["goalRef"] }
+    const refs = parseJson<{
+      goalRef: Extract<ConversationMessage, { kind: "goal_plan_card" }>["goalRef"];
+      cliProcess?: Extract<ConversationMessage, { kind: "goal_plan_card" }>["cliProcess"];
+    }>(row.ref_json) as
+      | {
+          goalRef: Extract<ConversationMessage, { kind: "goal_plan_card" }>["goalRef"];
+          cliProcess?: Extract<ConversationMessage, { kind: "goal_plan_card" }>["cliProcess"];
+        }
       | undefined;
     return {
       ...base,
       kind: "goal_plan_card",
       role: "kiki",
       goalRef: refs?.goalRef ?? { goalId: "", title: "", subGoalCount: 0, taskCount: 0 },
+      cliProcess: refs?.cliProcess,
     };
   }
   if (row.kind === "task_card") {

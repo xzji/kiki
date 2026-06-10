@@ -13,6 +13,7 @@
 - 新增远程 24h daemon 后台服务管理能力，支持通过 machine tunnel 查询、开启和关闭本机后台服务。
 - 新增项目架构层级与产品定位文档，沉淀 KiKi 的长期目标执行平台定位、分层架构和演进优先级。
 - 新增 Saga Prompt 总结文档，说明 Interviewer、Planner、Critic、Refiner、Spec Writer、Presenter 的职责、输入输出与约束。
+- 新增真实 Refiner Prompt 与校验测试，5 角色 Saga 的 Refiner 不再是占位 no-op。
 
 ### Changed
 - 将机器 tunnel 从 WebSocket 调整为 HTTP 长轮询，降低部署环境中的连接兼容性问题。
@@ -23,6 +24,9 @@
 - 统一任务运行状态查询视图，API 返回 progress、logs、trajectory、blocker 与等待原因时使用同一服务端聚合逻辑。
 - 将 `@kiki_agent/daemon` 版本提升到 `0.2.5`，补充 `install`、`uninstall`、`status` 子命令与远程后台服务控制入口。
 - 增强 5 角色 Saga 规划失败恢复，保留失败阶段、可重试断点和补充信息状态，支持用户继续回复后重试。
+- Refiner 改为调用真实 JSON invoke，支持局部 patch 合并到当前计划；Refiner 失败时保留当前计划继续让 Critic 复审。
+- goal plan card 支持持久化与 hydration `cliProcess`，刷新后仍可查看目标规划过程。
+- 缩短远程 daemon 服务状态和自启动设置请求超时时间，减少 UI 长时间等待。
 
 ### Fixed
 - 修复多 runtime 共用会话字段导致的跨 CLI session 泄漏问题，改为按 `runtimeKind` 隔离 `resumeSessionId`。
@@ -33,6 +37,7 @@
 - 修复任务取消、恢复和进度查询接口中 blocker/取消态/等待原因不一致的问题。
 - 修复 Saga 恢复上下文可能暴露内部错误、agent run id 或本地路径的问题。
 - 修复 dev panel saga 刷新 hook 的无效依赖 warning。
+- 修复过程侧边栏对已完成/无事件过程的折叠展示与空态提示。
 
 ### Removed
 - 移除远端 `docs/` 目录并加入 `.gitignore`，项目文档不再同步到仓库。

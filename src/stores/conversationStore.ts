@@ -129,6 +129,12 @@ function pickMessageContent(local: Extract<ConversationMessage, { kind: "text" }
   return local.content.length > incoming.content.length ? local.content : incoming.content;
 }
 
+function getMessageCliProcess(message: ConversationMessage | undefined) {
+  if (!message) return undefined;
+  if (message.kind === "text" || message.kind === "goal_plan_card") return message.cliProcess;
+  return undefined;
+}
+
 function mergeCliProcess(
   local: ConversationCliProcess | undefined,
   incoming: ConversationCliProcess | undefined,
@@ -153,15 +159,21 @@ function mergeCliProcess(
 }
 
 function mergeMessagePreservingCliProcess(local: ConversationMessage | undefined, incoming: ConversationMessage) {
-  if (!local || local.kind !== "text" || incoming.kind !== "text") return incoming;
-  const cliProcess = mergeCliProcess(local.cliProcess, incoming.cliProcess);
-  const content = pickMessageContent(local, incoming);
+  if (!local) return incoming;
+  const cliProcess = mergeCliProcess(getMessageCliProcess(local), getMessageCliProcess(incoming));
+  if (!cliProcess) return incoming;
+  const content = local.kind === "text" && incoming.kind === "text"
+    ? pickMessageContent(local, incoming)
+    : incoming.content;
 
-  return {
-    ...incoming,
-    content,
-    ...(cliProcess ? { cliProcess } : {}),
-  };
+  if (incoming.kind === "text" || incoming.kind === "goal_plan_card") {
+    return {
+      ...incoming,
+      content,
+      cliProcess,
+    };
+  }
+  return incoming;
 }
 
 function mergeConversationPreservingCliProcess(local: Conversation | undefined, incoming: Conversation) {

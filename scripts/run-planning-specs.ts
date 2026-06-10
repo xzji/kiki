@@ -23,6 +23,7 @@ import { runRuntimeRegistrySpecs } from "../src/lib/server/runtime/adapters/regi
 import { runContextPackBoundarySpecs } from "../src/lib/server/workspace/contextPack.spec";
 import { runJsonRepairAutoCloseSpecs } from "../src/lib/server/claude/jsonRepair.spec";
 import { runTaskDraftReviewSpecs } from "../src/lib/server/goalPlanning/taskDraftReview.spec";
+import { runRefinerPromptSpecs } from "../src/lib/server/goalPlanning/agents/refinerPrompt.spec";
 import { runPayloadGuardSpecs } from "../src/lib/server/agentRuntime/payloadGuard.spec";
 import { runClaudeJsonInvokeSpecs } from "../src/lib/server/agentRuntime/claudeJsonInvoke.spec";
 import { runAgentExecutorSpecs } from "../src/lib/server/agentRuntime/agentExecutor.spec";
@@ -76,6 +77,7 @@ runRuntimeEventsAggregationSpecs();
 runStorageAdapterSpecs();
 runJsonRepairAutoCloseSpecs();
 runTaskDraftReviewSpecs();
+runRefinerPromptSpecs();
 runClaudeTransportSessionSpecs();
 runPiAdapterSpecs();
 runRuntimeRegistrySpecs();

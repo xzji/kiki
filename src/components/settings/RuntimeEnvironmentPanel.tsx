@@ -1,7 +1,7 @@
 "use client";
 
 import { Laptop, Loader2, Monitor, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { deleteMachine, listMachines, type MachineRecord } from "@/lib/api/machines";
 import {
@@ -144,6 +144,9 @@ export function RuntimeEnvironmentPanel() {
   const [daemonRefreshFeedback, setDaemonRefreshFeedback] = useState<"success" | "error" | null>(null);
   const [confirm24hOpen, setConfirm24hOpen] = useState(false);
   const [optimisticDaemonEnabled, setOptimisticDaemonEnabled] = useState<boolean | null>(null);
+  const daemonSwitchPendingRef = useRef(false);
+  const daemonStatusInvalidationRef = useRef(0);
+  const daemonStatusPollingPendingRef = useRef(false);
   const [skillsStatus, setSkillsStatus] = useState<KikiSkillsStatusPayload | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsInstalling, setSkillsInstalling] = useState(false);
@@ -338,9 +341,16 @@ export function RuntimeEnvironmentPanel() {
     }
   }, []);
 
+  useEffect(() => {
+    daemonSwitchPendingRef.current = daemonSwitchPending;
+  }, [daemonSwitchPending]);
+
   const loadDaemonStatus = useCallback(async () => {
+    const invalidationVersion = daemonStatusInvalidationRef.current;
     const next = await fetchRuntimeDaemonStatus();
-    setDaemonStatus(next);
+    if (invalidationVersion === daemonStatusInvalidationRef.current && !daemonSwitchPendingRef.current) {
+      setDaemonStatus(next);
+    }
     return next;
   }, []);
 
@@ -410,8 +420,10 @@ export function RuntimeEnvironmentPanel() {
     setDaemonActionMessage(null);
     setDaemonActionError(null);
     setDaemonRefreshFeedback(null);
+    daemonSwitchPendingRef.current = true;
+    daemonStatusInvalidationRef.current += 1;
     try {
-      await setRuntimeDaemonAutoStart(
+      const result = await setRuntimeDaemonAutoStart(
         enabled
           ? {
               enabled: true,
@@ -425,20 +437,33 @@ export function RuntimeEnvironmentPanel() {
             }
           : { enabled: false },
       );
-      await loadDaemonStatus();
+      daemonStatusInvalidationRef.current += 1;
+      setDaemonStatus((current) => ({
+        config: result.config,
+        state: current?.state ?? null,
+        device: current?.device ?? null,
+        source: result.source ?? current?.source,
+        service: result.service ?? current?.service,
+        message: result.message,
+        launchAgentInstalled: result.launchAgentInstalled,
+        launchAgentPath: result.launchAgentPath,
+      }));
       setDaemonActionMessage(
         enabled
           ? "24h 运行已开启，后台服务已接管；如果当前还有前台 kiki-daemon run 终端，请关闭它以避免双进程抢占。"
           : "24h 运行已关闭，系统常驻后台服务已停用。",
       );
     } catch (error) {
+      daemonStatusInvalidationRef.current += 1;
       setOptimisticDaemonEnabled(null);
+      setDaemonStatus((current) => (current?.message ? { ...current, message: undefined } : current));
       setDaemonActionError(error instanceof Error ? error.message : "24h 运行设置失败");
     } finally {
+      daemonSwitchPendingRef.current = false;
       setOptimisticDaemonEnabled(null);
       setDaemonSwitchPending(false);
     }
-  }, [activeLocalEnvironment, loadDaemonStatus]);
+  }, [activeLocalEnvironment]);
 
   const daemonStatusBadge = useMemo(() => {
     if (daemonSwitchPending) return { label: "加载中", tone: "neutral" as const, loading: true };
@@ -467,11 +492,21 @@ export function RuntimeEnvironmentPanel() {
   useEffect(() => {
     let cancelled = false;
     const safeLoadDaemonStatus = async () => {
+      if (daemonSwitchPendingRef.current) return;
+      if (daemonStatusPollingPendingRef.current) return;
+      daemonStatusPollingPendingRef.current = true;
+      const invalidationVersion = daemonStatusInvalidationRef.current;
       try {
         const next = await fetchRuntimeDaemonStatus();
-        if (!cancelled) setDaemonStatus(next);
+        if (!cancelled && invalidationVersion === daemonStatusInvalidationRef.current && !daemonSwitchPendingRef.current) {
+          setDaemonStatus(next);
+        }
       } catch {
-        if (!cancelled) setDaemonStatus(null);
+        if (!cancelled && invalidationVersion === daemonStatusInvalidationRef.current && !daemonSwitchPendingRef.current) {
+          setDaemonStatus(null);
+        }
+      } finally {
+        daemonStatusPollingPendingRef.current = false;
       }
     };
     void safeLoadDaemonStatus();

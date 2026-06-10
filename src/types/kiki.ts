@@ -542,6 +542,7 @@ export type ConversationMessage =
       status?: "streaming" | "done" | "error";
       source?: "user" | "kiki" | "system";
       sagaRequestId?: string;
+      cliProcess?: ConversationCliProcess;
       goalRef: {
         goalId: string;
         title: string;

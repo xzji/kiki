@@ -118,6 +118,104 @@ export async function runTopicInitSagaSpecs() {
   }
 
   // -----------------------------------------------------------------------
+  // 2b. Refiner failure degrades to keeping the current plan
+  // -----------------------------------------------------------------------
+  {
+    const saga = createSagaInstance({ topicId: "topic-saga-refine-fail-soft", type: "topic_init" });
+    let criticCalls = 0;
+    let presenterCalled = false;
+    const criticInvoke: LlmInvoke = async () => {
+      criticCalls += 1;
+      return {
+        rawText: "{}",
+        parsed:
+          criticCalls === 1
+            ? { verdict: "needs_refinement", notes: "needs a better structure" }
+            : { verdict: "accept" },
+      };
+    };
+    const refineInvoke: LlmInvoke = async () => {
+      throw new Error("refiner parse failed");
+    };
+    const presentInvoke: LlmInvoke = async () => {
+      presenterCalled = true;
+      return { rawText: "{}", parsed: { summary: "ok" } };
+    };
+
+    const result = await runTopicInitSaga({
+      sagaInstanceId: saga.id,
+      topicId: "topic-saga-refine-fail-soft",
+      prompts: buildPrompts(),
+      invokes: {
+        interview: constInvoke({}),
+        plan: constInvoke({ threads: [{ id: "t1" }] }),
+        critic: criticInvoke,
+        refine: refineInvoke,
+        spec: constInvoke({ specs: [] }),
+        present: presentInvoke,
+      },
+      maxRefineLoops: 1,
+    });
+
+    assert.equal(result.status, "completed", "refiner failure should not fail saga");
+    assert.equal(result.refineLoops, 1, "failed refine still counts as one refine cycle");
+    assert.equal(criticCalls, 2, "critic should run again after refiner failure");
+    assert.equal(result.artifacts.refinedPlan, undefined, "failed refiner should not record refinedPlan");
+    assert.equal(presenterCalled, true, "presenter should still run");
+  }
+
+  // -----------------------------------------------------------------------
+  // 2c. Refiner partial output is merged with current plan
+  // -----------------------------------------------------------------------
+  {
+    const saga = createSagaInstance({ topicId: "topic-saga-refine-merge", type: "topic_init" });
+    let criticCalls = 0;
+    let presentedPlan: Record<string, unknown> | undefined;
+    const prompts = {
+      ...buildPrompts(),
+      present: (plan: Record<string, unknown>) => {
+        presentedPlan = plan;
+        return "present plan";
+      },
+    };
+    const criticInvoke: LlmInvoke = async () => {
+      criticCalls += 1;
+      return {
+        rawText: "{}",
+        parsed:
+          criticCalls === 1
+            ? { verdict: "needs_refinement", notes: "rename sub goal" }
+            : { verdict: "accept" },
+      };
+    };
+
+    const result = await runTopicInitSaga({
+      sagaInstanceId: saga.id,
+      topicId: "topic-saga-refine-merge",
+      prompts,
+      invokes: {
+        interview: constInvoke({}),
+        plan: constInvoke({
+          goalAnalysis: { coreIntent: "x", successState: "y", assumptions: [] },
+          risks: ["risk-1"],
+          subGoals: [{ id: 1, name: "旧板块" }],
+        }),
+        critic: criticInvoke,
+        refine: constInvoke({ subGoals: [{ id: 1, name: "新板块" }] }),
+        spec: constInvoke({ specs: [] }),
+        present: constInvoke({ summary: "ok" }),
+      },
+      maxRefineLoops: 2,
+    });
+
+    assert.equal(result.status, "completed");
+    assert.deepEqual(presentedPlan?.goalAnalysis, { coreIntent: "x", successState: "y", assumptions: [] });
+    assert.deepEqual(presentedPlan?.risks, ["risk-1"]);
+    assert.deepEqual(presentedPlan?.subGoals, [{ id: 1, name: "新板块" }]);
+    assert.deepEqual(result.artifacts.refinedPlan, presentedPlan);
+  }
+
+  // -----------------------------------------------------------------------
   // 3. awaiting_user — Interviewer surfaces questions, saga pauses
   // -----------------------------------------------------------------------
   {

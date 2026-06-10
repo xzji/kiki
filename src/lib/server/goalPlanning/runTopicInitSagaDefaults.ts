@@ -18,12 +18,9 @@
  *      - invokes `runTopicInitSaga` with the wired prompts/invokes,
  *      - returns the structured `TopicInitSagaResult`.
  *
- * Refiner note: `agents/refinerPrompt.ts` is currently a placeholder (no LLM prompt).
- * The default wiring therefore uses a deterministic no-op invoke that returns an
- * empty parsed object — `topicInitSaga.runRole` treats this as "keep current plan",
- * so the Critic↔Refiner loop still runs but the plan is preserved between iterations.
- * A real Refiner prompt + invoke can be plugged in by overriding `prompts.refine`
- * / `invokes.refine` without changing the orchestrator.
+ * Refiner note: default wiring now calls the real runtime JSON invoke. The
+ * orchestrator keeps the old safety property by preserving the current plan
+ * when Refiner fails or returns an empty payload.
  */
 
 import {
@@ -36,6 +33,10 @@ import {
 import { buildDecomposePrompt } from "@/lib/server/goalPlanning/agents/plannerPrompt";
 import { applyDraftReview } from "@/lib/server/goalPlanning/agents/criticPrompt";
 import { buildPlanPresentationPrompt } from "@/lib/server/goalPlanning/agents/presenterPrompt";
+import {
+  buildTopicPlanRefinerPrompt,
+  validateRefinedTopicPlan,
+} from "@/lib/server/goalPlanning/agents/refinerPrompt";
 import { DEFAULT_EASTER_EGG_SETTINGS } from "@/lib/goalSystemConfig";
 
 import {
@@ -46,7 +47,6 @@ import {
 } from "@/lib/server/repositories/agentRuntime/sagaInstancesRepository";
 
 import { createClaudeJsonInvoke } from "@/lib/server/agentRuntime/claudeJsonInvoke";
-import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import { isTerminalStatus } from "@/lib/server/agentRuntime/sagaCoordinator";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -76,7 +76,7 @@ export type TopicInitSagaSeed = {
  *    `{ collectedInfo: ... }` once user has answered enough rounds).
  *  - plan: top-level decomposition prompt (returns SubGoal[] / Thread[] structure).
  *  - critic: takes Planner output, returns `{ verdict, notes? }`.
- *  - refine: takes Planner output + Critic decision; default returns `{}` (no-op).
+ *  - refine: takes Planner output + Critic decision, returns a refined plan JSON.
  *  - present: takes (potentially refined) Planner output, returns presentation payload.
  */
 export function buildDefaultTopicInitSagaPrompts(
@@ -123,28 +123,17 @@ export function buildDefaultTopicInitSagaPrompts(
       "3. 整体输出 ≤ 30 行 / ≤ 1000 字符。",
     ].join("\n");
 
-  // Default Refiner prompt is unused (invoke is a no-op), but we keep a
-  // deterministic builder so test harnesses or PR9b follow-ups can plug a real
-  // LLM invoke without redefining the prompt shape.
   const refine = (
     planParsed: Record<string, unknown>,
     criticDecision: CriticDecisionPayload,
   ) =>
-    [
-      "你是 Topic 初始化 Saga 的 Refiner 修正角色。",
-      "Critic 已标记当前草稿需要修正，请输出修正后的草稿 JSON。",
-      "",
-      "Critic 决策：",
-      JSON.stringify(criticDecision, null, 2),
-      "",
-      "Planner 草稿：",
-      JSON.stringify(planParsed, null, 2),
-      "",
-      "约束：",
-      "1. 仅输出 JSON 对象，禁止 Markdown / 解释。",
-      "2. 保留原 schema，按 Critic notes 修正不合理项；若无可改进点，可原样输出。",
-      "3. payload ≤ 8KB。",
-    ].join("\n");
+    buildTopicPlanRefinerPrompt({
+      topicText: seed.topicText,
+      conversationContext: seed.conversationContext,
+      userContext,
+      currentPlan: planParsed,
+      criticDecision,
+    });
 
   const present = (planParsed: Record<string, unknown>) =>
     buildPlanPresentationPrompt({
@@ -202,10 +191,9 @@ export type CreateDefaultTopicInitSagaInvokesInput = {
  * Critic↔Refiner loop running rather than failing the entire Saga on a single
  * truncated payload (§9.5 决策/展示拆分硬约束).
  *
- * Refiner uses a deterministic no-op invoke (returns `{}`) because the LLM
- * prompt for Refiner is still a placeholder (PR9b). `topicInitSaga.runRole`
- * treats empty parsed payload as "keep current plan", so the loop is preserved
- * but plan content is unchanged across iterations.
+ * Refiner uses a real JSON invoke. Its failure policy lives in
+ * `topicInitSaga.ts`, where Refiner errors preserve the current plan instead of
+ * failing the whole Saga.
  */
 export function createDefaultTopicInitSagaInvokes(
   input: CreateDefaultTopicInitSagaInvokesInput,
@@ -242,12 +230,9 @@ export function createDefaultTopicInitSagaInvokes(
     }),
   });
 
-  // Deterministic no-op refiner: bypass LLM entirely until a real Refiner
-  // prompt + invoke is wired (placeholder in agents/refinerPrompt.ts).
-  const refine: LlmInvoke = async () => ({
-    rawText: "{}",
-    parsed: {},
-    meta: { degraded: true, fallbackReason: "refiner placeholder no-op" },
+  const refine = createClaudeJsonInvoke({
+    ...baseConfig,
+    validator: validateRefinedTopicPlan,
   });
 
   const present = createClaudeJsonInvoke({

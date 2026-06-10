@@ -452,7 +452,7 @@ export function getTunnelHub() {
     },
     requestDaemonServiceStatus(input: { machineId: string; timeoutMs?: number }) {
       const requestId = `daemon-service-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 30_000;
+      const timeoutMs = input.timeoutMs ?? 15_000;
       return new Promise<RemoteDaemonServiceStatus>((resolve, reject) => {
         const timer = setTimeout(() => {
           state.pendingDaemonServiceStatus.delete(requestId);
@@ -464,7 +464,7 @@ export function getTunnelHub() {
     },
     requestDaemonServiceAutostart(input: { machineId: string; enabled: boolean; timeoutMs?: number }) {
       const requestId = `daemon-service-autostart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 60_000;
+      const timeoutMs = input.timeoutMs ?? 25_000;
       return new Promise<RemoteDaemonServiceStatus>((resolve, reject) => {
         const timer = setTimeout(() => {
           state.pendingDaemonServiceAutostart.delete(requestId);

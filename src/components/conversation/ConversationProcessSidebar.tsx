@@ -118,13 +118,13 @@ function useSelectedProcess() {
   return useMemo(() => {
     const messages = conversation?.messages ?? [];
     const processMessages = messages.filter(
-      (message) => message.kind === "text" && message.role === "kiki" && message.cliProcess,
+      (message) => message.role === "kiki" && "cliProcess" in message && message.cliProcess,
     );
     const running = [...processMessages].reverse().find(
-      (message) => message.kind === "text" && message.cliProcess?.status === "running",
+      (message) => "cliProcess" in message && message.cliProcess?.status === "running",
     );
     const selected = running ?? processMessages.at(-1);
-    return selected?.kind === "text" ? selected.cliProcess ?? null : null;
+    return selected && "cliProcess" in selected ? selected.cliProcess ?? null : null;
   }, [conversation?.messages]);
 }
 

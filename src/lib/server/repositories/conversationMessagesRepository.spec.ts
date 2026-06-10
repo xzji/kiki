@@ -18,7 +18,9 @@ import { normalizeGoalId } from "@/lib/opaqueIds";
 
 import {
   appendThreadMessage,
+  insertConversationMessage,
   listConversationMessages,
+  updateConversationMessage,
 } from "./conversationMessagesRepository";
 
 // 与生产路径一致：conversations.goal_id 在写入前会被 normalize；spec seed 也照此做。
@@ -44,6 +46,26 @@ function countMessages(conversationId: string): number {
     .prepare(`SELECT COUNT(*) AS n FROM conversation_messages WHERE conversation_id = ?`)
     .get(conversationId) as { n: number };
   return row.n;
+}
+
+function makeCliProcess(runId: string) {
+  return {
+    runId,
+    status: "completed" as const,
+    startedAt: "2026-06-01T00:00:00.000Z",
+    finishedAt: "2026-06-01T00:00:02.000Z",
+    promptSections: [],
+    events: [
+      {
+        id: `${runId}-status`,
+        type: "status" as const,
+        createdAt: "2026-06-01T00:00:01.000Z",
+        title: "目标规划草案已生成",
+        content: "目标规划草案已生成",
+      },
+    ],
+    output: "目标规划草案已生成",
+  };
 }
 
 export async function runAppendThreadMessageSpecs() {
@@ -146,5 +168,68 @@ export async function runAppendThreadMessageSpecs() {
         }),
       /no conversation linked/,
     );
+  }
+
+  // 5. goal_plan_card 持久化 cliProcess
+  {
+    seedConversation("conv-5", "topic-5");
+    const cliProcess = makeCliProcess("goal-cli-msg-5");
+    insertConversationMessage("conv-5", {
+      id: "msg-plan-5",
+      kind: "goal_plan_card",
+      role: "kiki",
+      content: "目标规划草案已生成。",
+      createdAt: "2026-06-01T02:00:00.000Z",
+      status: "done",
+      source: "kiki",
+      cliProcess,
+      goalRef: {
+        goalId: "goal-5",
+        title: "目标 5",
+        subGoalCount: 1,
+        taskCount: 2,
+      },
+    });
+    const [message] = listConversationMessages({ conversationId: "conv-5" });
+    assert.equal(message?.kind, "goal_plan_card");
+    assert.deepEqual(message?.kind === "goal_plan_card" ? message.cliProcess : undefined, cliProcess);
+  }
+
+  // 6. text 更新为 goal_plan_card 后仍保留 cliProcess
+  {
+    seedConversation("conv-6", "topic-6");
+    const cliProcess = makeCliProcess("goal-cli-msg-6");
+    insertConversationMessage("conv-6", {
+      id: "msg-plan-6",
+      kind: "text",
+      role: "kiki",
+      content: "正在生成目标规划...",
+      createdAt: "2026-06-01T03:00:00.000Z",
+      status: "streaming",
+      source: "kiki",
+      cliProcess,
+    });
+    const updated = updateConversationMessage({
+      conversationId: "conv-6",
+      messageId: "msg-plan-6",
+      patch: {
+        kind: "goal_plan_card",
+        role: "kiki",
+        content: "目标规划草案已生成。",
+        status: "done",
+        source: "kiki",
+        cliProcess,
+        goalRef: {
+          goalId: "goal-6",
+          title: "目标 6",
+          subGoalCount: 2,
+          taskCount: 3,
+        },
+      },
+    });
+    assert.ok(updated && !("conflict" in updated && updated.conflict));
+    const [message] = listConversationMessages({ conversationId: "conv-6" });
+    assert.equal(message?.kind, "goal_plan_card");
+    assert.deepEqual(message?.kind === "goal_plan_card" ? message.cliProcess : undefined, cliProcess);
   }
 }

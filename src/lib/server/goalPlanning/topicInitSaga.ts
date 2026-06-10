@@ -195,6 +195,13 @@ function extractSpecTasksFromPlan(planParsed: Record<string, unknown>): SpecWrit
   });
 }
 
+function mergeRefinedPlan(
+  currentPlan: Record<string, unknown>,
+  refined: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...currentPlan, ...refined };
+}
+
 async function runRole(input: {
   topicId: string;
   sagaInstanceId: string;
@@ -325,14 +332,16 @@ export async function runTopicInitSaga(
         prompt: input.prompts.refine(currentPlan, criticDecision),
         invoke: input.invokes.refine,
       });
-      // Refiner may return either a full new plan or be a no-op (e.g. PR9b stub).
+      // Refiner may return a full plan or a partial top-level patch.
       // Treat empty / undefined as "keep current plan".
       if (refined && Object.keys(refined).length > 0) {
-        currentPlan = refined;
-        artifacts.refinedPlan = refined;
+        currentPlan = mergeRefinedPlan(currentPlan, refined);
+        artifacts.refinedPlan = currentPlan;
       }
-    } catch (error) {
-      return failSaga(input.sagaInstanceId, getFailedAgentRunId(error), "refine", error, artifacts, refineLoops);
+    } catch {
+      // Refiner is an enhancement role. Its agent_run already records the
+      // failure through agentExecutor; keep the current plan and let Critic
+      // decide again, preserving the old no-op safety behavior.
     }
 
     refineLoops += 1;

@@ -100,4 +100,38 @@ export function runSagaDraftAdapterSpecs() {
     assert.equal(draft.subGoals[0]?.title, "监控板块异动");
     assert.equal(draft.subGoals[0]?.tasks.length, 0);
   }
+
+  {
+    const draft = adaptTopicInitSagaToGoalDraft({
+      topicText: "跟踪美股科技",
+      result: completedResult({
+        artifacts: {
+          plan: {
+            goalAnalysis: {
+              coreIntent: "原始意图",
+              successState: "原始成功状态",
+              assumptions: ["原始假设"],
+            },
+            subGoals: [{ id: 1, name: "旧计划" }],
+          },
+          refinedPlan: {
+            goalAnalysis: {
+              coreIntent: "原始意图",
+              successState: "原始成功状态",
+              assumptions: ["原始假设"],
+            },
+            subGoals: [{ id: 1, name: "修正后计划" }],
+          },
+          presentation: {
+            goalTitle: "科技板块跟踪",
+            summary: "持续关注板块变化",
+            notificationStrategy: "有异动即提醒",
+          },
+        },
+      }),
+    });
+
+    assert.equal(draft.subGoals[0]?.title, "修正后计划");
+    assert.equal(draft.goalAnalysis?.coreIntent, "原始意图");
+  }
 }

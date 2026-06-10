@@ -6,13 +6,11 @@
  * Coverage:
  *  1. buildDefaultTopicInitSagaPrompts — 5 keys present, interview prompt
  *     swaps based on userContext emptiness, critic / present builders are functions.
- *  2. createDefaultTopicInitSagaInvokes — 5 keys present, refiner is the
- *     deterministic no-op (returns `{ parsed: {} }`).
- *  3. Refiner no-op contract: parsed is empty object so topicInitSaga's
- *     "keep current plan" branch is exercised.
- *  4. createSagaInstance idempotency — runTopicInitSagaWithDefaults reuses
+ *  2. createDefaultTopicInitSagaInvokes — 5 keys present, including a real
+ *     Refiner invoke wired through the runtime JSON path.
+ *  3. createSagaInstance idempotency — runTopicInitSagaWithDefaults reuses
  *     existing saga row when called twice with the same idempotencyKey.
- *  5. runTopicInitSagaWithDefaults guards — mutual exclusion, missing saga,
+ *  4. runTopicInitSagaWithDefaults guards — mutual exclusion, missing saga,
  *     terminal-status rejection.
  */
 
@@ -88,6 +86,9 @@ export async function runTopicInitSagaDefaultsSpecs() {
       { verdict: "needs_refinement", notes: "missing detail" },
     );
     assert.ok(refine.includes("Refiner"), "refine prompt mentions Refiner role");
+    assert.ok(refine.includes("Critic 决策"), "refine prompt includes critic decision");
+    assert.ok(refine.includes("Planner 草稿"), "refine prompt includes planner draft");
+    assert.ok(refine.includes("学习 Rust 异步运行时"), "refine prompt includes topic");
 
     // Presenter builder consumes plan and returns string.
     const present = promptsWithCtx.present({ subGoals: [{ name: "A", tasks: [{}, {}] }] });
@@ -96,7 +97,7 @@ export async function runTopicInitSagaDefaultsSpecs() {
   }
 
   // -----------------------------------------------------------------------
-  // 2. createDefaultTopicInitSagaInvokes — 5 keys + refiner no-op contract
+  // 2. createDefaultTopicInitSagaInvokes — 5 keys + real refiner invoke
   // -----------------------------------------------------------------------
   {
     const invokes = createDefaultTopicInitSagaInvokes({
@@ -107,15 +108,9 @@ export async function runTopicInitSagaDefaultsSpecs() {
       assert.equal(typeof invokes[key], "function", `invokes.${key} is fn`);
     }
 
-    // Refiner is deterministic no-op — bypass LLM transport entirely.
-    const refineResult = await invokes.refine({
-      agentRunId: "run-stub",
-      prompt: "anything",
-      context: { role: "refiner" },
-    });
-    assert.equal(refineResult.rawText, "{}", "refiner no-op rawText is '{}'");
-    assert.deepEqual(refineResult.parsed, {}, "refiner no-op parsed is empty object");
-    assert.equal(refineResult.meta?.degraded, true, "refiner no-op flagged degraded");
+    // Refiner is now a real runtime-backed invoke; do not call it in this unit
+    // spec because it would spawn the configured CLI.
+    assert.equal(typeof invokes.refine, "function", "invokes.refine is real invoke fn");
   }
 
   // -----------------------------------------------------------------------
@@ -217,4 +212,3 @@ export async function runTopicInitSagaDefaultsSpecs() {
     );
   }
 }
-
