@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
+import { getUserMemoryDir, getUserProfileMemoryFilePath } from "@/lib/server/storage/paths";
 import { listConversationMessages } from "@/lib/server/repositories/conversationMessagesRepository";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import {
@@ -9,6 +12,10 @@ import {
   ConversationCommandConflictError,
   ConversationCommandIdempotencyConflictError,
 } from "@/lib/server/services/conversationCommandService";
+import {
+  ensureConversationWorkspace,
+  getConversationSessionMemoryFilePath,
+} from "@/lib/server/workspace/conversationWorkspace";
 import type { ConversationMessage } from "@/types/kiki";
 
 function textMessage(id: string, content: string): Extract<ConversationMessage, { kind: "text" }> {
@@ -172,6 +179,7 @@ export function runConversationCommandServiceSpecs() {
   const instanceId = "instance-command-cascade-spec";
   const sagaId = "saga-command-cascade-spec";
   const agentRunId = "agent-run-command-cascade-spec";
+  const runtimeOnlyAgentRunId = "agent-run-runtime-only-command-cascade-spec";
   const runtimeJobId = "runtime-job-command-cascade-spec";
   const now = new Date().toISOString();
   const db = getDatabase();
@@ -285,6 +293,21 @@ export function runConversationCommandServiceSpecs() {
   ).run(goalId, taskId, instanceId, now);
   db.prepare(
     `
+      INSERT INTO inbox_item_states (
+        inbox_item_id, goal_id, status, favorite, unread, updated_at, created_at
+      ) VALUES ('inbox-item-command-cascade-spec', ?, 'active', 0, 1, ?, ?)
+    `,
+  ).run(goalId, now, now);
+  db.prepare(
+    `
+      INSERT INTO task_notification_states (
+        instance_id, goal_id, task_id, notification_json, delivery_state,
+        notification_sequence, inbox_item_id, conversation_message_ids_json, updated_at, created_at
+      ) VALUES (?, ?, ?, '{}', 'delivered', 1, 'inbox-item-command-cascade-spec', '[]', ?, ?)
+    `,
+  ).run(instanceId, goalId, taskId, now, now);
+  db.prepare(
+    `
       INSERT INTO saga_instances (
         id, topic_id, type, status, started_at, revision
       ) VALUES (?, ?, 'topic_init', 'running', ?, 0)
@@ -306,6 +329,19 @@ export function runConversationCommandServiceSpecs() {
   db.prepare(
     `INSERT INTO agent_snapshots (agent_run_id, last_event_seq, state_json, updated_at) VALUES (?, 1, '{}', ?)`,
   ).run(agentRunId, now);
+  db.prepare(
+    `
+      INSERT INTO agent_runs (
+        id, runtime_job_id, role, status, started_at
+      ) VALUES (?, ?, 'executor', 'running', ?)
+    `,
+  ).run(runtimeOnlyAgentRunId, runtimeJobId, now);
+  db.prepare(
+    `INSERT INTO agent_events (id, agent_run_id, seq, type, payload, created_at) VALUES ('agent-event-runtime-only-command-cascade-spec', ?, 1, 'started', '{}', ?)`,
+  ).run(runtimeOnlyAgentRunId, now);
+  db.prepare(
+    `INSERT INTO agent_snapshots (agent_run_id, last_event_seq, state_json, updated_at) VALUES (?, 1, '{}', ?)`,
+  ).run(runtimeOnlyAgentRunId, now);
 
   applyConversationCommand({
     command: { type: "delete_conversation", conversationId: cascadeConversationId },
@@ -315,12 +351,13 @@ export function runConversationCommandServiceSpecs() {
   for (const [table, where] of [
     ["conversations", "id = ?"],
     ["conversation_messages", "conversation_id = ?"],
-    ["conversation_event_log", "conversation_id = ?"],
     ["runtime_jobs", "conversation_id = ? OR id = ?"],
     ["artifacts", "conversation_id = ?"],
     ["artifact_interaction_state", "conversation_id = ?"],
     ["goal_event_log", "goal_id = ?"],
     ["goal_deliverables", "goal_id = ?"],
+    ["task_notification_states", "goal_id = ?"],
+    ["inbox_item_states", "goal_id = ?"],
     ["saga_instances", "id = ?"],
     ["agent_runs", "id = ?"],
     ["agent_events", "agent_run_id = ?"],
@@ -330,7 +367,7 @@ export function runConversationCommandServiceSpecs() {
     const params =
       table === "runtime_jobs"
         ? [cascadeConversationId, runtimeJobId]
-        : table.startsWith("goal_")
+        : table.startsWith("goal_") || table === "task_notification_states" || table === "inbox_item_states"
           ? [goalId]
           : table === "saga_instances" || table === "agent_messages"
             ? [sagaId]
@@ -341,6 +378,43 @@ export function runConversationCommandServiceSpecs() {
       .count;
     assert.equal(count, 0, `${table} should be deleted`);
   }
+  const deleteEvents = db
+    .prepare(
+      `
+        SELECT kind, idempotency_key FROM conversation_event_log
+        WHERE conversation_id = ?
+      `,
+    )
+    .all(cascadeConversationId) as Array<{ kind: string; idempotency_key: string | null }>;
+  assert.deepEqual(
+    deleteEvents.map((event) => event.kind),
+    ["conversation.deleted"],
+    "conversation_event_log should keep only the tombstone delete event",
+  );
+  assert.equal(
+    (db.prepare(`SELECT COUNT(*) AS count FROM agent_runs WHERE id = ?`).get(runtimeOnlyAgentRunId) as { count: number })
+      .count,
+    0,
+    "agent_runs linked only by runtime_job_id should be deleted",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM agent_events WHERE agent_run_id = ?`)
+        .get(runtimeOnlyAgentRunId) as { count: number }
+    ).count,
+    0,
+    "agent_events linked only by runtime_job_id should be deleted",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM agent_snapshots WHERE agent_run_id = ?`)
+        .get(runtimeOnlyAgentRunId) as { count: number }
+    ).count,
+    0,
+    "agent_snapshots linked only by runtime_job_id should be deleted",
+  );
 
   const topics = db.prepare(`SELECT value_json FROM runtime_state_snapshots WHERE key = 'topics'`).get() as {
     value_json: string;
@@ -385,4 +459,103 @@ export function runConversationCommandServiceSpecs() {
     idempotencyKey: createIdempotencyKey("conversation.spec.predeleted.delete.retry", preDeletedConversationId),
   });
   assert.equal(retryDelete.event.kind, "conversation.deleted");
+  const sameDeleteKey = createIdempotencyKey("conversation.spec.predeleted.delete.same-key", preDeletedConversationId);
+  const firstSameKeyDelete = applyConversationCommand({
+    command: { type: "delete_conversation", conversationId: preDeletedConversationId },
+    idempotencyKey: sameDeleteKey,
+  });
+  const secondSameKeyDelete = applyConversationCommand({
+    command: { type: "delete_conversation", conversationId: preDeletedConversationId },
+    idempotencyKey: sameDeleteKey,
+  });
+  assert.equal(secondSameKeyDelete.event.id, firstSameKeyDelete.event.id, "delete command should be idempotent by key");
+
+  const deepConversationId = "conv-command-deep-delete-spec";
+  const profilePath = getUserProfileMemoryFilePath();
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  fs.writeFileSync(profilePath, "# User Memory\n\n## 项目偏好\n- profile should stay\n", "utf8");
+  const workspace = ensureConversationWorkspace(deepConversationId);
+  fs.writeFileSync(getConversationSessionMemoryFilePath(deepConversationId), "# Session Memory\n\n临时记忆\n", "utf8");
+  fs.writeFileSync(path.join(workspace.workspaceDir, "attachments", "input.txt"), "attachment", "utf8");
+  fs.mkdirSync(path.join(workspace.workspaceDir, "logs", "claude-traces"), { recursive: true });
+  fs.writeFileSync(path.join(workspace.workspaceDir, "logs", "claude-traces", "trace.jsonl"), "trace\n", "utf8");
+  const candidatesPath = path.join(getUserMemoryDir(), "candidates.json");
+  fs.writeFileSync(
+    candidatesPath,
+    `${JSON.stringify(
+      {
+        version: 1,
+        candidates: [
+          {
+            candidateKey: "keep-other-source",
+            patch: { op: "add", section: "workPreferences", content: "保留其他来源", confidence: "high" },
+            sourceConversationIds: [deepConversationId, "conv-other-source"],
+            hitCount: 2,
+            confidence: "high",
+            contentHash: "hash-keep",
+            firstSeenAt: now,
+            lastSeenAt: now,
+          },
+          {
+            candidateKey: "remove-empty-source",
+            patch: { op: "add", section: "workPreferences", content: "删除空来源", confidence: "high" },
+            sourceConversationIds: [deepConversationId],
+            hitCount: 1,
+            confidence: "high",
+            contentHash: "hash-remove",
+            firstSeenAt: now,
+            lastSeenAt: now,
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  applyConversationCommand({
+    command: {
+      type: "create_conversation",
+      conversation: {
+        id: deepConversationId,
+        title: "深度删除测试",
+        runtimeSessions: { claude: "11111111-1111-4111-8111-111111111111" },
+      },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.deep.create", deepConversationId),
+  });
+  applyConversationCommand({
+    command: { type: "delete_conversation", conversationId: deepConversationId },
+    idempotencyKey: createIdempotencyKey("conversation.spec.deep.delete", deepConversationId),
+  });
+  assert.equal(fs.existsSync(workspace.workspaceDir), false, "conversation workspace should be removed");
+  assert.equal(fs.readFileSync(profilePath, "utf8").includes("profile should stay"), true, "profile memory should stay");
+  const candidateFile = JSON.parse(fs.readFileSync(candidatesPath, "utf8")) as {
+    candidates: Array<{ candidateKey: string; sourceConversationIds: string[] }>;
+  };
+  assert.deepEqual(
+    candidateFile.candidates.map((candidate) => [candidate.candidateKey, candidate.sourceConversationIds]),
+    [["keep-other-source", ["conv-other-source"]]],
+  );
+  const auditPath = path.join(getUserMemoryDir(), "audit.jsonl");
+  const auditLines = fs.readFileSync(auditPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    target: string;
+    conversationId?: string;
+    action: string;
+  });
+  assert.equal(
+    auditLines.some(
+      (event) => event.target === "session" && event.conversationId === deepConversationId && event.action === "clear",
+    ),
+    true,
+    "session memory cleanup should be audited",
+  );
+  assert.equal(
+    auditLines.some(
+      (event) => event.target === "candidate" && event.conversationId === deepConversationId && event.action === "clear",
+    ),
+    true,
+    "candidate memory cleanup should be audited",
+  );
 }

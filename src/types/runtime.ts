@@ -1,7 +1,8 @@
 import type { ArtifactRef } from "@/types/artifact";
 
 export type RuntimePermissionMode = "readonly" | "confirm" | "execute";
-export type LocalRuntimeKind = "claude" | "codex" | "gemini";
+export type LocalRuntimeKind = "claude" | "codex" | "gemini" | "pi";
+export const SUPPORTED_RUNTIME_KINDS: LocalRuntimeKind[] = ["claude", "pi"];
 export type RuntimeToolCapability =
   | "web"
   | "fileRead"
@@ -32,8 +33,8 @@ export const DEFAULT_RUNTIME_FILE_POLICY: RuntimeFilePolicy = {
   custom: {
     web: true,
     fileRead: true,
-    fileWrite: false,
-    shell: false,
+    fileWrite: true,
+    shell: true,
     subagent: false,
     schedule: false,
     planMode: false,
@@ -87,6 +88,8 @@ export type RuntimeDiscoveryItem = {
   installed: boolean;
   version?: string;
   installHint?: string;
+  uiAccent?: string;
+  uiIcon?: string;
 };
 
 export type RuntimeDiscoveryResult = {
@@ -96,11 +99,39 @@ export type RuntimeDiscoveryResult = {
 
 export type QuotedConversationMessageContext = import("@/types/kiki").ConversationMessageQuote;
 
+export type CliPromptSection = {
+  id: string;
+  kind: "system" | "context" | "user" | "tool_policy" | "other";
+  title: string;
+  content: string;
+};
+
+export type CliProcessEvent = {
+  id: string;
+  type: "prompt" | "thinking" | "assistant_trace" | "tool_call" | "output" | "status" | "error" | "file_artifact";
+  createdAt: string;
+  title?: string;
+  content?: string;
+  toolName?: string;
+  summary?: string;
+  input?: unknown;
+};
+
+export type ConversationCliProcess = {
+  runId: string;
+  status: "running" | "completed" | "error" | "aborted";
+  startedAt: string;
+  finishedAt?: string;
+  promptSections: CliPromptSection[];
+  events: CliProcessEvent[];
+  output: string;
+  error?: string;
+};
+
 export type ClaudeChatRequest = {
   message: string;
   conversationId: string;
   runtimeEnv: RuntimeEnvironment;
-  claudeSessionId?: string;
   source: "assistant-sidebar" | "conversation";
   workspaceMode?: "conversation" | "task";
   taskRef?: {
@@ -120,8 +151,12 @@ export type ClaudeStreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "session_invalid"; sessionId: string; message: string }
   | { type: "status"; status: "checking" | "running" | "completed" }
+  | { type: "prompt"; sections: CliPromptSection[] }
+  | { type: "thinking"; text: string }
+  | { type: "assistant_trace"; text: string }
   | { type: "delta"; text: string }
   | { type: "message"; content: string }
+  | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
   | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
   | { type: "error"; message: string }

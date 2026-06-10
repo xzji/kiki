@@ -360,6 +360,7 @@ export function RuntimeEventBridge() {
   const replaceEvents = useScheduleStore((state) => state.replaceEvents);
   const hydrateConversations = useConversationStore((state) => state.hydrateConversations);
   const applyConversationEvent = useConversationStore((state) => state.applyConversationEvent);
+  const setConversationsHydrated = useConversationStore((state) => state.setConversationsHydrated);
 
   const isApplyingRemoteRef = useRef(false);
   const [bootstrapped, setBootstrapped] = useState(false);
@@ -481,6 +482,7 @@ export function RuntimeEventBridge() {
               const after = await fetchConversationState();
               if (cancelled) return;
               conversationCursorRef.current = after.latestEventId;
+              setConversationsHydrated(true);
               setConversationHydrated(true);
               return;
             } catch {
@@ -489,10 +491,12 @@ export function RuntimeEventBridge() {
           }
         }
         hydrateConversations(remote.conversations);
+        setConversationsHydrated(true);
         setConversationHydrated(true);
       } catch {
         // 会话投影失败时保留本地乐观状态，后续聚合 SSE/轮询继续收敛；
         // 仍标记 hydrated，让聚合 SSE 至少以本地 cursor=0 起步，并由 30s 快照兜底收敛。
+        setConversationsHydrated(true);
         setConversationHydrated(true);
       }
     };
@@ -501,7 +505,7 @@ export function RuntimeEventBridge() {
     return () => {
       cancelled = true;
     };
-  }, [hydrateConversations]);
+  }, [hydrateConversations, setConversationsHydrated]);
 
   useEffect(() => {
     let cancelled = false;
@@ -780,6 +784,8 @@ export function RuntimeEventBridge() {
       .catch(() => {
         sseDisconnectedRef.current = true;
       });
+  // Replay pending goal events only when the projected goal revision advances.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapped, goalProjectionRevision]);
 
   return null;

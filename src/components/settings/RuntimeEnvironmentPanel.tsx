@@ -50,6 +50,7 @@ const runtimeKindLabels: Record<LocalRuntimeKind, string> = {
   claude: "Claude CLI",
   codex: "Codex CLI",
   gemini: "Gemini CLI",
+  pi: "Pi CLI",
 };
 
 const filePolicyModeLabels: Record<RuntimeFilePolicyMode, string> = {
@@ -1127,6 +1128,11 @@ function ToolPolicySection({
                   </span>
                   {constraint ? (
                     <span className="mt-1 block text-[10px] leading-4 text-[#B42318]">{constraint}</span>
+                  ) : null}
+                  {(option.key === "fileWrite" || option.key === "shell") && !checked ? (
+                    <span className="mt-1 block text-[10px] leading-4 text-[#B54708]">
+                      关闭后无法在会话中发送文件/附件
+                    </span>
                   ) : null}
                 </span>
               </button>

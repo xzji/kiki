@@ -26,6 +26,8 @@ type ConversationCommandResponse = {
   expectedRevision?: number;
 };
 
+let updateMessageCommandSeq = 0;
+
 async function readCommandResponse(response: Response): Promise<ConversationCommandResponse> {
   try {
     return (await response.json()) as ConversationCommandResponse;
@@ -100,9 +102,15 @@ export function updateConversationMessageCommand(
   messageId: string,
   patch: Partial<ConversationMessage>,
 ) {
+  updateMessageCommandSeq += 1;
   return postConversationCommand({
     command: { type: "update_message", conversationId, messageId, patch },
-    idempotencyKey: createIdempotencyKey("conversation.message.update", conversationId, messageId, String(Date.now())),
+    idempotencyKey: createIdempotencyKey(
+      "conversation.message.update",
+      conversationId,
+      messageId,
+      `${Date.now()}:${updateMessageCommandSeq}`,
+    ),
   });
 }
 
@@ -176,13 +184,18 @@ export function setConversationRuntimeEnvCommand(conversationId: string, runtime
   });
 }
 
-export function setConversationClaudeSessionCommand(conversationId: string, claudeSessionId: string | undefined) {
+export function setConversationRuntimeSessionCommand(
+  conversationId: string,
+  runtimeKind: string,
+  sessionId: string | undefined,
+) {
   return postConversationCommand({
-    command: { type: "set_claude_session", conversationId, claudeSessionId: claudeSessionId ?? null },
+    command: { type: "set_runtime_session", conversationId, runtimeKind, sessionId: sessionId ?? null },
     idempotencyKey: createIdempotencyKey(
-      "conversation.claude_session.set",
+      "conversation.runtime_session.set",
       conversationId,
-      claudeSessionId ?? "__cleared__",
+      runtimeKind,
+      sessionId ?? "__cleared__",
     ),
   });
 }

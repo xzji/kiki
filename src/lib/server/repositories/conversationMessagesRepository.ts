@@ -30,9 +30,11 @@ function messageRefs(message: ConversationMessage) {
     const refs: {
       quotedMessage?: Extract<ConversationMessage, { kind: "text" }>["quotedMessage"];
       artifactRefs?: Extract<ConversationMessage, { kind: "text" }>["artifactRefs"];
+      cliProcess?: Extract<ConversationMessage, { kind: "text" }>["cliProcess"];
     } = {};
     if (message.quotedMessage) refs.quotedMessage = message.quotedMessage;
     if (message.artifactRefs?.length) refs.artifactRefs = message.artifactRefs;
+    if (message.cliProcess) refs.cliProcess = message.cliProcess;
     return {
       refJson: Object.keys(refs).length > 0 ? JSON.stringify(refs) : null,
       snapshotJson: null,
@@ -113,6 +115,7 @@ export function mapConversationMessageRow(row: ConversationMessageRow): Conversa
   const refs = parseJson<{
     quotedMessage: Extract<ConversationMessage, { kind: "text" }>["quotedMessage"];
     artifactRefs: Extract<ConversationMessage, { kind: "text" }>["artifactRefs"];
+    cliProcess: Extract<ConversationMessage, { kind: "text" }>["cliProcess"];
   }>(row.ref_json);
   return {
     ...base,
@@ -120,6 +123,7 @@ export function mapConversationMessageRow(row: ConversationMessageRow): Conversa
     role: row.role,
     quotedMessage: refs?.quotedMessage,
     artifactRefs: refs?.artifactRefs,
+    cliProcess: refs?.cliProcess,
   };
 }
 

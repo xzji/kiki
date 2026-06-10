@@ -16,6 +16,7 @@ import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { useConversationStore } from "@/stores/conversationStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
+import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
 import type {
   CollectedInfoSummary,
   GoalBreakdownDraft,
@@ -60,13 +61,13 @@ export type GoalInfoCollectionStepResult =
 function assertClaudeRuntime() {
   const runtimeEnv = useRuntimeEnvStore.getState().getActiveEnvironment();
   if (!runtimeEnv || runtimeEnv.type !== "local") {
-    throw new Error("当前没有可用的本地 Claude 环境，请先到设置 -> 运行环境完成连接。");
+    throw new Error("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
   }
-  if ((runtimeEnv.runtimeKind || "claude") !== "claude") {
-    throw new Error("当前目标规划暂只支持 Claude CLI。请在运行环境中切换到 Claude CLI。");
+  if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
+    throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
   }
   if (runtimeEnv.health?.status !== "online") {
-    throw new Error("当前本地 Claude 环境离线，请先在设置里重新检测连接状态。");
+    throw new Error("当前本地 Runtime 离线，请先在设置里重新检测连接状态。");
   }
   return runtimeEnv;
 }

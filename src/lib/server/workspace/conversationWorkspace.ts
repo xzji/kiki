@@ -40,6 +40,14 @@ export function getConversationMessagesFilePath(conversationId: string) {
   return path.join(getConversationContextDir(conversationId), "messages.json");
 }
 
+export function getConversationMemoryDir(conversationId: string) {
+  return path.join(getConversationWorkspaceDir(conversationId), "memory");
+}
+
+export function getConversationSessionMemoryFilePath(conversationId: string) {
+  return path.join(getConversationMemoryDir(conversationId), "session.md");
+}
+
 export function getPlanningStateFilePath(conversationId: string) {
   return path.join(getConversationWorkspaceDir(conversationId), "planning", "state.json");
 }
@@ -173,6 +181,7 @@ export function ensureConversationWorkspace(conversationId: string): Conversatio
   ensureDir(path.join(workspaceDir, "attachments"));
   ensureDir(path.join(workspaceDir, "exports"));
   ensureDir(path.join(workspaceDir, "logs"));
+  ensureDir(path.join(workspaceDir, "memory"));
 
   const workspaceFilePath = path.join(workspaceDir, "workspace.json");
   let createdAt = new Date().toISOString();

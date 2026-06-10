@@ -13,6 +13,7 @@ type ConversationRow = {
   workspace_initialized_at: string | null;
   runtime_env_id: string | null;
   claude_session_id: string | null;
+  runtime_sessions_json: string | null;
   status: Conversation["status"];
   pinned: number;
   goal_info_collection_json: string | null;
@@ -27,6 +28,20 @@ function parseJson<T>(value: string | null): T | undefined {
   if (!value) return undefined;
   return JSON.parse(value) as T;
 }
+
+/**
+ * 解析 runtimeSessions：优先使用 runtime_sessions_json 列；
+ * 若历史数据只有 claude_session_id，则惰性兜底归入 runtimeSessions.claude。
+ */
+function resolveRuntimeSessions(row: ConversationRow): Record<string, string> | undefined {
+  const parsed = parseJson<Record<string, string>>(row.runtime_sessions_json);
+  const result: Record<string, string> = { ...(parsed ?? {}) };
+  if (row.claude_session_id && !result.claude) {
+    result.claude = row.claude_session_id;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 
 type SnapshotEnvelope<T> = {
   value: T;
@@ -268,6 +283,9 @@ function collectAgentRuntimeIds(ids: RelatedConversationIds) {
   for (const value of collectRowsBySet("agent_runs", "task_id", ids.taskIds, "id")) {
     addDefined(ids.agentRunIds, value);
   }
+  for (const value of collectRowsBySet("agent_runs", "runtime_job_id", ids.runtimeJobIds, "id")) {
+    addDefined(ids.agentRunIds, value);
+  }
   for (const value of collectRowsBySet("agent_runs", "saga_instance_id", ids.sagaInstanceIds, "id")) {
     addDefined(ids.agentRunIds, value);
   }
@@ -335,6 +353,16 @@ function deleteRelatedConversationData(conversationId: string) {
   const db = getDatabase();
   const ids = collectRelatedConversationIds(conversationId);
   removeConversationRuntimeSnapshots(conversationId, ids);
+  const inboxItemIds = new Set<string>();
+  for (const value of collectRowsBySet("task_notification_states", "goal_id", ids.goalIds, "inbox_item_id")) {
+    addDefined(inboxItemIds, value);
+  }
+  for (const value of collectRowsBySet("task_notification_states", "task_id", ids.taskIds, "inbox_item_id")) {
+    addDefined(inboxItemIds, value);
+  }
+  for (const value of collectRowsBySet("task_notification_states", "instance_id", ids.taskInstanceIds, "inbox_item_id")) {
+    addDefined(inboxItemIds, value);
+  }
 
   db.prepare(`DELETE FROM artifact_interaction_state WHERE conversation_id = ?`).run(conversationId);
   deleteWhereIn("artifact_interaction_state", "task_id", ids.taskIds);
@@ -350,6 +378,11 @@ function deleteRelatedConversationData(conversationId: string) {
   deleteWhereIn("goal_event_log", "goal_id", ids.goalIds);
   deleteWhereIn("goal_event_log", "task_id", ids.taskIds);
   deleteWhereIn("goal_event_log", "instance_id", ids.taskInstanceIds);
+  deleteWhereIn("task_notification_states", "goal_id", ids.goalIds);
+  deleteWhereIn("task_notification_states", "task_id", ids.taskIds);
+  deleteWhereIn("task_notification_states", "instance_id", ids.taskInstanceIds);
+  deleteWhereIn("inbox_item_states", "goal_id", ids.goalIds);
+  deleteWhereIn("inbox_item_states", "inbox_item_id", inboxItemIds);
 
   deleteWhereIn("agent_events", "agent_run_id", ids.agentRunIds);
   deleteWhereIn("agent_snapshots", "agent_run_id", ids.agentRunIds);
@@ -358,6 +391,7 @@ function deleteRelatedConversationData(conversationId: string) {
   deleteWhereIn("agent_runs", "topic_id", ids.topicIds);
   deleteWhereIn("agent_runs", "thread_id", ids.threadIds);
   deleteWhereIn("agent_runs", "task_id", ids.taskIds);
+  deleteWhereIn("agent_runs", "runtime_job_id", ids.runtimeJobIds);
   deleteWhereIn("agent_runs", "saga_instance_id", ids.sagaInstanceIds);
   deleteWhereIn("saga_instances", "id", ids.sagaInstanceIds);
   deleteWhereIn("saga_instances", "topic_id", ids.topicIds);
@@ -373,7 +407,7 @@ export function mapConversationRow(row: ConversationRow, messages: Conversation[
     workspacePath: row.workspace_path ?? undefined,
     workspaceInitializedAt: row.workspace_initialized_at ?? undefined,
     runtimeEnvId: row.runtime_env_id ?? undefined,
-    claudeSessionId: row.claude_session_id ?? undefined,
+    runtimeSessions: resolveRuntimeSessions(row),
     status: row.status ?? "idle",
     messages,
     updatedAt: row.updated_at,
@@ -445,11 +479,11 @@ export function insertConversation(conversation: Conversation) {
       `
         INSERT INTO conversations (
           id, title, goal_id, workspace_path, workspace_initialized_at, runtime_env_id,
-          claude_session_id, status, pinned, goal_info_collection_json, planning_run_state_json,
+          claude_session_id, runtime_sessions_json, status, pinned, goal_info_collection_json, planning_run_state_json,
           revision, created_at, updated_at, user_id
         ) VALUES (
           @id, @title, @goal_id, @workspace_path, @workspace_initialized_at, @runtime_env_id,
-          @claude_session_id, @status, @pinned, @goal_info_collection_json, @planning_run_state_json,
+          @claude_session_id, @runtime_sessions_json, @status, @pinned, @goal_info_collection_json, @planning_run_state_json,
           @revision, @created_at, @updated_at, @user_id
         )
       `,
@@ -461,7 +495,12 @@ export function insertConversation(conversation: Conversation) {
       workspace_path: normalized.workspacePath ?? null,
       workspace_initialized_at: normalized.workspaceInitializedAt ?? null,
       runtime_env_id: normalized.runtimeEnvId ?? null,
-      claude_session_id: normalized.claudeSessionId ?? null,
+      // claude_session_id 已弃用，session 统一存入 runtime_sessions_json；保留列仅为兼容旧数据读取。
+      claude_session_id: null,
+      runtime_sessions_json:
+        normalized.runtimeSessions && Object.keys(normalized.runtimeSessions).length > 0
+          ? JSON.stringify(normalized.runtimeSessions)
+          : null,
       status: normalized.status ?? "idle",
       pinned: normalized.pinned ? 1 : 0,
       goal_info_collection_json: normalized.goalInfoCollection ? JSON.stringify(normalized.goalInfoCollection) : null,
@@ -492,7 +531,7 @@ export function updateConversationFields(
     workspacePath: string | null;
     workspaceInitializedAt: string | null;
     runtimeEnvId: string | null;
-    claudeSessionId: string | null;
+    runtimeSessions: Record<string, string> | null;
     status: Conversation["status"];
     pinned: boolean;
     goalInfoCollection: GoalInfoCollection | null;
@@ -513,8 +552,8 @@ export function updateConversationFields(
         ? undefined
         : (patch.workspaceInitializedAt ?? current.conversation.workspaceInitializedAt),
     runtimeEnvId: patch.runtimeEnvId === null ? undefined : (patch.runtimeEnvId ?? current.conversation.runtimeEnvId),
-    claudeSessionId:
-      patch.claudeSessionId === null ? undefined : (patch.claudeSessionId ?? current.conversation.claudeSessionId),
+    runtimeSessions:
+      patch.runtimeSessions === null ? undefined : (patch.runtimeSessions ?? current.conversation.runtimeSessions),
     goalInfoCollection:
       patch.goalInfoCollection === null
         ? undefined
@@ -533,7 +572,7 @@ export function updateConversationFields(
             workspace_path = @workspace_path,
             workspace_initialized_at = @workspace_initialized_at,
             runtime_env_id = @runtime_env_id,
-            claude_session_id = @claude_session_id,
+            runtime_sessions_json = @runtime_sessions_json,
             status = @status,
             pinned = @pinned,
             goal_info_collection_json = @goal_info_collection_json,
@@ -550,7 +589,10 @@ export function updateConversationFields(
       workspace_path: next.workspacePath ?? null,
       workspace_initialized_at: next.workspaceInitializedAt ?? null,
       runtime_env_id: next.runtimeEnvId ?? null,
-      claude_session_id: next.claudeSessionId ?? null,
+      runtime_sessions_json:
+        next.runtimeSessions && Object.keys(next.runtimeSessions).length > 0
+          ? JSON.stringify(next.runtimeSessions)
+          : null,
       status: next.status ?? "idle",
       pinned: next.pinned ? 1 : 0,
       goal_info_collection_json: next.goalInfoCollection ? JSON.stringify(next.goalInfoCollection) : null,

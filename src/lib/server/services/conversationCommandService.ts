@@ -1,5 +1,10 @@
+import fs from "fs";
+
 import { createIdempotencyKey } from "@/lib/opaqueIds";
+import { deleteClaudeSessionFileSync } from "@/lib/server/claudeSession";
 import { getDatabase } from "@/lib/server/db/client";
+import { appendMemoryAuditEvent } from "@/lib/server/memory/memoryAudit";
+import { cleanupUserMemoryCandidatesForConversationSync } from "@/lib/server/memory/userMemoryCandidates";
 import {
   appendConversationEvent,
   getConversationEventByIdempotencyKey,
@@ -24,6 +29,11 @@ import {
   markLastMessageUnread,
   updateConversationMessage,
 } from "@/lib/server/repositories/conversationMessagesRepository";
+import {
+  deleteConversationWorkspace,
+  getConversationSessionMemoryFilePath,
+  getConversationWorkspaceDir,
+} from "@/lib/server/workspace/conversationWorkspace";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
 import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 
@@ -35,7 +45,7 @@ export type ConversationCommand =
   | { type: "set_goal"; conversationId: string; goalId: string }
   | { type: "set_workspace"; conversationId: string; workspacePath: string; workspaceInitializedAt?: string }
   | { type: "set_runtime_env"; conversationId: string; runtimeEnvId: string }
-  | { type: "set_claude_session"; conversationId: string; claudeSessionId: string | null }
+  | { type: "set_runtime_session"; conversationId: string; runtimeKind: string; sessionId: string | null }
   | { type: "set_status"; conversationId: string; status: Conversation["status"] }
   | { type: "set_goal_info_collection"; conversationId: string; collection: GoalInfoCollection | null }
   | { type: "set_planning_run_state"; conversationId: string; state: GoalPlanningRunState | null }
@@ -88,9 +98,37 @@ export class ConversationCommandIdempotencyConflictError extends Error {
   }
 }
 
+export type DeleteConversationDeepResult = {
+  deletedConversation: boolean;
+  deletedWorkspace: boolean;
+  deletedClaudeSession: boolean;
+  deletedClaudeSessionCount: number;
+  removedMemoryCandidates: number;
+  prunedMemoryCandidateSources: number;
+  auditEvents: number;
+};
+
 function requireNonEmptyString(value: string | undefined, field: string) {
   if (!value?.trim()) throw new ConversationCommandValidationError(`${field} 不能为空`);
   return value.trim();
+}
+
+/**
+ * 基于现有 runtimeSessions，对指定 runtimeKind 写入或清除 sessionId，返回新的映射。
+ * sessionId 为 null 时删除该 runtimeKind 的条目；返回 null 表示清空整个映射。
+ */
+function buildRuntimeSessionsPatch(
+  current: Record<string, string> | undefined,
+  runtimeKind: string,
+  sessionId: string | null,
+): Record<string, string> | null {
+  const next = { ...(current ?? {}) };
+  if (sessionId === null) {
+    delete next[runtimeKind];
+  } else {
+    next[runtimeKind] = sessionId;
+  }
+  return Object.keys(next).length > 0 ? next : null;
 }
 
 function assertExpectedRevision(conversationId: string, expectedRevision?: number) {
@@ -122,20 +160,56 @@ function appendEvent(input: Parameters<typeof appendConversationEvent>[0]) {
   return event;
 }
 
-function createSyntheticDeletedEvent(input: {
-  conversationId: string;
-  producedBy: "user" | "system" | "worker" | "migration";
-  idempotencyKey: string;
-}): ConversationEventRecord<"conversation.deleted"> {
+export function deleteConversationDeep(conversationId: string): DeleteConversationDeepResult {
+  const current = getConversation(conversationId)?.conversation ?? null;
+  const workspaceDir = getConversationWorkspaceDir(conversationId);
+  const sessionMemoryFilePath = getConversationSessionMemoryFilePath(conversationId);
+  const hadWorkspace = fs.existsSync(workspaceDir);
+  const hadSessionMemory = fs.existsSync(sessionMemoryFilePath);
+  let auditEvents = 0;
+
+  const memoryCandidates = cleanupUserMemoryCandidatesForConversationSync(conversationId);
+  if (memoryCandidates.prunedSources > 0 || memoryCandidates.removed > 0) {
+    appendMemoryAuditEvent({
+      target: "candidate",
+      conversationId,
+      source: "后台晋升",
+      action: "clear",
+    });
+    auditEvents += 1;
+  }
+
+  let claudeSessionResult = { deleted: false, deletedCount: 0 };
+  // 仅 claude runtime 的 session 以本地文件形式落盘（~/.claude/projects），需级联清理；
+  // 其它 CLI（如 pi）的 session 由各自 CLI 管理，这里不做文件删除。
+  const claudeSessionId = current?.runtimeSessions?.claude;
+  if (claudeSessionId) {
+    claudeSessionResult = deleteClaudeSessionFileSync({
+      sessionId: claudeSessionId,
+      workingDirectory: workspaceDir,
+    });
+  }
+
+  deleteConversationWorkspace(conversationId);
+  if (hadSessionMemory || hadWorkspace) {
+    appendMemoryAuditEvent({
+      target: "session",
+      conversationId,
+      source: "后台晋升",
+      action: "clear",
+    });
+    auditEvents += 1;
+  }
+
+  const deletedConversation = deleteConversation(conversationId);
   return {
-    id: getLatestConversationEventId() + 1,
-    eventId: `conversation-event-deleted-${input.conversationId}`,
-    conversationId: input.conversationId,
-    kind: "conversation.deleted",
-    payload: { conversationId: input.conversationId },
-    producedBy: input.producedBy,
-    idempotencyKey: input.idempotencyKey,
-    createdAt: new Date().toISOString(),
+    deletedConversation,
+    deletedWorkspace: hadWorkspace,
+    deletedClaudeSession: claudeSessionResult.deleted,
+    deletedClaudeSessionCount: claudeSessionResult.deletedCount,
+    removedMemoryCandidates: memoryCandidates.removed,
+    prunedMemoryCandidateSources: memoryCandidates.prunedSources,
+    auditEvents,
   };
 }
 
@@ -194,6 +268,30 @@ export function applyConversationCommand(input: {
       };
     }
 
+    if (command.type === "delete_conversation") {
+      const existingEvent = getConversationEventByIdempotencyKey(idempotencyKey);
+      if (existingEvent) {
+        if (existingEvent.kind !== "conversation.deleted" || existingEvent.conversationId !== conversationId) {
+          throw new ConversationCommandIdempotencyConflictError();
+        }
+        return { event: existingEvent, conversations: listConversationMetas() };
+      }
+
+      const currentRevision = getConversationRevision(conversationId);
+      if (currentRevision !== undefined) {
+        assertExpectedRevision(conversationId, input.expectedRevision);
+      }
+      deleteConversationDeep(conversationId);
+      const event = appendEvent({
+        conversationId,
+        kind: "conversation.deleted",
+        payload: { conversationId },
+        producedBy,
+        idempotencyKey,
+      });
+      return { event, conversations: listConversationMetas() };
+    }
+
     assertUnusedIdempotencyKey(idempotencyKey);
 
     if (command.type === "create_conversation") {
@@ -215,7 +313,7 @@ export function applyConversationCommand(input: {
         workspacePath: command.conversation.workspacePath,
         workspaceInitializedAt: command.conversation.workspaceInitializedAt,
         runtimeEnvId: command.conversation.runtimeEnvId,
-        claudeSessionId: command.conversation.claudeSessionId,
+        runtimeSessions: command.conversation.runtimeSessions,
         pinned: command.conversation.pinned,
       });
       if (!created) throw new ConversationCommandValidationError("会话创建失败", 500);
@@ -227,17 +325,6 @@ export function applyConversationCommand(input: {
         idempotencyKey,
       });
       return { event, conversation: created.conversation, revision: created.revision };
-    }
-
-    if (command.type === "delete_conversation") {
-      const currentRevision = getConversationRevision(conversationId);
-      const event = createSyntheticDeletedEvent({ conversationId, producedBy, idempotencyKey });
-      if (currentRevision === undefined) {
-        return { event, conversations: listConversationMetas() };
-      }
-      assertExpectedRevision(conversationId, input.expectedRevision);
-      deleteConversation(conversationId);
-      return { event, conversations: listConversationMetas() };
     }
 
     assertExpectedRevision(conversationId, input.expectedRevision);
@@ -339,12 +426,15 @@ export function applyConversationCommand(input: {
                 }
               : command.type === "set_runtime_env"
                 ? { runtimeEnvId: requireNonEmptyString(command.runtimeEnvId, "runtimeEnvId") }
-                : command.type === "set_claude_session"
+                : command.type === "set_runtime_session"
                   ? {
-                      claudeSessionId:
-                        command.claudeSessionId === null
+                      runtimeSessions: buildRuntimeSessionsPatch(
+                        current.conversation.runtimeSessions,
+                        requireNonEmptyString(command.runtimeKind, "runtimeKind"),
+                        command.sessionId === null
                           ? null
-                          : requireNonEmptyString(command.claudeSessionId, "claudeSessionId"),
+                          : requireNonEmptyString(command.sessionId, "sessionId"),
+                      ),
                     }
                   : command.type === "set_status"
                     ? { status: command.status ?? "idle" }
@@ -366,8 +456,8 @@ export function applyConversationCommand(input: {
               ? "conversation.workspace_set"
               : command.type === "set_runtime_env"
                 ? "conversation.runtime_env_set"
-                : command.type === "set_claude_session"
-                  ? "conversation.claude_session_set"
+                : command.type === "set_runtime_session"
+                  ? "conversation.runtime_session_set"
                   : command.type === "set_status"
                     ? "conversation.status_changed"
                     : command.type === "set_goal_info_collection"
@@ -391,8 +481,13 @@ export function applyConversationCommand(input: {
                   }
                 : kind === "conversation.runtime_env_set"
                   ? { runtimeEnvId: updated.conversation.runtimeEnvId ?? "", revision: updated.revision }
-                  : kind === "conversation.claude_session_set"
-                    ? { claudeSessionId: updated.conversation.claudeSessionId ?? "", revision: updated.revision }
+                  : kind === "conversation.runtime_session_set"
+                    ? {
+                        runtimeKind: command.type === "set_runtime_session" ? command.runtimeKind : "",
+                        sessionId:
+                          command.type === "set_runtime_session" ? (command.sessionId ?? "") : "",
+                        revision: updated.revision,
+                      }
                     : kind === "conversation.status_changed"
                       ? { status: updated.conversation.status, revision: updated.revision }
                       : kind === "conversation.goal_info_collection_updated"

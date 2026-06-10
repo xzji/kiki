@@ -11,6 +11,7 @@ import {
   ensureConversationWorkspace,
   getConversationWorkspaceDir,
 } from "@/lib/server/workspace/conversationWorkspace";
+import { cleanupUserMemoryCandidatesForConversation } from "@/lib/server/memory/userMemoryCandidates";
 import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
@@ -42,6 +43,7 @@ async function DELETEHandler(request: NextRequest, context: { params: Promise<{ 
     }
 
     deleteConversationWorkspace(conversationId);
+    await cleanupUserMemoryCandidatesForConversation(conversationId);
     return NextResponse.json({ ok: true, cancelledJobs, deletedJobs, deletedClaudeSession });
   } catch (error) {
     return NextResponse.json(

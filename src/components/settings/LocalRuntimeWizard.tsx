@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CheckCircle2, Code2, FolderOpen, Loader2, Sparkles, X } from "lucide-react";
+import { Atom, Bot, CheckCircle2, Code2, FolderOpen, Loader2, Sparkles, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -31,7 +31,23 @@ const runtimeMeta: Record<LocalRuntimeKind, { accent: string; icon: ReactNode }>
   claude: { accent: "bg-[#F3EEFF] text-[#5B3DBE]", icon: <Sparkles className="h-4 w-4" /> },
   codex: { accent: "bg-[#EEF6FF] text-[#2563EB]", icon: <Code2 className="h-4 w-4" /> },
   gemini: { accent: "bg-[#ECFDF3] text-[#067647]", icon: <Bot className="h-4 w-4" /> },
+  pi: { accent: "bg-[#FFF1F2] text-[#BE123C]", icon: <Atom className="h-4 w-4" /> },
 };
+
+const runtimeIconByName: Record<string, ReactNode> = {
+  Atom: <Atom className="h-4 w-4" />,
+  Bot: <Bot className="h-4 w-4" />,
+  Code2: <Code2 className="h-4 w-4" />,
+  Sparkles: <Sparkles className="h-4 w-4" />,
+};
+
+function getRuntimeMeta(runtime: RuntimeDiscoveryItem) {
+  const fallback = runtimeMeta[runtime.runtimeKind];
+  return {
+    accent: runtime.uiAccent || fallback.accent,
+    icon: runtime.uiIcon ? runtimeIconByName[runtime.uiIcon] ?? fallback.icon : fallback.icon,
+  };
+}
 
 type WizardStep = "scan" | "select" | "permission" | "confirm";
 
@@ -445,7 +461,7 @@ function SelectRuntimeStep({
     <div>
       <div className="text-[14px] font-medium text-[#111]">选择要添加的 Runtime</div>
       <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
-        这里只展示已安装并可执行的 Runtime。当前聊天链路优先支持 Claude CLI。
+        这里只展示已安装并可执行的 Runtime。当前聊天链路支持 Claude CLI 与 Pi CLI。
       </div>
       <div className="mt-4 grid gap-3">
         {runtimes.filter((runtime) => runtime.installed).map((runtime) => (
@@ -588,7 +604,7 @@ function ConfirmStep({
 }
 
 function RuntimeInstallCard({ runtime }: { runtime: RuntimeDiscoveryItem }) {
-  const meta = runtimeMeta[runtime.runtimeKind];
+  const meta = getRuntimeMeta(runtime);
   return (
     <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
       <div className="flex items-start gap-3">
@@ -629,7 +645,7 @@ function RuntimeSelectCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  const meta = runtimeMeta[runtime.runtimeKind];
+  const meta = getRuntimeMeta(runtime);
   return (
     <button
       type="button"

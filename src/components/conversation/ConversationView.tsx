@@ -1,9 +1,9 @@
 "use client";
 
-import { ChevronsRight, LayoutList, Maximize2 } from "lucide-react";
+import { ChevronsRight, Ellipsis, LayoutList, Maximize2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AssistantComposer } from "@/components/layout/AssistantComposer";
 import { ConversationMessageItem } from "@/components/conversation/ConversationMessageItem";
@@ -11,8 +11,10 @@ import { GoalPlanDrawer } from "@/components/conversation/GoalPlanDrawer";
 import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
+import { MemoryEditor } from "@/components/memory/MemoryEditor";
 import { streamClaudeChat } from "@/lib/api/claude";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { activateEnvironmentCommand } from "@/lib/api/runtime-environment-commands";
 import { generateTopicSagaPlan } from "@/lib/api/topics";
 import {
   applyConversationGovernance,
@@ -37,7 +39,12 @@ import { useConversationStore } from "@/stores/conversationStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { ConversationMessage, Goal } from "@/types/kiki";
-import type { QuotedConversationMessageContext } from "@/types/runtime";
+import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
+import type {
+  CliProcessEvent,
+  ConversationCliProcess,
+  QuotedConversationMessageContext,
+} from "@/types/runtime";
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -45,6 +52,41 @@ function isAbortError(error: unknown) {
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function createCliProcess(runId: string, startedAt: string): ConversationCliProcess {
+  return {
+    runId,
+    status: "running",
+    startedAt,
+    promptSections: [],
+    events: [],
+    output: "",
+  };
+}
+
+function createCliProcessEvent(
+  runId: string,
+  type: CliProcessEvent["type"],
+  input: Omit<CliProcessEvent, "id" | "type" | "createdAt"> = {},
+): CliProcessEvent {
+  return {
+    id: `${runId}-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    createdAt: new Date().toISOString(),
+    ...input,
+  };
+}
+
+function withCliProcess(
+  message: ConversationMessage,
+  updater: (process: ConversationCliProcess) => ConversationCliProcess,
+) {
+  if (message.kind !== "text" || !message.cliProcess) return message;
+  return {
+    ...message,
+    cliProcess: updater(message.cliProcess),
+  };
 }
 
 function classifyConversationError(message: string | null) {
@@ -88,6 +130,21 @@ function shouldResumePlanningFromMessage(message: string) {
 function buildAutoConversationTitle(message: string) {
   const normalized = message.replace(/\s+/g, " ").trim();
   return normalized.slice(0, 24) || "新会话";
+}
+
+function createTurnTimestamps() {
+  const base = Date.now();
+  return {
+    userCreatedAt: new Date(base).toISOString(),
+    assistantCreatedAt: new Date(base + 1).toISOString(),
+  };
+}
+
+function compareConversationMessagesForDisplay(a: ConversationMessage, b: ConversationMessage) {
+  const byTime = +new Date(a.createdAt) - +new Date(b.createdAt);
+  if (byTime !== 0) return byTime;
+  if (a.role === b.role) return 0;
+  return a.role === "user" ? -1 : 1;
 }
 
 function buildRecentConversationContext(messages: ConversationMessage[]) {
@@ -186,19 +243,42 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const markConversationRead = useConversationStore((state) => state.markConversationRead);
   const deleteMessage = useConversationStore((state) => state.deleteMessage);
   const setConversationRuntimeEnv = useConversationStore((state) => state.setConversationRuntimeEnv);
-  const setClaudeSessionId = useConversationStore((state) => state.setClaudeSessionId);
   const setConversationStatus = useConversationStore((state) => state.setConversationStatus);
   const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const goals = useGoalStore(selectVisibleGoals);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
+  const runtimeEnvironments = useRuntimeEnvStore((state) => state.environments);
+  const activeRuntimeEnvId = useRuntimeEnvStore((state) => state.activeRuntimeEnvId);
+  const setActiveRuntimeEnv = useRuntimeEnvStore((state) => state.setActiveEnvironment);
   const activeRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment());
   const conversation = conversations.find((c) => c.id === conversationId);
   const contextGoal = useMemo(
     () => (conversation?.goalId ? goals.find((item) => item.id === conversation.goalId) ?? null : null),
     [conversation?.goalId, goals],
   );
+  const switchRuntimeEnvironment = async (runtimeEnvId: string) => {
+    const target = runtimeEnvironments.find((runtime) => runtime.id === runtimeEnvId);
+    if (!target || target.type !== "local") return;
+    if (target.health?.status !== "online") {
+      setStreamError("只能切换到已连接的 Runtime。请先在设置里重新检测连接状态。");
+      return;
+    }
+    const previousRuntimeEnvId = activeRuntimeEnvId;
+    setActiveRuntimeEnv(runtimeEnvId);
+    try {
+      await activateEnvironmentCommand({ id: runtimeEnvId });
+      setStreamError(null);
+    } catch (error) {
+      if (previousRuntimeEnvId) {
+        setActiveRuntimeEnv(previousRuntimeEnvId);
+      }
+      setStreamError(getErrorMessage(error, "切换 Runtime 失败，请稍后重试。"));
+    }
+  };
   const [planOpen, setPlanOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [activePlanGoalId, setActivePlanGoalId] = useState<string | null>(null);
   const [planFocus, setPlanFocus] = useState<string | null>(null);
   const [quotedMessage, setQuotedMessage] = useState<ConversationMessage | null>(null);
@@ -235,9 +315,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   }, [conversation, markConversationRead]);
   const sortedMessages = useMemo(() => {
     if (!conversation) return [] as ConversationMessage[];
-    return [...conversation.messages].sort(
-      (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt),
-    );
+    return [...conversation.messages].sort(compareConversationMessagesForDisplay);
   }, [conversation]);
 
   // 默认定位到最新消息
@@ -285,12 +363,12 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const firstUnreadId = entryUnreadIds[0] ?? null;
   const unreadCount = entryUnreadIds.length;
 
-  const markUnreadSeen = () => {
+  const markUnreadSeen = useCallback(() => {
     setShowUnreadJump(false);
     setEntryUnreadIds([]);
-  };
+  }, []);
 
-  const refreshUnreadJumpVisibility = () => {
+  const refreshUnreadJumpVisibility = useCallback(() => {
     if (entryUnreadIds.length === 0) {
       setShowUnreadJump(false);
       return;
@@ -320,7 +398,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     setShowUnreadJump(true);
-  };
+  }, [entryUnreadIds, markUnreadSeen]);
 
   useEffect(() => {
     if (!firstUnreadId) {
@@ -331,7 +409,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       refreshUnreadJumpVisibility();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [entryUnreadIds, firstUnreadId, sortedMessages.length]);
+  }, [firstUnreadId, refreshUnreadJumpVisibility, sortedMessages.length]);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -351,7 +429,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       container.removeEventListener("scroll", handleScroll);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [entryUnreadIds, unreadCount]);
+  }, [refreshUnreadJumpVisibility, unreadCount]);
 
   if (!conversation) {
     return (
@@ -661,7 +739,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       canResumePlanning &&
       (hasLocalPlanningFailure || hasCheckpointPlanningFailure)
     ) {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
       const controller = new AbortController();
@@ -673,7 +751,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "user",
         content: text,
-        createdAt: now,
+        createdAt: userCreatedAt,
         source: "user",
         status: "done",
         quotedMessage: quoted ?? undefined,
@@ -685,7 +763,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         content: hasLocalPlanningFailure
           ? "正在从上次失败点恢复目标规划..."
           : "正在从已保存断点继续目标规划...",
-        createdAt: now,
+        createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
       });
@@ -774,7 +852,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       conversation.goalInfoCollection.status === "awaiting_user" &&
       parsedCommand.kind === "plain"
     ) {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
       const controller = new AbortController();
@@ -786,7 +864,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "user",
         content: text,
-        createdAt: now,
+        createdAt: userCreatedAt,
         source: "user",
         status: "done",
         quotedMessage: quoted ?? undefined,
@@ -796,7 +874,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "kiki",
         content: "已收到背景信息，正在拆解子目标...",
-        createdAt: now,
+        createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
       });
@@ -875,7 +953,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (parsedCommand.kind === "command" && parsedCommand.command === "saga") {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
       const sagaRequestId = `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -888,7 +966,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "user",
         content: text,
-        createdAt: now,
+        createdAt: userCreatedAt,
         source: "user",
         status: "done",
         quotedMessage: quoted ?? undefined,
@@ -898,7 +976,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "kiki",
         content: "正在启动 5 角色拆解 Saga（Interviewer / Planner / Critic / Refiner / Presenter）...",
-        createdAt: now,
+        createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
         sagaRequestId,
@@ -909,7 +987,10 @@ export function ConversationView({ conversationId }: { conversationId: string })
       try {
         const runtimeEnv = activeRuntimeEnv;
         if (!runtimeEnv || runtimeEnv.type !== "local") {
-          throw new Error("当前没有可用的本地 Claude 环境，请先到设置 -> 运行环境完成连接。");
+          throw new Error("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
+        }
+        if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
+          throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
         }
         const result = await generateTopicSagaPlan({
           topicText: parsedCommand.payload,
@@ -981,7 +1062,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (parsedCommand.kind === "command" && parsedCommand.command === "goal") {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
       const controller = new AbortController();
@@ -993,7 +1074,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "user",
         content: text,
-        createdAt: now,
+        createdAt: userCreatedAt,
         source: "user",
         status: "done",
         quotedMessage: quoted ?? undefined,
@@ -1003,7 +1084,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "kiki",
         content: "正在理解目标和关键约束...",
-        createdAt: now,
+        createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
       });
@@ -1057,7 +1138,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         ? resolveTaskCardInfo(quotedMessage, goals)
         : null;
     if (quotedTaskInfo) {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
       const userMessage: ConversationMessage = {
@@ -1065,7 +1146,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "user",
         content: text,
-        createdAt: now,
+        createdAt: userCreatedAt,
         source: "user",
         status: "done",
         quotedMessage: quoted ?? undefined,
@@ -1076,7 +1157,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         kind: "text",
         role: "kiki",
         content: "",
-        createdAt: now,
+        createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
       });
@@ -1285,21 +1366,21 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (!activeRuntimeEnv || activeRuntimeEnv.type !== "local") {
-      setStreamError("当前没有连接本地 Claude CLI，请先到设置 -> 运行环境完成连接。");
+      setStreamError("当前没有连接本地 Runtime，请先到设置 -> 运行环境完成连接。");
       return;
     }
 
-    if ((activeRuntimeEnv.runtimeKind || "claude") !== "claude") {
-      setStreamError("当前会话对话链路暂只支持 Claude CLI。请在运行环境中切换到 Claude CLI，Codex/Gemini 后续可继续接入。");
+    if (!SUPPORTED_RUNTIME_KINDS.includes(activeRuntimeEnv.runtimeKind || "claude")) {
+      setStreamError("当前会话对话链路暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
       return;
     }
 
     if (activeRuntimeEnv.health?.status !== "online") {
-      setStreamError("当前本地 Claude 环境离线，请先重新检测连接状态。");
+      setStreamError("当前本地 Runtime 离线，请先重新检测连接状态。");
       return;
     }
 
-    const now = new Date().toISOString();
+    const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
     const userId = `msg-user-${Date.now()}`;
     const assistantId = `msg-kiki-${Date.now() + 1}`;
     const controller = new AbortController();
@@ -1308,7 +1389,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       kind: "text",
       role: "user",
       content: text,
-      createdAt: now,
+      createdAt: userCreatedAt,
       source: "user",
       status: "done",
       quotedMessage: quoted ?? undefined,
@@ -1325,10 +1406,12 @@ export function ConversationView({ conversationId }: { conversationId: string })
       kind: "text",
       role: "kiki",
       content: "",
-      createdAt: new Date().toISOString(),
+      createdAt: assistantCreatedAt,
       status: "streaming",
       source: "kiki",
     });
+    // resume session 由服务端按 runtimeKind 从持久化状态（runtimeSessions）解析，前端不再计算或下发，
+    // 切换 runtime 时也无需手动清空——各 CLI 的 session 独立分键，互不串号。
     setConversationRuntimeEnv(conversation.id, activeRuntimeEnv.id);
     setConversationStatus(conversation.id, "streaming");
     setStreamError(null);
@@ -1435,13 +1518,64 @@ export function ConversationView({ conversationId }: { conversationId: string })
         ...message,
         content: "",
         status: "streaming",
+        ...(message.kind === "text" ? { cliProcess: createCliProcess(assistantId, assistantCreatedAt) } : {}),
       }));
+      const updateAssistantCliProcess = (
+        updater: (process: ConversationCliProcess) => ConversationCliProcess,
+      ) => {
+        updateMessage(conversation.id, assistantId, (message) => withCliProcess(message, updater));
+      };
+      const appendProcessEvent = (
+        type: CliProcessEvent["type"],
+        input: Omit<CliProcessEvent, "id" | "type" | "createdAt"> = {},
+      ) => {
+        const processEvent = createCliProcessEvent(assistantId, type, input);
+        updateAssistantCliProcess((process) => ({
+          ...process,
+          events: [...process.events, processEvent],
+        }));
+      };
+      const appendProcessTextEvent = (
+        type: Extract<CliProcessEvent["type"], "thinking" | "assistant_trace">,
+        title: string,
+        text: string,
+      ) => {
+        const eventId = `${assistantId}-${type}`;
+        updateAssistantCliProcess((process) => {
+          const existing = process.events.find((event) => event.id === eventId);
+          if (!existing) {
+            return {
+              ...process,
+              events: [
+                ...process.events,
+                {
+                  id: eventId,
+                  type,
+                  createdAt: new Date().toISOString(),
+                  title,
+                  content: text,
+                },
+              ],
+            };
+          }
+          return {
+            ...process,
+            events: process.events.map((event) =>
+              event.id === eventId
+                ? {
+                    ...event,
+                    content: `${event.content ?? ""}${text}`,
+                  }
+                : event,
+            ),
+          };
+        });
+      };
       await streamClaudeChat(
         {
           message: text,
           conversationId: conversation.id,
           runtimeEnv: activeRuntimeEnv,
-          claudeSessionId: conversation.claudeSessionId,
           source: "conversation",
           contextSnapshot: {
             conversation: {
@@ -1455,25 +1589,81 @@ export function ConversationView({ conversationId }: { conversationId: string })
         {
           onEvent: (event) => {
             if (event.type === "session") {
-              setClaudeSessionId(conversation.id, event.sessionId);
+              // session id 由服务端按 runtimeKind 单点持久化并经事件流回灌前端，前端不再写入。
               return;
             }
             if (event.type === "session_invalid") {
-              setClaudeSessionId(conversation.id, undefined);
-              const hint = "上一轮 Claude 会话已失效，已自动重置。请重新发送消息。";
+              // session 失效后由服务端清除归属；前端只负责展示提示。
+              const runtimeLabel = activeRuntimeEnv.name || activeRuntimeEnv.runtimeKind || "CLI";
+              const hint = `上一轮 ${runtimeLabel} 会话已失效，已自动重置。请重新发送消息。`;
               setStreamError(hint);
+              appendProcessEvent("error", { title: "Session 失效", content: hint });
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,
                 content: message.content || `（${hint}）`,
                 status: "error",
+                ...(message.kind === "text" && message.cliProcess
+                  ? {
+                      cliProcess: {
+                        ...message.cliProcess,
+                        status: "error",
+                        finishedAt: new Date().toISOString(),
+                        error: hint,
+                      },
+                    }
+                  : {}),
               }));
               setConversationStatus(conversation.id, "error");
+              return;
+            }
+            if (event.type === "status") {
+              appendProcessEvent("status", {
+                title: event.status === "checking" ? "检查运行环境" : event.status === "running" ? "CLI 运行中" : "CLI 已完成",
+                content: event.status,
+              });
+              return;
+            }
+            if (event.type === "prompt") {
+              const processEvent = createCliProcessEvent(assistantId, "prompt", {
+                title: "Prompt 已发送",
+                content: event.sections.map((section) => `## ${section.title}\n${section.content}`).join("\n\n"),
+              });
+              updateAssistantCliProcess((process) => ({
+                ...process,
+                promptSections: event.sections,
+                events: [...process.events, processEvent],
+              }));
+              return;
+            }
+            if (event.type === "thinking") {
+              appendProcessTextEvent("thinking", "Thinking", event.text);
+              return;
+            }
+            if (event.type === "assistant_trace") {
+              appendProcessTextEvent("assistant_trace", "Assistant Trace", event.text);
+              return;
+            }
+            if (event.type === "tool_call") {
+              appendProcessEvent("tool_call", {
+                title: event.toolName,
+                toolName: event.toolName,
+                summary: event.summary,
+                input: event.input,
+              });
               return;
             }
             if (event.type === "delta") {
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,
                 content: `${message.content}${event.text}`,
+                ...(message.kind === "text" && message.cliProcess
+                  ? {
+                      cliProcess: {
+                        ...message.cliProcess,
+                        output: `${message.cliProcess.output}${event.text}`,
+                      },
+                    }
+                  : {}),
               }));
               return;
             }
@@ -1482,10 +1672,22 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 ...message,
                 content: event.content,
                 status: "done",
+                ...(message.kind === "text" && message.cliProcess
+                  ? {
+                      cliProcess: {
+                        ...message.cliProcess,
+                        output: event.content,
+                      },
+                    }
+                  : {}),
               }));
               return;
             }
             if (event.type === "file_artifact") {
+              appendProcessEvent("file_artifact", {
+                title: "生成附件",
+                content: event.ref.label,
+              });
               updateMessage(conversation.id, assistantId, (message) =>
                 message.kind === "text"
                   ? {
@@ -1498,14 +1700,26 @@ export function ConversationView({ conversationId }: { conversationId: string })
             }
             if (event.type === "permission_request") {
               setStreamError(event.reason);
+              appendProcessEvent("status", { title: "权限受限", content: event.reason });
               return;
             }
             if (event.type === "error") {
               setStreamError(event.message);
+              appendProcessEvent("error", { title: "任务失败", content: event.message });
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,
                 content: message.content || `（任务失败：${event.message}）`,
                 status: "error",
+                ...(message.kind === "text" && message.cliProcess
+                  ? {
+                      cliProcess: {
+                        ...message.cliProcess,
+                        status: "error",
+                        finishedAt: new Date().toISOString(),
+                        error: event.message,
+                      },
+                    }
+                  : {}),
               }));
               setConversationStatus(conversation.id, "error");
               return;
@@ -1514,6 +1728,15 @@ export function ConversationView({ conversationId }: { conversationId: string })
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,
                 status: message.status === "streaming" ? "done" : message.status,
+                ...(message.kind === "text" && message.cliProcess
+                  ? {
+                      cliProcess: {
+                        ...message.cliProcess,
+                        status: message.cliProcess.status === "running" ? "completed" : message.cliProcess.status,
+                        finishedAt: message.cliProcess.finishedAt ?? new Date().toISOString(),
+                      },
+                    }
+                  : {}),
               }));
               setConversationStatus(conversation.id, "idle");
             }
@@ -1564,20 +1787,46 @@ export function ConversationView({ conversationId }: { conversationId: string })
       {/* 顶部栏 */}
       <header className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4 sm:px-6 lg:px-8">
         <div className="text-[15px] font-semibold text-[#1F2328]">{conversation.title}</div>
-        {conversation.goalId ? (
-          <button
-            type="button"
-            onClick={() => {
-              setActivePlanGoalId(conversation.goalId ?? null);
-              setPlanFocus(null);
-              setPlanOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#D0D7DE] bg-white px-2.5 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
-          >
-            <LayoutList className="h-3.5 w-3.5" />
-            目标规划
-          </button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {conversation.goalId ? (
+            <button
+              type="button"
+              onClick={() => {
+                setActivePlanGoalId(conversation.goalId ?? null);
+                setPlanFocus(null);
+                setPlanOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#D0D7DE] bg-white px-2.5 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+              目标规划
+            </button>
+          ) : null}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="更多"
+              onClick={() => setMoreMenuOpen((open) => !open)}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-[#D0D7DE] bg-white text-[#6B7280] hover:border-[#111] hover:text-[#111]"
+            >
+              <Ellipsis className="h-4 w-4" />
+            </button>
+            {moreMenuOpen ? (
+              <div className="absolute right-0 top-9 z-20 w-40 rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMemoryOpen(true);
+                    setMoreMenuOpen(false);
+                  }}
+                  className="flex w-full rounded-lg px-3 py-2 text-left text-[12px] text-[#1F2328] hover:bg-[#F5F6F8]"
+                >
+                  会话记忆
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </header>
 
       {/* 消息流 */}
@@ -1690,6 +1939,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
             autoFocus={conversation.messages.length === 0}
             localMode
             onStop={hasLocalActiveStream ? stopGeneration : undefined}
+            runtimeEnvironments={runtimeEnvironments}
+            activeRuntimeEnvironmentId={activeRuntimeEnvId}
+            onRuntimeChange={switchRuntimeEnvironment}
             quotedMessage={
               quotedMessage
                 ? buildQuotedMessageContext(quotedMessage, goals)
@@ -1706,6 +1958,38 @@ export function ConversationView({ conversationId }: { conversationId: string })
         focusSubGoalId={planFocus}
         onClose={() => setPlanOpen(false)}
       />
+
+      {memoryOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="关闭会话记忆"
+            onClick={() => setMemoryOpen(false)}
+            className="fixed inset-0 z-30 bg-black/10"
+          />
+          <aside className="fixed inset-y-0 right-0 z-40 flex w-[520px] max-w-[92vw] flex-col border-l border-[#E5E7EB] bg-white">
+            <div className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4">
+              <div className="text-[14px] font-medium text-[#111]">会话记忆</div>
+              <button
+                type="button"
+                aria-label="关闭会话记忆"
+                onClick={() => setMemoryOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 px-5 py-5">
+              <MemoryEditor
+                endpoint={`/api/conversations/${conversation.id}/memory`}
+                title="当前会话记忆"
+                description="这里管理 M1 会话摘要记忆。删除当前会话时，这份记忆会随 workspace 一起删除。"
+                limitLabel="6KB"
+              />
+            </div>
+          </aside>
+        </>
+      ) : null}
 
       {taskInfo ? (
         <>

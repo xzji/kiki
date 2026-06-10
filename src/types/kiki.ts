@@ -3,6 +3,7 @@ import type { ArtifactRef } from "@/types/artifact";
 import type { TaskResult } from "@/types/taskResult";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
+import type { ConversationCliProcess } from "@/types/runtime";
 
 export type TaskInstanceStatus =
   | "pending"
@@ -524,6 +525,7 @@ export type ConversationMessage =
       sagaRequestId?: string;
       quotedMessage?: ConversationMessageQuote;
       artifactRefs?: ArtifactRef[];
+      cliProcess?: ConversationCliProcess;
     }
   | {
       id: string;
@@ -602,7 +604,12 @@ export type Conversation = {
   workspacePath?: string;
   workspaceInitializedAt?: string;
   runtimeEnvId?: string;
-  claudeSessionId?: string;
+  /**
+   * 按运行时（runtimeKind）分键存储的可恢复 session id。
+   * 例如 { claude: "0aaa...", pi: "019e..." }。
+   * 替代旧的单一 claudeSessionId 字段，避免不同 CLI 之间串号。
+   */
+  runtimeSessions?: Record<string, string>;
   status?: "idle" | "streaming" | "error";
   messages: ConversationMessage[];
   updatedAt: string;

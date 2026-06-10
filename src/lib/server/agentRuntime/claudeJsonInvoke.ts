@@ -23,7 +23,7 @@ import {
   parseJsonWithCandidates,
   parseRepairedJsonText,
 } from "@/lib/server/claude/jsonRepair";
-import { runPromptJson, runPromptText } from "@/lib/server/claude/transport";
+import { runRuntimePromptJson, runRuntimePromptText } from "@/lib/server/runtime/runtimeTransport";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
 export type CreateClaudeJsonInvokeInput<T> = {
@@ -119,7 +119,7 @@ export async function parseClaudeJsonTextWithRepair<T>(input: {
  */
 export function createClaudeJsonInvoke<T>(input: CreateClaudeJsonInvokeInput<T>): LlmInvoke {
   return async (request) => {
-    const result = await runPromptJson({
+    const result = await runRuntimePromptJson({
       prompt: request.prompt,
       runtimeEnv: input.runtimeEnv,
       cwd: input.cwd,
@@ -135,7 +135,7 @@ export function createClaudeJsonInvoke<T>(input: CreateClaudeJsonInvokeInput<T>)
       validator: input.validator,
       degradedFallback: input.degradedFallback,
       repair: async (malformedJson) => {
-        const repaired = await runPromptJson({
+        const repaired = await runRuntimePromptJson({
           prompt: buildJsonRepairPrompt(malformedJson),
           runtimeEnv: input.runtimeEnv,
           cwd: input.cwd,
@@ -172,7 +172,7 @@ export function createClaudeTextInvoke(input: {
   signal?: AbortSignal;
 }): LlmInvoke {
   return async (request) => {
-    const result = await runPromptText({
+    const result = await runRuntimePromptText({
       prompt: request.prompt,
       runtimeEnv: input.runtimeEnv,
       cwd: input.cwd,

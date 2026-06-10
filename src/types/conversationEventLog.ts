@@ -8,7 +8,7 @@ export type ConversationEventKind =
   | "conversation.goal_set"
   | "conversation.workspace_set"
   | "conversation.runtime_env_set"
-  | "conversation.claude_session_set"
+  | "conversation.runtime_session_set"
   | "conversation.status_changed"
   | "conversation.goal_info_collection_updated"
   | "conversation.planning_run_state_updated"
@@ -29,7 +29,7 @@ export type ConversationEventPayloadMap = {
   "conversation.goal_set": { goalId: string; revision: number };
   "conversation.workspace_set": { workspacePath: string; workspaceInitializedAt?: string; revision: number };
   "conversation.runtime_env_set": { runtimeEnvId: string; revision: number };
-  "conversation.claude_session_set": { claudeSessionId: string; revision: number };
+  "conversation.runtime_session_set": { runtimeKind: string; sessionId: string; revision: number };
   "conversation.status_changed": { status: Conversation["status"]; revision: number };
   "conversation.goal_info_collection_updated": { collection: Conversation["goalInfoCollection"] | null; revision: number };
   "conversation.planning_run_state_updated": { state: Conversation["planningRunState"] | null; revision: number };

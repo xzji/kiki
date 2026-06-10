@@ -11,12 +11,13 @@ import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/
 import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 import type { RuntimeJobPayload } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import { runPromptJson, runPromptText, streamPrompt, type ClaudeStreamEvent } from "@/lib/server/claude/transport";
+import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
+import { runRuntimePromptJson, runRuntimePromptText, streamRuntimePrompt } from "@/lib/server/runtime/runtimeTransport";
 import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
 import type { MachineCommand, MachineResult, RemotePromptJsonPayload, RemoteStreamPromptPayload } from "@/lib/server/tunnel/tunnelHub";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-const DAEMON_VERSION = "0.2.3";
+const DAEMON_VERSION = "0.2.4";
 const POLL_PATH = "/api/machine-tunnel/poll";
 const RESULT_PATH = "/api/machine-tunnel/result";
 const STREAM_CHUNK_PATH = "/api/machine-tunnel/stream-chunk";
@@ -99,7 +100,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       fallbackWorkingDirectory: payload.runtimeEnv.workingDirectory,
       conversationId: payload.conversationId,
     });
-    const runner = mode === "json" ? runPromptJson : runPromptText;
+    const runner = mode === "json" ? runRuntimePromptJson : runRuntimePromptText;
     return runner({
       prompt: payload.prompt,
       runtimeEnv: payload.runtimeEnv,
@@ -250,12 +251,13 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
           conversationId: payload.conversationId,
         });
         try {
-          await streamPrompt({
+          await streamRuntimePrompt({
             message: payload.message,
             workingDirectory: cwd,
             cliPath: payload.cliPath,
             permissionMode: payload.permissionMode,
-            claudeSessionId: payload.claudeSessionId,
+            runtimeKind: payload.runtimeKind,
+            resumeSessionId: payload.resumeSessionId,
             contextPack: payload.contextPack,
             workspacePolicy: payload.workspacePolicy,
             systemPromptMode: payload.systemPromptMode,

@@ -48,6 +48,14 @@ export function getConversationWorkspacesRootDir() {
   return ensureDir(path.join(getWorkspaceStorageRootDir(), "conversations"));
 }
 
+export function getUserMemoryDir() {
+  return ensureDir(path.join(getProjectRootDataDir(), "memory"));
+}
+
+export function getUserProfileMemoryFilePath() {
+  return path.join(getUserMemoryDir(), "profile.md");
+}
+
 export function getTelemetryFilePath() {
   return path.join(getStorageRootDir(), "kiki-goal-telemetry.json");
 }

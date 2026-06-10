@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   workspace_initialized_at TEXT,
   runtime_env_id TEXT,
   claude_session_id TEXT,
+  runtime_sessions_json TEXT,
   status TEXT NOT NULL DEFAULT 'idle',
   pinned INTEGER NOT NULL DEFAULT 0,
   goal_info_collection_json TEXT,
@@ -713,6 +714,16 @@ export const KIKI_DB_MIGRATIONS: Array<{
         ON goal_event_log(kind, id);
 
       DROP INDEX IF EXISTS idx_goal_event_log_idempotency_key;
+    `,
+  },
+  {
+    // v17：会话 session 按运行时（runtimeKind）分键存储，避免不同 CLI 之间串号。
+    // 新增 runtime_sessions_json 列存储 Record<runtimeKind, sessionId>；
+    // 历史的 claude_session_id 在读取层（mapConversationRow）兜底归入 runtimeSessions.claude，
+    // 这里只负责加列，不做数据回填（读取层做惰性兜底，写入层逐步收敛）。
+    version: 17,
+    sql: `
+      ALTER TABLE conversations ADD COLUMN runtime_sessions_json TEXT;
     `,
   },
 ];

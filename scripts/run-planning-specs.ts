@@ -18,6 +18,8 @@ import { runConversationCommandServiceSpecs } from "../src/lib/server/services/c
 import { runRuntimeEventsAggregationSpecs } from "../src/lib/api/runtime-events.spec";
 import { runClaudeTransportSessionSpecs } from "../src/lib/server/claude/transport.spec";
 import { runClaudeTraceStoreSpecs } from "../src/lib/server/claude/traceStore.spec";
+import { runPiAdapterSpecs } from "../src/lib/server/runtime/adapters/piAdapter.spec";
+import { runRuntimeRegistrySpecs } from "../src/lib/server/runtime/adapters/registry.spec";
 import { runContextPackBoundarySpecs } from "../src/lib/server/workspace/contextPack.spec";
 import { runJsonRepairAutoCloseSpecs } from "../src/lib/server/claude/jsonRepair.spec";
 import { runTaskDraftReviewSpecs } from "../src/lib/server/goalPlanning/taskDraftReview.spec";
@@ -50,6 +52,8 @@ import { runThreadLoopDaemonSpecs } from "../src/lib/server/scheduler/threadLoop
 import { runDevPanelDataSpecs } from "../src/lib/server/repositories/agentRuntime/sagaInstancesRepository.spec";
 import { runDaemonRunnerSpecs } from "../src/lib/daemon/daemonRunner.spec";
 import { runSpecWriterSpecs } from "../src/lib/server/taskExecution/runSpecWriter.spec";
+import { runConversationStoreSpecs } from "../src/stores/conversationStore.spec";
+import { runMemorySpecs } from "../src/lib/server/memory/memory.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -72,6 +76,8 @@ runStorageAdapterSpecs();
 runJsonRepairAutoCloseSpecs();
 runTaskDraftReviewSpecs();
 runClaudeTransportSessionSpecs();
+runPiAdapterSpecs();
+runRuntimeRegistrySpecs();
 runClaudeTraceStoreSpecs();
 runContextPackBoundarySpecs();
 runPayloadGuardSpecs();
@@ -105,6 +111,8 @@ runDaemonRunnerSpecs();
   await runThreadLoopWorkerSpecs();
   await runThreadLoopDaemonSpecs();
   await runDevPanelDataSpecs();
+  await runConversationStoreSpecs();
+  await runMemorySpecs();
   console.log("planning specs passed");
 })().catch((error) => {
   console.error(error);

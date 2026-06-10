@@ -12,7 +12,6 @@ import {
   markConversationReadCommand,
   markConversationUnreadCommand,
   renameConversationCommand,
-  setConversationClaudeSessionCommand,
   setConversationGoalCommand,
   setConversationRuntimeEnvCommand,
   setConversationStatusCommand,
@@ -25,9 +24,12 @@ import {
 import { migrateConversationIds, normalizeGoalId } from "@/lib/opaqueIds";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
 import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
+import type { CliProcessEvent, CliPromptSection, ConversationCliProcess } from "@/types/runtime";
 
 type ConversationStore = {
   conversations: Conversation[];
+  conversationsHydrated: boolean;
+  setConversationsHydrated: (hydrated: boolean) => void;
   hydrateConversations: (conversations: Conversation[]) => void;
   applyConversationEvent: (event: ConversationEventRecord) => void;
   createConversation: (title?: string) => Conversation;
@@ -41,7 +43,7 @@ type ConversationStore = {
   markConversationUnread: (conversationId: string) => void;
   markMessageRead: (conversationId: string, messageId: string) => void;
   deleteMessage: (conversationId: string, messageId: string) => void;
-  deleteConversation: (conversationId: string) => void;
+  deleteConversation: (conversationId: string) => Promise<void>;
   toggleConversationPinned: (conversationId: string) => void;
   setGoalForConversation: (conversationId: string, goalId: string) => void;
   setGoalInfoCollection: (conversationId: string, collection: GoalInfoCollection | null) => void;
@@ -49,7 +51,6 @@ type ConversationStore = {
   renameConversation: (conversationId: string, title: string) => void;
   setConversationWorkspace: (conversationId: string, workspacePath: string) => void;
   setConversationRuntimeEnv: (conversationId: string, runtimeEnvId: string) => void;
-  setClaudeSessionId: (conversationId: string, claudeSessionId: string | undefined) => void;
   setConversationStatus: (conversationId: string, status: Conversation["status"]) => void;
 };
 
@@ -98,6 +99,76 @@ function sanitizeConversationHistory(conversations: Conversation[]) {
     }));
 }
 
+function mergeById<T extends { id: string }>(primary: T[], secondary: T[]) {
+  const merged = new Map<string, T>();
+  for (const item of secondary) merged.set(item.id, item);
+  for (const item of primary) merged.set(item.id, item);
+  return Array.from(merged.values());
+}
+
+function sortCliEvents(events: CliProcessEvent[]) {
+  return [...events].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+}
+
+function pickCliProcessOutput(local: ConversationCliProcess, incoming: ConversationCliProcess) {
+  if (incoming.status !== "running") return incoming.output;
+  if (local.status !== "running") return local.output;
+  if (!local.output) return incoming.output;
+  if (!incoming.output) return local.output;
+  return incoming.output.length >= local.output.length ? incoming.output : local.output;
+}
+
+function pickMessageContent(local: Extract<ConversationMessage, { kind: "text" }>, incoming: Extract<ConversationMessage, { kind: "text" }>) {
+  if (!local.cliProcess || !incoming.cliProcess) return incoming.content;
+  if (incoming.cliProcess.status !== "running") return incoming.content;
+  if (local.cliProcess.status !== "running") return local.content;
+  return local.content.length > incoming.content.length ? local.content : incoming.content;
+}
+
+function mergeCliProcess(
+  local: ConversationCliProcess | undefined,
+  incoming: ConversationCliProcess | undefined,
+) {
+  if (!local) return incoming;
+  if (!incoming) return local;
+
+  const terminalStatus = incoming.status !== "running" ? incoming.status : local.status;
+  const promptSections = mergeById<CliPromptSection>(local.promptSections, incoming.promptSections);
+  const events = sortCliEvents(mergeById<CliProcessEvent>(local.events, incoming.events));
+
+  return {
+    ...incoming,
+    status: terminalStatus,
+    startedAt: local.startedAt || incoming.startedAt,
+    finishedAt: incoming.finishedAt ?? local.finishedAt,
+    promptSections,
+    events,
+    output: pickCliProcessOutput(local, incoming),
+    error: incoming.error ?? local.error,
+  };
+}
+
+function mergeMessagePreservingCliProcess(local: ConversationMessage | undefined, incoming: ConversationMessage) {
+  if (!local || local.kind !== "text" || incoming.kind !== "text") return incoming;
+  const cliProcess = mergeCliProcess(local.cliProcess, incoming.cliProcess);
+  const content = pickMessageContent(local, incoming);
+
+  return {
+    ...incoming,
+    content,
+    ...(cliProcess ? { cliProcess } : {}),
+  };
+}
+
+function mergeConversationPreservingCliProcess(local: Conversation | undefined, incoming: Conversation) {
+  if (!local) return incoming;
+  const localMessages = new Map(local.messages.map((message) => [message.id, message]));
+  return {
+    ...incoming,
+    messages: incoming.messages.map((message) => mergeMessagePreservingCliProcess(localMessages.get(message.id), message)),
+  };
+}
+
 function mergeConversationsById(...groups: Conversation[][]) {
   const merged = new Map<string, Conversation>();
   for (const group of groups) {
@@ -112,6 +183,30 @@ function sendConversationCommand(task: Promise<unknown>) {
   task.catch((error) => {
     console.error("[conversation-command]", error);
     void resyncConversations();
+  });
+}
+
+const messageUpdateQueues = new Map<string, Promise<unknown>>();
+
+function sendConversationMessageUpdateCommand(
+  conversationId: string,
+  messageId: string,
+  message: ConversationMessage,
+) {
+  const key = `${conversationId}:${messageId}`;
+  const previous = messageUpdateQueues.get(key) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => updateConversationMessageCommand(conversationId, messageId, message))
+    .catch((error) => {
+      console.error("[conversation-command]", error);
+      void resyncConversations();
+    });
+  messageUpdateQueues.set(key, next);
+  void next.finally(() => {
+    if (messageUpdateQueues.get(key) === next) {
+      messageUpdateQueues.delete(key);
+    }
   });
 }
 
@@ -144,7 +239,8 @@ type ConversationEventLoosePayload = {
   workspacePath?: string;
   workspaceInitializedAt?: string;
   runtimeEnvId?: string;
-  claudeSessionId?: string;
+  runtimeKind?: string;
+  sessionId?: string;
   status?: Conversation["status"];
   collection?: GoalInfoCollection | null;
   state?: GoalPlanningRunState | null;
@@ -173,8 +269,20 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
         };
       case "conversation.runtime_env_set":
         return { ...conversation, runtimeEnvId: payload.runtimeEnvId };
-      case "conversation.claude_session_set":
-        return { ...conversation, claudeSessionId: payload.claudeSessionId };
+      case "conversation.runtime_session_set": {
+        const runtimeKind = payload.runtimeKind;
+        if (!runtimeKind) return conversation;
+        const nextSessions = { ...(conversation.runtimeSessions ?? {}) };
+        if (payload.sessionId) {
+          nextSessions[runtimeKind] = payload.sessionId;
+        } else {
+          delete nextSessions[runtimeKind];
+        }
+        return {
+          ...conversation,
+          runtimeSessions: Object.keys(nextSessions).length > 0 ? nextSessions : undefined,
+        };
+      }
       case "conversation.status_changed":
         return { ...conversation, status: payload.status ?? conversation.status };
       case "conversation.goal_info_collection_updated":
@@ -203,7 +311,9 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
         return {
           ...conversation,
           messages: conversation.messages.map((message) =>
-            message.id === payload.message?.id && payload.message ? payload.message : message,
+            message.id === payload.message?.id && payload.message
+              ? mergeMessagePreservingCliProcess(message, payload.message)
+              : message,
           ),
         };
       }
@@ -228,8 +338,16 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
 export const useConversationStore = create<ConversationStore>()(
   (set, get) => ({
       conversations: [],
+      conversationsHydrated: false,
+      setConversationsHydrated: (hydrated) => set({ conversationsHydrated: hydrated }),
       hydrateConversations: (conversations) => {
-        set({ conversations: sanitizeConversationHistory(mergeConversationsById(conversations)) });
+        const localById = new Map(get().conversations.map((conversation) => [conversation.id, conversation]));
+        const sanitized = sanitizeConversationHistory(mergeConversationsById(conversations));
+        set({
+          conversations: sanitized.map((conversation) =>
+            mergeConversationPreservingCliProcess(localById.get(conversation.id), conversation),
+          ),
+        });
       },
       applyConversationEvent: (event) => {
         set({ conversations: applyConversationEventToList(get().conversations, event) });
@@ -279,7 +397,7 @@ export const useConversationStore = create<ConversationStore>()(
           ),
         });
         if (nextMessage) {
-          sendConversationCommand(updateConversationMessageCommand(conversationId, messageId, nextMessage));
+          sendConversationMessageUpdateCommand(conversationId, messageId, nextMessage);
         }
       },
       markConversationRead: (conversationId) => {
@@ -340,11 +458,11 @@ export const useConversationStore = create<ConversationStore>()(
         });
         sendConversationCommand(deleteConversationMessageCommand(conversationId, messageId));
       },
-      deleteConversation: (conversationId) => {
+      deleteConversation: async (conversationId) => {
+        await deleteConversationCommand(conversationId);
         set({
           conversations: get().conversations.filter((item) => item.id !== conversationId),
         });
-        sendConversationCommand(deleteConversationCommand(conversationId));
       },
       toggleConversationPinned: (conversationId) => {
         set({
@@ -410,14 +528,6 @@ export const useConversationStore = create<ConversationStore>()(
           ),
         });
         sendConversationCommand(setConversationRuntimeEnvCommand(conversationId, runtimeEnvId));
-      },
-      setClaudeSessionId: (conversationId, claudeSessionId) => {
-        set({
-          conversations: get().conversations.map((item) =>
-            item.id === conversationId ? { ...item, claudeSessionId } : item,
-          ),
-        });
-        sendConversationCommand(setConversationClaudeSessionCommand(conversationId, claudeSessionId));
       },
       setConversationStatus: (conversationId, status) => {
         set({

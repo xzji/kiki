@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
+import { readSessionMemoryForPrompt } from "@/lib/server/memory/conversationMemoryService";
+import { readRelevantUserProfileMemoryForPrompt } from "@/lib/server/memory/userMemoryService";
 import { resolveExecutionContext } from "@/lib/server/taskExecution/contextResolver";
 import { renderDependencySection } from "@/lib/server/taskExecution/contextRenderer";
 import { readinessFromContext } from "@/lib/server/taskExecution/readinessAdapter";
@@ -128,6 +130,17 @@ type ParsedTaskRunnerResult = {
   blocker: ExecutionBlocker | null;
   structuredOutput: Record<string, unknown> | null;
 };
+
+function readTaskRunnerMemoryContext(conversationId: string) {
+  try {
+    return {
+      userMemory: readRelevantUserProfileMemoryForPrompt(conversationId).content,
+      sessionMemory: readSessionMemoryForPrompt(conversationId),
+    };
+  } catch {
+    return { userMemory: "", sessionMemory: "" };
+  }
+}
 
 function normalizeParsedAwaitingResult<T extends ParsedTaskRunnerResult>(result: T): T {
   if (!result.awaitingUser) return result;
@@ -1698,9 +1711,10 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
       workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
       permissionMode,
+      runtimeKind: input.runtimeEnv.runtimeKind,
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
-      claudeSessionId: undefined,
+      resumeSessionId: undefined,
       signal: input.signal,
       onSpawn: input.onSpawn,
       onEvent: (event) => {
@@ -2572,6 +2586,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
       resumeContext: input.resumeContext,
       initialTrajectory: input.initialTrajectory,
       webAppInteractionContext,
+      memoryContext: readTaskRunnerMemoryContext(executionContext.identity.conversationId),
     });
     const workingDirectory = input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory;
     appendGoalTaskAgentEvent(input, "llm.request", {
@@ -2585,9 +2600,10 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
       workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: input.runtimeEnv.permissionMode,
+      runtimeKind: input.runtimeEnv.runtimeKind,
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
-      claudeSessionId: undefined,
+      resumeSessionId: undefined,
       signal: input.signal,
       onSpawn: input.onSpawn,
       onEvent: (event) => {
@@ -3137,6 +3153,7 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       resumeContext: input.resumeContext,
       initialTrajectory: input.initialTrajectory,
       webAppInteractionContext: buildWebAppInteractionContext({ conversationId: executionContext.identity.conversationId }),
+      memoryContext: readTaskRunnerMemoryContext(executionContext.identity.conversationId),
     }),
   });
 

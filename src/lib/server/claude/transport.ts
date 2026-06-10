@@ -1,9 +1,10 @@
-import fs from "fs";
 import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 
 import type {
+  CliPromptSection,
+  LocalRuntimeKind,
   QuotedConversationMessageContext,
   RuntimeEnvironment,
   RuntimeFilePolicy,
@@ -20,6 +21,7 @@ import {
   type ToolChannelPolicy,
 } from "@/lib/runtime/toolPolicy";
 import type { ArtifactRef } from "@/types/artifact";
+import { diffWorkspaceFiles, emitRuntimeFileEvents, snapshotWorkspaceFiles } from "@/lib/server/runtime/fileArtifactEmit";
 
 /**
  * 强制回收 Claude CLI 子进程及其衍生的整个进程组。
@@ -32,9 +34,8 @@ import type { ArtifactRef } from "@/types/artifact";
  * 再发 SIGKILL 强杀，确保「abort 一定能杀干净」。
  */
 const KILL_ESCALATION_MS = 5 * 1000;
-const MAX_STREAM_FILE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
-function killChildTree(child: ChildProcess) {
+export function killChildTree(child: ChildProcess) {
   const pid = child.pid;
   // spawn 失败时 pid 为 undefined，直接返回，避免 process.kill(-undefined) 抛 TypeError。
   if (typeof pid !== "number") return;
@@ -109,7 +110,9 @@ export type ClaudeStreamOptions = {
   workingDirectory: string;
   cliPath: string;
   permissionMode: RuntimePermissionMode;
-  claudeSessionId?: string;
+  runtimeKind?: LocalRuntimeKind;
+  /** 本次运行需要 resume 的 session id（由服务端按 runtimeKind 解析后传入）。 */
+  resumeSessionId?: string;
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
   systemPromptMode?: "conversation" | "neutral";
@@ -118,15 +121,18 @@ export type ClaudeStreamOptions = {
   channelPolicy?: ToolChannelPolicy;
   conversationId?: string;
   signal?: AbortSignal;
-  onEvent: (event: ClaudeStreamEvent) => void;
+  onEvent: (event: RuntimeStreamEvent) => void;
   /** spawn 成功后回传子进程 pid，供上层（如 ExecutionSupervisor）绑定 OS 进程做生命周期管理。 */
   onSpawn?: (pid: number) => void;
 };
 
-export type ClaudeStreamEvent =
+export type RuntimeStreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "session_invalid"; sessionId: string; message: string }
   | { type: "status"; status: "checking" | "running" | "completed" }
+  | { type: "prompt"; sections: CliPromptSection[] }
+  | { type: "thinking"; text: string }
+  | { type: "assistant_trace"; text: string }
   | { type: "delta"; text: string }
   | { type: "message"; content: string; fallbackContent?: string }
   | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
@@ -135,6 +141,14 @@ export type ClaudeStreamEvent =
   | { type: "permission_request"; reason: string }
   | { type: "error"; message: string }
   | { type: "done" };
+
+export type ClaudeStreamEvent = RuntimeStreamEvent;
+
+export type ClaudeWorkspacePromptPayload = {
+  systemPrompt: string;
+  promptInput: string;
+  promptSections: CliPromptSection[];
+};
 
 export type ClaudePromptJsonResult = {
   raw: string;
@@ -190,7 +204,7 @@ function buildToolArgs(policy: { allowedTools: string[]; disallowedTools: string
  * JSON calls must return their business payload through stdout result.result.
  * They never need write-capable tools; work that needs tools should use streamPrompt.
  */
-export async function runPromptJson(input: {
+export type ClaudePromptInput = {
   prompt: string;
   runtimeEnv: RuntimeEnvironment;
   abortSignal?: AbortSignal;
@@ -208,7 +222,9 @@ export async function runPromptJson(input: {
   toolPolicy?: ClaudeJsonToolPolicy;
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
-}): Promise<ClaudePromptJsonResult> {
+};
+
+export async function runPromptJson(input: ClaudePromptInput): Promise<ClaudePromptJsonResult> {
   if (shouldProxyCliToMachine()) {
     const { proxyRunPromptJson } = await import("@/lib/server/tunnel/remoteCliProxy");
     return proxyRunPromptJson(input);
@@ -314,25 +330,7 @@ export async function runPromptJson(input: {
   });
 }
 
-export async function runPromptText(input: {
-  prompt: string;
-  runtimeEnv: RuntimeEnvironment;
-  abortSignal?: AbortSignal;
-  cwd: string;
-  conversationId?: string;
-  permissionMode?: RuntimePermissionMode;
-  abortMessage?: string;
-  failureMessage?: string;
-  traceContext?: {
-    requestId?: string;
-    scope?: string;
-    phase?: string;
-    stepLabel?: string;
-  };
-  toolPolicy?: ClaudeJsonToolPolicy;
-  filePolicy?: RuntimeFilePolicy;
-  channelPolicy?: ToolChannelPolicy;
-}): Promise<ClaudePromptJsonResult> {
+export async function runPromptText(input: ClaudePromptInput): Promise<ClaudePromptJsonResult> {
   if (shouldProxyCliToMachine()) {
     const { proxyRunPromptText } = await import("@/lib/server/tunnel/remoteCliProxy");
     return proxyRunPromptText(input);
@@ -537,6 +535,60 @@ export function buildWorkspaceBoundPrompt(input: {
   return parts.join("\n");
 }
 
+export function buildWorkspacePromptPayload(input: {
+  workspaceDir: string;
+  workspacePolicy?: string;
+  toolSummary?: ReturnType<typeof describeRuntimeToolPolicy>;
+  message: string;
+  quotedMessage?: ClaudeStreamOptions["quotedMessage"];
+  contextPack?: string;
+  redactionMode?: "strict" | "passthrough";
+  includeConversationIdentity?: boolean;
+}): ClaudeWorkspacePromptPayload {
+  const redactionMode = input.redactionMode ?? "strict";
+  const systemPrompt = buildWorkspaceSystemPrompt({
+    workspaceDir: input.workspaceDir,
+    workspacePolicy: input.workspacePolicy,
+    toolSummary: input.toolSummary,
+    redactionMode,
+    includeConversationIdentity: input.includeConversationIdentity,
+  });
+  const contextContent = input.contextPack?.trim()
+    ? redactionMode === "strict"
+      ? redactInternalIdentifiersForPrompt(input.contextPack.trim())
+      : input.contextPack.trim()
+    : "";
+  const userPrompt = buildPrompt(input.message, input.quotedMessage, redactionMode);
+  const promptInput = [
+    contextContent ? ["【当前会话上下文包】", contextContent].join("\n") : "",
+    userPrompt,
+  ].filter(Boolean).join("\n");
+  const promptSections: CliPromptSection[] = [];
+  if (systemPrompt.trim()) {
+    promptSections.push({
+      id: "system",
+      kind: "system",
+      title: "System Prompt",
+      content: systemPrompt,
+    });
+  }
+  if (contextContent) {
+    promptSections.push({
+      id: "context",
+      kind: "context",
+      title: "Context Pack",
+      content: contextContent,
+    });
+  }
+  promptSections.push({
+    id: "user",
+    kind: "user",
+    title: "User Prompt",
+    content: userPrompt,
+  });
+  return { systemPrompt, promptInput, promptSections };
+}
+
 export type ClaudeSessionDecision =
   | { kind: "set"; sessionId: string }
   | { kind: "duplicate-init"; ignored: string }
@@ -631,32 +683,6 @@ function isPathInsideDirectory(parentDir: string, targetPath: string) {
   return target === parent || target.startsWith(`${parent}${path.sep}`);
 }
 
-function inferMimeFromFilename(filename: string) {
-  const ext = path.extname(filename).toLowerCase();
-  const mimeByExt: Record<string, string> = {
-    ".csv": "text/csv; charset=utf-8",
-    ".doc": "application/msword",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".gif": "image/gif",
-    ".html": "text/html; charset=utf-8",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".json": "application/json; charset=utf-8",
-    ".md": "text/markdown; charset=utf-8",
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".ppt": "application/vnd.ms-powerpoint",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ".svg": "image/svg+xml",
-    ".text": "text/plain; charset=utf-8",
-    ".txt": "text/plain; charset=utf-8",
-    ".xls": "application/vnd.ms-excel",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".zip": "application/zip",
-  };
-  return mimeByExt[ext] ?? "application/octet-stream";
-}
-
 function extractClaudeOutputText(raw: string) {
   try {
     const parsed = JSON.parse(raw.trim()) as ClaudeCliPayload;
@@ -671,6 +697,13 @@ function extractClaudeOutputText(raw: string) {
 function extractAssistantTraceText(payload: ClaudeCliPayload) {
   const pieces = payload.message?.content
     ?.map((item) => item.thinking || item.text || "")
+    .filter(Boolean);
+  return pieces?.join("\n") ?? "";
+}
+
+function extractAssistantThinkingText(payload: ClaudeCliPayload) {
+  const pieces = payload.message?.content
+    ?.map((item) => item.thinking || "")
     .filter(Boolean);
   return pieces?.join("\n") ?? "";
 }
@@ -718,6 +751,31 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     return proxyStreamPrompt(options);
   }
   const cwd = normalizeWorkingDirectory(options.workingDirectory);
+  const resolvedToolPolicy = resolveRuntimeToolPolicy({
+    filePolicy: options.filePolicy,
+    permissionMode: options.permissionMode,
+    channelPolicy: options.channelPolicy ?? { mode: options.workspacePolicy === "task" ? "task" : "conversation" },
+  });
+  const isTaskPrompt = options.workspacePolicy === "task" || options.channelPolicy?.mode === "task";
+  // 仅在会话模式且开启 shell 时，对 workspace 做运行前快照，
+  // 用于成功后采集脚本生成的「最终产出物」作为会话附件；任务/目标运行不回传附件。
+  const shellEnabled = resolvedToolPolicy.enabledCapabilities.includes("shell");
+  const workspaceSnapshot = shellEnabled && !isTaskPrompt ? snapshotWorkspaceFiles(cwd) : null;
+  const redactionMode = isTaskPrompt ? "passthrough" : "strict";
+  const effectiveWorkspacePolicy = options.workspacePolicy ?? (isTaskPrompt ? "task" : undefined);
+  const includeConversationIdentity = !isTaskPrompt && options.systemPromptMode === "conversation";
+  const toolSummary = describeRuntimeToolPolicy(resolvedToolPolicy);
+  const promptPayload = buildWorkspacePromptPayload({
+    workspaceDir: cwd,
+    workspacePolicy: effectiveWorkspacePolicy,
+    toolSummary,
+    message: options.message,
+    quotedMessage: options.quotedMessage,
+    contextPack: options.contextPack,
+    redactionMode,
+    includeConversationIdentity,
+  });
+  const { systemPrompt, promptInput, promptSections } = promptPayload;
   const cliPath = await resolveCliPath(options.cliPath);
 
   options.onEvent({ type: "status", status: "checking" });
@@ -731,49 +789,27 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     "--permission-mode",
     mapPermissionMode(options.permissionMode),
   ];
-  if (options.claudeSessionId) {
-    args.push("--resume", options.claudeSessionId);
+  if (options.resumeSessionId) {
+    args.push("--resume", options.resumeSessionId);
   }
-  const resolvedToolPolicy = resolveRuntimeToolPolicy({
-    filePolicy: options.filePolicy,
-    permissionMode: options.permissionMode,
-    channelPolicy: options.channelPolicy ?? { mode: options.workspacePolicy === "task" ? "task" : "conversation" },
-  });
-  const isTaskPrompt = options.workspacePolicy === "task" || options.channelPolicy?.mode === "task";
-  const redactionMode = isTaskPrompt ? "passthrough" : "strict";
-  const effectiveWorkspacePolicy = options.workspacePolicy ?? (isTaskPrompt ? "task" : undefined);
-  const includeConversationIdentity = !isTaskPrompt && options.systemPromptMode === "conversation";
-  const toolSummary = describeRuntimeToolPolicy(resolvedToolPolicy);
-  const systemPrompt = buildWorkspaceSystemPrompt({
-    workspaceDir: cwd,
-    workspacePolicy: effectiveWorkspacePolicy,
-    toolSummary,
-    redactionMode,
-    includeConversationIdentity,
-  });
   if (systemPrompt.trim()) {
     args.push("--append-system-prompt", systemPrompt);
   }
   // Claude CLI 的 --allowedTools 在 Commander.js 中被定义为 variadic（<tools...>），
   // 使用逗号分隔形式，并通过 stdin 传 prompt，规避参数吞食问题。
   args.push(...buildToolArgs(resolvedToolPolicy));
-  const promptInput = buildWorkspaceBoundPrompt({
-    message: options.message,
-    quotedMessage: options.quotedMessage,
-    contextPack: options.contextPack,
-    redactionMode,
-  });
   const trace = createClaudeTrace({
     cwd,
     cliPath,
     args,
     permissionMode: options.permissionMode,
     toolPolicy: resolvedToolPolicy,
-    claudeSessionId: options.claudeSessionId,
+    resumeSessionId: options.resumeSessionId,
     scope: "conversation_chat",
     stepLabel: "Claude 会话流式回复",
   });
   trace?.writePrompt(promptInput);
+  options.onEvent({ type: "prompt", sections: promptSections });
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(cliPath, args, {
@@ -799,7 +835,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     let aggregatedAssistantText = "";
     let callbackError: unknown = null;
     let settled = false;
-    let canonicalSessionId = options.claudeSessionId;
+    let canonicalSessionId = options.resumeSessionId;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
     const pendingFilePaths = new Set<string>();
 
@@ -815,7 +851,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       reject(error);
     };
 
-    const emitEvent = (event: ClaudeStreamEvent) => {
+    const emitEvent = (event: RuntimeStreamEvent) => {
       if (callbackError) return false;
       try {
         options.onEvent(event);
@@ -830,41 +866,17 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     };
 
     const emitPendingFileEvents = () => {
-      for (const rawFilePath of Array.from(pendingFilePaths)) {
-        try {
-          const filePath = path.resolve(cwd, rawFilePath);
-          if (!isPathInsideDirectory(cwd, filePath)) {
-            trace?.appendStderr(`跳过会话工作区外的文件附件：${rawFilePath}\n`);
-            continue;
-          }
-          if (!fs.existsSync(filePath)) {
-            trace?.appendStderr(`跳过不存在的文件附件：${rawFilePath}\n`);
-            continue;
-          }
-          const stat = fs.statSync(filePath);
-          if (!stat.isFile()) {
-            trace?.appendStderr(`跳过非普通文件附件：${rawFilePath}\n`);
-            continue;
-          }
-          if (stat.size > MAX_STREAM_FILE_ATTACHMENT_BYTES) {
-            trace?.appendStderr(`跳过超过大小限制的文件附件：${rawFilePath} (${stat.size} bytes)\n`);
-            continue;
-          }
-          const bytes = fs.readFileSync(filePath);
-          if (!emitEvent({
-            type: "file",
-            filename: path.basename(filePath),
-            mime: inferMimeFromFilename(filePath),
-            size: stat.size,
-            contentBase64: bytes.toString("base64"),
-            summary: path.relative(cwd, filePath),
-          })) return false;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          trace?.appendStderr(`读取会话文件附件失败：${rawFilePath}：${message}\n`);
+      if (workspaceSnapshot) {
+        for (const changedPath of diffWorkspaceFiles(cwd, workspaceSnapshot)) {
+          pendingFilePaths.add(changedPath);
         }
       }
-      return true;
+      return emitRuntimeFileEvents({
+        cwd,
+        filePaths: pendingFilePaths,
+        emitEvent,
+        appendDiagnostic: (message) => trace?.appendStderr(message),
+      });
     };
 
     const abort = () => {
@@ -970,6 +982,12 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
         const thinking = extractAssistantTraceText(payload);
         if (thinking) aggregatedAssistantText += thinking;
         if (thinking) trace?.appendThinking(`${thinking}\n`);
+        const thinkingOnly = extractAssistantThinkingText(payload);
+        if (thinkingOnly) {
+          emitEvent({ type: "thinking", text: thinkingOnly });
+        } else if (thinking) {
+          emitEvent({ type: "assistant_trace", text: thinking });
+        }
         return;
       }
 
@@ -1002,7 +1020,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
           emitEvent({ type: "status", status: "completed" });
         } else {
           emittedFatalError = true;
-          const decision = classifyResultError(payload, options.claudeSessionId);
+          const decision = classifyResultError(payload, options.resumeSessionId);
           if (decision.kind === "session_invalid") {
             emitEvent({
               type: "session_invalid",

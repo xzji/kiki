@@ -131,7 +131,7 @@ function formatTask(task: PromptSafeTask) {
 
 /**
  * Prompt 可见的最小 Conversation 投影。仅保留 prompt 拼装所需字段。
- * 显式丢弃 `id`、`goalId`、`workspacePath`、`claudeSessionId`、`runtimeEnvId`、`pinned` 等内部字段。
+ * 显式丢弃 `id`、`goalId`、`workspacePath`、`runtimeSessions`、`runtimeEnvId`、`pinned` 等内部字段。
  */
 export type PromptSafeConversation = {
   title: string;
@@ -191,6 +191,8 @@ export function buildConversationContextPack(input: {
   conversation: PromptSafeConversation;
   goal?: PromptSafeGoal | null;
   recentMessages: PromptSafeMessage[];
+  userMemory?: string;
+  sessionMemory?: string;
   quotedMessage?: QuotedConversationMessageContext | null;
 }) {
   const lines: string[] = [
@@ -202,6 +204,14 @@ export function buildConversationContextPack(input: {
     "- 不得读取父目录、项目源码目录或其他会话 workspace。",
     "- 如果用户要求继续/恢复，但当前上下文没有可恢复状态，请说明当前会话没有找到可恢复任务。",
   ];
+
+  if (input.userMemory?.trim()) {
+    lines.push("", "## 用户长期记忆", input.userMemory.trim());
+  }
+
+  if (input.sessionMemory?.trim()) {
+    lines.push("", "## 当前会话记忆", input.sessionMemory.trim());
+  }
 
   if (input.conversation.planningRunState) {
     lines.push(

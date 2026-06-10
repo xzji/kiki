@@ -302,7 +302,7 @@ export function runContextPackBoundarySpecs() {
     const safe = pickConversationForPrompt(
       makeConversation({
         id: "conv-internal",
-        claudeSessionId: "claude-sess-xxx",
+        runtimeSessions: { claude: "claude-sess-xxx" },
         workspacePath: "/Users/bytedance/secret/workspace",
         messages: [
           {
@@ -323,7 +323,7 @@ export function runContextPackBoundarySpecs() {
     );
     const json = JSON.stringify(safe);
     assert.ok(!/"id":/.test(json), "PromptSafeConversation 不应保留 id 字段");
-    assert.ok(!/claudeSessionId/.test(json), "不应保留 claudeSessionId");
+    assert.ok(!/runtimeSessions/.test(json), "不应保留 runtimeSessions");
     assert.ok(!/workspacePath/.test(json), "不应保留 workspacePath");
     assert.ok(!/taskRef/.test(json), "messages 内不应保留 taskRef");
     assert.ok(!/conv-internal/.test(json), "id 字面值不应出现");

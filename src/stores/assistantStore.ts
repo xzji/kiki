@@ -10,7 +10,7 @@ import { useConversationStore } from "@/stores/conversationStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { ArtifactRef } from "@/types/artifact";
 import type { Conversation, ConversationMessage, GoalInfoCollection } from "@/types/kiki";
-import type { ClaudeStreamEvent, RuntimeEnvironment } from "@/types/runtime";
+import { SUPPORTED_RUNTIME_KINDS, type ClaudeStreamEvent, type RuntimeEnvironment } from "@/types/runtime";
 
 export type AssistantMessage = {
   id: string;
@@ -75,6 +75,14 @@ function writePersistedOpen(open: boolean) {
   } catch {
     // ignore
   }
+}
+
+function createTurnTimestamps() {
+  const base = Date.now();
+  return {
+    userCreatedAt: new Date(base).toISOString(),
+    assistantCreatedAt: new Date(base + 1).toISOString(),
+  };
 }
 
 function toConversationMessage(message: AssistantMessage): ConversationMessage {
@@ -156,18 +164,18 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       pendingCollection &&
       !(parsedCommand.kind === "command" && parsedCommand.command === "goal")
     ) {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const assistantId = `k-${Date.now() + 1}`;
       const controller = new AbortController();
       set({
         messages: [
           ...get().messages,
-          { id: `u-${Date.now()}`, role: "user", content: trimmed, createdAt: now },
+          { id: `u-${Date.now()}`, role: "user", content: trimmed, createdAt: userCreatedAt },
           {
             id: assistantId,
             role: "kiki",
             content: "已收到背景信息，正在生成目标规划...",
-            createdAt: now,
+            createdAt: assistantCreatedAt,
             status: "streaming",
           },
         ],
@@ -276,16 +284,16 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     }
 
     if (parsedCommand.kind === "unknown") {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       set({
         messages: [
           ...get().messages,
-          { id: `u-${Date.now()}`, role: "user", content: trimmed, createdAt: now },
+          { id: `u-${Date.now()}`, role: "user", content: trimmed, createdAt: userCreatedAt },
           {
             id: `k-${Date.now() + 1}`,
             role: "kiki",
             content: `暂不支持 ${parsedCommand.commandText} 命令。你可以先使用 /goal 创建长程目标。`,
-            createdAt: now,
+            createdAt: assistantCreatedAt,
             status: "done",
           },
         ],
@@ -294,18 +302,18 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     }
 
     if (parsedCommand.kind === "command" && parsedCommand.command === "goal") {
-      const now = new Date().toISOString();
+      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const assistantId = `k-${Date.now() + 1}`;
       const controller = new AbortController();
       set({
         messages: [
           ...get().messages,
-          { id: `u-${Date.now()}`, role: "user", content: trimmed, createdAt: now },
+          { id: `u-${Date.now()}`, role: "user", content: trimmed, createdAt: userCreatedAt },
           {
             id: assistantId,
             role: "kiki",
             content: "正在理解目标和关键约束...",
-            createdAt: now,
+            createdAt: assistantCreatedAt,
             status: "streaming",
           },
         ],
@@ -376,26 +384,26 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
     const runtimeEnv = useRuntimeEnvStore.getState().getActiveEnvironment();
     if (!runtimeEnv || runtimeEnv.type !== "local") {
-      set({ error: "当前没有可用的本地 Claude 环境，请先到设置 -> 运行环境完成连接。" });
+      set({ error: "当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。" });
       return;
     }
 
-    if ((runtimeEnv.runtimeKind || "claude") !== "claude") {
-      set({ error: "当前对话链路暂只支持 Claude CLI。请在运行环境中切换到 Claude CLI，Codex/Gemini 后续可继续接入。" });
+    if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
+      set({ error: "当前对话链路暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。" });
       return;
     }
 
     if (runtimeEnv.health?.status !== "online") {
-      set({ error: "当前本地 Claude 环境离线，请先在设置里重新检测连接状态。" });
+      set({ error: "当前本地 Runtime 离线，请先在设置里重新检测连接状态。" });
       return;
     }
 
-    const now = new Date().toISOString();
+    const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
     const userMsg: AssistantMessage = {
       id: `u-${Date.now()}`,
       role: "user",
       content: trimmed,
-      createdAt: now
+      createdAt: userCreatedAt
     };
     const assistantId = `k-${Date.now() + 1}`;
     const controller = new AbortController();
@@ -404,7 +412,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       id: assistantId,
       role: "kiki",
       content: "",
-      createdAt: now,
+      createdAt: assistantCreatedAt,
       status: "streaming",
     };
     set({

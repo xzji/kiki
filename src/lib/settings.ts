@@ -1,6 +1,6 @@
 export const OPEN_SETTINGS_EVENT = "kiki:open-settings";
 
-export type SettingsTab = "account" | "runtime" | "easter-egg";
+export type SettingsTab = "account" | "runtime" | "memory" | "easter-egg";
 
 export function openSettings(tab: SettingsTab = "account") {
   if (typeof window === "undefined") return;

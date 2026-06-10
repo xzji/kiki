@@ -1,2 +1,2 @@
-export { streamPrompt as streamClaudeCli } from "@/lib/server/claude/transport";
-export type { ClaudeStreamEvent, ClaudeStreamOptions } from "@/lib/server/claude/transport";
+export { streamRuntimePrompt as streamClaudeCli } from "@/lib/server/runtime/runtimeTransport";
+export type { ClaudeStreamEvent, ClaudeStreamOptions, RuntimeStreamEvent } from "@/lib/server/claude/transport";

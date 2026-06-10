@@ -20,9 +20,10 @@ import {
   recoverJsonArtifactsFromClaudeOutput,
   type RecoveredJsonArtifact,
 } from "@/lib/server/claude/artifactRecovery";
-import { runPromptJson, runPromptText } from "@/lib/server/claude/transport";
+import { runRuntimePromptJson, runRuntimePromptText } from "@/lib/server/runtime/runtimeTransport";
 import { parseTaskDraftBatch } from "@/lib/server/goalPlanning/blockProtocol";
 import { buildSingleTaskDraftRepairPrompt, buildTaskDraftPrompt } from "@/lib/server/goalPlanning/taskDraftPrompt";
+import { readRelevantUserProfileMemoryForPrompt } from "@/lib/server/memory/userMemoryService";
 import {
   TaskDraftBatchEmptyError,
   type TaskDraft,
@@ -45,6 +46,19 @@ import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/t
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
+
+function withUserMemoryContext(userContext: Record<string, unknown>) {
+  try {
+    const userMemory = readRelevantUserProfileMemoryForPrompt(JSON.stringify(userContext)).content;
+    if (!userMemory) return userContext;
+    return {
+      ...userContext,
+      userMemory,
+    };
+  } catch {
+    return userContext;
+  }
+}
 
 export type GoalClarificationQuestions = {
   questions: string[];
@@ -690,7 +704,7 @@ async function runClaudeJson(input: {
   }
 
   try {
-    const result = await runPromptJson({
+    const result = await runRuntimePromptJson({
       prompt: effectivePrompt,
       runtimeEnv: input.runtimeEnv,
       cwd,
@@ -768,7 +782,7 @@ async function runClaudeText(input: {
   }
 
   try {
-    const result = await runPromptText({
+    const result = await runRuntimePromptText({
       prompt: effectivePrompt,
       runtimeEnv: input.runtimeEnv,
       cwd,
@@ -1251,9 +1265,10 @@ async function decomposeGoalWithClaude(input: {
   signal?: AbortSignal;
   requestId?: string;
 }) {
+  const userContext = withUserMemoryContext(input.userContext);
   const stdout = await runClaudeJson({
     runtimeEnv: input.runtimeEnv,
-    prompt: buildDecomposePrompt(input),
+    prompt: buildDecomposePrompt({ ...input, userContext }),
     conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "子目标拆解已中断",
@@ -1295,7 +1310,7 @@ async function decomposeGoalWithClaude(input: {
       prompt: buildDecompositionNormalizationPrompt({
         goalTitle: input.goalTitle,
         goalDescription: input.goalDescription,
-        userContext: input.userContext,
+        userContext,
         config: input.config,
         rawOutput: normalizeClaudeJsonText(stdout),
       }),
@@ -1375,9 +1390,10 @@ async function generateTaskDraftBatchForSubGoalWithClaude(input: {
   subGoalIndex?: number;
   totalSubGoals?: number;
 }): Promise<TaskDraftBatch> {
+  const userContext = withUserMemoryContext(input.userContext);
   const stdout = await runClaudeText({
     runtimeEnv: input.runtimeEnv,
-    prompt: buildTaskDraftPrompt(input),
+    prompt: buildTaskDraftPrompt({ ...input, userContext }),
     conversationId: input.conversationId,
     signal: input.signal,
     abortMessage: "任务草稿生成已中断",

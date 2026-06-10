@@ -124,6 +124,7 @@ export async function judgeTaskFeedback(input: {
     workingDirectory: input.workingDirectory,
     cliPath: input.runtimeEnv.cliPath,
     permissionMode: "readonly",
+    runtimeKind: input.runtimeEnv.runtimeKind,
     filePolicy: input.runtimeEnv.filePolicy,
     channelPolicy: { mode: "conversation" },
     workspacePolicy: "conversation",

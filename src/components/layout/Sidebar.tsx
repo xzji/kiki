@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Ellipsis,
   Inbox,
+  LoaderCircle,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -13,15 +14,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  deleteConversationWorkspaceApi,
-  ensureConversationWorkspaceApi,
-} from "@/lib/api/conversationWorkspace";
-import { deleteGoalsByConversationCommand } from "@/lib/api/goal-commands";
-import { createIdempotencyKey } from "@/lib/opaqueIds";
+import { ensureConversationWorkspaceApi } from "@/lib/api/conversationWorkspace";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
-import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import type { Conversation } from "@/types/kiki";
@@ -33,6 +28,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const conversations = useConversationStore((state) => state.conversations);
+  const conversationsHydrated = useConversationStore((state) => state.conversationsHydrated);
   const createConversation = useConversationStore((state) => state.createConversation);
   const markConversationRead = useConversationStore((state) => state.markConversationRead);
   const markConversationUnread = useConversationStore((state) => state.markConversationUnread);
@@ -40,10 +36,6 @@ export function Sidebar() {
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const setConversationWorkspace = useConversationStore((state) => state.setConversationWorkspace);
   const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
-  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
-  const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
-  const addPendingConversationGoalDelete = useGoalStore((state) => state.addPendingConversationGoalDelete);
-  const removePendingConversationGoalDelete = useGoalStore((state) => state.removePendingConversationGoalDelete);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
   const setCollapsed = useNavSidebarStore((state) => state.setCollapsed);
@@ -83,33 +75,13 @@ export function Sidebar() {
   const confirmDeleteConversation = async () => {
     if (!deleteTarget || deletePending) return;
     setDeletePending(true);
-    const idempotencyKey = createIdempotencyKey("goal.delete_by_conversation", deleteTarget.id);
-    const overlayId = `conversation-goal-delete:${idempotencyKey}`;
-    addPendingConversationGoalDelete({
-      id: overlayId,
-      conversationId: deleteTarget.id,
-      idempotencyKey,
-      createdAt: new Date().toISOString(),
-    });
     try {
-      await deleteConversationWorkspaceApi({
-        conversationId: deleteTarget.id,
-        claudeSessionId: deleteTarget.claudeSessionId,
-      });
-      const result = await deleteGoalsByConversationCommand({
-        conversationId: deleteTarget.id,
-        baseRevision: goalProjectionRevision,
-        idempotencyKey,
-      });
-      applyGoalsProjection(result.goals, result.revision);
-      removePendingConversationGoalDelete(overlayId);
-      deleteConversation(deleteTarget.id);
+      await deleteConversation(deleteTarget.id);
       if (pathname.startsWith(`/conversations/${deleteTarget.id}`)) {
         router.push("/conversations");
       }
       setDeleteTarget(null);
     } catch (error) {
-      removePendingConversationGoalDelete(overlayId);
       window.alert(error instanceof Error ? error.message : "删除会话失败");
     } finally {
       setDeletePending(false);
@@ -207,7 +179,9 @@ export function Sidebar() {
       </div>
 
       <div className="mt-2 flex-1 overflow-y-auto overscroll-contain pr-1">
-        {sortedConversations.length === 0 ? (
+        {!conversationsHydrated && sortedConversations.length === 0 ? (
+          <ConversationListLoading />
+        ) : sortedConversations.length === 0 ? (
           <div className="mt-3 px-[34px] py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
         ) : (
           <ul className="space-y-1">
@@ -238,6 +212,28 @@ export function Sidebar() {
         onConfirm={confirmDeleteConversation}
       />
     </aside>
+  );
+}
+
+function ConversationListLoading() {
+  return (
+    <div className="mt-3 space-y-2 px-3" aria-label="会话列表加载中" role="status">
+      <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-[#8A9099]">
+        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+        <span>加载会话中...</span>
+      </div>
+      {[0, 1, 2].map((item) => (
+        <div
+          key={item}
+          className="h-[50px] animate-pulse rounded-xl border border-[#E5E7EB]/70 bg-white/70"
+        >
+          <div className="px-3 py-2">
+            <div className="h-3 w-28 rounded-full bg-[#E2E6EC]" />
+            <div className="mt-2 h-2.5 w-36 rounded-full bg-[#ECEFF3]" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

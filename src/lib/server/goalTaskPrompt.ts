@@ -154,6 +154,10 @@ export function buildGoalTaskRunnerPrompt(input: {
   resumeContext?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
   webAppInteractionContext?: string;
+  memoryContext?: {
+    userMemory?: string;
+    sessionMemory?: string;
+  };
 }) {
   const { context, resumeContext, initialTrajectory } = input;
   const { goal, subGoal, task, instance } = {
@@ -201,6 +205,11 @@ ${resumeContext ? `\n用户恢复上下文（必须纳入本轮执行）：\n${r
   const interactiveSurfaceKind = task.expectedResult?.interactiveSurface?.kind ?? (requiresInteractiveSurface ? "blocks" : undefined);
   const requiresWebAppSurface = requiresInteractiveSurface && interactiveSurfaceKind === "webapp";
   const webAppInteractionContext = input.webAppInteractionContext ?? "";
+  const sessionMemory = input.memoryContext?.sessionMemory?.trim() ?? "";
+  const userMemory = input.memoryContext?.userMemory?.trim() ?? "";
+  const memoryBlock = userMemory || sessionMemory
+    ? `\n# Memory Context（只读）\n${userMemory ? `\n## 用户长期记忆\n${userMemory}\n` : ""}${sessionMemory ? `\n## 当前会话记忆\n${sessionMemory}\n` : ""}\n以上记忆仅作为偏好、目标和决策参考。不得写入或修改 M1/M2，任务执行状态仍以 runtime_jobs / task_result 契约为准。\n`
+    : "";
 
   return `# Role
 你是 KiKi 的后台任务执行 Agent。请以“交付物要求”为核心真实推进任务，而不是只给建议或只总结过程。
@@ -219,6 +228,7 @@ ${renderTaskSpecSection(task)}
 ${renderWorkspaceHint(context)}
 依赖任务：
 ${renderDependencySection(context)}
+${memoryBlock}
 
 交付物要求（必须满足）：
 - 预期结果：${task.expectedOutcome}

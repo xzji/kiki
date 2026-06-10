@@ -5,7 +5,7 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 import { getSlashCommandSuggestions } from "@/lib/slashCommands";
 import type { SlashCommand } from "@/lib/slashCommands";
-import type { QuotedConversationMessageContext } from "@/types/runtime";
+import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
 type Props = {
   onSubmit: (
@@ -19,6 +19,9 @@ type Props = {
   localMode?: boolean;
   onStop?: () => void;
   autoFocus?: boolean;
+  runtimeEnvironments?: RuntimeEnvironment[];
+  activeRuntimeEnvironmentId?: string | null;
+  onRuntimeChange?: (runtimeEnvId: string) => void | Promise<void>;
 };
 
 function getCommandPayloadPlaceholder(command: SlashCommand) {
@@ -40,6 +43,12 @@ function removeSlashFragment(input: string, start: number, end: number) {
   return next.replace(/[ \t]{2,}/g, " ");
 }
 
+function runtimeKindLabel(runtime: RuntimeEnvironment) {
+  if ((runtime.runtimeKind || "claude") === "pi") return "Pi CLI";
+  if ((runtime.runtimeKind || "claude") === "claude") return "Claude CLI";
+  return runtime.runtimeKind || "Runtime";
+}
+
 export function AssistantComposer({
   onSubmit,
   placeholder = "输入任何想法，我会帮助你，没有什么大不了的事",
@@ -49,6 +58,9 @@ export function AssistantComposer({
   localMode = false,
   onStop,
   autoFocus = false,
+  runtimeEnvironments = [],
+  activeRuntimeEnvironmentId,
+  onRuntimeChange,
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedModel, setSelectedModel] = useState(localMode ? "Claude Code Local" : "GPT 5.4");
@@ -72,6 +84,17 @@ export function AssistantComposer({
 
   const connectorItems = ["Notion", "Google Drive", "Slack", "Linear"];
   const modelItems = localMode ? ["Claude Code Local"] : ["GPT 5.4", "Claude 4.1", "Gemini 2.5 Pro"];
+  const connectedRuntimeEnvironments = runtimeEnvironments.filter(
+    (runtime) => runtime.type === "local" && runtime.health?.status === "online",
+  );
+  const activeRuntimeEnvironment =
+    runtimeEnvironments.find((runtime) => runtime.id === activeRuntimeEnvironmentId) ??
+    null;
+  const activeRuntimeLabel = activeRuntimeEnvironment
+    ? activeRuntimeEnvironment.name || runtimeKindLabel(activeRuntimeEnvironment)
+    : localMode
+      ? "未连接 Runtime"
+      : selectedModel;
 
   const selectCommand = (index: number) => {
     const command = commandSuggestions[index];
@@ -311,32 +334,72 @@ export function AssistantComposer({
               <button
                 type="button"
                 disabled={disabled}
-                className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-[#F5F6F8]"
+                className="flex max-w-[220px] items-center gap-1 rounded-md px-2 py-1.5 hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#C1C7D0]"
                 onClick={() => {
                   setShowModelMenu((prev) => !prev);
                   setShowConnectorMenu(false);
                 }}
+                title={activeRuntimeEnvironment ? `当前使用：${activeRuntimeLabel}` : undefined}
               >
-                <span>{selectedModel}</span>
+                <span className="truncate">{activeRuntimeLabel}</span>
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
               {showModelMenu ? (
-                <div className="absolute bottom-10 right-0 z-10 w-40 rounded-xl border border-[#E5E7EB] bg-white p-1">
-                  {modelItems.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[#F5F6F8] ${
-                        item === selectedModel ? "text-[#111]" : "text-[#374151]"
-                      }`}
-                      onClick={() => {
-                        setSelectedModel(item);
-                        setShowModelMenu(false);
-                      }}
-                    >
-                      {item}
-                    </button>
-                  ))}
+                <div className="absolute bottom-10 right-0 z-10 w-64 rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
+                  {localMode ? (
+                    connectedRuntimeEnvironments.length > 0 ? (
+                      connectedRuntimeEnvironments.map((runtime) => {
+                        const selected = runtime.id === activeRuntimeEnvironment?.id;
+                        return (
+                          <button
+                            key={runtime.id}
+                            type="button"
+                            className={`flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-[#F5F6F8] ${
+                              selected ? "text-[#111]" : "text-[#374151]"
+                            }`}
+                            onClick={() => {
+                              setShowModelMenu(false);
+                              if (!selected) void onRuntimeChange?.(runtime.id);
+                            }}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] font-medium">
+                                {runtime.name || runtimeKindLabel(runtime)}
+                              </span>
+                              <span className="mt-0.5 block truncate text-[11px] text-[#6B7280]">
+                                {runtimeKindLabel(runtime)} · {runtime.permissionMode}
+                              </span>
+                            </span>
+                            {selected ? (
+                              <span className="mt-0.5 shrink-0 rounded-full bg-[#ECFDF3] px-2 py-0.5 text-[11px] text-[#067647]">
+                                当前
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="px-3 py-2 text-[12px] leading-5 text-[#6B7280]">
+                        暂无已连接 Runtime，请到设置中连接。
+                      </div>
+                    )
+                  ) : (
+                    modelItems.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[#F5F6F8] ${
+                          item === selectedModel ? "text-[#111]" : "text-[#374151]"
+                        }`}
+                        onClick={() => {
+                          setSelectedModel(item);
+                          setShowModelMenu(false);
+                        }}
+                      >
+                        {item}
+                      </button>
+                    ))
+                  )}
                 </div>
               ) : null}
             </div>

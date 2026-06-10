@@ -29,11 +29,12 @@ const contents = files.map((file) => ({ file, rel: relative(file), text: readFil
 const productionContents = contents.filter(({ rel }) => !rel.endsWith(".spec.ts"));
 
 fail(
-  "Claude CLI spawn 只能出现在 claude/transport.ts",
+  "CLI spawn 只能出现在 claude/transport.ts 或 runtime 适配器内",
   productionContents
     .filter(({ text }) => text.includes("spawn("))
     .map(({ rel }) => rel)
-    .filter((rel) => rel !== "src/lib/server/claude/transport.ts"),
+    .filter((rel) => rel !== "src/lib/server/claude/transport.ts")
+    .filter((rel) => !rel.startsWith("src/lib/server/runtime/adapters/")),
 );
 
 fail(

@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock, RotateCcw, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { Brain, Lock, RotateCcw, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import type { SettingsTab } from "@/lib/settings";
 import { setRuntimeDaemonMaxConcurrentTasks } from "@/lib/api/runtime-daemon";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
+import { MemoryEditor } from "@/components/memory/MemoryEditor";
 
 import { BackendLogsPanel } from "./BackendLogsPanel";
 import { RuntimeEnvironmentPanel } from "./RuntimeEnvironmentPanel";
@@ -79,7 +80,7 @@ export function SettingsModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={onClose}>
       <div
-        className="relative flex h-[72vh] max-h-[760px] w-[920px] max-w-[92vw] overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white"
+        className="relative flex h-[88vh] max-h-[920px] w-[1080px] max-w-[96vw] overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white"
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -90,7 +91,7 @@ export function SettingsModal({
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="flex w-[220px] flex-none flex-col border-r border-[#E5E7EB] bg-[#FBFBFC] px-4 py-4">
+        <div className="flex w-[148px] flex-none flex-col border-r border-[#E5E7EB] bg-[#FBFBFC] px-4 py-4">
           <div className="mb-5 flex items-center px-2">
             <div className="text-[15px] font-medium text-[#111]">设置</div>
           </div>
@@ -104,6 +105,11 @@ export function SettingsModal({
               active={activeTab === "runtime"}
               label="运行环境"
               onClick={() => setActiveTab("runtime")}
+            />
+            <SettingsNavItem
+              active={activeTab === "memory"}
+              label="记忆"
+              onClick={() => setActiveTab("memory")}
             />
           </div>
           <div className="mt-auto pt-4">
@@ -129,12 +135,15 @@ export function SettingsModal({
                 ? "账号"
                 : activeTab === "runtime"
                   ? "运行环境"
-                  : "彩蛋设置"}
+                  : activeTab === "memory"
+                    ? "记忆"
+                    : "彩蛋设置"}
             </div>
           </div>
           <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
             {activeTab === "account" ? <AccountPanel /> : null}
             {activeTab === "runtime" ? <RuntimeEnvironmentPanel /> : null}
+            {activeTab === "memory" ? <UserMemoryPanel /> : null}
             {activeTab === "easter-egg" ? (
               <EasterEggSettingsPanel
                 hydrated={settingsHydrated}
@@ -148,6 +157,23 @@ export function SettingsModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function UserMemoryPanel() {
+  return (
+    <div className="h-full min-h-[480px] max-w-[760px]">
+      <div className="mb-4 flex items-center gap-2 text-[13px] text-[#6B7280]">
+        <Brain className="h-4 w-4 text-[#5B3DBE]" />
+        <span>用户长期记忆会跨会话注入，用于保存稳定偏好和长期事实。</span>
+      </div>
+      <MemoryEditor
+        endpoint="/api/memory/profile"
+        title="用户记忆"
+        description="这里管理 M2 用户长期记忆。内容会在新会话中作为用户画像注入，但不会跟随单个会话删除。"
+        limitLabel="24KB"
+      />
     </div>
   );
 }

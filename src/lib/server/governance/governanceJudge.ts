@@ -3,7 +3,7 @@ import {
   normalizeClaudeJsonText,
   parseJsonWithCandidates,
 } from "@/lib/server/claude/jsonRepair";
-import { runPromptJson } from "@/lib/server/claude/transport";
+import { runRuntimePromptJson } from "@/lib/server/runtime/runtimeTransport";
 import { buildGovernanceJudgePrompt } from "@/lib/server/governance/governancePrompt";
 import {
   buildDegradedGovernanceResult,
@@ -28,7 +28,7 @@ export async function judgeGovernanceIntent(input: {
   signal?: AbortSignal;
 }): Promise<GovernanceJudgeResult> {
   try {
-    const result = await runPromptJson({
+    const result = await runRuntimePromptJson({
       prompt: buildGovernanceJudgePrompt(input),
       runtimeEnv: input.runtimeEnv,
       cwd: input.workingDirectory,

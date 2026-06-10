@@ -9,8 +9,12 @@ function parseEventType(raw: string): ClaudeStreamEvent["type"] | null {
     case "session":
     case "session_invalid":
     case "status":
+    case "prompt":
+    case "thinking":
+    case "assistant_trace":
     case "delta":
     case "message":
+    case "tool_call":
     case "file_artifact":
     case "permission_request":
     case "error":

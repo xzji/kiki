@@ -5,10 +5,14 @@ import {
   touchMachineHeartbeat,
   type AuthenticatedMachine,
 } from "@/lib/server/services/machineService";
-import type { ClaudeJsonToolPolicy, ClaudePromptJsonResult } from "@/lib/server/claude/transport";
+import type {
+  ClaudeJsonToolPolicy,
+  ClaudePromptJsonResult,
+} from "@/lib/server/claude/transport";
 import type { ToolChannelPolicy } from "@/lib/runtime/toolPolicy";
 import type {
   QuotedConversationMessageContext,
+  LocalRuntimeKind,
   RuntimeDiscoveryItem,
   RuntimeEnvironment,
   RuntimeEnvironmentCheckInput,
@@ -40,8 +44,9 @@ export type RemoteStreamPromptPayload = {
   workingDirectory: string;
   cliPath: string;
   permissionMode: RuntimePermissionMode;
+  runtimeKind?: LocalRuntimeKind;
   conversationId?: string;
-  claudeSessionId?: string;
+  resumeSessionId?: string;
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
   systemPromptMode?: "conversation" | "neutral";

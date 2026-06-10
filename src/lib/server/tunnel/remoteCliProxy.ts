@@ -38,7 +38,7 @@ function resolveMachineId() {
   const userId = getCurrentUserId();
   const machineId = pickOnlineMachineIdForUser(userId);
   if (!machineId) {
-    throw new Error("请先连接本机电脑并保持在线，再使用 Claude CLI");
+    throw new Error("请先连接本机电脑并保持在线，再使用本地 Runtime");
   }
   return machineId;
 }
@@ -66,8 +66,9 @@ export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
         workingDirectory: options.workingDirectory,
         cliPath: options.cliPath,
         permissionMode: options.permissionMode,
+        runtimeKind: options.runtimeKind,
         conversationId: options.conversationId,
-        claudeSessionId: options.claudeSessionId,
+        resumeSessionId: options.resumeSessionId,
         contextPack: options.contextPack,
         workspacePolicy: options.workspacePolicy,
         systemPromptMode: options.systemPromptMode,
