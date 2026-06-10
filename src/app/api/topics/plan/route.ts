@@ -63,7 +63,22 @@ async function POSTHandler(request: NextRequest) {
     }
 
     if (result.status !== "completed") {
-      return NextResponse.json({ reason: "5 角色 Saga 执行失败" }, { status: 500 });
+      const reason = result.errorMessage || "5 角色 Saga 执行失败";
+      console.error("[topics/plan] saga failed", {
+        sagaId: result.saga.id,
+        failedStep: result.failedStep,
+        failedAgentRunId: result.failedAgentRunId,
+        reason,
+      });
+      return NextResponse.json(
+        {
+          reason,
+          sagaId: result.saga.id,
+          failedStep: result.failedStep,
+          failedAgentRunId: result.failedAgentRunId,
+        },
+        { status: 500 },
+      );
     }
 
     const draft = adaptTopicInitSagaToGoalDraft({ topicText, result });

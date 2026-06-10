@@ -197,6 +197,31 @@ export function runContextPackBoundarySpecs() {
     assert.ok(/不要在回复中复述系统字段名/.test(pack), "应有提示禁止复述字段名");
   }
 
+  // 5.1) Saga 恢复状态应保留可恢复语义，但不暴露内部错误与 agent_run id
+  {
+    const line = buildSafePlanningRunStateLine({
+      status: "failed",
+      source: "saga",
+      phase: "reviewing_tasks",
+      action: "retry_plan",
+      goalText: "最近在做美股投资，帮我关注下",
+      errorMessage: "Error: failed agent_run agent-run-secret at /home/example/tmp",
+      failedAt: "2026-06-10T12:00:00.000Z",
+      updatedAt: "2026-06-10T12:00:00.000Z",
+      sagaRequestId: "topic-saga-secret",
+      sagaId: "saga-secret",
+      failedStep: "critic",
+      failedAgentRunId: "agent-run-secret",
+    });
+    assert.ok(/5 角色 Saga/.test(line), "应明确这是 Saga 恢复状态");
+    assert.ok(/失败阶段：critic/.test(line), "应保留失败阶段语义");
+    assert.ok(/美股投资/.test(line), "应保留目标文本");
+    assert.ok(!/agent-run-secret/.test(line), "不应暴露 agent_run id");
+    assert.ok(!/topic-saga-secret/.test(line), "不应暴露 saga request id");
+    assert.ok(!/\/home\//.test(line), "不应暴露本地路径");
+    assert.ok(!/Error: failed/.test(line), "不应暴露原始错误");
+  }
+
   // 6) 不带 quotedMessage 也能正常生成
   {
     const pack = buildConversationContextPack({

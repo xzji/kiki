@@ -86,6 +86,9 @@ export type TopicInitSagaResult = {
   saga: SagaInstance;
   status: "completed" | "awaiting_user" | "failed";
   awaitingQuestions?: string[];
+  errorMessage?: string;
+  failedAgentRunId?: string;
+  failedStep?: TopicInitSagaStep;
   /** Final parsed payloads keyed by role. Only populated on success / partial. */
   artifacts: {
     interview?: Record<string, unknown>;
@@ -102,6 +105,24 @@ export type TopicInitSagaResult = {
 };
 
 export const DEFAULT_MAX_REFINE_LOOPS = 2;
+
+class SagaRoleError extends Error {
+  agentRunId: string;
+  role: "interviewer" | "planner" | "critic" | "refiner" | "presenter";
+
+  constructor(input: {
+    role: SagaRoleError["role"];
+    agentRunId: string;
+    cause: unknown;
+  }) {
+    const message = input.cause instanceof Error ? input.cause.message : String(input.cause);
+    super(message);
+    this.name = "SagaRoleError";
+    this.agentRunId = input.agentRunId;
+    this.role = input.role;
+    this.cause = input.cause;
+  }
+}
 
 function asInterviewerDecision(value: unknown): InterviewerDecisionPayload {
   if (!value || typeof value !== "object") return {};
@@ -186,13 +207,17 @@ async function runRole(input: {
     sagaInstanceId: input.sagaInstanceId,
     role: input.role,
   });
-  const result = await executeAgentRun({
-    agentRunId: run.id,
-    prompt: input.prompt,
-    context: { role: input.role, sagaInstanceId: input.sagaInstanceId },
-    invoke: input.invoke,
-  });
-  return result.parsed;
+  try {
+    const result = await executeAgentRun({
+      agentRunId: run.id,
+      prompt: input.prompt,
+      context: { role: input.role, sagaInstanceId: input.sagaInstanceId },
+      invoke: input.invoke,
+    });
+    return result.parsed;
+  } catch (error) {
+    throw new SagaRoleError({ role: input.role, agentRunId: run.id, cause: error });
+  }
 }
 
 /**
@@ -212,6 +237,7 @@ export async function runTopicInitSaga(
   const artifacts: TopicInitSagaResult["artifacts"] = {};
 
   // --- 1. Interviewer ---
+  let interviewerRunId: string | undefined;
   try {
     advanceSaga({ sagaInstanceId: input.sagaInstanceId, toStep: "interview" });
     const run = createAgentRun({
@@ -219,6 +245,7 @@ export async function runTopicInitSaga(
       sagaInstanceId: input.sagaInstanceId,
       role: "interviewer",
     });
+    interviewerRunId = run.id;
     const result = await executeAgentRun({
       agentRunId: run.id,
       prompt: input.prompts.interview,
@@ -242,11 +269,7 @@ export async function runTopicInitSaga(
       };
     }
   } catch (error) {
-    // Note: executeAgentRun has already appended an `error` event to this run
-    // and marked the agent run as failed. We deliberately pass `undefined` for
-    // agentRunId to failSaga to avoid emitting a duplicate `error` event on
-    // the same agent_run (mirrors Planner/Critic/Refiner/Presenter handling).
-    return failSaga(input.sagaInstanceId, undefined, error, artifacts, 0);
+    return failSaga(input.sagaInstanceId, interviewerRunId, "interview", error, artifacts, 0);
   }
 
   // --- 2. Planner ---
@@ -260,7 +283,7 @@ export async function runTopicInitSaga(
       invoke: input.invokes.plan,
     });
   } catch (error) {
-    return failSaga(input.sagaInstanceId, undefined, error, artifacts, 0);
+    return failSaga(input.sagaInstanceId, getFailedAgentRunId(error), "plan", error, artifacts, 0);
   }
 
   // --- 3-4. Critic↔Refiner loop ---
@@ -282,7 +305,7 @@ export async function runTopicInitSaga(
       criticDecision = asCriticDecision(criticParsed);
       artifacts.critic = criticDecision;
     } catch (error) {
-      return failSaga(input.sagaInstanceId, undefined, error, artifacts, refineLoops);
+      return failSaga(input.sagaInstanceId, getFailedAgentRunId(error), "critic", error, artifacts, refineLoops);
     }
 
     if (criticDecision.verdict === "accept") break;
@@ -309,7 +332,7 @@ export async function runTopicInitSaga(
         artifacts.refinedPlan = refined;
       }
     } catch (error) {
-      return failSaga(input.sagaInstanceId, undefined, error, artifacts, refineLoops);
+      return failSaga(input.sagaInstanceId, getFailedAgentRunId(error), "refine", error, artifacts, refineLoops);
     }
 
     refineLoops += 1;
@@ -345,7 +368,7 @@ export async function runTopicInitSaga(
       invoke: input.invokes.present,
     });
   } catch (error) {
-    return failSaga(input.sagaInstanceId, undefined, error, artifacts, refineLoops);
+    return failSaga(input.sagaInstanceId, getFailedAgentRunId(error), "present", error, artifacts, refineLoops);
   }
 
   const completed = markCompleted(input.sagaInstanceId);
@@ -361,6 +384,7 @@ export async function runTopicInitSaga(
 function failSaga(
   sagaInstanceId: string,
   agentRunId: string | undefined,
+  failedStep: TopicInitSagaStep,
   error: unknown,
   artifacts: TopicInitSagaResult["artifacts"],
   refineLoops: number,
@@ -370,9 +394,16 @@ function failSaga(
   return {
     saga: saga ?? mustFindSaga(sagaInstanceId),
     status: "failed",
+    errorMessage: message,
+    failedAgentRunId: agentRunId,
+    failedStep,
     artifacts,
     refineLoops,
   };
+}
+
+function getFailedAgentRunId(error: unknown) {
+  return error instanceof SagaRoleError ? error.agentRunId : undefined;
 }
 
 function mustFindSaga(id: string): SagaInstance {

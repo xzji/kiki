@@ -22,6 +22,16 @@ import type {
 } from "@/types/runtime";
 import type { KikiSkillsInstallPayload, KikiSkillsStatusPayload } from "@/lib/kikiSkills/types";
 
+export type RemoteDaemonServiceKind = "launchd" | "systemd" | "unsupported";
+
+export type RemoteDaemonServiceStatus = {
+  platform: string;
+  kind: RemoteDaemonServiceKind;
+  installed: boolean;
+  running: boolean;
+  path: string;
+};
+
 export type RemotePromptJsonPayload = {
   prompt: string;
   runtimeEnv: RuntimeEnvironment;
@@ -72,6 +82,8 @@ export type MachineCommand =
   | { type: "select_directory"; requestId: string }
   | { type: "skills_status"; requestId: string }
   | { type: "skills_install"; requestId: string }
+  | { type: "daemon_service_status"; requestId: string }
+  | { type: "daemon_service_autostart"; requestId: string; enabled: boolean }
   | { type: "run_prompt_json"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "run_prompt_text"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "stream_prompt"; sessionId: string; payload: RemoteStreamPromptPayload }
@@ -85,6 +97,8 @@ export type MachineResult =
   | { type: "select_directory"; requestId: string; ok: boolean; path?: string; canceled?: boolean; error?: string }
   | { type: "skills_status"; requestId: string; ok: boolean; result?: KikiSkillsStatusPayload; error?: string }
   | { type: "skills_install"; requestId: string; ok: boolean; result?: KikiSkillsInstallPayload; error?: string }
+  | { type: "daemon_service_status"; requestId: string; ok: boolean; result?: RemoteDaemonServiceStatus; error?: string }
+  | { type: "daemon_service_autostart"; requestId: string; ok: boolean; result?: RemoteDaemonServiceStatus; error?: string }
   | { type: "run_prompt_json"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string }
   | { type: "run_prompt_text"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string };
 
@@ -112,6 +126,8 @@ type TunnelHubState = {
   pendingSelectDirectory: Map<string, PendingTunnelRequest<{ path: string } | { canceled: true }>>;
   pendingSkillsStatus: Map<string, PendingTunnelRequest<KikiSkillsStatusPayload>>;
   pendingSkillsInstall: Map<string, PendingTunnelRequest<KikiSkillsInstallPayload>>;
+  pendingDaemonServiceStatus: Map<string, PendingTunnelRequest<RemoteDaemonServiceStatus>>;
+  pendingDaemonServiceAutostart: Map<string, PendingTunnelRequest<RemoteDaemonServiceStatus>>;
   pendingRunPromptJson: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   pendingRunPromptText: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   executeResultListener: ExecuteResultListener | null;
@@ -134,6 +150,8 @@ function getState(): TunnelHubState {
       pendingSelectDirectory: new Map(),
       pendingSkillsStatus: new Map(),
       pendingSkillsInstall: new Map(),
+      pendingDaemonServiceStatus: new Map(),
+      pendingDaemonServiceAutostart: new Map(),
       pendingRunPromptJson: new Map(),
       pendingRunPromptText: new Map(),
       executeResultListener: null,
@@ -257,6 +275,30 @@ export function submitMachineResult(result: MachineResult) {
     state.pendingSkillsInstall.delete(result.requestId);
     if (!result.ok || !result.result) {
       pending.reject(new Error(result.error || "本机 KiKi 默认 skills 安装失败"));
+      return;
+    }
+    pending.resolve(result.result);
+    return;
+  }
+  if (result.type === "daemon_service_status") {
+    const pending = state.pendingDaemonServiceStatus.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingDaemonServiceStatus.delete(result.requestId);
+    if (!result.ok || !result.result) {
+      pending.reject(new Error(result.error || "本机后台服务状态获取失败"));
+      return;
+    }
+    pending.resolve(result.result);
+    return;
+  }
+  if (result.type === "daemon_service_autostart") {
+    const pending = state.pendingDaemonServiceAutostart.get(result.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    state.pendingDaemonServiceAutostart.delete(result.requestId);
+    if (!result.ok || !result.result) {
+      pending.reject(new Error(result.error || "本机后台服务设置失败"));
       return;
     }
     pending.resolve(result.result);
@@ -406,6 +448,34 @@ export function getTunnelHub() {
         }, timeoutMs);
         state.pendingSkillsInstall.set(requestId, { machineId: input.machineId, resolve, reject, timer });
         enqueueCommand(input.machineId, { type: "skills_install", requestId });
+      });
+    },
+    requestDaemonServiceStatus(input: { machineId: string; timeoutMs?: number }) {
+      const requestId = `daemon-service-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 30_000;
+      return new Promise<RemoteDaemonServiceStatus>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingDaemonServiceStatus.delete(requestId);
+          reject(new Error("本机后台服务状态获取超时，请确认 daemon 已更新到最新版并保持在线"));
+        }, timeoutMs);
+        state.pendingDaemonServiceStatus.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, { type: "daemon_service_status", requestId });
+      });
+    },
+    requestDaemonServiceAutostart(input: { machineId: string; enabled: boolean; timeoutMs?: number }) {
+      const requestId = `daemon-service-autostart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timeoutMs = input.timeoutMs ?? 60_000;
+      return new Promise<RemoteDaemonServiceStatus>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingDaemonServiceAutostart.delete(requestId);
+          reject(new Error("本机后台服务设置超时，请确认 daemon 已更新到最新版并保持在线"));
+        }, timeoutMs);
+        state.pendingDaemonServiceAutostart.set(requestId, { machineId: input.machineId, resolve, reject, timer });
+        enqueueCommand(input.machineId, {
+          type: "daemon_service_autostart",
+          requestId,
+          enabled: input.enabled,
+        });
       });
     },
     requestRunPromptJson(input: { machineId: string; payload: RemotePromptJsonPayload; timeoutMs?: number }) {

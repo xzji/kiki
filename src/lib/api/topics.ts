@@ -19,6 +19,25 @@ export type TopicSagaPlanResult =
       sagaId?: string;
     };
 
+export class TopicSagaPlanError extends Error {
+  sagaId?: string;
+  failedStep?: string;
+  failedAgentRunId?: string;
+
+  constructor(input: {
+    reason: string;
+    sagaId?: string;
+    failedStep?: string;
+    failedAgentRunId?: string;
+  }) {
+    super(input.reason);
+    this.name = "TopicSagaPlanError";
+    this.sagaId = input.sagaId;
+    this.failedStep = input.failedStep;
+    this.failedAgentRunId = input.failedAgentRunId;
+  }
+}
+
 export async function generateTopicSagaPlan(input: {
   topicText: string;
   runtimeEnv: RuntimeEnvironment;
@@ -38,9 +57,19 @@ export async function generateTopicSagaPlan(input: {
     body: JSON.stringify(body),
     signal,
   });
-  const data = (await response.json()) as TopicSagaPlanResult & { reason?: string };
+  const data = (await response.json()) as TopicSagaPlanResult & {
+    reason?: string;
+    sagaId?: string;
+    failedStep?: string;
+    failedAgentRunId?: string;
+  };
   if (!response.ok) {
-    throw new Error(data.reason || "5 角色 Saga 规划失败");
+    throw new TopicSagaPlanError({
+      reason: data.reason || "5 角色 Saga 规划失败",
+      sagaId: data.sagaId,
+      failedStep: data.failedStep,
+      failedAgentRunId: data.failedAgentRunId,
+    });
   }
   return data;
 }

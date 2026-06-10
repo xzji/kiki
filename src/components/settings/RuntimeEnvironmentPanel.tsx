@@ -375,8 +375,15 @@ export function RuntimeEnvironmentPanel() {
     }
   }, [skillsInstalling]);
 
-  const daemonEnabled = Boolean(daemonStatus?.config?.autoStart && daemonStatus?.launchAgentInstalled);
+  const daemonService = daemonStatus?.service;
+  const daemonEnabled = daemonService
+    ? Boolean(daemonService.installed && daemonService.running)
+    : Boolean(daemonStatus?.config?.autoStart && daemonStatus?.launchAgentInstalled);
   const effectiveDaemonEnabled = optimisticDaemonEnabled ?? daemonEnabled;
+  const isRemoteDaemonSource = daemonStatus?.source === "remote";
+  const daemonDescription = isRemoteDaemonSource
+    ? "通过已连接本机 daemon 注册系统后台服务，关闭浏览器或云端页面后仍可继续连接云端并执行任务。开启成功后请关闭当前前台 kiki-daemon run 终端，避免双进程抢占。"
+    : "为当前本地 Runtime 安装系统常驻守护，关闭浏览器后依然可以继续调度任务。默认关闭，首次开启时会提示你确认安装 LaunchAgent；关闭后会自动停用系统常驻。";
 
   const refreshDaemonStatus = useCallback(async () => {
     if (daemonRefreshPending) return;
@@ -421,8 +428,8 @@ export function RuntimeEnvironmentPanel() {
       await loadDaemonStatus();
       setDaemonActionMessage(
         enabled
-          ? "24h 运行已开启，系统会为当前本地 Runtime 安装并启动 LaunchAgent。"
-          : "24h 运行已关闭，系统常驻 LaunchAgent 已停用。",
+          ? "24h 运行已开启，后台服务已接管；如果当前还有前台 kiki-daemon run 终端，请关闭它以避免双进程抢占。"
+          : "24h 运行已关闭，系统常驻后台服务已停用。",
       );
     } catch (error) {
       setOptimisticDaemonEnabled(null);
@@ -781,10 +788,7 @@ export function RuntimeEnvironmentPanel() {
                           刷新状态
                         </button>
                       </div>
-                      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
-                        为当前本地 Runtime 安装系统常驻守护，关闭浏览器后依然可以继续调度任务。默认关闭，首次开启时会提示你确认安装
-                        LaunchAgent；关闭后会自动停用系统常驻。
-                      </div>
+                      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{daemonDescription}</div>
                     </div>
                     <button
                       type="button"
@@ -832,13 +836,19 @@ export function RuntimeEnvironmentPanel() {
                         loading={daemonSwitchPending}
                       />
                       <InfoField
-                        label="LaunchAgent"
-                        value={daemonStatus?.launchAgentInstalled ? "已安装" : "未安装"}
+                        label="后台服务"
+                        value={
+                          daemonService
+                            ? `${daemonService.installed ? "已安装" : "未安装"} / ${daemonService.running ? "运行中" : "未运行"}`
+                            : daemonStatus?.launchAgentInstalled
+                              ? "已安装"
+                              : "未安装"
+                        }
                         loading={daemonSwitchPending}
                       />
                       <InfoField
-                        label="LaunchAgent 路径"
-                        value={daemonStatus?.launchAgentPath || "暂无"}
+                        label="服务配置路径"
+                        value={daemonService?.path || daemonStatus?.launchAgentPath || "暂无"}
                         loading={daemonSwitchPending}
                       />
                     </div>
@@ -847,6 +857,11 @@ export function RuntimeEnvironmentPanel() {
                   {daemonActionMessage ? (
                     <div className="mt-3 rounded-2xl border border-[#BBF7D0] bg-[#F0FDF4] px-4 py-3 text-[12px] leading-5 text-[#166534]">
                       {daemonActionMessage}
+                    </div>
+                  ) : null}
+                  {daemonStatus?.message ? (
+                    <div className="mt-3 rounded-2xl border border-[#FEDF89] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#B54708]">
+                      {daemonStatus.message}
                     </div>
                   ) : null}
                   {daemonActionError ? (
@@ -886,6 +901,7 @@ export function RuntimeEnvironmentPanel() {
       <EnableDaemonConfirmDialog
         open={confirm24hOpen}
         environmentName={activeLocalEnvironment?.name || "当前本地 Runtime"}
+        remote={isRemoteDaemonSource}
         pending={daemonSwitchPending}
         onClose={() => {
           if (daemonSwitchPending) return;
@@ -1171,12 +1187,14 @@ function InfoField({
 function EnableDaemonConfirmDialog({
   open,
   environmentName,
+  remote,
   pending,
   onClose,
   onConfirm,
 }: {
   open: boolean;
   environmentName: string;
+  remote: boolean;
   pending: boolean;
   onClose: () => void;
   onConfirm: () => void;
@@ -1192,14 +1210,33 @@ function EnableDaemonConfirmDialog({
         <div className="border-b border-[#E5E7EB] px-5 py-4">
           <div className="text-[15px] font-medium text-[#111]">开启 24h 运行</div>
           <div className="mt-1 text-[13px] leading-6 text-[#6B7280]">
-            即将为 <span className="font-medium text-[#111]">{environmentName}</span> 安装 macOS LaunchAgent。安装后，
-            KiKi 会在你登录系统后自动拉起本机 Runtime Daemon，关闭浏览器也可以继续执行任务。
+            {remote ? (
+              <>
+                即将通过已连接的本机 daemon 为 <span className="font-medium text-[#111]">{environmentName}</span>{" "}
+                注册系统后台服务。安装后，KiKi 会在本机后台持续连接云端，关闭浏览器或云端页面也可以继续执行任务。
+              </>
+            ) : (
+              <>
+                即将为 <span className="font-medium text-[#111]">{environmentName}</span> 安装 macOS LaunchAgent。安装后，
+                KiKi 会在你登录系统后自动拉起本机 Runtime Daemon，关闭浏览器也可以继续执行任务。
+              </>
+            )}
           </div>
         </div>
         <div className="space-y-2 px-5 py-4 text-[13px] leading-6 text-[#475467]">
-          <div>1. 会写入 `~/Library/LaunchAgents/com.kiki.runtime-daemon.plist`</div>
-          <div>2. 会调用 `launchctl` 注册并启动系统常驻进程</div>
-          <div>3. 之后你仍然可以随时关闭这个开关来停用常驻能力</div>
+          {remote ? (
+            <>
+              <div>1. macOS 会写入 `~/Library/LaunchAgents/com.kiki.daemon.plist`</div>
+              <div>2. Linux 会写入 user systemd unit，并启动 `kiki-daemon` 后台服务</div>
+              <div>3. 开启成功后请关闭当前前台 `kiki-daemon run` 终端，避免双进程抢占</div>
+            </>
+          ) : (
+            <>
+              <div>1. 会写入 `~/Library/LaunchAgents/com.kiki.runtime-daemon.plist`</div>
+              <div>2. 会调用 `launchctl` 注册并启动系统常驻进程</div>
+              <div>3. 之后你仍然可以随时关闭这个开关来停用常驻能力</div>
+            </>
+          )}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-5 py-4">
           <button

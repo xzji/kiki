@@ -86,13 +86,13 @@ export async function executeAgentRun(input: ExecuteAgentRunInput): Promise<Exec
     throw new Error(`agentExecutor: cannot start unknown run ${agentRunId}`);
   }
 
-  appendGuardedEvent({
-    agentRunId,
-    type: "llm.request",
-    payload: { prompt, context },
-  });
-
   try {
+    appendGuardedEvent({
+      agentRunId,
+      type: "llm.request",
+      payload: { prompt, context },
+    });
+
     const result = await invoke({ agentRunId, prompt, context });
 
     appendGuardedEvent({
@@ -130,11 +130,15 @@ export async function executeAgentRun(input: ExecuteAgentRunInput): Promise<Exec
     return { run: completed, rawText: result.rawText, parsed: result.parsed };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    appendGuardedEvent({
-      agentRunId,
-      type: "error",
-      payload: { message },
-    });
+    try {
+      appendGuardedEvent({
+        agentRunId,
+        type: "error",
+        payload: { message },
+      });
+    } catch {
+      // Preserve the original failure path even if error-event persistence fails.
+    }
     updateAgentRun({
       id: agentRunId,
       status: "failed",

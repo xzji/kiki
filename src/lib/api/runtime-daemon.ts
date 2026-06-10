@@ -24,12 +24,25 @@ export type RuntimeDaemonStatusPayload = {
   config: RuntimeDaemonConfig | null;
   state: RuntimeDaemonState | null;
   device: RuntimeDaemonDeviceState | null;
+  source?: "local" | "remote";
+  service?: RuntimeDaemonServiceStatus;
+  message?: string;
   launchAgentInstalled: boolean;
   launchAgentPath: string;
 };
 
+export type RuntimeDaemonServiceStatus = {
+  platform: string;
+  kind: "launchd" | "systemd" | "unsupported";
+  installed: boolean;
+  running: boolean;
+  path: string;
+};
+
 export type RuntimeDaemonInstallPayload = {
   ok: boolean;
+  source?: "local" | "remote";
+  service?: RuntimeDaemonServiceStatus;
   launchAgentInstalled: boolean;
   launchAgentPath: string;
   message?: string;

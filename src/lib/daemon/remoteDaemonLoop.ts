@@ -14,14 +14,32 @@ import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
 import { runRuntimePromptJson, runRuntimePromptText, streamRuntimePrompt } from "@/lib/server/runtime/runtimeTransport";
 import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
-import type { MachineCommand, MachineResult, RemotePromptJsonPayload, RemoteStreamPromptPayload } from "@/lib/server/tunnel/tunnelHub";
+import type {
+  MachineCommand,
+  MachineResult,
+  RemoteDaemonServiceStatus,
+  RemotePromptJsonPayload,
+  RemoteStreamPromptPayload,
+} from "@/lib/server/tunnel/tunnelHub";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-const DAEMON_VERSION = "0.2.4";
+const DAEMON_VERSION = "0.2.5";
 const POLL_PATH = "/api/machine-tunnel/poll";
 const RESULT_PATH = "/api/machine-tunnel/result";
 const STREAM_CHUNK_PATH = "/api/machine-tunnel/stream-chunk";
 const RECONNECT_DELAY_MS = 5_000;
+
+export type RemoteDaemonServiceManager = {
+  installService: () => Promise<RemoteDaemonServiceStatus>;
+  uninstallService: () => Promise<RemoteDaemonServiceStatus>;
+  serviceStatus: () => Promise<RemoteDaemonServiceStatus>;
+};
+
+type RunRemoteDaemonLoopInput = {
+  serverUrl: string;
+  apiKey: string;
+  serviceManager?: RemoteDaemonServiceManager;
+};
 
 function normalizeBaseUrl(serverUrl: string) {
   return serverUrl.replace(/\/$/, "");
@@ -51,7 +69,7 @@ async function executeRemoteJob(input: {
   });
 }
 
-export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: string }) {
+export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   const base = normalizeBaseUrl(input.serverUrl);
   const pollUrl = `${base}${POLL_PATH}`;
   const resultUrl = `${base}${RESULT_PATH}`;
@@ -213,6 +231,45 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       }
       return;
     }
+    if (command.type === "daemon_service_status") {
+      try {
+        if (!input.serviceManager) {
+          throw new Error("当前 daemon 不支持后台服务状态查询，请更新 @kiki_agent/daemon");
+        }
+        const result = await input.serviceManager.serviceStatus();
+        await postResult({ type: "daemon_service_status", requestId: command.requestId, ok: true, result });
+      } catch (error) {
+        await postResult({
+          type: "daemon_service_status",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "后台服务状态获取失败",
+        });
+      }
+      return;
+    }
+    if (command.type === "daemon_service_autostart") {
+      try {
+        if (!input.serviceManager) {
+          throw new Error("当前 daemon 不支持后台服务设置，请更新 @kiki_agent/daemon");
+        }
+        if (command.enabled) {
+          await input.serviceManager.installService();
+        } else {
+          await input.serviceManager.uninstallService();
+        }
+        const result = await input.serviceManager.serviceStatus();
+        await postResult({ type: "daemon_service_autostart", requestId: command.requestId, ok: true, result });
+      } catch (error) {
+        await postResult({
+          type: "daemon_service_autostart",
+          requestId: command.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : "后台服务设置失败",
+        });
+      }
+      return;
+    }
     if (command.type === "run_prompt_json") {
       try {
         const result = await runPromptOnMachine(command.payload, "json");
@@ -327,7 +384,7 @@ export async function runRemoteDaemonLoop(input: { serverUrl: string; apiKey: st
       })();
       return;
     }
-    // cancel 等其它命令暂忽略
+    appendRuntimeDaemonLog(`忽略未知或暂不支持的命令：${command.type}`);
   }
 
   // 永不退出：网络/服务端错误都按重试处理。

@@ -1,11 +1,15 @@
-import { execFileSync } from "child_process";
-import fs from "fs";
 import path from "path";
 
 import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
+import type { RemoteDaemonServiceStatus } from "@/lib/server/tunnel/tunnelHub";
 
 import { collectDaemonServiceEnv } from "./pathEnv";
-import { installService, serviceStatus, uninstallService } from "./service";
+import {
+  installService as installDaemonService,
+  resolveInstallScriptPath,
+  serviceStatus,
+  uninstallService as uninstallDaemonService,
+} from "./service";
 
 type Subcommand = "run" | "install" | "uninstall" | "status" | "help";
 
@@ -26,23 +30,6 @@ function resolveSubcommand(): Subcommand {
   return "run";
 }
 
-/** install 时写入 plist 的脚本路径；若通过 npx 调用但已全局安装，优先用全局路径。 */
-function resolveInstallScriptPath() {
-  const current = __filename;
-  if (!current.includes(`${path.sep}_npx${path.sep}`)) {
-    return current;
-  }
-  try {
-    const bin = execFileSync("which", ["kiki-daemon"], { encoding: "utf8" }).trim();
-    if (bin && !bin.includes("_npx")) {
-      return fs.realpathSync(bin);
-    }
-  } catch {
-    // ignore
-  }
-  return current;
-}
-
 function requireConnectionArgs() {
   const serverUrl = readArg("--server-url");
   const apiKey = readArg("--api-key");
@@ -51,6 +38,10 @@ function requireConnectionArgs() {
     process.exit(1);
   }
   return { serverUrl, apiKey };
+}
+
+async function remoteServiceStatus(): Promise<RemoteDaemonServiceStatus> {
+  return { platform: process.platform, ...(await serviceStatus()) };
 }
 
 function printHelp() {
@@ -90,7 +81,7 @@ async function main() {
   }
 
   if (subcommand === "uninstall") {
-    const result = await uninstallService();
+    const result = await uninstallDaemonService();
     console.log(`已卸载后台服务（${result.kind}）：${result.path}`);
     return;
   }
@@ -104,7 +95,7 @@ async function main() {
           "    建议先全局安装再 install：npm i -g @kiki_agent/daemon && kiki-daemon install ...",
       );
     }
-    const result = await installService({
+    const result = await installDaemonService({
       nodePath: process.execPath,
       scriptPath,
       serverUrl,
@@ -120,7 +111,14 @@ async function main() {
   }
 
   const { serverUrl, apiKey } = requireConnectionArgs();
+  const scriptPath = resolveInstallScriptPath();
+  const environment = collectDaemonServiceEnv(process.env);
   console.log(`[kiki-daemon] 前台运行，连接 ${serverUrl}`);
+  if (scriptPath.includes(`${path.sep}_npx${path.sep}`)) {
+    console.warn(
+      "⚠️  当前通过 npx 临时缓存运行。若从网页开启 24h 运行，建议先全局安装：npm i -g @kiki_agent/daemon",
+    );
+  }
   // 守护进程兜底：偶发的未捕获异常不应让进程退出，交由重连循环恢复。
   process.on("unhandledRejection", (reason) => {
     console.error("[kiki-daemon] unhandledRejection:", reason instanceof Error ? reason.message : reason);
@@ -128,7 +126,28 @@ async function main() {
   process.on("uncaughtException", (error) => {
     console.error("[kiki-daemon] uncaughtException:", error instanceof Error ? error.message : error);
   });
-  await runRemoteDaemonLoop({ serverUrl, apiKey });
+  await runRemoteDaemonLoop({
+    serverUrl,
+    apiKey,
+    serviceManager: {
+      async installService() {
+        const installScriptPath = resolveInstallScriptPath();
+        await installDaemonService({
+          nodePath: process.execPath,
+          scriptPath: installScriptPath,
+          serverUrl,
+          apiKey,
+          environment,
+        });
+        return remoteServiceStatus();
+      },
+      async uninstallService() {
+        await uninstallDaemonService();
+        return remoteServiceStatus();
+      },
+      serviceStatus: remoteServiceStatus,
+    },
+  });
 }
 
 void main().catch((error) => {

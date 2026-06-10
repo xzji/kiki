@@ -6,7 +6,23 @@ import { isServerLocalCliDisabled } from "@/lib/server/runtime/cloudExecutionPol
 import { getKikiDefaultSkillsStatus, installKikiDefaultSkills } from "@/lib/server/kikiSkills/installService";
 import type { RuntimeDiscoveryResult, RuntimeEnvironmentCheckInput, RuntimeEnvironmentCheckResult } from "@/types/runtime";
 
-import { getTunnelHub } from "./tunnelHub";
+import { getTunnelHub, type RemoteDaemonServiceStatus } from "./tunnelHub";
+
+export type RuntimeDaemonServiceProxyResult = {
+  source: "remote";
+  service: RemoteDaemonServiceStatus;
+  message?: string;
+};
+
+function offlineDaemonServiceStatus(): RemoteDaemonServiceStatus {
+  return {
+    platform: "unknown",
+    kind: "unsupported",
+    installed: false,
+    running: false,
+    path: "",
+  };
+}
 
 export function pickOnlineMachineIdForUser(userId: string): string | null {
   const hub = getTunnelHub();
@@ -98,4 +114,48 @@ export async function installKikiSkillsForUser(userId: string) {
   }
 
   return installKikiDefaultSkills();
+}
+
+export async function getRuntimeDaemonServiceStatusForUser(
+  userId: string,
+): Promise<RuntimeDaemonServiceProxyResult> {
+  if (!isServerLocalCliDisabled()) {
+    throw new Error("本地 Web 模式不需要通过 machine tunnel 查询后台服务");
+  }
+
+  const machineId = pickOnlineMachineIdForUser(userId);
+  if (!machineId) {
+    return {
+      source: "remote",
+      service: offlineDaemonServiceStatus(),
+      message: "请先连接本机电脑并保持在线，再查看 24h 运行状态",
+    };
+  }
+
+  const service = await getTunnelHub().requestDaemonServiceStatus({ machineId });
+  return { source: "remote", service };
+}
+
+export async function setRuntimeDaemonServiceAutostartForUser(
+  userId: string,
+  enabled: boolean,
+): Promise<RuntimeDaemonServiceProxyResult> {
+  if (!isServerLocalCliDisabled()) {
+    throw new Error("本地 Web 模式不需要通过 machine tunnel 设置后台服务");
+  }
+
+  const machineId = pickOnlineMachineIdForUser(userId);
+  if (!machineId) {
+    if (enabled) {
+      throw new Error("请先连接本机电脑并保持在线，再开启 24h 运行");
+    }
+    return {
+      source: "remote",
+      service: offlineDaemonServiceStatus(),
+      message: "本机电脑未在线，无法远程卸载后台服务；请在本机执行 kiki-daemon uninstall",
+    };
+  }
+
+  const service = await getTunnelHub().requestDaemonServiceAutostart({ machineId, enabled });
+  return { source: "remote", service };
 }

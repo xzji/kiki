@@ -146,6 +146,7 @@ export type GoalPlanningRecoveryAction = "retry_collect" | "retry_plan" | "resum
 
 export type GoalPlanningRunState = {
   status: "failed";
+  source?: "goal" | "saga";
   phase: GoalWorkflowPhase;
   action: GoalPlanningRecoveryAction;
   goalText: string;
@@ -153,6 +154,10 @@ export type GoalPlanningRunState = {
   failedAt: string;
   updatedAt: string;
   lastUserMessage?: string;
+  sagaRequestId?: string;
+  sagaId?: string;
+  failedStep?: string;
+  failedAgentRunId?: string;
 };
 
 export type GoalInfoCollectionStatus =

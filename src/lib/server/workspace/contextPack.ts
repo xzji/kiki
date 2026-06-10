@@ -102,6 +102,19 @@ const ACTION_LABEL: Record<string, string> = {
 export function buildSafePlanningRunStateLine(
   state: NonNullable<Conversation["planningRunState"]>,
 ): string {
+  if (state.source === "saga") {
+    const segments = ["上一次 5 角色 Saga 目标规划失败，当前会话保留了可重试断点"];
+    if (state.failedStep) {
+      segments.push(`失败阶段：${state.failedStep}`);
+    }
+    if (state.errorMessage) {
+      segments.push("上一次执行因系统异常中断（错误细节已隐藏）");
+    }
+    if (state.goalText) {
+      segments.push(`目标文本：${truncate(state.goalText, 400)}`);
+    }
+    return segments.join("；");
+  }
   const phase = state.phase ? PHASE_LABEL[state.phase] || "目标规划" : "目标规划";
   const action = state.action ? ACTION_LABEL[state.action] || "处理中" : "处理中";
   const segments = [`上一次目标规划处于「${phase}」阶段，状态为「${action}」`];

@@ -1,7 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { promisify } from "util";
 
 import { collectDaemonServiceEnv } from "./pathEnv";
@@ -21,6 +21,23 @@ export type InstallContext = {
   /** 安装时捕获的完整环境变量；未提供则用当前 process.env 生成 */
   environment?: Record<string, string>;
 };
+
+/** install 时写入 plist/unit 的脚本路径；若通过 npx 调用但已全局安装，优先用全局路径。 */
+export function resolveInstallScriptPath(entryPath = process.argv[1] || __filename) {
+  const current = fs.realpathSync(entryPath);
+  if (!current.includes(`${path.sep}_npx${path.sep}`)) {
+    return current;
+  }
+  try {
+    const bin = execFileSync("which", ["kiki-daemon"], { encoding: "utf8" }).trim();
+    if (bin && !bin.includes("_npx")) {
+      return fs.realpathSync(bin);
+    }
+  } catch {
+    // ignore
+  }
+  return current;
+}
 
 function kikiHome() {
   return path.join(os.homedir(), ".kiki");

@@ -10,6 +10,9 @@
 - 新增会话过程侧边栏，用于在会话页查看 CLI 运行过程与聚合后的过程信息。
 - 新增 KiKi 默认 skills 管理能力，包括本地/远程状态查询、安装 API、tunnel 指令与前端调用封装。
 - 新增流式文件 artifact 回传与消息持久化支持，CLI 生成文件可作为会话附件展示。
+- 新增远程 24h daemon 后台服务管理能力，支持通过 machine tunnel 查询、开启和关闭本机后台服务。
+- 新增项目架构层级与产品定位文档，沉淀 KiKi 的长期目标执行平台定位、分层架构和演进优先级。
+- 新增 Saga Prompt 总结文档，说明 Interviewer、Planner、Critic、Refiner、Spec Writer、Presenter 的职责、输入输出与约束。
 
 ### Changed
 - 将机器 tunnel 从 WebSocket 调整为 HTTP 长轮询，降低部署环境中的连接兼容性问题。
@@ -18,6 +21,8 @@
 - 扩展规划测试入口，纳入 memory、runtime adapter、conversation store 与即时会话入口相关规格测试。
 - 增强 Runtime 环境与权限提示，关闭关键权限时明确提示附件能力受限。
 - 统一任务运行状态查询视图，API 返回 progress、logs、trajectory、blocker 与等待原因时使用同一服务端聚合逻辑。
+- 将 `@kiki_agent/daemon` 版本提升到 `0.2.5`，补充 `install`、`uninstall`、`status` 子命令与远程后台服务控制入口。
+- 增强 5 角色 Saga 规划失败恢复，保留失败阶段、可重试断点和补充信息状态，支持用户继续回复后重试。
 
 ### Fixed
 - 修复多 runtime 共用会话字段导致的跨 CLI session 泄漏问题，改为按 `runtimeKind` 隔离 `resumeSessionId`。
@@ -26,10 +31,13 @@
 - 修复任务规格生成与 tick 增量任务路径的降级、重复 ID 检测和 stale 标记遗漏。
 - 修复 Pi CLI 在模型调用失败、自动重试失败、assistant 输出为空或长时间静默时被误判为等待中的问题。
 - 修复任务取消、恢复和进度查询接口中 blocker/取消态/等待原因不一致的问题。
+- 修复 Saga 恢复上下文可能暴露内部错误、agent run id 或本地路径的问题。
+- 修复 dev panel saga 刷新 hook 的无效依赖 warning。
 
 ### Removed
 - 移除远端 `docs/` 目录并加入 `.gitignore`，项目文档不再同步到仓库。
 - 清理远端当前树中的 `.trae/`、本地 diagnostics、task audit 和历史备份分支中的本地数据库文件。
+- 过滤本地调试目录与 debug markdown，避免 `.dbg/`、`debug-*.md` 和本地调试上报地址进入提交。
 
 ### Verification
 - 通过 `pnpm tsc --noEmit`。

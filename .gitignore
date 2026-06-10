@@ -31,6 +31,8 @@ packages/*/dist
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+/.dbg/
+/debug-*.md
 
 # secrets & local env (never commit)
 .env

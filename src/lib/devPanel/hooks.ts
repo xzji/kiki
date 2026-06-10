@@ -59,7 +59,7 @@ export function useSagaInstances(input?: UseSagaInstancesInput): UseSagaInstance
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const statusKey = joinCsv(input?.statuses);
   const typeKey = joinCsv(input?.types);
 
@@ -72,7 +72,7 @@ export function useSagaInstances(input?: UseSagaInstancesInput): UseSagaInstance
     if (input?.limit) params.set("limit", String(input.limit));
     const qs = params.toString();
     return qs ? `/api/dev/runtime/sagas?${qs}` : `/api/dev/runtime/sagas`;
-  }, [statusKey, typeKey, input?.topicId, input?.sinceIso, input?.limit, tick]);
+  }, [statusKey, typeKey, input?.topicId, input?.sinceIso, input?.limit]);
 
   useEffect(() => {
     let aborted = false;
@@ -103,9 +103,9 @@ export function useSagaInstances(input?: UseSagaInstancesInput): UseSagaInstance
     return () => {
       aborted = true;
     };
-  }, [upsertSaga, url]);
+  }, [refreshNonce, upsertSaga, url]);
 
-  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  const refetch = useCallback(() => setRefreshNonce((value) => value + 1), []);
   const items = useMemo(() => {
     const merged = new Map<string, SagaInstance>();
     for (const saga of fetchedItems) merged.set(saga.id, saga);

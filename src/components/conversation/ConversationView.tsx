@@ -15,7 +15,7 @@ import { MemoryEditor } from "@/components/memory/MemoryEditor";
 import { streamClaudeChat } from "@/lib/api/claude";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { activateEnvironmentCommand } from "@/lib/api/runtime-environment-commands";
-import { generateTopicSagaPlan } from "@/lib/api/topics";
+import { generateTopicSagaPlan, TopicSagaPlanError } from "@/lib/api/topics";
 import {
   applyConversationGovernance,
   judgeConversationGovernance,
@@ -38,7 +38,7 @@ import { taskDetailPath } from "@/lib/routes";
 import { useConversationStore } from "@/stores/conversationStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
-import type { ConversationMessage, Goal } from "@/types/kiki";
+import type { ConversationMessage, Goal, GoalPlanningRunState, GoalWorkflowPhase } from "@/types/kiki";
 import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
 import type {
   CliProcessEvent,
@@ -178,6 +178,56 @@ function appendPlanningFailureMessage(current: string, error: unknown) {
   return `${current.trimEnd()}\n\n${failure}`;
 }
 
+function mapSagaStepToGoalPhase(step?: string): GoalWorkflowPhase {
+  if (step === "interview") return "collecting_info";
+  if (step === "critic" || step === "refine") return "reviewing_tasks";
+  if (step === "present") return "presenting_plan";
+  return "decomposing";
+}
+
+function createSagaPlanningFailureState(input: {
+  topicText: string;
+  sagaRequestId: string;
+  error: unknown;
+  lastUserMessage?: string;
+}): GoalPlanningRunState {
+  const now = new Date().toISOString();
+  const sagaError = input.error instanceof TopicSagaPlanError ? input.error : null;
+  const message = getErrorMessage(input.error, "5 角色 Saga 规划失败");
+  return {
+    status: "failed",
+    source: "saga",
+    phase: mapSagaStepToGoalPhase(sagaError?.failedStep),
+    action: "retry_plan",
+    goalText: input.topicText,
+    errorMessage: message,
+    failedAt: now,
+    updatedAt: now,
+    lastUserMessage: input.lastUserMessage,
+    sagaRequestId: input.sagaRequestId,
+    sagaId: sagaError?.sagaId,
+    failedStep: sagaError?.failedStep,
+    failedAgentRunId: sagaError?.failedAgentRunId,
+  };
+}
+
+function buildSagaRecoveryConversationContext(input: {
+  recovery: GoalPlanningRunState;
+  userMessage: string;
+  messages: ConversationMessage[];
+}) {
+  return [
+    buildRecentConversationContext(input.messages),
+    "Saga 恢复上下文：",
+    `原始目标：${input.recovery.goalText}`,
+    input.recovery.failedStep ? `上次失败阶段：${input.recovery.failedStep}` : undefined,
+    input.recovery.errorMessage ? `上次失败原因：${input.recovery.errorMessage}` : undefined,
+    input.userMessage.trim() ? `用户本次恢复指令：${input.userMessage.trim()}` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function isScrollNearBottom(container: HTMLElement, threshold = 48) {
   return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
 }
@@ -246,6 +296,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const setConversationRuntimeEnv = useConversationStore((state) => state.setConversationRuntimeEnv);
   const setConversationStatus = useConversationStore((state) => state.setConversationStatus);
   const setGoalInfoCollection = useConversationStore((state) => state.setGoalInfoCollection);
+  const setPlanningRunState = useConversationStore((state) => state.setPlanningRunState);
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const goals = useGoalStore(selectVisibleGoals);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
@@ -776,7 +827,87 @@ export function ConversationView({ conversationId }: { conversationId: string })
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
 
+      let activeSagaRecoveryRequestId: string | undefined;
       try {
+        if (hasLocalPlanningFailure && conversation.planningRunState?.source === "saga") {
+          const recovery = conversation.planningRunState;
+          const runtimeEnv = activeRuntimeEnv;
+          if (!runtimeEnv || runtimeEnv.type !== "local") {
+            throw new Error("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
+          }
+          if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
+            throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
+          }
+          appendActiveGoalProgress(controller, assistantId, {
+            message: recovery.failedStep
+              ? `正在从 Saga ${recovery.failedStep} 失败点重新推进...`
+              : "正在从上次 Saga 失败点重新推进...",
+          });
+          const sagaRequestId = `topic-saga-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          activeSagaRecoveryRequestId = sagaRequestId;
+          const result = await generateTopicSagaPlan({
+            topicText: recovery.goalText,
+            runtimeEnv,
+            conversationId: conversation.id,
+            conversationContext: buildSagaRecoveryConversationContext({
+              recovery,
+              userMessage: text,
+              messages: conversation.messages,
+            }),
+            requestId: sagaRequestId,
+            signal: controller.signal,
+          });
+          if (result.kind === "awaiting_user") {
+            const questionText = result.questions
+              .map((question, index) => `${index + 1}. ${question}`)
+              .join("\n");
+            setPlanningRunState(conversation.id, {
+              ...recovery,
+              updatedAt: new Date().toISOString(),
+              lastUserMessage: text,
+              sagaRequestId,
+              sagaId: result.sagaId ?? recovery.sagaId,
+              errorMessage: "Saga 需要补充信息后才能继续。",
+            });
+            updateMessage(conversation.id, assistantId, (message) => ({
+              ...message,
+              content: questionText
+                ? `5 角色 Saga 仍需要补充信息：\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`
+                : "5 角色 Saga 需要更多信息才能继续，请补充后回复“继续”。",
+              status: "done",
+              sagaRequestId,
+            }));
+            setConversationStatus(conversation.id, "idle");
+            return;
+          }
+          const committed = await commitGoalDraftToStores({
+            conversationId: conversation.id,
+            draft: result.draft,
+          });
+          setPlanningRunState(conversation.id, null);
+          setGoalInfoCollection(conversation.id, null);
+          updateMessage(conversation.id, assistantId, (message) => ({
+            id: message.id,
+            kind: "goal_plan_card",
+            role: "kiki",
+            content: goalPlanMessageContent(),
+            createdAt: message.createdAt,
+            unread: message.unread,
+            status: "done",
+            source: "kiki",
+            sagaRequestId,
+            goalRef: {
+              goalId: committed.goalId,
+              title: committed.goalTitle,
+              summary: committed.summary,
+              subGoalCount: committed.subGoalCount,
+              taskCount: committed.taskCount,
+            },
+          }));
+          setConversationStatus(conversation.id, "idle");
+          setActivePlanGoalId(committed.goalId);
+          return;
+        }
         const progressHandler = (progress: { message: string }) => {
           appendActiveGoalProgress(controller, assistantId, progress);
         };
@@ -834,6 +965,18 @@ export function ConversationView({ conversationId }: { conversationId: string })
             setHasLocalActiveStream(false);
           }
           return;
+        }
+        if (hasLocalPlanningFailure && conversation.planningRunState?.source === "saga") {
+          setPlanningRunState(
+            conversation.id,
+            createSagaPlanningFailureState({
+              topicText: conversation.planningRunState.goalText,
+              sagaRequestId:
+                activeSagaRecoveryRequestId ?? `topic-saga-retry-failed-${Date.now()}`,
+              error,
+              lastUserMessage: text,
+            }),
+          );
         }
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
@@ -1010,11 +1153,25 @@ export function ConversationView({ conversationId }: { conversationId: string })
           const questionText = result.questions
             .map((question, index) => `${index + 1}. ${question}`)
             .join("\n");
+          setPlanningRunState(conversation.id, {
+            status: "failed",
+            source: "saga",
+            phase: "collecting_info",
+            action: "retry_plan",
+            goalText: parsedCommand.payload,
+            errorMessage: "Saga 需要补充信息后才能继续。",
+            failedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastUserMessage: text,
+            sagaRequestId,
+            sagaId: result.sagaId,
+            failedStep: "interview",
+          });
           updateMessage(conversation.id, assistantId, (message) => ({
             ...message,
             content: questionText
-              ? `5 角色 Saga 仍需要补充信息：\n\n${questionText}\n\n当前 /saga 先走单轮模式，你可以把补充信息合并到下一条新的 /saga ... 指令里重新发起。`
-              : "5 角色 Saga 需要更多信息才能继续，请补充后重新使用 /saga 发起。",
+              ? `5 角色 Saga 仍需要补充信息：\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`
+              : "5 角色 Saga 需要更多信息才能继续，请补充后回复“继续”。",
             status: "done",
           }));
           setConversationStatus(conversation.id, "idle");
@@ -1024,6 +1181,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           conversationId: conversation.id,
           draft: result.draft,
         });
+        setPlanningRunState(conversation.id, null);
         updateMessage(conversation.id, assistantId, (message) => ({
           id: message.id,
           kind: "goal_plan_card",
@@ -1049,6 +1207,15 @@ export function ConversationView({ conversationId }: { conversationId: string })
           setConversationStatus(conversation.id, "idle");
           return;
         }
+        setPlanningRunState(
+          conversation.id,
+          createSagaPlanningFailureState({
+            topicText: parsedCommand.payload,
+            sagaRequestId,
+            error,
+            lastUserMessage: text,
+          }),
+        );
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
           content: appendPlanningFailureMessage(message.content, error),
