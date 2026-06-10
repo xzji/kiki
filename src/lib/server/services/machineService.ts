@@ -57,6 +57,35 @@ function toMachineRecord(row: MachineRow): MachineRecord {
   };
 }
 
+function isStableDeviceFingerprint(fingerprint: string) {
+  return fingerprint.startsWith("device:");
+}
+
+function canUpgradeLegacyFingerprint(storedFingerprint: string, incomingFingerprint: string) {
+  return (
+    !isStableDeviceFingerprint(storedFingerprint) &&
+    isStableDeviceFingerprint(incomingFingerprint) &&
+    incomingFingerprint.startsWith(`device:${storedFingerprint}:`)
+  );
+}
+
+function deleteDuplicateStableFingerprintMachines(input: {
+  machineId: string;
+  fingerprint: string;
+}) {
+  const fingerprint = input.fingerprint.trim();
+  if (!isStableDeviceFingerprint(fingerprint)) return;
+  const db = getRegistryDatabase();
+  db.prepare(
+    `
+      DELETE FROM machines
+      WHERE id <> ?
+        AND fingerprint = ?
+        AND user_id = (SELECT user_id FROM machines WHERE id = ?)
+    `,
+  ).run(input.machineId, fingerprint, input.machineId);
+}
+
 /** 清理从未连上过（无心跳）的占位记录，避免反复打开弹窗堆积 My Machine */
 export function deleteNeverConnectedMachinesForUser(userId: string) {
   const db = getRegistryDatabase();
@@ -142,13 +171,15 @@ export function touchMachineHeartbeat(machineId: string, fingerprint?: string) {
   const db = getRegistryDatabase();
   const now = nowIso();
   if (fingerprint?.trim()) {
+    const normalizedFingerprint = fingerprint.trim();
     db.prepare(
       `
         UPDATE machines
         SET last_seen_at = ?, fingerprint = COALESCE(fingerprint, ?)
         WHERE id = ?
       `,
-    ).run(now, fingerprint.trim(), machineId);
+    ).run(now, normalizedFingerprint, machineId);
+    deleteDuplicateStableFingerprintMachines({ machineId, fingerprint: normalizedFingerprint });
     return;
   }
   db.prepare(`UPDATE machines SET last_seen_at = ? WHERE id = ?`).run(now, machineId);
@@ -162,6 +193,12 @@ export function assertMachineFingerprint(machineId: string, fingerprint: string)
   if (!row) return { ok: false as const, reason: "machine 不存在" };
   if (!row.fingerprint) {
     db.prepare(`UPDATE machines SET fingerprint = ? WHERE id = ?`).run(fingerprint, machineId);
+    deleteDuplicateStableFingerprintMachines({ machineId, fingerprint });
+    return { ok: true as const };
+  }
+  if (canUpgradeLegacyFingerprint(row.fingerprint, fingerprint)) {
+    db.prepare(`UPDATE machines SET fingerprint = ? WHERE id = ?`).run(fingerprint, machineId);
+    deleteDuplicateStableFingerprintMachines({ machineId, fingerprint });
     return { ok: true as const };
   }
   if (row.fingerprint !== fingerprint) {

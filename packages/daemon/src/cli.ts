@@ -55,7 +55,7 @@ function printHelp() {
   kiki-daemon help                                             显示本帮助
 
 示例:
-  npx @kiki_agent/daemon@latest install --server-url https://kiki.example.com --api-key sk_machine_xxx
+  npm i -g @kiki_agent/daemon@latest && kiki-daemon install --server-url https://kiki.example.com --api-key sk_machine_xxx
 `);
 }
 

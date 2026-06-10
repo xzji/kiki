@@ -30,6 +30,10 @@ export type GoalCommand =
       goal: Goal;
     }
   | {
+      type: "replace_goal_plan";
+      goal: Goal;
+    }
+  | {
       type: "confirm_goal_plan";
       goalId: string;
     }
@@ -216,6 +220,57 @@ function updateGoalWorkflow(goal: Goal, updater: (previous: GoalWorkflow | undef
   };
 }
 
+function assertGoalPlanReplaceable(goal: Goal) {
+  const phase = goal.workflow?.phase;
+  if (
+    goal.workflow?.planDecision === "confirmed" ||
+    phase === "executing" ||
+    phase === "monitoring" ||
+    phase === "reviewing" ||
+    phase === "completed"
+  ) {
+    throw new GoalCommandValidationError(409, "已确认或执行中的主题规划不能整体替换，请通过任务治理修改");
+  }
+  const hasTaskInstances = goal.subGoals.some((subGoal) => subGoal.tasks.some((task) => task.instances.length > 0));
+  if (hasTaskInstances) {
+    throw new GoalCommandValidationError(409, "已有执行记录的主题规划不能整体替换，请通过任务治理修改");
+  }
+}
+
+function assertReplacementWorkflow(goal: Goal) {
+  if (goal.workflow?.phase !== "presenting_plan" || goal.workflow.planDecision !== "pending") {
+    throw new GoalCommandValidationError(400, "替换后的主题规划必须回到待确认状态");
+  }
+}
+
+function replaceGoalPlan(goals: Goal[], replacement: Goal) {
+  const normalizedReplacement = migrateGoalIds(replacement);
+  validateGoalEntity(normalizedReplacement);
+  assertReplacementWorkflow(normalizedReplacement);
+  const existing = findGoal(goals, normalizedReplacement.id);
+  assertGoalPlanReplaceable(existing);
+  const existingGoalId = normalizeGoalId(existing.id);
+  const nextGoal: Goal = {
+    ...normalizedReplacement,
+    id: existingGoalId,
+    createdAt: existing.createdAt,
+    conversationId: existing.conversationId,
+    kind: existing.kind,
+    progress: 0,
+    subGoals: normalizedReplacement.subGoals.map((subGoal) => ({
+      ...subGoal,
+      goalId: existingGoalId,
+      tasks: subGoal.tasks.map((task) => ({
+        ...task,
+        progress: 0,
+        instances: [],
+      })),
+    })),
+  };
+  validateGoalEntity(nextGoal);
+  return goals.map((goal) => (normalizeGoalId(goal.id) === existingGoalId ? nextGoal : goal));
+}
+
 function createSubGoal(input: { goalId: string; title: string; idempotencyKey: string; index: number }): SubGoal {
   const title = assertTitle(input.title, "子目标标题");
   return {
@@ -277,6 +332,8 @@ function applyCommandToGoals(goals: Goal[], command: GoalCommand, idempotencyKey
       }
       return [...goals, migrateGoalIds(command.goal)];
     }
+    case "replace_goal_plan":
+      return replaceGoalPlan(goals, command.goal);
     case "confirm_goal_plan":
       return withGoal(goals, command.goalId, (goal) =>
         updateGoalWorkflow(goal, (previous) => ({
@@ -403,6 +460,18 @@ function eventPayloadForCommand(command: GoalCommand, idempotencyKey: string) {
           title: command.goal.title,
         },
       };
+    case "replace_goal_plan": {
+      const normalizedGoal = migrateGoalIds(command.goal);
+      return {
+        kind: "goal.structure_changed" as const,
+        payload: {
+          action: "goal.plan_replaced" as const,
+          entityId: normalizeGoalId(normalizedGoal.id),
+          entityHash: hashValue(normalizedGoal),
+          title: normalizedGoal.title,
+        },
+      };
+    }
     case "confirm_goal_plan":
       return {
         kind: "goal.workflow_changed" as const,
@@ -470,7 +539,7 @@ function eventPayloadForCommand(command: GoalCommand, idempotencyKey: string) {
 }
 
 function goalIdForCommand(command: GoalCommand, goals: Goal[]) {
-  if (command.type === "create_goal") return command.goal.id;
+  if (command.type === "create_goal" || command.type === "replace_goal_plan") return command.goal.id;
   if ("goalId" in command) return command.goalId;
   const affected = goals.find((goal) => goal.conversationId === command.conversationId);
   return affected?.id ?? deriveOpaqueId("goal", `conversation:${command.conversationId}`);

@@ -395,7 +395,7 @@ export function getTunnelHub() {
         const timer = setTimeout(() => {
           state.pendingDiscover.delete(requestId);
           reject(
-            new Error("本机扫描超时。请确认 daemon 已更新到最新版（npx @kiki_agent/daemon@latest）并保持在线。"),
+            new Error("本机扫描超时。请确认 daemon 已全局安装并更新到最新版（npm i -g @kiki_agent/daemon@latest）且保持在线。"),
           );
         }, timeoutMs);
         state.pendingDiscover.set(requestId, { machineId: input.machineId, resolve, reject, timer });

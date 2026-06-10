@@ -69,6 +69,10 @@ function parseGoalCommand(value: unknown): GoalCommand | null {
     const goal = parseGoalValue(record.goal);
     return goal ? { type, goal } : null;
   }
+  if (type === "replace_goal_plan") {
+    const goal = parseGoalValue(record.goal);
+    return goal ? { type, goal } : null;
+  }
   if (type === "delete_goals_by_conversation") {
     const conversationId = readNonEmptyString(record, "conversationId");
     return conversationId ? { type, conversationId } : null;

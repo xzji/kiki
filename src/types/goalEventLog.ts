@@ -37,6 +37,7 @@ export type GoalEventPayloadMap = {
   "goal.structure_changed": {
     action:
       | "goal.created"
+      | "goal.plan_replaced"
       | "task.updated"
       | "task.created"
       | "task.deleted"

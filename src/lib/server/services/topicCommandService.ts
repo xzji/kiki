@@ -58,6 +58,10 @@ export type TopicCommand =
       topic: Goal;
     }
   | {
+      type: "replace_topic_plan";
+      topic: Goal;
+    }
+  | {
       type: "confirm_topic_plan";
       topicId: string;
     }
@@ -118,6 +122,8 @@ export function mapTopicCommandToGoalCommand(command: TopicCommand): GoalCommand
   switch (command.type) {
     case "create_topic":
       return { type: "create_goal", goal: command.topic };
+    case "replace_topic_plan":
+      return { type: "replace_goal_plan", goal: command.topic };
     case "confirm_topic_plan":
       return { type: "confirm_goal_plan", goalId: command.topicId };
     case "request_topic_plan_revision":

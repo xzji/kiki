@@ -27,6 +27,7 @@
 - Refiner 改为调用真实 JSON invoke，支持局部 patch 合并到当前计划；Refiner 失败时保留当前计划继续让 Critic 复审。
 - goal plan card 支持持久化与 hydration `cliProcess`，刷新后仍可查看目标规划过程。
 - 缩短远程 daemon 服务状态和自启动设置请求超时时间，减少 UI 长时间等待。
+- 将 `@kiki_agent/daemon` 版本提升到 `0.2.6`，使用稳定设备指纹支持同一电脑覆盖连接自动去重。
 
 ### Fixed
 - 修复多 runtime 共用会话字段导致的跨 CLI session 泄漏问题，改为按 `runtimeKind` 隔离 `resumeSessionId`。
@@ -38,6 +39,7 @@
 - 修复 Saga 恢复上下文可能暴露内部错误、agent run id 或本地路径的问题。
 - 修复 dev panel saga 刷新 hook 的无效依赖 warning。
 - 修复过程侧边栏对已完成/无事件过程的折叠展示与空态提示。
+- 修复已连接电脑重复展示且在线机器无法移除的问题，删除在线电脑时会提示将断开 daemon。
 
 ### Removed
 - 移除远端 `docs/` 目录并加入 `.gitignore`，项目文档不再同步到仓库。

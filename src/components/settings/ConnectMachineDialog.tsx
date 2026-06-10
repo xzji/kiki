@@ -52,6 +52,13 @@ function formatRelativeTime(value?: string | null) {
   }).format(date);
 }
 
+function formatMachineFingerprint(fingerprint?: string | null) {
+  if (!fingerprint) return "未知平台";
+  const matched = /^device:([^:]+):(.+)$/.exec(fingerprint);
+  if (!matched) return fingerprint;
+  return `${matched[1]} · ${matched[2].slice(0, 8)}`;
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -252,7 +259,7 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
                   已连接：{connectedMachine?.name || "本机电脑"}
                 </div>
                 <div className="mt-0.5 text-[12px] text-[#3F8F5F]">
-                  {connectedMachine?.fingerprint || "未知平台"} · {formatRelativeTime(connectedMachine?.lastSeenAt)} · 在线
+                  {formatMachineFingerprint(connectedMachine?.fingerprint)} · {formatRelativeTime(connectedMachine?.lastSeenAt)} · 在线
                 </div>
               </div>
             </div>

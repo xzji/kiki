@@ -14,8 +14,17 @@ type RequestBody = {
   runtimeEnv: RuntimeEnvironment;
   conversationId?: string;
   conversationContext?: string;
+  revisionFeedback?: string;
+  previousPlanContext?: string;
   maxRefineLoops?: number;
 };
+
+function joinContextParts(parts: Array<string | undefined>) {
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+}
 
 async function POSTHandler(request: NextRequest) {
   const body = (await request.json()) as RequestBody;
@@ -35,14 +44,24 @@ async function POSTHandler(request: NextRequest) {
       `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const conversationId = body.conversationId?.trim();
     const workspace = conversationId ? ensureConversationWorkspace(conversationId) : undefined;
+    const revisionFeedback = body.revisionFeedback?.trim() || undefined;
+    const previousPlanContext = body.previousPlanContext?.trim() || undefined;
+    const revisionContext = revisionFeedback
+      ? joinContextParts([
+          previousPlanContext ? `上一版主题规划摘要：\n${previousPlanContext}` : undefined,
+          `用户对上一版规划的调整意见：\n${revisionFeedback}`,
+        ])
+      : undefined;
     const result = await runTopicInitSagaWithDefaults({
       topicId: `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       topicText,
-      conversationContext: body.conversationContext,
+      conversationContext: joinContextParts([body.conversationContext, revisionContext]) || undefined,
       userContext: {
-        command: "/saga",
+        command: revisionFeedback ? "/saga revision" : "/saga",
         initialRequest: topicText,
         conversationId,
+        revisionFeedback,
+        previousPlanContext,
       },
       cwd: workspace?.workspaceDir ?? process.cwd(),
       runtimeEnv: body.runtimeEnv,

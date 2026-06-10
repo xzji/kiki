@@ -124,6 +124,13 @@ function formatLocalDateTime(value?: string) {
   }).format(date);
 }
 
+function formatMachineFingerprint(fingerprint?: string | null) {
+  if (!fingerprint) return "未知平台";
+  const matched = /^device:([^:]+):(.+)$/.exec(fingerprint);
+  if (!matched) return fingerprint;
+  return `${matched[1]} · ${matched[2].slice(0, 8)}`;
+}
+
 export function RuntimeEnvironmentPanel() {
   const environments = useRuntimeEnvStore((state) => state.environments);
   const setEnvironmentHealth = useRuntimeEnvStore((state) => state.setEnvironmentHealth);
@@ -141,7 +148,7 @@ export function RuntimeEnvironmentPanel() {
   const [daemonActionError, setDaemonActionError] = useState<string | null>(null);
   const [daemonSwitchPending, setDaemonSwitchPending] = useState(false);
   const [daemonRefreshPending, setDaemonRefreshPending] = useState(false);
-  const [daemonRefreshFeedback, setDaemonRefreshFeedback] = useState<"success" | "error" | null>(null);
+  const [daemonRefreshFeedback, setDaemonRefreshFeedback] = useState<"error" | null>(null);
   const [confirm24hOpen, setConfirm24hOpen] = useState(false);
   const [optimisticDaemonEnabled, setOptimisticDaemonEnabled] = useState<boolean | null>(null);
   const daemonSwitchPendingRef = useRef(false);
@@ -341,6 +348,21 @@ export function RuntimeEnvironmentPanel() {
     }
   }, []);
 
+  const handleDeleteMachine = useCallback(async (machine: MachineRecord) => {
+    const title = machine.name || "本机电脑";
+    const message = machine.online
+      ? `移除在线电脑「${title}」？\n\n这会立即断开该 daemon；如果之后还要使用，需要重新运行连接命令。`
+      : `移除本机电脑「${title}」？`;
+    const ok = window.confirm(message);
+    if (!ok) return;
+    try {
+      await deleteMachine(machine.id);
+      await loadMachines();
+    } catch (error) {
+      console.error("删除本机电脑失败", error);
+    }
+  }, [loadMachines]);
+
   useEffect(() => {
     daemonSwitchPendingRef.current = daemonSwitchPending;
   }, [daemonSwitchPending]);
@@ -401,7 +423,6 @@ export function RuntimeEnvironmentPanel() {
     setDaemonRefreshFeedback(null);
     try {
       await loadDaemonStatus();
-      setDaemonRefreshFeedback("success");
     } catch {
       setDaemonRefreshFeedback("error");
     } finally {
@@ -468,7 +489,6 @@ export function RuntimeEnvironmentPanel() {
   const daemonStatusBadge = useMemo(() => {
     if (daemonSwitchPending) return { label: "加载中", tone: "neutral" as const, loading: true };
     if (daemonRefreshPending) return { label: "刷新中", tone: "neutral" as const, loading: true };
-    if (daemonRefreshFeedback === "success") return { label: "刷新成功", tone: "success" as const, loading: false };
     if (daemonRefreshFeedback === "error") return { label: "刷新失败", tone: "error" as const, loading: false };
     if (!effectiveDaemonEnabled) return { label: "已关闭", tone: "neutral" as const, loading: false };
     if (daemonStatus?.state?.status === "error") return { label: "异常", tone: "error" as const, loading: false };
@@ -604,7 +624,7 @@ export function RuntimeEnvironmentPanel() {
                         {machine.name || "本机电脑"}
                       </div>
                       <div className="mt-0.5 text-[12px] text-[#6B7280]">
-                        {machine.fingerprint || "未知平台"} · {formatLocalDateTime(machine.lastSeenAt ?? undefined)}
+                        {formatMachineFingerprint(machine.fingerprint)} · {formatLocalDateTime(machine.lastSeenAt ?? undefined)}
                       </div>
                     </div>
                   </div>
@@ -619,24 +639,15 @@ export function RuntimeEnvironmentPanel() {
                     >
                       {machine.online ? "在线" : "离线"}
                     </span>
-                    {!machine.online ? (
-                      <button
-                        type="button"
-                        aria-label="移除本机电脑"
-                        onClick={() => {
-                          const ok = window.confirm(`移除本机电脑「${machine.name || "本机电脑"}」？`);
-                          if (!ok) return;
-                          void deleteMachine(machine.id)
-                            .then(() => loadMachines())
-                            .catch((error) => {
-                              console.error("删除本机电脑失败", error);
-                            });
-                        }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#B42318] hover:bg-[#FEF2F2]"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      aria-label="移除本机电脑"
+                      title={machine.online ? "移除并断开此在线电脑" : "移除本机电脑"}
+                      onClick={() => void handleDeleteMachine(machine)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#B42318] hover:bg-[#FEF2F2]"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -794,11 +805,9 @@ export function RuntimeEnvironmentPanel() {
                         <span
                           className={cn(
                             "rounded-full border px-2 py-1 text-[11px]",
-                            daemonStatusBadge.tone === "success"
-                              ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#166534]"
-                              : daemonStatusBadge.tone === "error"
-                                ? "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]"
-                                : "border-[#E5E7EB] bg-white text-[#111]",
+                            daemonStatusBadge.tone === "error"
+                              ? "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]"
+                              : "border-[#E5E7EB] bg-white text-[#111]",
                           )}
                         >
                           {daemonStatusBadge.loading ? (

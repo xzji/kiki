@@ -69,6 +69,10 @@ function parseTopicCommand(value: unknown): TopicCommand | null {
     const topic = parseTopicValue(record.topic);
     return topic ? { type, topic } : null;
   }
+  if (type === "replace_topic_plan") {
+    const topic = parseTopicValue(record.topic);
+    return topic ? { type, topic } : null;
+  }
   if (type === "delete_topics_by_conversation") {
     const conversationId = readNonEmptyString(record, "conversationId");
     return conversationId ? { type, conversationId } : null;

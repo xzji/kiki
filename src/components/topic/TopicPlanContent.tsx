@@ -9,7 +9,9 @@ import { ChatHistoryView } from "@/components/topic/ChatHistoryView";
 import { DigestTopicView } from "@/components/topic/DigestTopicView";
 import { ThreadBlock } from "@/components/topic/ThreadBlock";
 import { ThreadCreateDrawer } from "@/components/topic/ThreadCreateDrawer";
-import { confirmGoalPlanCommand, requestGoalPlanRevisionCommand } from "@/lib/api/goal-commands";
+import { confirmGoalPlanCommand } from "@/lib/api/goal-commands";
+import { generateTopicSagaPlan } from "@/lib/api/topics";
+import { replaceGoalDraftInStores } from "@/lib/goalWorkflow";
 import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { dependencySatisfied } from "@/lib/taskDependencies";
 import { deriveTaskDisplayState, stripTaskPrefix } from "@/lib/taskInstance";
@@ -18,7 +20,9 @@ import { BASE_DATE, formatDateInput } from "@/lib/date";
 import { topicDetailPath, topicTaskDetailPath } from "@/lib/routes";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
+import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, GoalWorkflowPhase, Task, TaskExecutionPhase, TaskInstanceStatus } from "@/types/kiki";
+import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
 
 type WorkflowTaskState = "in_progress" | "paused" | "awaiting_user" | "pending" | "error" | "completed";
 
@@ -112,6 +116,53 @@ export function TopicPlanBreadcrumb({
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function getStoredRevisionFeedback(goal: Goal) {
+  return readString(asRecord(goal.workflow?.collectedInfo)?.revisionFeedback);
+}
+
+function trimContext(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}\n...` : value;
+}
+
+function buildPreviousPlanContext(goal: Goal) {
+  const workflowInfo = [
+    goal.workflow?.reasoning ? `规划理由：${goal.workflow.reasoning}` : undefined,
+    goal.workflow?.notificationStrategy ? `提醒策略：${goal.workflow.notificationStrategy}` : undefined,
+  ].filter(Boolean);
+  const threads = goal.subGoals.map((subGoal, subGoalIndex) => {
+    const tasks = subGoal.tasks.slice(0, 8).map((task, taskIndex) =>
+      [
+        `  ${taskIndex + 1}. ${task.title}`,
+        task.description ? `     描述：${task.description}` : undefined,
+        `     预期结果：${task.expectedOutcome}`,
+      ].filter(Boolean).join("\n"),
+    );
+    return [
+      `${subGoalIndex + 1}. ${subGoal.title}`,
+      subGoal.description ? `   描述：${subGoal.description}` : undefined,
+      tasks.join("\n"),
+    ].filter(Boolean).join("\n");
+  });
+  return trimContext(
+    [
+      `主题：${goal.title}`,
+      goal.summary ? `摘要：${goal.summary}` : undefined,
+      ...workflowInfo,
+      "当前线程与任务：",
+      threads.join("\n\n"),
+    ].filter(Boolean).join("\n"),
+    6000,
+  );
+}
+
 export function TopicPlanContent({
   goal,
   onOpenTask,
@@ -124,6 +175,7 @@ export function TopicPlanContent({
   const router = useRouter();
   const inboxItems = useInboxStore((state) => state.items);
   const markTaskRead = useInboxStore((state) => state.markTaskRead);
+  const getActiveRuntimeEnv = useRuntimeEnvStore((state) => state.getActiveEnvironment);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const goalProjectionRevision = useGoalStore((state) => state.goalProjectionRevision);
   const pendingSubGoalCreates = useGoalStore((state) => state.pendingSubGoalCreates);
@@ -134,6 +186,8 @@ export function TopicPlanContent({
   const addPendingGoalWorkflow = useGoalStore((state) => state.addPendingGoalWorkflow);
   const removePendingGoalWorkflow = useGoalStore((state) => state.removePendingGoalWorkflow);
   const [subGoalDrawerOpen, setSubGoalDrawerOpen] = useState(false);
+  const [revisionSubmitting, setRevisionSubmitting] = useState(false);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
   const pendingTaskCreateIds = new Set(
     pendingTaskCreates
       .filter((item) => item.goalId === goal.id)
@@ -240,6 +294,75 @@ export function TopicPlanContent({
     router.push(topicTaskDetailPath(goal.id, task.id));
   };
 
+  const runRevisionPlan = async (feedback: string) => {
+    const normalizedFeedback = feedback.trim();
+    if (!normalizedFeedback || revisionSubmitting) return;
+    const runtimeEnv = getActiveRuntimeEnv();
+    if (!runtimeEnv || runtimeEnv.type !== "local") {
+      window.alert("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
+      return;
+    }
+    if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
+      window.alert("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
+      return;
+    }
+    const overlayId = createOpaqueId("idem");
+    const requestId = `topic-saga-revision-${goal.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replaceIdempotencyKey = createIdempotencyKey("topic.replace_plan", goal.id, normalizedFeedback, overlayId);
+    setRevisionSubmitting(true);
+    setRevisionError(null);
+    addPendingGoalWorkflow({
+      id: overlayId,
+      goalId: goal.id,
+      idempotencyKey: replaceIdempotencyKey,
+      createdAt: new Date().toISOString(),
+      workflow: {
+        ...(displayWorkflow ?? goal.workflow),
+        phase: "decomposing",
+        planDecision: "revision_requested",
+        startedAt: displayWorkflow?.startedAt ?? goal.workflow?.startedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        collectedInfo: {
+          ...(displayWorkflow?.collectedInfo ?? goal.workflow?.collectedInfo ?? {}),
+          revisionFeedback: normalizedFeedback,
+        },
+      },
+    });
+    try {
+      const result = await generateTopicSagaPlan({
+        topicText: goal.title,
+        runtimeEnv,
+        conversationId: goal.conversationId,
+        revisionFeedback: normalizedFeedback,
+        previousPlanContext: buildPreviousPlanContext(goal),
+        requestId,
+      });
+      if (result.kind === "awaiting_user") {
+        const questions = result.questions.map((question, index) => `${index + 1}. ${question}`).join("\n");
+        window.alert(questions ? `Saga 需要补充信息：\n\n${questions}` : "Saga 需要补充信息后才能继续。");
+        return;
+      }
+      await replaceGoalDraftInStores({
+        goal,
+        draft: result.draft,
+        revisionFeedback: normalizedFeedback,
+        baseRevision: goalProjectionRevision,
+        idempotencyKey: replaceIdempotencyKey,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "规划重新生成失败";
+      setRevisionError(message);
+      window.alert(message);
+    } finally {
+      removePendingGoalWorkflow(overlayId);
+      setRevisionSubmitting(false);
+    }
+  };
+
+  const isPlanPending = displayWorkflow?.phase === "presenting_plan" && displayWorkflow.planDecision === "pending";
+  const isRevisionStuck = displayWorkflow?.phase === "decomposing" && displayWorkflow.planDecision === "revision_requested";
+  const canRevisePlan = isPlanPending || isRevisionStuck;
+
   return (
     <div className="max-w-[920px] pb-12">
       <section className="mb-8 rounded-[20px] border border-[#E5E7EB] bg-white p-6">
@@ -287,85 +410,68 @@ export function TopicPlanContent({
                   <div className="mt-1 text-sm font-medium text-[#1F2328]">
                     {phaseLabel(displayWorkflow.phase)}
                   </div>
-                  {pendingGoalWorkflow ? (
-                    <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">保存中...</div>
+                  {pendingGoalWorkflow || revisionSubmitting ? (
+                    <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">
+                      {revisionSubmitting ? "重新生成规划中..." : "保存中..."}
+                    </div>
                   ) : null}
                   {displayWorkflow.error ? (
                     <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{displayWorkflow.error}</div>
                   ) : null}
+                  {revisionError ? (
+                    <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{revisionError}</div>
+                  ) : null}
                 </div>
-                {displayWorkflow.phase === "presenting_plan" && displayWorkflow.planDecision === "pending" ? (
+                {canRevisePlan ? (
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => {
-                        const feedback = window.prompt("告诉 KiKi 你希望如何调整这份计划：");
+                        const feedback = window.prompt(
+                          "告诉 KiKi 你希望如何调整这份计划：",
+                          isRevisionStuck ? getStoredRevisionFeedback(goal) ?? "" : "",
+                        );
                         if (!feedback?.trim()) return;
-                        const overlayId = createOpaqueId("idem");
-                        const idempotencyKey = createIdempotencyKey("goal.request_plan_revision", goal.id, feedback.trim(), overlayId);
-                        addPendingGoalWorkflow({
-                          id: overlayId,
-                          goalId: goal.id,
-                          idempotencyKey,
-                          createdAt: new Date().toISOString(),
-                          workflow: {
-                            ...displayWorkflow,
-                            phase: "decomposing",
-                            planDecision: "revision_requested",
-                            updatedAt: new Date().toISOString(),
-                            collectedInfo: {
-                              ...(displayWorkflow.collectedInfo ?? {}),
-                              revisionFeedback: feedback.trim(),
+                        void runRevisionPlan(feedback);
+                      }}
+                      disabled={revisionSubmitting}
+                      className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {revisionSubmitting ? "重新生成中..." : isRevisionStuck ? "重新生成规划" : "继续调整"}
+                    </button>
+                    {isPlanPending ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const overlayId = createOpaqueId("idem");
+                          const idempotencyKey = createIdempotencyKey("goal.confirm_plan", goal.id, overlayId);
+                          addPendingGoalWorkflow({
+                            id: overlayId,
+                            goalId: goal.id,
+                            idempotencyKey,
+                            createdAt: new Date().toISOString(),
+                            workflow: {
+                              ...displayWorkflow,
+                              phase: "executing",
+                              planDecision: "confirmed",
+                              updatedAt: new Date().toISOString(),
+                              confirmedAt: displayWorkflow.confirmedAt ?? new Date().toISOString(),
                             },
-                          },
-                        });
-                        void requestGoalPlanRevisionCommand({
-                          goalId: goal.id,
-                          feedback: feedback.trim(),
-                          baseRevision: goalProjectionRevision,
-                          idempotencyKey,
-                        }).then((result) => {
-                          applyGoalsProjection(result.goals, result.revision);
-                          removePendingGoalWorkflow(overlayId);
-                        }).catch((error) => {
-                          removePendingGoalWorkflow(overlayId);
-                          window.alert(error instanceof Error ? error.message : "规划调整提交失败");
-                        });
-                      }}
-                      className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
-                    >
-                      继续调整
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const overlayId = createOpaqueId("idem");
-                        const idempotencyKey = createIdempotencyKey("goal.confirm_plan", goal.id, overlayId);
-                        addPendingGoalWorkflow({
-                          id: overlayId,
-                          goalId: goal.id,
-                          idempotencyKey,
-                          createdAt: new Date().toISOString(),
-                          workflow: {
-                            ...displayWorkflow,
-                            phase: "executing",
-                            planDecision: "confirmed",
-                            updatedAt: new Date().toISOString(),
-                            confirmedAt: displayWorkflow.confirmedAt ?? new Date().toISOString(),
-                          },
-                        });
-                        void confirmGoalPlanCommand({ goalId: goal.id, baseRevision: goalProjectionRevision, idempotencyKey }).then((result) => {
-                          applyGoalsProjection(result.goals, result.revision);
-                          removePendingGoalWorkflow(overlayId);
-                        }).catch((error) => {
-                          removePendingGoalWorkflow(overlayId);
-                          window.alert(error instanceof Error ? error.message : "规划确认失败");
-                        });
-                      }}
-                      className="rounded-lg bg-[#111] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#333]"
-                    >
-                      确认并启动
-                    </button>
+                          });
+                          void confirmGoalPlanCommand({ goalId: goal.id, baseRevision: goalProjectionRevision, idempotencyKey }).then((result) => {
+                            applyGoalsProjection(result.goals, result.revision);
+                            removePendingGoalWorkflow(overlayId);
+                          }).catch((error) => {
+                            removePendingGoalWorkflow(overlayId);
+                            window.alert(error instanceof Error ? error.message : "规划确认失败");
+                          });
+                        }}
+                        disabled={revisionSubmitting}
+                        className="rounded-lg bg-[#111] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#333] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        确认并启动
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

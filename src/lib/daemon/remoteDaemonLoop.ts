@@ -1,4 +1,7 @@
+import { createHash, randomUUID } from "crypto";
+import fs from "fs";
 import os from "os";
+import path from "path";
 
 process.env.KIKI_MACHINE_EXECUTOR = "true";
 
@@ -23,11 +26,12 @@ import type {
 } from "@/lib/server/tunnel/tunnelHub";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-const DAEMON_VERSION = "0.2.5";
+const DAEMON_VERSION = "0.2.6";
 const POLL_PATH = "/api/machine-tunnel/poll";
 const RESULT_PATH = "/api/machine-tunnel/result";
 const STREAM_CHUNK_PATH = "/api/machine-tunnel/stream-chunk";
 const RECONNECT_DELAY_MS = 5_000;
+const DEVICE_ID_FILE = "daemon-device-id";
 
 export type RemoteDaemonServiceManager = {
   installService: () => Promise<RemoteDaemonServiceStatus>;
@@ -45,8 +49,40 @@ function normalizeBaseUrl(serverUrl: string) {
   return serverUrl.replace(/\/$/, "");
 }
 
+function daemonStateDirectory() {
+  if (process.env.KIKI_DAEMON_HOME?.trim()) return process.env.KIKI_DAEMON_HOME.trim();
+  if (process.platform === "win32" && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, "kiki-agent");
+  }
+  return path.join(os.homedir(), ".kiki");
+}
+
+function fallbackDeviceId() {
+  return createHash("sha256")
+    .update([os.hostname(), os.homedir(), process.platform, process.arch].join("|"))
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function readOrCreateDeviceId() {
+  try {
+    const directory = daemonStateDirectory();
+    const filePath = path.join(directory, DEVICE_ID_FILE);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (fs.existsSync(filePath)) {
+      const existing = fs.readFileSync(filePath, "utf8").trim();
+      if (existing) return existing;
+    }
+    const next = randomUUID();
+    fs.writeFileSync(filePath, `${next}\n`, { mode: 0o600 });
+    return next;
+  } catch {
+    return fallbackDeviceId();
+  }
+}
+
 function osFingerprint() {
-  return `${process.platform}-${process.arch}`;
+  return `device:${process.platform}-${process.arch}:${readOrCreateDeviceId()}`;
 }
 
 async function executeRemoteJob(input: {

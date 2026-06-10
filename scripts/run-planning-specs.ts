@@ -49,6 +49,7 @@ import { runTaskInstancesRepositorySpecs } from "../src/lib/server/repositories/
 import { runInboxRepositorySpecs } from "../src/lib/server/repositories/inboxRepository.spec";
 import { runAppendThreadMessageSpecs } from "../src/lib/server/repositories/conversationMessagesRepository.spec";
 import { runDispatchTaskFromThreadSpecs } from "../src/lib/server/services/dispatchTaskFromThread.spec";
+import { runMachineServiceSpecs } from "../src/lib/server/services/machineService.spec";
 import { runThreadLoopDaemonSpecs } from "../src/lib/server/scheduler/threadLoopDaemon.spec";
 import { runDevPanelDataSpecs } from "../src/lib/server/repositories/agentRuntime/sagaInstancesRepository.spec";
 import { runDaemonRunnerSpecs } from "../src/lib/daemon/daemonRunner.spec";
@@ -91,6 +92,7 @@ runSchemaSpecs();
 runGoalCommandServiceSpecs();
 runTaskPatchMergeSpecs();
 runGoalRuntimeServiceSpecs();
+runMachineServiceSpecs();
 runTopicCommandServiceSpecs();
 runSagaDraftAdapterSpecs();
 runThreadTickOutputSchemaSpecs();

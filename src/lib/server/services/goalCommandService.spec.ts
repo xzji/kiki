@@ -7,6 +7,7 @@ import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import {
   applyGoalCommand,
   GoalCommandConflictError,
+  GoalCommandValidationError,
 } from "@/lib/server/services/goalCommandService";
 import type { Goal } from "@/types/kiki";
 
@@ -42,6 +43,72 @@ export function runGoalCommandServiceSpecs() {
     result.goals.find((goal) => goal.id === normalizedGoalId)?.id,
     normalizedGoalId,
     "create_goal response should return normalized goal ids",
+  );
+
+  const replaceSourceId = "goal-command-service-replace";
+  const replaceSource = makeGoal(replaceSourceId);
+  applyGoalCommand({
+    command: {
+      type: "create_goal",
+      goal: replaceSource,
+    },
+    idempotencyKey: "goal-command-service:replace-source",
+  });
+  const replaceMeta = readGoalsSnapshotMeta([]);
+  const replaceResult = applyGoalCommand({
+    command: {
+      type: "replace_goal_plan",
+      goal: {
+        ...makeGoal(replaceSourceId),
+        title: "Replaced Plan",
+        createdAt: "2099-01-01T00:00:00.000Z",
+        conversationId: "conversation-should-not-change",
+        workflow: {
+          phase: "presenting_plan",
+          planDecision: "pending",
+          startedAt: "2026-06-01T00:00:00.000Z",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        },
+        subGoals: [
+          {
+            id: "replace-sub-goal",
+            goalId: replaceSourceId,
+            title: "Replacement SubGoal",
+            tasks: [],
+          },
+        ],
+      },
+    },
+    idempotencyKey: "goal-command-service:replace-plan",
+    baseRevision: replaceMeta.revision,
+  });
+  const replacedGoal = replaceResult.goals.find((goal) => goal.id === normalizeGoalId(replaceSourceId));
+  const replacePayload = replaceResult.event.payload as { action?: unknown; entityId?: unknown };
+  assert.equal(replacedGoal?.title, "Replaced Plan", "replace_goal_plan should replace goal plan content");
+  assert.equal(replacedGoal?.createdAt, replaceSource.createdAt, "replace_goal_plan should preserve createdAt");
+  assert.equal(replacedGoal?.conversationId, replaceSource.conversationId, "replace_goal_plan should preserve conversation binding");
+  assert.equal(replacedGoal?.subGoals[0]?.goalId, normalizeGoalId(replaceSourceId), "replacement sub goals should reference existing goal id");
+  assert.equal(replacePayload.action, "goal.plan_replaced");
+  assert.equal(replacePayload.entityId, normalizeGoalId(replaceSourceId));
+  assert.throws(
+    () =>
+      applyGoalCommand({
+        command: {
+          type: "replace_goal_plan",
+          goal: {
+            ...makeGoal(replaceSourceId),
+            workflow: {
+              phase: "executing",
+              planDecision: "confirmed",
+              startedAt: "2026-06-01T00:00:00.000Z",
+              updatedAt: "2026-06-01T00:00:00.000Z",
+            },
+          },
+        },
+        idempotencyKey: "goal-command-service:replace-plan-invalid-workflow",
+      }),
+    GoalCommandValidationError,
+    "replace_goal_plan should reject non-pending replacement workflow",
   );
 
   const snapshot = readGoalsSnapshotMeta([]);

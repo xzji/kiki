@@ -43,7 +43,17 @@ export function runTopicCommandServiceSpecs() {
     }
   }
 
-  // 2) confirm_topic_plan → confirm_goal_plan，topicId → goalId
+  // 2) replace_topic_plan → replace_goal_plan，topic 字段透传到 goal
+  {
+    const goal = makeGoalStub();
+    const mapped = mapTopicCommandToGoalCommand({ type: "replace_topic_plan", topic: goal });
+    assert.equal(mapped.type, "replace_goal_plan");
+    if (mapped.type === "replace_goal_plan") {
+      assert.strictEqual(mapped.goal, goal);
+    }
+  }
+
+  // 3) confirm_topic_plan → confirm_goal_plan，topicId → goalId
   {
     const mapped = mapTopicCommandToGoalCommand({ type: "confirm_topic_plan", topicId: "g-2" });
     assert.equal(mapped.type, "confirm_goal_plan");
@@ -52,7 +62,7 @@ export function runTopicCommandServiceSpecs() {
     }
   }
 
-  // 3) request_topic_plan_revision → request_goal_plan_revision
+  // 4) request_topic_plan_revision → request_goal_plan_revision
   {
     const mapped = mapTopicCommandToGoalCommand({
       type: "request_topic_plan_revision",
@@ -66,7 +76,7 @@ export function runTopicCommandServiceSpecs() {
     }
   }
 
-  // 4) create_thread → create_sub_goal（threadId 暂走 subGoalId 通道）
+  // 5) create_thread → create_sub_goal（threadId 暂走 subGoalId 通道）
   {
     const mapped = mapTopicCommandToGoalCommand({
       type: "create_thread",
@@ -80,7 +90,7 @@ export function runTopicCommandServiceSpecs() {
     }
   }
 
-  // 5) create_task：threadId → subGoalId、topicId → goalId
+  // 6) create_task：threadId → subGoalId、topicId → goalId
   {
     const mapped = mapTopicCommandToGoalCommand({
       type: "create_task",
@@ -96,7 +106,7 @@ export function runTopicCommandServiceSpecs() {
     }
   }
 
-  // 6) update_task / delete_task：topicId → goalId、taskId 直通
+  // 7) update_task / delete_task：topicId → goalId、taskId 直通
   {
     const upd = mapTopicCommandToGoalCommand({
       type: "update_task",
@@ -122,7 +132,7 @@ export function runTopicCommandServiceSpecs() {
     }
   }
 
-  // 7) delete_topics_by_conversation → delete_goals_by_conversation
+  // 8) delete_topics_by_conversation → delete_goals_by_conversation
   {
     const mapped = mapTopicCommandToGoalCommand({
       type: "delete_topics_by_conversation",

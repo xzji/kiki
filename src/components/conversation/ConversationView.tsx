@@ -82,7 +82,7 @@ function withCliProcess(
   message: ConversationMessage,
   updater: (process: ConversationCliProcess) => ConversationCliProcess,
 ) {
-  if (message.kind !== "text" || !message.cliProcess) return message;
+  if ((message.kind !== "text" && message.kind !== "goal_plan_card") || !message.cliProcess) return message;
   return {
     ...message,
     cliProcess: updater(message.cliProcess),
@@ -515,25 +515,89 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const resultInfo = resolveTaskCardInfo(resultMessage, goals);
   const streamErrorUi = classifyConversationError(streamError);
   const backgroundIssue = conversation.backgroundIssue;
-  const appendActiveGoalProgress = (
+  const isActiveAssistantMessage = (controller: AbortController, assistantId: string, options?: { allowAborted?: boolean }) => {
+    if (!options?.allowAborted && controller.signal.aborted) return false;
+    return streamAbortRef.current === controller && activeAssistantMessageIdRef.current === assistantId;
+  };
+  const createPlanningCliProcess = (input: {
+    runId: string;
+    startedAt: string;
+    title: string;
+    output?: string;
+  }): ConversationCliProcess => {
+    const process = createCliProcess(input.runId, input.startedAt);
+    return {
+      ...process,
+      output: input.output ?? "",
+      events: [
+        createCliProcessEvent(input.runId, "status", {
+          title: input.title,
+          content: input.output ?? input.title,
+        }),
+      ],
+    };
+  };
+  const appendPlanningProcessEvent = (
+    controller: AbortController,
+    assistantId: string,
+    type: CliProcessEvent["type"],
+    input: Omit<CliProcessEvent, "id" | "type" | "createdAt"> = {},
+  ) => {
+    if (!isActiveAssistantMessage(controller, assistantId)) return;
+    updateMessage(conversation.id, assistantId, (message) =>
+      withCliProcess(message, (process) => ({
+        ...process,
+        events: [...process.events, createCliProcessEvent(process.runId, type, input)],
+      })),
+    );
+  };
+  const appendPlanningProgress = (
     controller: AbortController,
     assistantId: string,
     progress: { message: string },
   ) => {
-    if (
-      controller.signal.aborted ||
-      streamAbortRef.current !== controller ||
-      activeAssistantMessageIdRef.current !== assistantId
-    ) {
-      return;
-    }
+    if (!isActiveAssistantMessage(controller, assistantId)) return;
     updateMessage(conversation.id, assistantId, (message) => {
       if (message.status !== "streaming" || controller.signal.aborted) return message;
+      const nextContent = appendGoalProgressMessage(message.content, progress.message);
+      if ((message.kind !== "text" && message.kind !== "goal_plan_card") || !message.cliProcess) {
+        return {
+          ...message,
+          content: nextContent,
+        };
+      }
       return {
         ...message,
-        content: appendGoalProgressMessage(message.content, progress.message),
+        content: nextContent,
+        cliProcess: {
+          ...message.cliProcess,
+          output: appendGoalProgressMessage(message.cliProcess.output, progress.message),
+          events: [
+            ...message.cliProcess.events,
+            createCliProcessEvent(message.cliProcess.runId, "status", {
+              title: progress.message,
+              content: progress.message,
+            }),
+          ],
+        },
       };
     });
+  };
+  const markPlanningProcessDone = (
+    controller: AbortController,
+    assistantId: string,
+    status: ConversationCliProcess["status"],
+    error?: string,
+  ) => {
+    if (!isActiveAssistantMessage(controller, assistantId, { allowAborted: true })) return;
+    updateMessage(conversation.id, assistantId, (message) =>
+      withCliProcess(message, (process) => ({
+        ...process,
+        status,
+        finishedAt: process.finishedAt ?? new Date().toISOString(),
+        error: error ?? process.error,
+      })),
+    );
   };
 
   const appendGovernanceConfirmation = (input: {
@@ -799,6 +863,13 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const plannedSagaRecoveryRequestId =
+        hasLocalPlanningFailure && conversation.planningRunState?.source === "saga"
+          ? `topic-saga-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          : undefined;
+      const initialAssistantContent = hasLocalPlanningFailure
+        ? "正在从上次失败点恢复目标规划..."
+        : "正在从已保存断点继续目标规划...";
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
@@ -817,12 +888,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
         id: assistantId,
         kind: "text",
         role: "kiki",
-        content: hasLocalPlanningFailure
-          ? "正在从上次失败点恢复目标规划..."
-          : "正在从已保存断点继续目标规划...",
+        content: initialAssistantContent,
         createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
+        cliProcess: createPlanningCliProcess({
+          runId: plannedSagaRecoveryRequestId ?? `goal-cli-${assistantId}`,
+          startedAt: assistantCreatedAt,
+          title: hasLocalPlanningFailure ? "恢复目标规划" : "从断点继续目标规划",
+          output: initialAssistantContent,
+        }),
       });
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
@@ -838,12 +913,13 @@ export function ConversationView({ conversationId }: { conversationId: string })
           if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
             throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
           }
-          appendActiveGoalProgress(controller, assistantId, {
+          appendPlanningProgress(controller, assistantId, {
             message: recovery.failedStep
               ? `正在从 Saga ${recovery.failedStep} 失败点重新推进...`
               : "正在从上次 Saga 失败点重新推进...",
           });
-          const sagaRequestId = `topic-saga-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const sagaRequestId =
+            plannedSagaRecoveryRequestId ?? `topic-saga-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           activeSagaRecoveryRequestId = sagaRequestId;
           const result = await generateTopicSagaPlan({
             topicText: recovery.goalText,
@@ -877,6 +953,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
               status: "done",
               sagaRequestId,
             }));
+            appendPlanningProcessEvent(controller, assistantId, "status", {
+              title: "等待用户补充",
+              content: "Saga 需要补充信息后才能继续。",
+            });
+            markPlanningProcessDone(controller, assistantId, "completed");
             setConversationStatus(conversation.id, "idle");
             return;
           }
@@ -896,6 +977,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             status: "done",
             source: "kiki",
             sagaRequestId,
+            ...(message.kind === "text" || message.kind === "goal_plan_card" ? { cliProcess: message.cliProcess } : {}),
             goalRef: {
               goalId: committed.goalId,
               title: committed.goalTitle,
@@ -904,12 +986,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
               taskCount: committed.taskCount,
             },
           }));
+          appendPlanningProcessEvent(controller, assistantId, "status", {
+            title: "目标规划草案已生成",
+            content: goalPlanMessageContent(),
+          });
+          markPlanningProcessDone(controller, assistantId, "completed");
           setConversationStatus(conversation.id, "idle");
           setActivePlanGoalId(committed.goalId);
           return;
         }
         const progressHandler = (progress: { message: string }) => {
-          appendActiveGoalProgress(controller, assistantId, progress);
+          appendPlanningProgress(controller, assistantId, progress);
         };
         const result = hasLocalPlanningFailure
           ? await resumeGoalWorkflowFromRecovery({
@@ -933,6 +1020,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
             content: `${result.assistantMessage}\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`,
             status: "done",
           }));
+          appendPlanningProcessEvent(controller, assistantId, "status", {
+            title: "等待用户补充",
+            content: "目标规划仍需要补充信息。",
+          });
+          markPlanningProcessDone(controller, assistantId, "completed");
           setConversationStatus(conversation.id, "idle");
           return;
         }
@@ -946,6 +1038,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           unread: message.unread,
           status: "done",
           source: "kiki",
+          ...(message.kind === "text" || message.kind === "goal_plan_card" ? { cliProcess: message.cliProcess } : {}),
           goalRef: {
             goalId: result.goalId,
             title: result.goalTitle,
@@ -954,10 +1047,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
             taskCount: result.taskCount,
           },
         }));
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "目标规划草案已生成",
+          content: goalPlanMessageContent(),
+        });
+        markPlanningProcessDone(controller, assistantId, "completed");
         setConversationStatus(conversation.id, "idle");
         setActivePlanGoalId(result.goalId);
       } catch (error) {
         if (isAbortError(error)) {
+          markPlanningProcessDone(controller, assistantId, "aborted", "目标规划已中断");
           setConversationStatus(conversation.id, "idle");
           if (streamAbortRef.current === controller) {
             streamAbortRef.current = null;
@@ -983,6 +1082,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
           content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
+        appendPlanningProcessEvent(controller, assistantId, "error", {
+          title: "目标规划生成失败",
+          content: getErrorMessage(error, "目标规划生成失败"),
+        });
+        markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "目标规划生成失败"));
         setConversationStatus(conversation.id, "error");
         setStreamError(getErrorMessage(error, "目标规划生成失败"));
       } finally {
@@ -1004,6 +1108,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const initialAssistantContent = "已收到背景信息，正在拆解子目标...";
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
@@ -1022,10 +1127,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
         id: assistantId,
         kind: "text",
         role: "kiki",
-        content: "已收到背景信息，正在拆解子目标...",
+        content: initialAssistantContent,
         createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
+        cliProcess: createPlanningCliProcess({
+          runId: `goal-cli-${assistantId}`,
+          startedAt: assistantCreatedAt,
+          title: "继续目标规划",
+          output: initialAssistantContent,
+        }),
       });
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
@@ -1037,7 +1148,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           conversationId: conversation.id,
           signal: controller.signal,
           onProgress: (progress) => {
-            appendActiveGoalProgress(controller, assistantId, progress);
+            appendPlanningProgress(controller, assistantId, progress);
           },
         });
         if (result.kind === "collecting_info") {
@@ -1050,6 +1161,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
             content: `${result.assistantMessage}\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`,
             status: "done",
           }));
+          appendPlanningProcessEvent(controller, assistantId, "status", {
+            title: "等待用户补充",
+            content: "目标规划仍需要补充信息。",
+          });
+          markPlanningProcessDone(controller, assistantId, "completed");
           setConversationStatus(conversation.id, "idle");
           return;
         }
@@ -1063,6 +1179,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           unread: message.unread,
           status: "done",
           source: "kiki",
+          ...(message.kind === "text" || message.kind === "goal_plan_card" ? { cliProcess: message.cliProcess } : {}),
           goalRef: {
             goalId: result.goalId,
             title: result.goalTitle,
@@ -1071,10 +1188,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
             taskCount: result.taskCount,
           },
         }));
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "目标规划草案已生成",
+          content: goalPlanMessageContent(),
+        });
+        markPlanningProcessDone(controller, assistantId, "completed");
         setConversationStatus(conversation.id, "idle");
         setActivePlanGoalId(result.goalId);
       } catch (error) {
         if (isAbortError(error)) {
+          markPlanningProcessDone(controller, assistantId, "aborted", "目标规划已中断");
           setConversationStatus(conversation.id, "idle");
           return;
         }
@@ -1083,6 +1206,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
           content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
+        appendPlanningProcessEvent(controller, assistantId, "error", {
+          title: "目标规划生成失败",
+          content: getErrorMessage(error, "目标规划生成失败"),
+        });
+        markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "目标规划生成失败"));
         setConversationStatus(conversation.id, "error");
         setStreamError(getErrorMessage(error, "目标规划生成失败"));
       } finally {
@@ -1106,6 +1234,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
       const sagaRequestId = `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const initialAssistantContent = "正在启动 5 角色拆解 Saga（Interviewer / Planner / Critic / Refiner / Presenter）...";
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
@@ -1124,11 +1253,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
         id: assistantId,
         kind: "text",
         role: "kiki",
-        content: "正在启动 5 角色拆解 Saga（Interviewer / Planner / Critic / Refiner / Presenter）...",
+        content: initialAssistantContent,
         createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
         sagaRequestId,
+        cliProcess: createPlanningCliProcess({
+          runId: sagaRequestId,
+          startedAt: assistantCreatedAt,
+          title: "启动 5 角色 Saga",
+          output: initialAssistantContent,
+        }),
       });
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
@@ -1141,6 +1276,22 @@ export function ConversationView({ conversationId }: { conversationId: string })
         if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
           throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
         }
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "Interviewer",
+          content: "校验目标信息并判断是否需要继续澄清。",
+        });
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "Planner",
+          content: "生成目标与任务结构草案。",
+        });
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "Critic / Refiner",
+          content: "评审草案并按需修正。",
+        });
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "Spec / Presenter",
+          content: "生成可确认的目标规划。",
+        });
         const result = await generateTopicSagaPlan({
           topicText: parsedCommand.payload,
           runtimeEnv,
@@ -1174,6 +1325,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
               : "5 角色 Saga 需要更多信息才能继续，请补充后回复“继续”。",
             status: "done",
           }));
+          appendPlanningProcessEvent(controller, assistantId, "status", {
+            title: "等待用户补充",
+            content: "Saga 需要补充信息后才能继续。",
+          });
+          markPlanningProcessDone(controller, assistantId, "completed");
           setConversationStatus(conversation.id, "idle");
           return;
         }
@@ -1192,6 +1348,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           status: "done",
           source: "kiki",
           sagaRequestId,
+          ...(message.kind === "text" || message.kind === "goal_plan_card" ? { cliProcess: message.cliProcess } : {}),
           goalRef: {
             goalId: committed.goalId,
             title: committed.goalTitle,
@@ -1200,10 +1357,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
             taskCount: committed.taskCount,
           },
         }));
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "目标规划草案已生成",
+          content: goalPlanMessageContent(),
+        });
+        markPlanningProcessDone(controller, assistantId, "completed");
         setConversationStatus(conversation.id, "idle");
         setActivePlanGoalId(committed.goalId);
       } catch (error) {
         if (isAbortError(error)) {
+          markPlanningProcessDone(controller, assistantId, "aborted", "Saga 规划已中断");
           setConversationStatus(conversation.id, "idle");
           return;
         }
@@ -1221,6 +1384,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
           content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
+        appendPlanningProcessEvent(controller, assistantId, "error", {
+          title: "5 角色 Saga 规划失败",
+          content: getErrorMessage(error, "5 角色 Saga 规划失败"),
+        });
+        markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "5 角色 Saga 规划失败"));
         setConversationStatus(conversation.id, "error");
         setStreamError(getErrorMessage(error, "5 角色 Saga 规划失败"));
       } finally {
@@ -1238,6 +1406,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
+      const initialAssistantContent = "正在理解目标和关键约束...";
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
@@ -1256,10 +1425,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
         id: assistantId,
         kind: "text",
         role: "kiki",
-        content: "正在理解目标和关键约束...",
+        content: initialAssistantContent,
         createdAt: assistantCreatedAt,
         status: "streaming",
         source: "kiki",
+        cliProcess: createPlanningCliProcess({
+          runId: `goal-cli-${assistantId}`,
+          startedAt: assistantCreatedAt,
+          title: "启动目标规划",
+          output: initialAssistantContent,
+        }),
       });
       setConversationStatus(conversation.id, "streaming");
       setStreamError(null);
@@ -1271,7 +1446,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           conversationId: conversation.id,
           signal: controller.signal,
           onProgress: (progress) => {
-            appendActiveGoalProgress(controller, assistantId, progress);
+            appendPlanningProgress(controller, assistantId, progress);
           },
         });
         const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
@@ -1283,9 +1458,15 @@ export function ConversationView({ conversationId }: { conversationId: string })
           content: `${result.assistantMessage}\n\n${questionText}\n\n你可以直接在下一条消息里一次性回答这些问题。`,
           status: "done",
         }));
+        appendPlanningProcessEvent(controller, assistantId, "status", {
+          title: "等待用户补充",
+          content: "目标规划需要先收集关键背景信息。",
+        });
+        markPlanningProcessDone(controller, assistantId, "completed");
         setConversationStatus(conversation.id, "idle");
       } catch (error) {
         if (isAbortError(error)) {
+          markPlanningProcessDone(controller, assistantId, "aborted", "目标规划已中断");
           setConversationStatus(conversation.id, "idle");
           return;
         }
@@ -1294,13 +1475,19 @@ export function ConversationView({ conversationId }: { conversationId: string })
           content: appendPlanningFailureMessage(message.content, error),
           status: "error",
         }));
+        appendPlanningProcessEvent(controller, assistantId, "error", {
+          title: "目标规划生成失败",
+          content: getErrorMessage(error, "目标规划生成失败"),
+        });
+        markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "目标规划生成失败"));
         setConversationStatus(conversation.id, "error");
         setStreamError(getErrorMessage(error, "目标规划生成失败"));
-      }
-      if (streamAbortRef.current === controller) {
-        streamAbortRef.current = null;
-        activeAssistantMessageIdRef.current = null;
-        setHasLocalActiveStream(false);
+      } finally {
+        if (streamAbortRef.current === controller) {
+          streamAbortRef.current = null;
+          activeAssistantMessageIdRef.current = null;
+          setHasLocalActiveStream(false);
+        }
       }
       setQuotedMessage(null);
       return;

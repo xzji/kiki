@@ -6,6 +6,7 @@ import {
   getGoalPlanCheckpoint,
   resumeGoalPlanFromCheckpoint,
 } from "@/lib/api/goals";
+import { replaceTopicPlanCommand } from "@/lib/api/topics";
 import {
   ensureConversationWorkspaceApi,
   writeConversationContextApi,
@@ -19,6 +20,7 @@ import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
 import type {
   CollectedInfoSummary,
+  Goal,
   GoalBreakdownDraft,
   GoalInfoCollection,
   GoalInfoCollectionRound,
@@ -228,6 +230,105 @@ export async function commitGoalDraftToStores(input: {
   return {
     goalId: goal.id,
     conversationId: input.conversationId,
+    goalTitle: input.draft.goalTitle,
+    summary: input.draft.summary,
+    subGoalCount: input.draft.subGoals.length,
+    taskCount: input.draft.subGoals.reduce((sum, subGoal) => sum + subGoal.tasks.length, 0),
+  };
+}
+
+function hasTaskInstances(goal: Goal) {
+  return goal.subGoals.some((subGoal) => subGoal.tasks.some((task) => task.instances.length > 0));
+}
+
+function revisionHistoryFrom(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)));
+}
+
+export async function replaceGoalDraftInStores(input: {
+  goal: Goal;
+  draft: GoalBreakdownDraft;
+  revisionFeedback: string;
+  baseRevision?: number;
+  idempotencyKey?: string;
+}): Promise<GoalWorkflowResult> {
+  if (input.goal.workflow?.planDecision === "confirmed") {
+    throw new Error("已确认规划请通过任务治理修改");
+  }
+  if (hasTaskInstances(input.goal)) {
+    throw new Error("已有执行记录的主题规划不能整体替换，请通过任务治理修改");
+  }
+
+  const conversationStore = useConversationStore.getState();
+  const goalStore = useGoalStore.getState();
+  const base = buildGoalFromDraft(input.draft);
+  const now = new Date().toISOString();
+  const previousCollectedInfo = input.goal.workflow?.collectedInfo ?? {};
+  const revisionHistory = [
+    {
+      feedback: input.revisionFeedback,
+      requestedAt: now,
+      previousWorkflowUpdatedAt: input.goal.workflow?.updatedAt,
+    },
+    ...revisionHistoryFrom(previousCollectedInfo.revisionHistory),
+  ].slice(0, 5);
+  const workflow: GoalWorkflow = {
+    phase: "presenting_plan",
+    planDecision: "pending",
+    collectedInfo: {
+      collectedInfoSummary: input.draft.collectedInfoSummary,
+      goalAnalysis: input.draft.goalAnalysis,
+      executionOrder: input.draft.executionOrder,
+      reviewSummary: input.draft.reviewSummary,
+      revisionFeedback: input.revisionFeedback,
+      previousWorkflowUpdatedAt: input.goal.workflow?.updatedAt,
+      revisionHistory,
+    },
+    assumptions: input.draft.assumptions,
+    risks: input.draft.risks,
+    reasoning: input.draft.reasoning,
+    notificationStrategy: input.draft.notificationStrategy,
+    startedAt: input.goal.workflow?.startedAt ?? now,
+    updatedAt: now,
+  };
+  const goal: Goal = {
+    ...base,
+    id: input.goal.id,
+    title: input.draft.goalTitle,
+    summary: input.draft.summary,
+    deadline: input.draft.deadline || base.deadline,
+    createdAt: input.goal.createdAt,
+    conversationId: input.goal.conversationId,
+    kind: input.goal.kind,
+    progress: 0,
+    workflow,
+    subGoals: base.subGoals.map((subGoal) => ({
+      ...subGoal,
+      goalId: input.goal.id,
+      tasks: subGoal.tasks.map((task) => ({
+        ...task,
+        progress: 0,
+        instances: [],
+      })),
+    })),
+  };
+  const result = await replaceTopicPlanCommand({
+    topic: goal,
+    baseRevision: input.baseRevision ?? goalStore.goalProjectionRevision,
+    idempotencyKey:
+      input.idempotencyKey ??
+      `topic.replace_plan:${input.goal.id}:${now}:${Math.random().toString(36).slice(2, 8)}`,
+  });
+  goalStore.applyGoalsProjection(result.goals, result.revision);
+  if (input.goal.conversationId) {
+    conversationStore.setGoalForConversation(input.goal.conversationId, input.goal.id);
+    conversationStore.renameConversation(input.goal.conversationId, input.draft.goalTitle);
+    await writeCurrentConversationContext(input.goal.conversationId, input.goal.id);
+  }
+  return {
+    goalId: input.goal.id,
+    conversationId: input.goal.conversationId ?? "",
     goalTitle: input.draft.goalTitle,
     summary: input.draft.summary,
     subGoalCount: input.draft.subGoals.length,
