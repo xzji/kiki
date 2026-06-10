@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronsRight, Ellipsis, LayoutList, Maximize2 } from "lucide-react";
+import { AlertTriangle, ChevronsRight, Ellipsis, LayoutList, LoaderCircle, Maximize2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -238,6 +238,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversations = useConversationStore((state) => state.conversations);
+  const conversationsHydrated = useConversationStore((state) => state.conversationsHydrated);
   const appendMessage = useConversationStore((state) => state.appendMessage);
   const updateMessage = useConversationStore((state) => state.updateMessage);
   const markConversationRead = useConversationStore((state) => state.markConversationRead);
@@ -431,6 +432,10 @@ export function ConversationView({ conversationId }: { conversationId: string })
     };
   }, [refreshUnreadJumpVisibility, unreadCount]);
 
+  if (!conversation && !conversationsHydrated) {
+    return <ConversationInitializing />;
+  }
+
   if (!conversation) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-white">
@@ -458,6 +463,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const taskInfo = resolveTaskCardInfo(taskInfoMessage, goals);
   const resultInfo = resolveTaskCardInfo(resultMessage, goals);
   const streamErrorUi = classifyConversationError(streamError);
+  const backgroundIssue = conversation.backgroundIssue;
   const appendActiveGoalProgress = (
     controller: AbortController,
     assistantId: string,
@@ -1848,6 +1854,21 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 </button>
               </div>
             ) : null}
+            {backgroundIssue ? (
+              <div className="rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#92400E]">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+                  <div>
+                    <div className="font-medium">
+                      {backgroundIssue.kind === "persistence" ? "会话保存暂未完成" : "会话 workspace 初始化暂未完成"}
+                    </div>
+                    <div className="mt-1">
+                      {backgroundIssue.message} 你可以继续在当前会话输入，后台状态会继续收敛，后续操作也会按需重试。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             {sortedMessages.length === 0 ? (
               <div className="mt-20 max-w-md self-center text-center text-[13px] text-[#8C9198]">
                 和 KiKi 聊聊你的目标或想法，输入 <span className="font-mono text-[#1F2328]">/goal</span>{" "}
@@ -2061,6 +2082,22 @@ export function ConversationView({ conversationId }: { conversationId: string })
         }
         onClose={() => setResultMessage(null)}
       />
+    </div>
+  );
+}
+
+function ConversationInitializing() {
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <header className="flex h-12 flex-none items-center border-b border-[#E5E7EB] px-4 sm:px-6 lg:px-8">
+        <div className="h-4 w-32 animate-pulse rounded-full bg-[#E5E7EB]" />
+      </header>
+      <div className="flex flex-1 items-center justify-center px-6">
+        <div className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3 text-[13px] text-[#6B7280]">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+          <span>正在进入会话...</span>
+        </div>
+      </div>
     </div>
   );
 }

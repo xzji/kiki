@@ -20,6 +20,7 @@ import { useConversationStore, getConversationUnreadCount } from "@/stores/conve
 import { useInboxStore } from "@/stores/inboxStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import type { Conversation } from "@/types/kiki";
+import { startInstantConversationEntry } from "./instantConversationEntry";
 
 export const NAV_SIDEBAR_EXPANDED_WIDTH = 260;
 export const NAV_SIDEBAR_COLLAPSED_WIDTH = 56;
@@ -35,6 +36,7 @@ export function Sidebar() {
   const deleteConversation = useConversationStore((state) => state.deleteConversation);
   const renameConversation = useConversationStore((state) => state.renameConversation);
   const setConversationWorkspace = useConversationStore((state) => state.setConversationWorkspace);
+  const setConversationBackgroundIssue = useConversationStore((state) => state.setConversationBackgroundIssue);
   const toggleConversationPinned = useConversationStore((state) => state.toggleConversationPinned);
   const inboxItems = useInboxStore((state) => state.items);
   const collapsed = useNavSidebarStore((state) => state.collapsed);
@@ -63,13 +65,13 @@ export function Sidebar() {
   );
 
   const onCreateConversation = () => {
-    const next = createConversation();
-    void ensureConversationWorkspaceApi(next.id)
-      .then((workspacePath) => setConversationWorkspace(next.id, workspacePath))
-      .catch(() => {
-        // 使用时服务端还会懒初始化，创建入口不因 workspace 预创建失败而阻塞。
-      });
-    router.push(`/conversations/${next.id}`);
+    startInstantConversationEntry({
+      createConversation,
+      ensureConversationWorkspace: ensureConversationWorkspaceApi,
+      navigate: (href) => router.push(href),
+      setConversationWorkspace,
+      setConversationBackgroundIssue,
+    });
   };
 
   const confirmDeleteConversation = async () => {

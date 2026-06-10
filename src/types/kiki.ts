@@ -595,6 +595,13 @@ export type ConversationMessage =
       };
     };
 
+export type ConversationBackgroundIssue = {
+  kind: "persistence" | "workspace";
+  message: string;
+  occurredAt: string;
+  retryable?: boolean;
+};
+
 export type Conversation = {
   id: string;
   title: string;
@@ -614,6 +621,11 @@ export type Conversation = {
   messages: ConversationMessage[];
   updatedAt: string;
   pinned?: boolean;
+  /**
+   * Client-only recovery hint for background create/workspace tasks.
+   * Server projections intentionally do not persist this field.
+   */
+  backgroundIssue?: ConversationBackgroundIssue;
 };
 
 export type GoalBreakdownDraft = {

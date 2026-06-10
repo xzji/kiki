@@ -32,6 +32,10 @@ type ConversationStore = {
   setConversationsHydrated: (hydrated: boolean) => void;
   hydrateConversations: (conversations: Conversation[]) => void;
   applyConversationEvent: (event: ConversationEventRecord) => void;
+  setConversationBackgroundIssue: (
+    conversationId: string,
+    issue: Conversation["backgroundIssue"],
+  ) => void;
   createConversation: (title?: string) => Conversation;
   appendMessage: (conversationId: string, message: ConversationMessage) => void;
   updateMessage: (
@@ -179,9 +183,18 @@ function mergeConversationsById(...groups: Conversation[][]) {
   return Array.from(merged.values()).sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
 }
 
-function sendConversationCommand(task: Promise<unknown>) {
+function isLocalOptimisticConversation(conversation: Conversation) {
+  return conversation.id.startsWith("conv-new-");
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function sendConversationCommand(task: Promise<unknown>, onError?: (error: unknown) => void) {
   task.catch((error) => {
     console.error("[conversation-command]", error);
+    onError?.(error);
     void resyncConversations();
   });
 }
@@ -227,7 +240,9 @@ async function resyncConversations() {
 function upsertConversation(conversations: Conversation[], next: Conversation) {
   const found = conversations.some((item) => item.id === next.id);
   return found
-    ? conversations.map((item) => (item.id === next.id ? { ...item, ...next } : item))
+    ? conversations.map((item) =>
+        item.id === next.id ? mergeConversationPreservingCliProcess(item, next) : item,
+      )
     : [next, ...conversations];
 }
 
@@ -341,16 +356,27 @@ export const useConversationStore = create<ConversationStore>()(
       conversationsHydrated: false,
       setConversationsHydrated: (hydrated) => set({ conversationsHydrated: hydrated }),
       hydrateConversations: (conversations) => {
-        const localById = new Map(get().conversations.map((conversation) => [conversation.id, conversation]));
+        const localConversations = get().conversations;
+        const localById = new Map(localConversations.map((conversation) => [conversation.id, conversation]));
         const sanitized = sanitizeConversationHistory(mergeConversationsById(conversations));
-        set({
-          conversations: sanitized.map((conversation) =>
-            mergeConversationPreservingCliProcess(localById.get(conversation.id), conversation),
-          ),
-        });
+        const remoteIds = new Set(sanitized.map((conversation) => conversation.id));
+        const mergedRemote = sanitized.map((conversation) =>
+          mergeConversationPreservingCliProcess(localById.get(conversation.id), conversation),
+        );
+        const localOptimistic = localConversations.filter(
+          (conversation) => isLocalOptimisticConversation(conversation) && !remoteIds.has(conversation.id),
+        );
+        set({ conversations: mergeConversationsById(mergedRemote, localOptimistic) });
       },
       applyConversationEvent: (event) => {
         set({ conversations: applyConversationEventToList(get().conversations, event) });
+      },
+      setConversationBackgroundIssue: (conversationId, issue) => {
+        set({
+          conversations: get().conversations.map((item) =>
+            item.id === conversationId ? { ...item, backgroundIssue: issue } : item,
+          ),
+        });
       },
       createConversation: (title) => {
         const now = new Date().toISOString();
@@ -362,7 +388,14 @@ export const useConversationStore = create<ConversationStore>()(
           status: "idle",
         };
         set({ conversations: [next, ...get().conversations] });
-        sendConversationCommand(createConversationCommand(next));
+        sendConversationCommand(createConversationCommand(next), (error) => {
+          get().setConversationBackgroundIssue(next.id, {
+            kind: "persistence",
+            message: getErrorMessage(error, "会话保存失败，请稍后重试。"),
+            occurredAt: new Date().toISOString(),
+            retryable: true,
+          });
+        });
         return next;
       },
       appendMessage: (conversationId, message) => {
