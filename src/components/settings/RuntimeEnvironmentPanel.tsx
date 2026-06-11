@@ -59,6 +59,8 @@ const filePolicyModeLabels: Record<RuntimeFilePolicyMode, string> = {
   custom: "自定义勾选",
 };
 
+const CHECKING_STATUS_STALE_MS = 60_000;
+
 const toolCapabilityOptions: Array<{
   key: RuntimeToolCapability;
   label: string;
@@ -129,6 +131,14 @@ function formatMachineFingerprint(fingerprint?: string | null) {
   const matched = /^device:([^:]+):(.+)$/.exec(fingerprint);
   if (!matched) return fingerprint;
   return `${matched[1]} · ${matched[2].slice(0, 8)}`;
+}
+
+function isFreshCheckingStatus(environment: RuntimeEnvironment) {
+  if (environment.health?.status !== "checking") return false;
+  if (!environment.lastCheckedAt) return false;
+  const checkedAt = new Date(environment.lastCheckedAt).getTime();
+  if (Number.isNaN(checkedAt)) return false;
+  return Date.now() - checkedAt < CHECKING_STATUS_STALE_MS;
 }
 
 export function RuntimeEnvironmentPanel() {
@@ -252,7 +262,16 @@ export function RuntimeEnvironmentPanel() {
     const ok = window.confirm(`删除本地环境「${environment.name}」？`);
     if (!ok) return;
     try {
-      const result = await removeEnvironmentCommand({ id: environment.id });
+      const removeOnce = () => removeEnvironmentCommand({ id: environment.id });
+      let result: Awaited<ReturnType<typeof removeEnvironmentCommand>>;
+      try {
+        result = await removeOnce();
+      } catch (error) {
+        if (!(error instanceof RuntimeEnvironmentCommandError) || !error.conflict) {
+          throw error;
+        }
+        result = await removeOnce();
+      }
       removeEnvironment(environment.id);
       useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
     } catch (error) {
@@ -331,7 +350,7 @@ export function RuntimeEnvironmentPanel() {
   useEffect(() => {
     const localEnvironments = environments.filter((item) => item.type === "local");
     localEnvironments.forEach((environment) => {
-      if (environment.health?.status === "online" || environment.health?.status === "checking") return;
+      if (environment.health?.status === "online" || isFreshCheckingStatus(environment)) return;
       void refreshEnvironment(environment);
     });
   }, [environments, refreshEnvironment]);

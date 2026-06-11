@@ -26,12 +26,32 @@ import type {
 } from "@/lib/server/tunnel/tunnelHub";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-const DAEMON_VERSION = "0.2.6";
+const DAEMON_VERSION = "0.2.7";
 const POLL_PATH = "/api/machine-tunnel/poll";
 const RESULT_PATH = "/api/machine-tunnel/result";
 const STREAM_CHUNK_PATH = "/api/machine-tunnel/stream-chunk";
 const RECONNECT_DELAY_MS = 5_000;
+// 鉴权（401）退避：重试无法自行恢复，避免每 5s 无意义高频打点
+const AUTH_FAILURE_BACKOFF_MS = 60_000;
+// 连续 401 达到此次数后打印一次醒目诊断（避免日志刷屏）
+const AUTH_FAILURE_WARN_THRESHOLD = 3;
+// 持续 401 时，每隔此次数重复一次醒目诊断，避免长期静默让人误以为进程已死
+const AUTH_FAILURE_REMINDER_EVERY = 30;
 const DEVICE_ID_FILE = "daemon-device-id";
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/** 读取 poll 失败响应里的 reason，便于区分 401 的具体原因 */
+async function readPollFailureReason(response: Response): Promise<string> {
+  try {
+    const data = (await response.json()) as { reason?: string };
+    return typeof data.reason === "string" && data.reason ? data.reason : `HTTP ${response.status}`;
+  } catch {
+    return `HTTP ${response.status}`;
+  }
+}
 
 export type RemoteDaemonServiceManager = {
   installService: () => Promise<RemoteDaemonServiceStatus>;
@@ -114,6 +134,12 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
 
   let boundUserId: string | null = null;
   const runningJobs = new Set<string>();
+  // 进行中的流式会话数（stream_prompt 不进 runningJobs，需单独计数，避免交接退出打断实时流）。
+  let activeStreams = 0;
+  // 方案 A：前台进程在网页开启 24h、后台服务接管后置位，由主循环择机优雅退出。
+  let shouldExitAfterHandoff = false;
+  // 避免"等待在途任务"日志每轮 poll 重复打印。
+  let handoffWaitLogged = false;
 
   async function postResult(result: MachineResult) {
     try {
@@ -296,6 +322,14 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         }
         const result = await input.serviceManager.serviceStatus();
         await postResult({ type: "daemon_service_autostart", requestId: command.requestId, ok: true, result });
+        // 方案 A：网页开启 24h 成功后，后台服务（launchd/systemd）已接管 poll。
+        // 若当前是非托管的前台进程，则在结果回传后主动退出，避免同机双进程争抢
+        // 同一 machineId 的长轮询与命令队列（导致任务丢失/心跳抖动）。
+        // 仅在确认后台服务确实 running 时才退出，否则继续 poll 兜底，防止掉线空窗。
+        const isManaged = process.env.KIKI_DAEMON_MANAGED === "1";
+        if (command.enabled && !isManaged && result.running) {
+          shouldExitAfterHandoff = true;
+        }
       } catch (error) {
         await postResult({
           type: "daemon_service_autostart",
@@ -335,6 +369,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       return;
     }
     if (command.type === "stream_prompt") {
+      activeStreams += 1;
       void (async () => {
         const payload = command.payload as RemoteStreamPromptPayload;
         let seq = 0;
@@ -372,6 +407,8 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             seq++,
           );
           await postStreamChunk(command.sessionId, { type: "done" }, seq++);
+        } finally {
+          activeStreams -= 1;
         }
       })();
       return;
@@ -424,6 +461,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   }
 
   // 永不退出：网络/服务端错误都按重试处理。
+  let consecutiveAuthFailures = 0;
   for (;;) {
     try {
       const response = await fetch(pollUrl, {
@@ -431,10 +469,39 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
         body: JSON.stringify({ fingerprint, daemonVersion: DAEMON_VERSION }),
       });
-      if (!response.ok) {
-        appendRuntimeDaemonLog(`poll 返回 HTTP ${response.status}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
-        await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+      if (response.status === 401) {
+        // 鉴权失败：api-key 失效/记录被去重删除/指纹不匹配。重试无法自行恢复，
+        // 进程仍在跑但服务端永远判离线 —— 必须给出明确诊断而非静默空转。
+        consecutiveAuthFailures += 1;
+        const reason = await readPollFailureReason(response);
+        const shouldWarn =
+          consecutiveAuthFailures === AUTH_FAILURE_WARN_THRESHOLD ||
+          (consecutiveAuthFailures > AUTH_FAILURE_WARN_THRESHOLD &&
+            (consecutiveAuthFailures - AUTH_FAILURE_WARN_THRESHOLD) % AUTH_FAILURE_REMINDER_EVERY === 0);
+        if (shouldWarn) {
+          appendRuntimeDaemonLog(
+            `⚠️ 鉴权持续失败（原因：${reason}，本机指纹：${fingerprint}）。` +
+              `进程仍在运行但服务端判定离线，重试无法自动恢复。` +
+              `通常因 api-key 失效或该机器记录已被新连接顶替删除。` +
+              `请到网页「运行环境」重新生成连接命令并执行：npm i -g @kiki_agent/daemon@latest && kiki-daemon install --server-url ${base} --api-key <新key>`,
+          );
+        } else if (consecutiveAuthFailures < AUTH_FAILURE_WARN_THRESHOLD) {
+          appendRuntimeDaemonLog(`poll 鉴权失败（${reason}），${AUTH_FAILURE_BACKOFF_MS / 1000}s 后重试…`);
+        }
+        await sleep(AUTH_FAILURE_BACKOFF_MS);
         continue;
+      }
+      if (!response.ok) {
+        // 瞬时错误（5xx/网络抖动/部署切换）：短间隔重试，可自愈。
+        consecutiveAuthFailures = 0;
+        appendRuntimeDaemonLog(`poll 返回 HTTP ${response.status}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
+        await sleep(RECONNECT_DELAY_MS);
+        continue;
+      }
+      // 成功：复位鉴权失败计数，恢复正常连接。
+      if (consecutiveAuthFailures > 0) {
+        appendRuntimeDaemonLog("鉴权恢复，连接已重新建立。");
+        consecutiveAuthFailures = 0;
       }
       const data = (await response.json()) as {
         ok: boolean;
@@ -445,9 +512,24 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       for (const command of data.commands ?? []) {
         await handleCommand(command);
       }
+      if (shouldExitAfterHandoff) {
+        // 等待在途任务（execute）与流式会话（stream_prompt）跑完再退出，
+        // 避免中断正在执行的 job 或截断实时流式输出。
+        const pending = runningJobs.size + activeStreams;
+        if (pending > 0) {
+          if (!handoffWaitLogged) {
+            appendRuntimeDaemonLog(`后台服务已接管，待 ${pending} 个在途任务/流式会话完成后前台进程将退出…`);
+            handoffWaitLogged = true;
+          }
+        } else {
+          appendRuntimeDaemonLog("后台服务已接管 24h 运行，前台进程优雅退出（交接完成）。");
+          await sleep(200);
+          process.exit(0);
+        }
+      }
     } catch (error) {
       appendRuntimeDaemonLog(`poll 失败：${error instanceof Error ? error.message : String(error)}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
-      await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+      await sleep(RECONNECT_DELAY_MS);
     }
   }
 }

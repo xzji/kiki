@@ -4,6 +4,26 @@ import type {
   RuntimeDiscoveryResult,
 } from "@/types/runtime";
 
+const RUNTIME_ENV_STATUS_TIMEOUT_MS = 45_000;
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("本地环境状态获取超时，请确认本机 daemon 在线且 CLI 可用");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function checkRuntimeEnv(
   input: RuntimeEnvironmentCheckInput,
 ): Promise<RuntimeEnvironmentCheckResult> {
@@ -33,7 +53,11 @@ export async function getRuntimeEnvStatus(input: {
     runtimeKind: input.runtimeKind || "claude",
   });
 
-  const response = await fetch(`/api/runtime-envs/status?${query.toString()}`);
+  const response = await fetchWithTimeout(
+    `/api/runtime-envs/status?${query.toString()}`,
+    {},
+    RUNTIME_ENV_STATUS_TIMEOUT_MS,
+  );
   const data = (await response.json()) as RuntimeEnvironmentCheckResult;
   if (!response.ok) {
     throw new Error(data.reason || "本地环境状态获取失败");

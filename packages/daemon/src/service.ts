@@ -77,6 +77,9 @@ function resolveServiceEnvironment(ctx: InstallContext) {
     ...base,
     KIKI_DATA_DIR: dataDir(),
     HOME: base.HOME || os.homedir(),
+    // 标记此进程由后台服务（launchd/systemd）托管，使其在收到 autostart 命令时
+    // 不会像前台进程那样自我退出，避免误杀常驻服务。
+    KIKI_DAEMON_MANAGED: "1",
   };
 }
 
@@ -142,6 +145,8 @@ function buildLinuxUnit(ctx: InstallContext) {
 Description=Kiki local execution daemon
 After=network-online.target
 Wants=network-online.target
+# 关闭崩溃节流：默认 10s 内崩 5 次会进 failed 永久不再拉起，置 0 保证无限重启
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -159,6 +164,47 @@ async function uid() {
   return typeof process.getuid === "function" ? String(process.getuid()) : null;
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/** 读取 daemon.stderr.log 末尾若干行，用于在启动校验失败时给出真实原因 */
+function tailDaemonStderr(maxLines = 12): string {
+  try {
+    const file = path.join(logsDir(), "daemon.stderr.log");
+    if (!fs.existsSync(file)) return "";
+    const content = fs.readFileSync(file, "utf8").trimEnd();
+    if (!content) return "";
+    return content.split("\n").slice(-maxLines).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * install 之后轮询 serviceStatus()，确认进程确实稳定 running。
+ * launchctl/systemctl 命令退出码为 0 仅代表“登记+拉起一次”，不代表进程能存活；
+ * 进程拉起后立刻崩溃（如连不上服务端、脚本路径失效）时命令仍返回成功，
+ * 这里通过轮询补上“真·running”校验，失败则抛出带 stderr 末尾的明确错误。
+ */
+async function verifyServiceRunning(input: { attempts?: number; intervalMs?: number } = {}) {
+  const attempts = input.attempts ?? 5;
+  const intervalMs = input.intervalMs ?? 800;
+  let lastRunning = false;
+  for (let i = 0; i < attempts; i += 1) {
+    await sleep(intervalMs);
+    const status = await serviceStatus();
+    lastRunning = status.running;
+    if (status.running) return;
+  }
+  const tail = tailDaemonStderr();
+  const detail = tail ? `\n--- daemon.stderr.log（末尾）---\n${tail}` : "";
+  throw new Error(
+    `后台服务已登记但未稳定运行（running=${lastRunning}）。进程可能在启动后立即退出，` +
+      `请检查 server-url/api-key 是否正确、网络是否可达。${detail}`,
+  );
+}
+
 export async function installService(ctx: InstallContext) {
   if (process.platform === "darwin") {
     const target = macPlistPath();
@@ -170,6 +216,7 @@ export async function installService(ctx: InstallContext) {
     await execFileAsync("launchctl", ["bootout", domain, target]).catch(() => undefined);
     await execFileAsync("launchctl", ["bootstrap", domain, target]);
     await execFileAsync("launchctl", ["kickstart", "-k", `${domain}/${MAC_LABEL}`]);
+    await verifyServiceRunning();
     return { kind: "launchd" as const, path: target };
   }
 
@@ -181,6 +228,7 @@ export async function installService(ctx: InstallContext) {
     await execFileAsync("systemctl", ["--user", "enable", "--now", LINUX_UNIT]);
     // 让服务在用户未登录时也能运行（开机自启）
     await execFileAsync("loginctl", ["enable-linger", os.userInfo().username]).catch(() => undefined);
+    await verifyServiceRunning();
     return { kind: "systemd" as const, path: target };
   }
 
