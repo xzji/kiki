@@ -35,7 +35,17 @@ CREATE TABLE IF NOT EXISTS invite_codes (
   code             TEXT PRIMARY KEY,
   created_at       TEXT NOT NULL,
   used_at          TEXT,
-  used_by_user_id  TEXT
+  used_by_user_id  TEXT,
+  max_uses         INTEGER NOT NULL DEFAULT 1,
+  usage_count      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_invite_codes_used ON invite_codes(used_at);
+
+CREATE TABLE IF NOT EXISTS invite_code_redemptions (
+  code       TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  used_at    TEXT NOT NULL,
+  PRIMARY KEY (code, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_invite_code_redemptions_user ON invite_code_redemptions(user_id);
 `;

@@ -116,10 +116,22 @@ type WaitingPoll = {
 
 type ExecuteResultListener = (input: { jobId: string; ok: boolean; error?: string }) => void;
 type MachineDisconnectListener = (machineId: string) => void;
+type MachineCommandSender = (command: MachineCommand) => boolean;
+type MachineWsConnection = {
+  userId: string;
+  sender: MachineCommandSender;
+};
+type MachineHttpPollingPresence = {
+  userId: string;
+  timer: NodeJS.Timeout;
+};
 
 type TunnelHubState = {
   queues: Map<string, MachineCommand[]>;
   waiting: Map<string, WaitingPoll>;
+  wsConnections: Map<string, MachineWsConnection>;
+  wsPreferredMachines: Set<string>;
+  httpPollingMachines: Map<string, MachineHttpPollingPresence>;
   pendingExecutes: Map<string, PendingTunnelRequest<{ ok: boolean; error?: string }>>;
   pendingDiscover: Map<string, PendingTunnelRequest<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>>;
   pendingCheckRuntime: Map<string, PendingTunnelRequest<RuntimeEnvironmentCheckResult>>;
@@ -144,6 +156,9 @@ function getState(): TunnelHubState {
     globalRef[HUB_STATE_KEY] = {
       queues: new Map(),
       waiting: new Map(),
+      wsConnections: new Map(),
+      wsPreferredMachines: new Set(),
+      httpPollingMachines: new Map(),
       pendingExecutes: new Map(),
       pendingDiscover: new Map(),
       pendingCheckRuntime: new Map(),
@@ -165,8 +180,32 @@ function isMachineOnlineDb(userId: string, machineId: string) {
   return getOnlineMachinesForUser(userId).some((machine) => machine.id === machineId);
 }
 
+function isMachineHttpPollingOnline(machineId: string) {
+  return getState().httpPollingMachines.has(machineId);
+}
+
+function getHttpPollingMachineIdsForUser(userId: string) {
+  return Array.from(getState().httpPollingMachines.entries())
+    .filter(([, presence]) => presence.userId === userId)
+    .map(([machineId]) => machineId);
+}
+
+function registerMachineHttpPolling(machineId: string, userId: string, timeoutMs: number) {
+  const state = getState();
+  const existing = state.httpPollingMachines.get(machineId);
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(() => {
+    const current = state.httpPollingMachines.get(machineId);
+    if (current?.timer === timer) state.httpPollingMachines.delete(machineId);
+  }, timeoutMs + 5_000);
+  state.httpPollingMachines.set(machineId, { userId, timer });
+}
+
 function enqueueCommand(machineId: string, command: MachineCommand) {
   const state = getState();
+  const wsConnection = state.wsConnections.get(machineId);
+  if (wsConnection?.sender(command)) return;
+
   const waiting = state.waiting.get(machineId);
   if (waiting) {
     clearTimeout(waiting.timer);
@@ -177,6 +216,41 @@ function enqueueCommand(machineId: string, command: MachineCommand) {
   const queue = state.queues.get(machineId) ?? [];
   queue.push(command);
   state.queues.set(machineId, queue);
+}
+
+export function registerMachineWsConnection(input: { machineId: string; userId: string; sender: MachineCommandSender }) {
+  const state = getState();
+  const httpPolling = state.httpPollingMachines.get(input.machineId);
+  if (httpPolling) {
+    clearTimeout(httpPolling.timer);
+    state.httpPollingMachines.delete(input.machineId);
+  }
+  state.wsPreferredMachines.add(input.machineId);
+  state.wsConnections.set(input.machineId, { userId: input.userId, sender: input.sender });
+  const queued = state.queues.get(input.machineId) ?? [];
+  if (queued.length === 0) return;
+  state.queues.delete(input.machineId);
+  for (let index = 0; index < queued.length; index += 1) {
+    if (input.sender(queued[index])) continue;
+    state.queues.set(input.machineId, queued.slice(index));
+    break;
+  }
+}
+
+export function unregisterMachineWsConnection(machineId: string, sender?: MachineCommandSender) {
+  const state = getState();
+  if (sender && state.wsConnections.get(machineId)?.sender !== sender) return;
+  state.wsConnections.delete(machineId);
+}
+
+export function isMachineWsOnline(machineId: string) {
+  return getState().wsConnections.has(machineId);
+}
+
+export function getWsOnlineMachineIdsForUser(userId: string) {
+  return Array.from(getState().wsConnections.entries())
+    .filter(([, connection]) => connection.userId === userId)
+    .map(([machineId]) => machineId);
 }
 
 /** 长轮询取命令：有则立即返回，否则挂起最多 timeoutMs，期间有命令入队即唤醒。 */
@@ -342,6 +416,7 @@ export async function pollMachineCommands(input: {
     if (!check.ok) return { error: check.reason };
   }
   touchMachineHeartbeat(machine.machineId, input.fingerprint);
+  registerMachineHttpPolling(machine.machineId, machine.userId, input.timeoutMs);
   const commands = await takeMachineCommands(machine.machineId, input.timeoutMs);
   return { machine, commands };
 }
@@ -375,10 +450,23 @@ export function getTunnelHub() {
   const state = getState();
   return {
     isMachineOnline(machineId: string, userId: string) {
+      const state = getState();
+      if (isMachineWsOnline(machineId) || isMachineHttpPollingOnline(machineId)) return true;
+      if (state.wsPreferredMachines.has(machineId)) return false;
       return isMachineOnlineDb(userId, machineId);
     },
     getOnlineMachineIdsForUser(userId: string) {
-      return getOnlineMachinesForUser(userId).map((machine) => machine.id);
+      const state = getState();
+      const legacyDbMachineIds = getOnlineMachinesForUser(userId)
+        .map((machine) => machine.id)
+        .filter((machineId) => !state.wsPreferredMachines.has(machineId));
+      return Array.from(
+        new Set([
+          ...legacyDbMachineIds,
+          ...getWsOnlineMachineIdsForUser(userId),
+          ...getHttpPollingMachineIdsForUser(userId),
+        ]),
+      );
     },
     sendExecute(input: { machineId: string; jobId: string; requestId: string; payload: Record<string, unknown> }) {
       enqueueCommand(input.machineId, {

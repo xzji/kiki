@@ -114,19 +114,30 @@ function sortCliEvents(events: CliProcessEvent[]) {
   return [...events].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
 }
 
-function pickCliProcessOutput(local: ConversationCliProcess, incoming: ConversationCliProcess) {
+// 本端正在本地实时流式驱动的消息 id（由 updateMessage 维护）。仅发送端会逐 token 调 updateMessage
+// 推进 streaming 消息；这些消息的本地内容总是领先于本端自产、滞后回灌的快照，因此合并时以本地为准，
+// 避免视觉回退抖动。观察方不在此集合内，其消息内容由回灌快照驱动（配合 version 单调守卫前进）。
+const locallyStreamingMessageIds = new Set<string>();
+
+function pickCliProcessOutput(
+  local: ConversationCliProcess,
+  incoming: ConversationCliProcess,
+  localLeads: boolean,
+) {
   if (incoming.status !== "running") return incoming.output;
-  if (local.status !== "running") return local.output;
-  if (!local.output) return incoming.output;
-  if (!incoming.output) return local.output;
-  return incoming.output.length >= local.output.length ? incoming.output : local.output;
+  if (localLeads && local.status === "running") return local.output;
+  return incoming.output;
 }
 
-function pickMessageContent(local: Extract<ConversationMessage, { kind: "text" }>, incoming: Extract<ConversationMessage, { kind: "text" }>) {
+function pickMessageContent(
+  local: Extract<ConversationMessage, { kind: "text" }>,
+  incoming: Extract<ConversationMessage, { kind: "text" }>,
+  localLeads: boolean,
+) {
   if (!local.cliProcess || !incoming.cliProcess) return incoming.content;
   if (incoming.cliProcess.status !== "running") return incoming.content;
-  if (local.cliProcess.status !== "running") return local.content;
-  return local.content.length > incoming.content.length ? local.content : incoming.content;
+  if (localLeads && local.cliProcess.status === "running") return local.content;
+  return incoming.content;
 }
 
 function getMessageCliProcess(message: ConversationMessage | undefined) {
@@ -138,6 +149,7 @@ function getMessageCliProcess(message: ConversationMessage | undefined) {
 function mergeCliProcess(
   local: ConversationCliProcess | undefined,
   incoming: ConversationCliProcess | undefined,
+  localLeads: boolean,
 ) {
   if (!local) return incoming;
   if (!incoming) return local;
@@ -153,17 +165,19 @@ function mergeCliProcess(
     finishedAt: incoming.finishedAt ?? local.finishedAt,
     promptSections,
     events,
-    output: pickCliProcessOutput(local, incoming),
+    output: pickCliProcessOutput(local, incoming, localLeads),
     error: incoming.error ?? local.error,
   };
 }
 
 function mergeMessagePreservingCliProcess(local: ConversationMessage | undefined, incoming: ConversationMessage) {
   if (!local) return incoming;
-  const cliProcess = mergeCliProcess(getMessageCliProcess(local), getMessageCliProcess(incoming));
+  // 仅当这条消息正由本端本地实时流式推进时，本地内容才领先于回灌快照。
+  const localLeads = locallyStreamingMessageIds.has(incoming.id);
+  const cliProcess = mergeCliProcess(getMessageCliProcess(local), getMessageCliProcess(incoming), localLeads);
   if (!cliProcess) return incoming;
   const content = local.kind === "text" && incoming.kind === "text"
-    ? pickMessageContent(local, incoming)
+    ? pickMessageContent(local, incoming, localLeads)
     : incoming.content;
 
   if (incoming.kind === "text" || incoming.kind === "goal_plan_card") {
@@ -212,12 +226,15 @@ function sendConversationCommand(task: Promise<unknown>, onError?: (error: unkno
 }
 
 const messageUpdateQueues = new Map<string, Promise<unknown>>();
+// 流式更新去抖合并：本地 UI 仍逐 token 更新（发送端体验不变），但发往服务端的 update_message
+// 按 ~120ms 合并为一帧，仅发"最新快照"。这样几百字回复的 POST/message.updated 事件量降 1~2 个
+// 数量级，根治事件膨胀与观察方重放卡顿；消息进入终态（非 streaming）时立即 flush，保证最终内容必达。
+const MESSAGE_UPDATE_FLUSH_MS = 120;
+const messageUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const messageUpdatePayloads = new Map<string, ConversationMessage>();
 
-function sendConversationMessageUpdateCommand(
-  conversationId: string,
-  messageId: string,
-  message: ConversationMessage,
-) {
+// 复用 per-key 串行队列：去抖后的请求仍严格按入队顺序落库，确保服务端 version 单调递增。
+function enqueueMessageUpdate(conversationId: string, messageId: string, message: ConversationMessage) {
   const key = `${conversationId}:${messageId}`;
   const previous = messageUpdateQueues.get(key) ?? Promise.resolve();
   const next = previous
@@ -233,6 +250,41 @@ function sendConversationMessageUpdateCommand(
       messageUpdateQueues.delete(key);
     }
   });
+}
+
+function flushMessageUpdate(key: string, conversationId: string, messageId: string) {
+  const timer = messageUpdateTimers.get(key);
+  if (timer) {
+    clearTimeout(timer);
+    messageUpdateTimers.delete(key);
+  }
+  const message = messageUpdatePayloads.get(key);
+  if (!message) return;
+  messageUpdatePayloads.delete(key);
+  enqueueMessageUpdate(conversationId, messageId, message);
+}
+
+function sendConversationMessageUpdateCommand(
+  conversationId: string,
+  messageId: string,
+  message: ConversationMessage,
+) {
+  const key = `${conversationId}:${messageId}`;
+  messageUpdatePayloads.set(key, message);
+  // 终态（done/error 等）立即 flush，保证最终内容必达，不被去抖窗口延迟或丢弃。
+  if (message.status !== "streaming") {
+    flushMessageUpdate(key, conversationId, messageId);
+    return;
+  }
+  // 流式中：已有待发帧则只更新 payload（合并），不重复起定时器。
+  if (messageUpdateTimers.has(key)) return;
+  messageUpdateTimers.set(
+    key,
+    setTimeout(() => {
+      messageUpdateTimers.delete(key);
+      flushMessageUpdate(key, conversationId, messageId);
+    }, MESSAGE_UPDATE_FLUSH_MS),
+  );
 }
 
 let resyncPending = false;
@@ -273,7 +325,40 @@ type ConversationEventLoosePayload = {
   state?: GoalPlanningRunState | null;
   message?: ConversationMessage;
   messageId?: string;
+  version?: number;
 };
+
+// message.updated 顺序安全守卫：服务端为每条消息维护单调自增 version（见
+// conversationMessagesRepository.updateConversationMessage），事件 payload 透传该 version。
+// 观察方/回灌方按 messageId 记录已应用的最大 version，丢弃更旧或重复的快照，
+// 从根本上消除"旧快照临时覆盖正确内容"导致的词序错乱。
+const appliedMessageVersions = new Map<string, number>();
+const APPLIED_MESSAGE_VERSIONS_MAX = 5000;
+
+function shouldApplyMessageVersion(messageId: string, version: number | undefined) {
+  if (typeof version !== "number") return true;
+  const applied = appliedMessageVersions.get(messageId) ?? -1;
+  if (version <= applied) return false;
+  appliedMessageVersions.set(messageId, version);
+  if (appliedMessageVersions.size > APPLIED_MESSAGE_VERSIONS_MAX) {
+    const overflow = appliedMessageVersions.size - APPLIED_MESSAGE_VERSIONS_MAX;
+    const iterator = appliedMessageVersions.keys();
+    for (let i = 0; i < overflow; i += 1) {
+      const next = iterator.next();
+      if (next.done) break;
+      appliedMessageVersions.delete(next.value);
+    }
+  }
+  return true;
+}
+
+// 消息被删除时回收其 module 级流式/版本状态，避免：
+// 1) locallyStreamingMessageIds 残留导致后续同 id 回灌的权威快照被误判"本地领先"而拒绝应用（内容停滞）；
+// 2) appliedMessageVersions 条目无法回收，长程运行下挤占 5000 上限并误淘汰活跃条目。
+function forgetMessageRuntimeState(messageId: string) {
+  locallyStreamingMessageIds.delete(messageId);
+  appliedMessageVersions.delete(messageId);
+}
 
 function applyConversationEventToList(conversations: Conversation[], event: ConversationEventRecord) {
   const payload = event.payload as ConversationEventLoosePayload;
@@ -335,6 +420,8 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
       }
       case "message.updated": {
         if (!payload.message) return conversation;
+        // 顺序安全守卫：丢弃比已应用版本更旧或重复的快照，避免旧快照临时覆盖正确内容。
+        if (!shouldApplyMessageVersion(payload.message.id, payload.version)) return conversation;
         return {
           ...conversation,
           messages: conversation.messages.map((message) =>
@@ -345,6 +432,7 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
         };
       }
       case "message.deleted":
+        if (payload.messageId) forgetMessageRuntimeState(payload.messageId);
         return {
           ...conversation,
           messages: conversation.messages.filter((message) => message.id !== payload.messageId),
@@ -442,6 +530,13 @@ export const useConversationStore = create<ConversationStore>()(
           ),
         });
         if (nextMessage) {
+          // 维护本端本地实时流式标记：进入 streaming 时登记（本地内容领先回灌快照），
+          // 进入终态时清除（之后由服务端权威终态快照收敛）。
+          if (nextMessage.status === "streaming") {
+            locallyStreamingMessageIds.add(messageId);
+          } else {
+            locallyStreamingMessageIds.delete(messageId);
+          }
           sendConversationMessageUpdateCommand(conversationId, messageId, nextMessage);
         }
       },
@@ -489,6 +584,7 @@ export const useConversationStore = create<ConversationStore>()(
         sendConversationCommand(markConversationMessageReadCommand(conversationId, messageId));
       },
       deleteMessage: (conversationId, messageId) => {
+        forgetMessageRuntimeState(messageId);
         set({
           conversations: get().conversations.map((item) => {
             if (item.id !== conversationId) return item;
@@ -505,6 +601,8 @@ export const useConversationStore = create<ConversationStore>()(
       },
       deleteConversation: async (conversationId) => {
         await deleteConversationCommand(conversationId);
+        const removed = get().conversations.find((item) => item.id === conversationId);
+        removed?.messages.forEach((message) => forgetMessageRuntimeState(message.id));
         set({
           conversations: get().conversations.filter((item) => item.id !== conversationId),
         });

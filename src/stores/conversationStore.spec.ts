@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 
 import { useConversationStore } from "@/stores/conversationStore";
-import type { Conversation } from "@/types/kiki";
+import type { Conversation, ConversationMessage } from "@/types/kiki";
+import type { ConversationEventRecord } from "@/types/conversationEventLog";
 
 function createConversation(id: string): Conversation {
   return {
@@ -36,11 +37,139 @@ export async function runConversationStoreSpecs() {
   try {
     runOptimisticHydrationPreservesLocalNewConversationSpec();
     runOptimisticHydrationMergesRemoteConversationSpec();
+    runMessageUpdatedVersionGuardSpec();
+    runDeleteMessageResetsRuntimeStateSpec();
     await runDeleteConversationWaitsForServerConfirmationSpec();
     await runDeleteConversationFailureKeepsLocalConversationSpec();
   } finally {
     globalThis.fetch = originalFetch;
     useConversationStore.setState({ conversations: [], conversationsHydrated: false });
+  }
+}
+
+function createStreamingTextMessage(id: string, content: string): ConversationMessage {
+  return {
+    id,
+    kind: "text",
+    role: "kiki",
+    content,
+    createdAt: "2026-06-09T00:00:00.000Z",
+    status: "streaming",
+    source: "kiki",
+    cliProcess: {
+      runId: id,
+      status: "running",
+      startedAt: "2026-06-09T00:00:00.000Z",
+      output: content,
+      promptSections: [],
+      events: [],
+    },
+  };
+}
+
+function createMessageUpdatedEvent(
+  id: number,
+  conversationId: string,
+  message: ConversationMessage,
+  version: number,
+): ConversationEventRecord<"message.updated"> {
+  return {
+    id,
+    eventId: `evt-${id}`,
+    conversationId,
+    kind: "message.updated",
+    payload: { message, version },
+    producedBy: "system",
+    createdAt: "2026-06-09T00:00:00.000Z",
+  };
+}
+
+// 顺序安全守卫：更高 version 的快照应被应用，随后回灌的更旧/重复 version 快照必须被丢弃，
+// 不得让旧内容覆盖已应用的较新内容（根治"先词序错乱、刷新后正确"）。
+function runMessageUpdatedVersionGuardSpec() {
+  const conversationId = "conv-version-guard";
+  const messageId = "msg-version-guard";
+  // 用唯一 messageId 规避 module 级 version Map 的跨用例污染。
+  const base = createConversation(conversationId);
+  base.messages = [createStreamingTextMessage(messageId, "")];
+  useConversationStore.setState({ conversations: [base], conversationsHydrated: true });
+
+  const apply = (content: string, version: number) =>
+    useConversationStore
+      .getState()
+      .applyConversationEvent(
+        createMessageUpdatedEvent(version, conversationId, createStreamingTextMessage(messageId, content), version),
+      );
+
+  const currentContent = () =>
+    useConversationStore
+      .getState()
+      .conversations.find((conversation) => conversation.id === conversationId)
+      ?.messages.find((message) => message.id === messageId)?.content;
+
+  apply("当然可以，", 1);
+  apply("当然可以，序员去面试", 2);
+  assert.equal(currentContent(), "当然可以，序员去面试", "更高 version 的快照应被应用");
+
+  // 滞后/乱序回灌的更旧 version 快照（中间态错位内容）必须被丢弃。
+  apply("当然可以，序", 1);
+  assert.equal(currentContent(), "当然可以，序员去面试", "更旧 version 的快照应被丢弃，不得回退内容");
+
+  // 重复的同一 version 也应被丢弃。
+  apply("脏数据", 2);
+  assert.equal(currentContent(), "当然可以，序员去面试", "重复 version 的快照应被丢弃");
+
+  // 继续推进的更高 version 仍可正常应用。
+  apply("当然可以，序员去面试，面试官问：", 3);
+  assert.equal(currentContent(), "当然可以，序员去面试，面试官问：", "后续更高 version 的快照应继续应用");
+}
+
+// 泄漏修复：删除消息应回收其 module 级 version/streaming 状态，使同 id 的后续快照不被陈旧的
+// 已应用 version 拦截（否则同 id 复用场景下权威快照会被误判为更旧而拒绝应用，导致内容停滞）。
+function runDeleteMessageResetsRuntimeStateSpec() {
+  const conversationId = "conv-delete-resets-runtime";
+  const messageId = "msg-delete-resets-runtime";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => createJsonResponse(200, { ok: true })) as typeof fetch;
+  try {
+    const base = createConversation(conversationId);
+    base.messages = [createStreamingTextMessage(messageId, "")];
+    useConversationStore.setState({ conversations: [base], conversationsHydrated: true });
+
+    const apply = (content: string, version: number) =>
+      useConversationStore
+        .getState()
+        .applyConversationEvent(
+          createMessageUpdatedEvent(version, conversationId, createStreamingTextMessage(messageId, content), version),
+        );
+    const currentContent = () =>
+      useConversationStore
+        .getState()
+        .conversations.find((conversation) => conversation.id === conversationId)
+        ?.messages.find((message) => message.id === messageId)?.content;
+
+    apply("推进到版本5", 5);
+    assert.equal(currentContent(), "推进到版本5", "应应用 version 5 快照");
+
+    // 删除该消息：应回收已应用的 version 记录。
+    useConversationStore.getState().deleteMessage(conversationId, messageId);
+    assert.equal(
+      useConversationStore
+        .getState()
+        .conversations.find((conversation) => conversation.id === conversationId)
+        ?.messages.length,
+      0,
+      "删除后消息应被移除",
+    );
+
+    // 重新出现同 id 的消息（如服务端补发），低 version 应能正常应用而非被旧记录拦截。
+    const reborn = createConversation(conversationId);
+    reborn.messages = [createStreamingTextMessage(messageId, "")];
+    useConversationStore.setState({ conversations: [reborn], conversationsHydrated: true });
+    apply("新生命周期版本1", 1);
+    assert.equal(currentContent(), "新生命周期版本1", "删除回收 version 后，同 id 低 version 快照应可重新应用");
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 }
 

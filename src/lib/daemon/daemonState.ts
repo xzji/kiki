@@ -35,10 +35,30 @@ export function getRuntimeDaemonLogFilePath() {
   return path.join(getRuntimeLogsDir(), "daemon.log");
 }
 
+/**
+ * 生成本机本地时区的日志时间戳，形如 `2026-06-11 21:43:56 +08:00`。
+ * 相比 UTC 的 toISOString()，便于用户直接对照本地时间排障。
+ */
+function formatLocalLogTimestamp(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  // getTimezoneOffset 返回的是「本地比 UTC 慢多少分钟」，东八区为 -480。
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absOffset = Math.abs(offsetMinutes);
+  const offset = `${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} ${offset}`;
+}
+
 export function appendRuntimeDaemonLog(message: string) {
   const logFile = getRuntimeDaemonLogFilePath();
   ensureParentDir(logFile);
-  fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  fs.appendFileSync(logFile, `[${formatLocalLogTimestamp()}] ${message}\n`, "utf8");
 }
 
 export function readRuntimeDaemonDeviceState(): RuntimeDaemonDeviceState | null {

@@ -32,6 +32,7 @@ import { runAgentRunCommandServiceSpecs } from "../src/lib/server/services/agent
 import { runLegacyGoalToTopicSpecs } from "../src/lib/migration/legacyGoalToTopic.spec";
 import { runSchemaSpecs } from "../src/lib/server/db/schema.spec";
 import { runGoalCommandServiceSpecs } from "../src/lib/server/services/goalCommandService.spec";
+import { runInviteCodeServiceSpecs } from "../src/lib/server/services/inviteCodeService.spec";
 import { runTaskPatchMergeSpecs } from "../src/lib/server/governance/taskPatchMerge.spec";
 import { runGoalRuntimeServiceSpecs } from "../src/lib/server/services/goalRuntimeService.spec";
 import { runTopicCommandServiceSpecs } from "../src/lib/server/services/topicCommandService.spec";
@@ -50,6 +51,7 @@ import { runInboxRepositorySpecs } from "../src/lib/server/repositories/inboxRep
 import { runAppendThreadMessageSpecs } from "../src/lib/server/repositories/conversationMessagesRepository.spec";
 import { runDispatchTaskFromThreadSpecs } from "../src/lib/server/services/dispatchTaskFromThread.spec";
 import { runMachineServiceSpecs } from "../src/lib/server/services/machineService.spec";
+import { runMachineTunnelSpecs } from "../src/lib/server/tunnel/machineTunnel.spec";
 import { runThreadLoopDaemonSpecs } from "../src/lib/server/scheduler/threadLoopDaemon.spec";
 import { runDevPanelDataSpecs } from "../src/lib/server/repositories/agentRuntime/sagaInstancesRepository.spec";
 import { runDaemonRunnerSpecs } from "../src/lib/daemon/daemonRunner.spec";
@@ -90,6 +92,7 @@ runAgentRunCommandServiceSpecs();
 runLegacyGoalToTopicSpecs();
 runSchemaSpecs();
 runGoalCommandServiceSpecs();
+runInviteCodeServiceSpecs();
 runTaskPatchMergeSpecs();
 runGoalRuntimeServiceSpecs();
 runMachineServiceSpecs();
@@ -119,6 +122,7 @@ runDaemonRunnerSpecs();
   await runConversationStoreSpecs();
   await runInstantConversationEntrySpecs();
   await runMemorySpecs();
+  await runMachineTunnelSpecs();
   console.log("planning specs passed");
 })().catch((error) => {
   console.error(error);

@@ -2,7 +2,10 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 import { SESSION_COOKIE_NAME, SESSION_RENEW_INTERVAL_MS, SESSION_TTL_DAYS } from "@/lib/server/auth/authConfig";
 import { getRegistryDatabase } from "@/lib/server/db/registryClient";
-import { consumeInviteCodeInTransaction } from "@/lib/server/services/inviteCodeService";
+import {
+  consumeInviteCodeInTransaction,
+  releaseInviteCodeUseForUser,
+} from "@/lib/server/services/inviteCodeService";
 import { createOpaqueUserId, provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 
 const SCRYPT_KEYLEN = 64;
@@ -172,9 +175,7 @@ export function registerUser(input: {
     provisionUserWorkspace(userId);
   } catch (error) {
     db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
-    db.prepare(`UPDATE invite_codes SET used_at = NULL, used_by_user_id = NULL WHERE used_by_user_id = ?`).run(
-      userId,
-    );
+    releaseInviteCodeUseForUser(db, userId);
     const message = error instanceof Error ? error.message : "用户工作区初始化失败";
     return { ok: false, reason: message };
   }

@@ -2,6 +2,21 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-06-12
+
+### Added
+- 新增 machine tunnel WebSocket 优先通道：服务端在自定义 server 上挂载独立 `/api/machine-tunnel/ws` upgrade 端点，支持 header 鉴权、同机顶替、ping/pong 心跳、70s 入站看门狗与 close 即时离线回收；保留 HTTP 长轮询作为自动回退。
+- daemon `0.2.8` 默认优先建立 WS tunnel，连接成功后发送 `hello` 重同步握手，断线按 1s→2s→30s 退避重连，连续快速失败后自动降级到 HTTP 长轮询。
+- 新增邀请码多次使用能力：注册表增加 `max_uses`、`usage_count` 与 `invite_code_redemptions`，支持内置 `KIKIGOOD` 多次兑换、显式批量创建邀请码，以及注册失败后的使用次数回滚。
+
+### Changed
+- tunnelHub 支持按 machineId 优先路由到 WS 连接，无 WS 连接时回落到既有长轮询队列；在线判定合并 WS 内存连接与 DB 心跳。
+- 会话事件 SSE 改为自适应轮询：活跃期 400ms、空闲期 2s，配合发送端约 120ms 的消息更新去抖合帧，观察方流式收敛更平滑、DB 压力更低。
+
+### Fixed
+- 修复 `message.updated` 乱序/重复回灌导致旧快照短暂覆盖新内容、词序错乱的问题；为每条消息增加 version 单调守卫，只应用更高版本快照。
+- 修复消息删除后 module 级流式状态和已应用版本未回收，导致同 id 消息重生时被旧状态误判拦截的问题。
+
 ## 2026-06-11
 
 ### Fixed

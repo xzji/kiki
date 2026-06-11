@@ -9,6 +9,7 @@ import { listUsersForOrchestratorTick } from "@/lib/server/orchestrator/listUser
 import { getOrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { runOrchestratorUserFrame } from "@/lib/server/orchestrator/runOrchestratorUserFrame";
 import { registerTunnelDispatchCallbacks } from "@/lib/server/worker/dispatchReadyTasksToMachines";
+import { initializeMachineTunnelWsServer } from "@/lib/server/tunnel/machineTunnelWsServer";
 import type { Server as HttpServer } from "http";
 
 const ORCHESTRATOR_LEASE_OWNER = "cloud-orchestrator";
@@ -76,12 +77,12 @@ export async function runCloudOrchestratorLoop() {
   await runCloudOrchestratorScheduler();
 }
 
-/** Railway 生产：Tunnel 走 HTTP 长轮询 API（/api/machine-tunnel/*），再跑编排循环 */
-export function bootstrapCloudControlPlane(_server?: HttpServer) {
-  void _server;
+/** Railway 生产：优先挂载 WS Tunnel，保留 HTTP 长轮询 API（/api/machine-tunnel/*）兜底，再跑编排循环 */
+export function bootstrapCloudControlPlane(server?: HttpServer) {
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
+  if (server) initializeMachineTunnelWsServer(server);
   registerTunnelDispatchCallbacks();
-  appendRuntimeDaemonLog("云端控制面已启动（Tunnel 走 HTTP 长轮询）");
+  appendRuntimeDaemonLog("云端控制面已启动（Tunnel 优先 WS，HTTP 长轮询兜底）");
   void runCloudOrchestratorScheduler().catch((error) => {
     console.error("[kiki-cloud-orchestrator] fatal error", error);
     process.exitCode = 1;

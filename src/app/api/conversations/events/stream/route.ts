@@ -8,7 +8,12 @@ import { withAuth } from "@/lib/server/http/withAuth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const POLL_INTERVAL_MS = 2000;
+// 自适应轮询：流式进行中（持续有新事件）用短间隔让观察方近实时收敛；连续空闲若干次后回退到
+// 长间隔，避免空闲会话增加无谓负载与 DB 压力。配合发送端 ~120ms 的持久化去抖合帧，
+// 观察方能较平滑地分段呈现，消除原先固定 2s "哐一大段"的卡顿体感。
+const ACTIVE_POLL_INTERVAL_MS = 400;
+const IDLE_POLL_INTERVAL_MS = 2000;
+const IDLE_TICKS_BEFORE_BACKOFF = 3;
 
 async function GETHandler(request: NextRequest, context: { userId: string }) {
   const { userId } = context;
@@ -18,6 +23,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
   if (!Number.isFinite(cursor)) cursor = 0;
   let timer: NodeJS.Timeout | null = null;
   let disposed = false;
+  let idleTicks = 0;
   let cleanup: () => void = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
@@ -26,7 +32,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
         if (disposed) return;
         disposed = true;
         if (timer) {
-          clearInterval(timer);
+          clearTimeout(timer);
           timer = null;
         }
         try {
@@ -42,8 +48,10 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
           const events = getConversationEvents({ conversationId, fromId: cursor, limit: 100 });
           if (events.length) {
             cursor = events[events.length - 1].id;
+            idleTicks = 0;
             writeSseEvent(controller, "events", { events, nextCursor: cursor });
           } else {
+            idleTicks += 1;
             writeSseEvent(controller, "heartbeat", { cursor });
           }
         } catch (error) {
@@ -53,8 +61,17 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
         }
       };
       const boundTick = bindUserContextTick(userId, tick);
+      const scheduleNext = () => {
+        if (disposed) return;
+        const interval =
+          idleTicks >= IDLE_TICKS_BEFORE_BACKOFF ? IDLE_POLL_INTERVAL_MS : ACTIVE_POLL_INTERVAL_MS;
+        timer = setTimeout(() => {
+          boundTick();
+          scheduleNext();
+        }, interval);
+      };
       boundTick();
-      timer = setInterval(boundTick, POLL_INTERVAL_MS);
+      scheduleNext();
       if (request.signal.aborted) {
         cleanup();
         return;

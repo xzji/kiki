@@ -30,7 +30,7 @@ async function main() {
     const db = getRegistryDatabase();
     const createdAt = new Date().toISOString();
     const insert = db.prepare(
-      `INSERT OR IGNORE INTO invite_codes (code, created_at, used_at, used_by_user_id) VALUES (?, ?, NULL, NULL)`,
+      `INSERT OR IGNORE INTO invite_codes (code, created_at, used_at, used_by_user_id, max_uses, usage_count) VALUES (?, ?, NULL, NULL, 1, 0)`,
     );
     const created: string[] = [];
     for (const code of explicit) {
