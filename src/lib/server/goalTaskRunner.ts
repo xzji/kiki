@@ -95,7 +95,7 @@ type RunGoalTaskInput = {
   executionContext?: TaskExecutionContext;
   agentRunId?: string;
   signal?: AbortSignal;
-  /** 流式进展事件回调，用于上层（ExecutionSupervisor）重置空闲超时判定。 */
+  /** 流式进展事件回调，用于上层（ProcessSupervisor）重置空闲超时判定。 */
   onProgressPing?: (kind: string) => void;
   /** Claude CLI spawn 成功后回传 pid，供上层绑定 OS 进程做生命周期管理。 */
   onSpawn?: (pid: number) => void;

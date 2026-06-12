@@ -2,7 +2,7 @@ import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
 import { isRuntimeJobLeaseHeld } from "@/lib/server/repositories/runtimeJobsRepository";
 
 /**
- * ExecutionSupervisor —— worker 进程内的「执行生命周期所有者」。
+ * ProcessSupervisor —— worker 进程内的「执行生命周期所有者」。
  *
  * 背景（见方案）：此前「谁启动子进程、谁负责回收、谁对账 DB」分散在 worker 各处，
  * 导致挂死的 Claude CLI 子进程既无法被超时回收，也无法在 job 行被删后被终止，
@@ -17,6 +17,8 @@ import { isRuntimeJobLeaseHeld } from "@/lib/server/repositories/runtimeJobsRepo
  * 命中任一条件即统一调用 abort，由 transport 的 abort 监听强杀进程组。
  *
  * 注意：仅保存进程内临时状态，不做持久化；runtime_jobs 仍是权威业务状态。
+ * 该组件**仅在执行层（本地 daemon）有意义**：register 调用只发生在 taskDispatchWorker
+ * 启动子进程那一刻；云端 cloudOrchestratorRunner 不持有任何子进程，因此不需要 supervisor。
  */
 export type SupervisedJobInput = {
   requestId: string;
@@ -43,7 +45,7 @@ type SupervisedJob = {
   renewTimer?: NodeJS.Timeout;
 };
 
-export class ExecutionSupervisor {
+export class ProcessSupervisor {
   private readonly jobs = new Map<string, SupervisedJob>();
 
   /** 登记一个开始执行的 job。以 requestId 为 key（RunGoalTaskInput 仅持有 requestId）。 */
@@ -107,7 +109,7 @@ export class ExecutionSupervisor {
     if (!job || job.aborted) return;
     job.aborted = true;
     appendRuntimeDaemonLog(
-      `任务 ${job.jobId} 被 ExecutionSupervisor 中止${job.pid ? `（pid=${job.pid}）` : ""}：${reason}`,
+      `任务 ${job.jobId} 被 ProcessSupervisor 中止${job.pid ? `（pid=${job.pid}）` : ""}：${reason}`,
     );
     try {
       job.abortController.abort();
@@ -166,4 +168,4 @@ export class ExecutionSupervisor {
 }
 
 /** worker 进程内单例。 */
-export const executionSupervisor = new ExecutionSupervisor();
+export const processSupervisor = new ProcessSupervisor();

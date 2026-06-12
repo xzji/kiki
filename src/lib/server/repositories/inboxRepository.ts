@@ -7,7 +7,8 @@
  *  - inbox **不是物理表**，而是 `goal_event_log.notification.delivered` 事件的派生
  *    投影。前端通过 `RuntimeEventBridge` 监听 `notification.delivered{target:"inbox"}`
  *    渲染 inbox 列表项；inboxItemId 仅是事件 payload 内的字符串引用。
- *  - 现有 `goalNotificationWorker` 写 `inbox-${instance.id}`；本仓库针对
+ *  - 现有 `goalSideEffects`（旧名 goalNotificationWorker）写 `inbox-${instance.id}`；
+ *    本仓库针对
  *    Thread/Saga 派生的非 task-instance 通知（thread tick post_message /
  *    thread paused 通告 / saga 失败告警）写 `inbox-${source}-${threadId|topicId}-${ts}`。
  *  - 严格走 `appendGoalEventOnce`（带 idempotencyKey）保证同一 traceId 重写不重复。

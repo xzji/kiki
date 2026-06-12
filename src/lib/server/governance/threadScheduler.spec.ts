@@ -1,10 +1,10 @@
 /**
- * threadLoopScheduler spec — 验证 §3.4.4 调度选择器。
+ * threadScheduler spec — 验证 §3.4.4 调度选择器。
  */
 
 import assert from "node:assert/strict";
 
-import { isThreadDue, selectDueThreads } from "@/lib/server/thread/threadLoopScheduler";
+import { isThreadDue, selectDueThreads } from "@/lib/server/governance/threadScheduler";
 import { THREAD_FAILURE_PAUSE_THRESHOLD, type Thread } from "@/types/topic";
 
 const NOW = new Date("2026-06-01T08:00:00.000Z");
@@ -27,7 +27,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-export function runThreadLoopSchedulerSpecs() {
+export function runThreadSchedulerSpecs() {
   // ---------- 非 active 全部排除 ----------
   for (const status of ["paused", "archived"] as const) {
     assert.equal(isThreadDue(makeThread({ status }), NOW), null, `status=${status} 应不 due`);

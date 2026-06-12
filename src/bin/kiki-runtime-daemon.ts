@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "@/lib/runtime/schedulingTimezone";
+
 import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
 import { runRuntimeDaemonLoop } from "@/lib/daemon/daemonRunner";
 import { DEFAULT_LOCAL_USER_ID, runWithUserContext } from "@/lib/server/context/userContext";

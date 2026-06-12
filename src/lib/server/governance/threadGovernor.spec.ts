@@ -1,5 +1,5 @@
 /**
- * threadLoopWorker spec — 验证 §3.4.4 frame 编排：
+ * threadGovernor spec — 验证 §3.4.4 frame 编排：
  *  - 仅 due thread 被 tick；
  *  - tick 成功路径：prepareRun → collect → tick → dispatch → persist → record；
  *  - tick 失败路径：dispatch 不调用，persist 仍调用以累计 failureCount；
@@ -13,12 +13,12 @@ import assert from "node:assert/strict";
 import {
   runThreadLoopFrame,
   type ThreadLoopFrameInput,
-} from "@/lib/server/thread/threadLoopWorker";
+} from "@/lib/server/governance/threadGovernor";
 import { createAgentRun } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import { listAgentEvents } from "@/lib/server/repositories/agentRuntime/agentEventsRepository";
 import { getGoalEvents } from "@/lib/server/repositories/goalEventLogRepository";
 import { appendInboxMessage } from "@/lib/server/repositories/inboxRepository";
-import { recordTickOutcome } from "@/lib/server/thread/threadLoopCallbacks";
+import { recordTickOutcome } from "@/lib/server/governance/threadGovernorCallbacks";
 import { THREAD_FAILURE_PAUSE_THRESHOLD, type Thread, type ThreadTickOutput, type Topic } from "@/types/topic";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
@@ -64,7 +64,7 @@ function makeInvokeOk(output: ThreadTickOutput): LlmInvoke {
   return async () => ({ rawText: JSON.stringify(output), parsed: output as unknown as Record<string, unknown> });
 }
 
-export async function runThreadLoopWorkerSpecs() {
+export async function runThreadGovernorSpecs() {
   // ---------- 仅 due thread 被 tick ----------
   {
     const callOrder: string[] = [];

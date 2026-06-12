@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "@/lib/runtime/schedulingTimezone";
+
 import { createServer, type IncomingMessage } from "http";
 import { parse } from "url";
 import type { Duplex } from "stream";

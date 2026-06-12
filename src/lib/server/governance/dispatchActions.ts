@@ -15,6 +15,12 @@
  */
 
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
+import type {
+  CancelTaskRequest,
+  DispatchTaskRequest,
+  SendThreadMessageRequest,
+  UpdateTaskRequest,
+} from "@/lib/server/services/dispatchTaskFromThread";
 import type { Task } from "@/types/kiki";
 import type {
   ThreadTickAction,
@@ -24,16 +30,35 @@ import type {
 
 // ---------------------------------------------------------------------------
 // callback 契约
+//
+// 注：DispatchTaskRequest / UpdateTaskRequest / CancelTaskRequest /
+// SendThreadMessageRequest / ThreadTaskIntent 的定义已下沉到调度层
+// (services/dispatchTaskFromThread.ts)，此处只 re-export + 定义 callback 签名。
+// 依赖方向：governance → services（单向，禁止反向）。
 // ---------------------------------------------------------------------------
 
-export type DispatchTaskRequest = {
-  topicId: string;
-  threadId: string;
-  reason: string;
-  taskDraft: TaskDraft;
-  /** @deprecated Task 频率由 taskDraft 推断；保留为旧调用点兼容。 */
-  taskType?: Task["taskType"];
-};
+export type {
+  CancelTaskRequest,
+  DispatchTaskRequest,
+  SendThreadMessageRequest,
+  UpdateTaskRequest,
+} from "@/lib/server/services/dispatchTaskFromThread";
+
+/**
+ * ThreadTaskIntent —— 治理层产出、调度层消费的「task 治理意图」联合类型。
+ *
+ * 治理层（threadGovernor）在 tick 中产出这三种意图之一，由 dispatchActions 调度
+ * 到调度层暴露的 service（dispatchTaskFromThread / updateTaskFromThread /
+ * cancelTaskFromThread），这是治理层 → 调度层造/改/删 task 的**唯一通道**。
+ *
+ * 不变量：
+ *  - 治理层不得绕过此契约直接写 DB（也不允许直接 import scheduling/* 的内部模块）。
+ *  - 调度层在收到 intent 后负责分配 taskId、写 envelope、生成 instance 等所有调度副作用。
+ */
+export type ThreadTaskIntent =
+  | { kind: "dispatch"; request: DispatchTaskRequest }
+  | { kind: "update"; request: UpdateTaskRequest }
+  | { kind: "cancel"; request: CancelTaskRequest };
 
 export type DispatchTaskCallback = (request: DispatchTaskRequest) => Promise<{
   taskId: string;
@@ -41,36 +66,13 @@ export type DispatchTaskCallback = (request: DispatchTaskRequest) => Promise<{
   instanceId?: string;
 }>;
 
-export type UpdateTaskRequest = {
-  topicId: string;
-  threadId: string;
-  taskId: string;
-  reason: string;
-  patch: Partial<TaskDraft>;
-  currentTask: Task;
-};
-
 export type UpdateTaskCallback = (request: UpdateTaskRequest) => Promise<{
   taskId: string;
 }>;
 
-export type CancelTaskRequest = {
-  topicId: string;
-  threadId: string;
-  taskId: string;
-  reason: string;
-};
-
 export type CancelTaskCallback = (request: CancelTaskRequest) => Promise<{
   taskId: string;
 }>;
-
-export type SendThreadMessageRequest = {
-  topicId: string;
-  threadId: string;
-  text: string;
-  severity: ThreadTickPostMessageSeverity;
-};
 
 export type SendThreadMessageCallback = (request: SendThreadMessageRequest) => Promise<{
   conversationMessageId: string;

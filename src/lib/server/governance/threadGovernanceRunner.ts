@@ -1,14 +1,14 @@
 /**
- * threadLoopDaemon — PR13（计划 §12.2）。
+ * threadGovernanceRunner — Thread 治理层守护进程（计划 §12.2）。
  *
  * 职责：
- *  - 把 [runThreadLoopFrame](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/thread/threadLoopWorker.ts)
+ *  - 把 `runThreadLoopFrame`（governance/threadGovernor.ts）
  *    包装成可启动 / 停止 / 重启的守护进程；
  *  - setInterval(tickIntervalMs) 内每帧调用 `runThreadLoopFrame({ now: clock(), invoke, callbacks })`；
  *  - 通过 in-flight flag 阻止下一帧在上一帧未结束时重入；
- *  - 注入 [buildThreadLoopFrameCallbacks](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/thread/threadLoopCallbacks.ts)
- *    与 [createClaudeJsonInvoke](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/agentRuntime/claudeJsonInvoke.ts)
- *    工厂建好的 thread_runner LlmInvoke。
+ *  - 注入 `buildThreadLoopFrameCallbacks`（governance/threadGovernorCallbacks.ts）
+ *    与 `createClaudeJsonInvoke`（server/agentRuntime/claudeJsonInvoke.ts）工厂建好的
+ *    thread_runner LlmInvoke。
  *
  * 不做的事：
  *  - 不在 daemon 层访问 DB（仓库访问全在 callback 内）；
@@ -21,11 +21,11 @@ import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import {
   buildThreadLoopFrameCallbacks,
   type ThreadLoopFrameCallbacks,
-} from "@/lib/server/thread/threadLoopCallbacks";
+} from "@/lib/server/governance/threadGovernorCallbacks";
 import {
   runThreadLoopFrame,
   type ThreadLoopFrameOutcome,
-} from "@/lib/server/thread/threadLoopWorker";
+} from "@/lib/server/governance/threadGovernor";
 
 export type ThreadLoopDaemonConfig = {
   /** 默认 60_000ms。 */

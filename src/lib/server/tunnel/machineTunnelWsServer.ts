@@ -21,7 +21,7 @@ import {
   MACHINE_TUNNEL_WS_PATH,
   type MachineTunnelEnvelope,
 } from "@/lib/server/tunnel/machineTunnelProtocol";
-import { reconcileMachineTunnelHello } from "@/lib/server/worker/dispatchReadyTasksToMachines";
+import { reconcileMachineTunnelHello } from "@/lib/server/scheduling/taskDispatcher";
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const INBOUND_WATCHDOG_MS = 70_000;

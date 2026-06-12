@@ -23,7 +23,7 @@ async function main() {
   if (explicit.length > 0) {
     const invalid = explicit.filter((code) => !isValidInviteCodeFormat(code));
     if (invalid.length > 0) {
-      console.error(`无效邀请码（须 8 位字母数字混排）：${invalid.join(", ")}`);
+      console.error(`无效邀请码（须为 8 位字母或数字组合）：${invalid.join(", ")}`);
       process.exitCode = 1;
       return;
     }

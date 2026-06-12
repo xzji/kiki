@@ -1,3 +1,43 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "overrides": [
+    {
+      "files": ["src/lib/server/scheduling/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@/lib/server/governance/*",
+                  "@/lib/server/governance"
+                ],
+                "message": "scheduling/* 不得依赖 governance/*。治理层 → 调度层是单向依赖；如需共享类型，请下沉到 services/ 或 types/。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/lib/server/governance/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@/lib/server/scheduling/*",
+                  "@/lib/server/scheduling"
+                ],
+                "message": "governance/* 不得直接 import scheduling/* 内部模块；只能通过 services/ 下的公共契约或 adapter 跨层。"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

@@ -1,21 +1,19 @@
 /**
- * ThreadLoopWorker — 计划 §3.4.4。
+ * ThreadGovernor — 计划 §3.4.4（旧名 ThreadLoopWorker）。
  *
  * 设计要点：
- *  - 每帧调用 `runThreadLoopFrame`（worker / scheduler 守护进程的循环体）：
+ *  - 每帧调用 `runThreadLoopFrame`（治理层守护进程的循环体）：
  *    1. 收集所有 active topic 下的 active thread（由 callback 注入）；
- *    2. 用 [threadLoopScheduler.ts](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/thread/threadLoopScheduler.ts)
- *       筛出 due 列表；
+ *    2. 用 `governance/threadScheduler.ts` 筛出 due 列表；
  *    3. 顺序处理每个 due thread：
  *       - 由调用方为每次 tick 创建独立 agent_run（通过 prepareAgentRun 注入）；
- *       - 调 [runThreadTick](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/thread/threadRunner.ts)
- *         得到 patch + output；
+ *       - 调 `runThreadTick`（server/thread/threadRunner.ts）得到 patch + output；
  *       - 用 dispatchThreadActions 派发 actions；
  *       - 用 persistThreadPatch 写回 thread 状态（携带 baseRevision 乐观锁）；
  *       - 用 recordTickOutcome 写 agent_events.thread.tick.*。
  *  - 一次循环内单 thread 失败不影响其它 thread；统一收集到 result.failures。
- *  - 真实守护进程（setInterval / cron）由 PR14 在更上层接入；本模块仅承担
- *    "一帧调度"的纯编排，便于注入虚拟时钟做单测。
+ *  - 真实守护进程（setInterval / cron）由 governance/threadGovernanceRunner.ts 接入；
+ *    本模块仅承担"一帧调度"的纯编排，便于注入虚拟时钟做单测。
  */
 
 import { dispatchThreadActions, type DispatchThreadActionsResult } from "./dispatchActions";
@@ -25,8 +23,8 @@ import type {
   SendThreadMessageCallback,
   UpdateTaskCallback,
 } from "./dispatchActions";
-import { selectDueThreads, type DueThread } from "./threadLoopScheduler";
-import { runThreadTick, type ThreadTickResult } from "./threadRunner";
+import { selectDueThreads, type DueThread } from "./threadScheduler";
+import { runThreadTick, type ThreadTickResult } from "@/lib/server/thread/threadRunner";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { Task, TaskInstance } from "@/types/kiki";
 import type { Thread, Topic } from "@/types/topic";

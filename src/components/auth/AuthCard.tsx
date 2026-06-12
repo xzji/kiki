@@ -98,14 +98,9 @@ export function AuthCard() {
     return errors;
   }
 
-  function isValidInviteCode(code: string) {
-    const normalized = code.trim().toUpperCase();
-    return /^[A-Z0-9]{8}$/.test(normalized) && /[A-Z]/.test(normalized) && /[0-9]/.test(normalized);
-  }
-
   function validateRegister() {
     const errors: FieldErrors = {};
-    if (!isValidInviteCode(inviteCode)) errors.inviteCode = "请输入 8 位字母与数字组合的邀请码";
+    if (!/^[A-Z0-9]{8}$/.test(inviteCode.trim().toUpperCase())) errors.inviteCode = "请输入 8 位邀请码";
     if (!isValidEmail(email.trim())) errors.email = "请输入有效邮箱";
     if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
       errors.password = "密码至少 8 位且包含字母和数字";
@@ -214,7 +209,7 @@ export function AuthCard() {
               value={inviteCode}
               onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
               onBlur={() => markTouched("inviteCode")}
-              placeholder="8 位字母与数字"
+              placeholder="8 位邀请码"
               aria-invalid={Boolean(touched.inviteCode && fieldErrors.inviteCode)}
               aria-describedby={fieldErrors.inviteCode ? "inviteCode-error" : undefined}
               className={`h-10 w-full rounded-lg border bg-white px-3 font-mono text-sm tracking-widest outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${

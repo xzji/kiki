@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "@/lib/runtime/schedulingTimezone";
+
 process.env.KIKI_ORCHESTRATOR_MODE = process.env.KIKI_ORCHESTRATOR_MODE ?? "cloud";
 
 import { runCloudOrchestratorLoop } from "@/lib/server/orchestrator/cloudOrchestratorRunner";

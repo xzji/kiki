@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
-import { runGoalSchedulerEngine } from "@/lib/server/worker/goalSchedulerEngine";
+import { runGoalSchedulerEngine } from "@/lib/server/scheduling/taskScheduler";
 import type { Goal } from "@/types/kiki";
 import { DEFAULT_RUNTIME_FILE_POLICY, type RuntimeEnvironment } from "@/types/runtime";
 

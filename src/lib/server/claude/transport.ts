@@ -122,7 +122,7 @@ export type ClaudeStreamOptions = {
   conversationId?: string;
   signal?: AbortSignal;
   onEvent: (event: RuntimeStreamEvent) => void;
-  /** spawn 成功后回传子进程 pid，供上层（如 ExecutionSupervisor）绑定 OS 进程做生命周期管理。 */
+  /** spawn 成功后回传子进程 pid，供上层（如 ProcessSupervisor）绑定 OS 进程做生命周期管理。 */
   onSpawn?: (pid: number) => void;
 };
 

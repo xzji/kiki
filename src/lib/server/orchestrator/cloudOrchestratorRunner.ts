@@ -1,15 +1,20 @@
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
-import { runRecoveryWorker } from "@/lib/server/worker/recoveryWorker";
+import { runRecoveryWorker } from "@/lib/server/scheduling/recoveryWorker";
 import {
   reconcileRuntimeJobLeasesAndProjections,
-} from "@/lib/server/worker/taskDispatchWorker";
-import { executionSupervisor } from "@/lib/server/worker/executionSupervisor";
+} from "@/lib/server/scheduling/taskDispatchWorker";
 import { listUsersForOrchestratorTick } from "@/lib/server/orchestrator/listUsersWithPendingWork";
 import { getOrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { runOrchestratorUserFrame } from "@/lib/server/orchestrator/runOrchestratorUserFrame";
-import { registerTunnelDispatchCallbacks } from "@/lib/server/worker/dispatchReadyTasksToMachines";
+import { registerTunnelDispatchCallbacks } from "@/lib/server/scheduling/taskDispatcher";
 import { initializeMachineTunnelWsServer } from "@/lib/server/tunnel/machineTunnelWsServer";
+import { describeSchedulingTimezone } from "@/lib/runtime/schedulingTimezone";
+import {
+  NAMESPACE,
+  logScheduling,
+  logTickSummary,
+} from "@/lib/server/observability/schedulingLog";
 import type { Server as HttpServer } from "http";
 
 const ORCHESTRATOR_LEASE_OWNER = "cloud-orchestrator";
@@ -26,11 +31,13 @@ export async function runCloudOrchestratorScheduler() {
     for (const candidate of listUsersForOrchestratorTick()) {
       runWithUserContext(candidate.userId, () => {
         try {
+          // 云端只做 DB 层 lease 对账（lease 过期回收 + 状态投影）；
+          // 进程内 supervisor 仅在执行层（本地 daemon）有意义，云端不持有任何子进程。
           reconcileRuntimeJobLeasesAndProjections();
-          executionSupervisor.reconcileJobOwnership();
         } catch (error) {
-          appendRuntimeDaemonLog(
-            `用户 ${candidate.userId} 对账失败：${error instanceof Error ? error.message : String(error)}`,
+          logScheduling(
+            NAMESPACE.task.reconcileLease,
+            `user=${candidate.userId} error ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       });
@@ -52,14 +59,18 @@ export async function runCloudOrchestratorScheduler() {
           leaseOwner: ORCHESTRATOR_LEASE_OWNER,
           config,
         });
-        appendRuntimeDaemonLog(
-          `用户 ${result.userId}：新增任务 ${result.createdJobs}，下发 ${result.dispatched}${
-            result.skippedOffline ? "（machine 离线，任务保留 queued）" : ""
-          }`,
-        );
+        logTickSummary(NAMESPACE.task.scheduler, {
+          created: result.createdJobs,
+          dispatched: result.dispatched,
+          extra: {
+            user: result.userId,
+            ...(result.skippedOffline ? { skippedOffline: true } : {}),
+          },
+        });
       } catch (error) {
-        appendRuntimeDaemonLog(
-          `用户 ${candidate.userId} 编排帧失败：${error instanceof Error ? error.message : String(error)}`,
+        logScheduling(
+          NAMESPACE.task.scheduler,
+          `user=${candidate.userId} frame error ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -73,6 +84,12 @@ export async function runCloudOrchestratorLoop() {
 
   registerTunnelDispatchCallbacks();
   appendRuntimeDaemonLog("云端编排器已启动（Tunnel 走 HTTP 长轮询）");
+  {
+    const tzInfo = describeSchedulingTimezone();
+    appendRuntimeDaemonLog(
+      `tz applied=${tzInfo.applied} requested=${tzInfo.requested ?? "<unset>"} intl=${tzInfo.intlResolved}`,
+    );
+  }
 
   await runCloudOrchestratorScheduler();
 }
@@ -83,6 +100,12 @@ export function bootstrapCloudControlPlane(server?: HttpServer) {
   if (server) initializeMachineTunnelWsServer(server);
   registerTunnelDispatchCallbacks();
   appendRuntimeDaemonLog("云端控制面已启动（Tunnel 优先 WS，HTTP 长轮询兜底）");
+  {
+    const tzInfo = describeSchedulingTimezone();
+    appendRuntimeDaemonLog(
+      `tz applied=${tzInfo.applied} requested=${tzInfo.requested ?? "<unset>"} intl=${tzInfo.intlResolved}`,
+    );
+  }
   void runCloudOrchestratorScheduler().catch((error) => {
     console.error("[kiki-cloud-orchestrator] fatal error", error);
     process.exitCode = 1;

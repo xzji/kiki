@@ -8,7 +8,7 @@ import {
   dispatchThreadActions,
   type DispatchTaskCallback,
   type SendThreadMessageCallback,
-} from "@/lib/server/thread/dispatchActions";
+} from "@/lib/server/governance/dispatchActions";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
 import type { Task } from "@/types/kiki";
 import type { ThreadTickOutput } from "@/types/topic";

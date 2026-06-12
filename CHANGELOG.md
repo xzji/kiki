@@ -15,6 +15,9 @@
 - 将 `@kiki_agent/daemon` 版本提升到 `0.2.11`，进一步强化 WS tunnel 稳定性、goal task 终态回执与前台/后台运行提示。
 - 将 `@kiki_agent/daemon` 版本提升到 `0.2.16`，新增 daemon 分层日志能力：默认记录生命周期、连接、心跳、命令、执行与流式元数据，支持结构化 `daemon.log`、大小轮转与显式 trace 双开关。
 - Topic 初始化 Saga 运行过程现在可实时映射为 CLI 过程事件，前端可直接看到 Interviewer/Planner/Critic/Refiner/Spec/Presenter 的 prompt、输出和结构化结果。
+- 将 daemon 主入口重构为 `composeDaemon` 分层装配：调度主循环、任务分发、lease/process 对账、thread governance 各自独立 runner，云端与本地可复用同一 runner 能力而不再耦合在单文件里。
+- governance / scheduling 目录边界收紧：通过 ESLint 限制两层互相直接 import，只允许经 services/types 公共契约跨层协作；同时将 thread task 读取收敛到 `threadTaskView` 只读 adapter。
+- 调度与治理链路补齐 observability：新增 scheduling/tick 结构化日志、tick recorder、时区描述与 orchestrator user frame 观测，便于排查 tick 漏跑、lease 回收和云端/本地执行分工。
 
 ### Fixed
 - 修复 `message.updated` 乱序/重复回灌导致旧快照短暂覆盖新内容、词序错乱的问题；为每条消息增加 version 单调守卫，只应用更高版本快照。
@@ -22,6 +25,7 @@
 - 修复云端 machine 执行 goal task 后只回传 `ok:true/false` 的“瘦回执”问题；现在会把 `completed/failed/awaiting_user`、`blocker`、`trajectory` 与结构化结果一并回传，避免服务端误判任务状态。
 - 修复 WebSocket tunnel 在 `perMessageDeflate` 压缩开启时的兼容性风险，服务端与诊断链路统一关闭压缩。
 - 修复默认多次使用邀请码示例码中包含字母 `O` 导致与规则和肉眼识别不一致的问题，改为 `KIKIG00D`。
+- 修复调度 worker 仍依赖旧 `executionSupervisor` 的单体所有者问题，统一切换到 `runtime/processSupervisor`，避免本地子进程生命周期管理继续散落在 worker 层。
 
 ## 2026-06-11
 

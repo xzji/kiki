@@ -1,5 +1,5 @@
 /**
- * threadLoopDaemon spec — PR13（计划 §12.2.5）。
+ * threadGovernanceRunner spec — PR13（计划 §12.2.5）。
  *
  * 验证 daemon 外壳行为（不接 DB）：
  *  - start() 后 setInterval 周期性触发 frame；
@@ -12,10 +12,10 @@
 
 import assert from "node:assert/strict";
 
-import { createThreadLoopDaemon } from "@/lib/server/scheduler/threadLoopDaemon";
-import type { ThreadLoopFrameCallbacks } from "@/lib/server/thread/threadLoopCallbacks";
+import { createThreadLoopDaemon } from "@/lib/server/governance/threadGovernanceRunner";
+import type { ThreadLoopFrameCallbacks } from "@/lib/server/governance/threadGovernorCallbacks";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
-import type { ThreadLoopFrameOutcome } from "@/lib/server/thread/threadLoopWorker";
+import type { ThreadLoopFrameOutcome } from "@/lib/server/governance/threadGovernor";
 
 function buildNoopCallbacks(): ThreadLoopFrameCallbacks {
   return {
@@ -35,7 +35,7 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export async function runThreadLoopDaemonSpecs() {
+export async function runThreadGovernanceRunnerSpecs() {
   // ---------- runOnce 同步触发一帧 ----------
   {
     let buildCount = 0;

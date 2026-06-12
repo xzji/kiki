@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { normalizeSubGoalId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
 import { requestThreadGovernanceTick } from "@/lib/server/services/goalRuntimeService";
-import { isThreadDue } from "@/lib/server/thread/threadLoopScheduler";
+import { isThreadDue } from "@/lib/server/governance/threadScheduler";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import {
   readTopicsSnapshotMeta,

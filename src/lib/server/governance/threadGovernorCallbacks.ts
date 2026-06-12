@@ -1,9 +1,9 @@
 /**
- * threadLoopCallbacks — 把 PR14 仓库层绑定为 runThreadLoopFrame 的 7 callback（PR14.6 + 计划 §12.3.2）。
+ * threadGovernorCallbacks — 把 PR14 仓库层绑定为 runThreadLoopFrame 的 7 callback（PR14.6 + 计划 §12.3.2）。
  *
  * 设计：
  *  - 本模块**只做装配**：纯 IO 不带业务逻辑；测试可不依赖此模块（纯函数层
- *    threadLoopWorker.spec.ts 直接 mock callback）。
+ *    threadGovernor.spec.ts 直接 mock callback）。
  *  - 装配点严格遵循 §12.3.2 表格。
  *  - sendThreadMessage 双写约束：
  *      - 用同 traceId（= frameStartedAt + index）确保 conversation_messages 与
@@ -28,7 +28,7 @@ import {
   updateTaskFromThread,
 } from "@/lib/server/services/dispatchTaskFromThread";
 import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { goalsSnapshotThreadTaskView } from "@/lib/server/services/threadTaskView";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type {
   CollectActiveThreadsCallback,
@@ -37,13 +37,13 @@ import type {
   PrepareAgentRunCallback,
   PersistThreadPatchCallback,
   RecordTickOutcomeCallback,
-} from "@/lib/server/thread/threadLoopWorker";
+} from "@/lib/server/governance/threadGovernor";
 import type {
   DispatchTaskCallback,
   CancelTaskCallback,
   SendThreadMessageCallback,
   UpdateTaskCallback,
-} from "@/lib/server/thread/dispatchActions";
+} from "@/lib/server/governance/dispatchActions";
 
 // ---------------------------------------------------------------------------
 // 1. collectActiveThreads — 读 topics envelope，过滤 active topic + active thread
@@ -91,9 +91,7 @@ export const collectCurrentThreadTasks: CollectCurrentThreadTasksCallback = asyn
   topicId,
   threadId,
 }) => {
-  const goal = readGoalsSnapshot([]).find((candidate) => candidate.id === topicId);
-  const subGoal = goal?.subGoals.find((candidate) => candidate.id === threadId);
-  return subGoal?.tasks ?? [];
+  return goalsSnapshotThreadTaskView.listByThread({ topicId, threadId });
 };
 
 // ---------------------------------------------------------------------------

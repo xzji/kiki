@@ -17,7 +17,7 @@ import { upsertGoalsSnapshot, readGoalsSnapshot, readGoalsSnapshotMeta } from "@
 import { deriveOpaqueId, normalizeSubGoalId } from "@/lib/opaqueIds";
 import type { Goal } from "@/types/kiki";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
-import type { DispatchTaskRequest } from "@/lib/server/thread/dispatchActions";
+import type { DispatchTaskRequest } from "@/lib/server/governance/dispatchActions";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
 import { dispatchTaskFromThread } from "./dispatchTaskFromThread";

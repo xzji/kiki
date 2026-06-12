@@ -24,14 +24,61 @@ import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { applyTopicCommand } from "@/lib/server/services/topicCommandService";
 import { runSpecWriter } from "@/lib/server/taskExecution/runSpecWriter";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
-import type {
-  CancelTaskRequest,
-  DispatchTaskRequest,
-  UpdateTaskRequest,
-} from "@/lib/server/thread/dispatchActions";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
+import type {
+  ThreadTickPostMessageSeverity,
+} from "@/types/topic";
 import { normalizeConcreteTriggerRule } from "@/lib/taskTriggerTime";
 import { normalizeExecutionKind, type Task, type TaskSpec } from "@/types/kiki";
+
+// ---------------------------------------------------------------------------
+// Thread → Task 调度契约（治理层产出 / 本 service 消费）
+//
+// 这些类型是治理层 → 调度层造/改/删 task 的**唯一公共契约**：
+//  - 治理层（governance/*）产出 request；
+//  - 本 service（services/dispatchTaskFromThread）落库；
+//  - 治理层不允许绕开本 service 直接写 envelope。
+//
+// 把契约定义放在调度层（service 所在目录）保证依赖方向单向：governance → services。
+// ---------------------------------------------------------------------------
+
+export type DispatchTaskRequest = {
+  topicId: string;
+  threadId: string;
+  reason: string;
+  taskDraft: TaskDraft;
+  /** @deprecated Task 频率由 taskDraft 推断；保留为旧调用点兼容。 */
+  taskType?: Task["taskType"];
+};
+
+export type UpdateTaskRequest = {
+  topicId: string;
+  threadId: string;
+  taskId: string;
+  reason: string;
+  patch: Partial<TaskDraft>;
+  currentTask: Task;
+};
+
+export type CancelTaskRequest = {
+  topicId: string;
+  threadId: string;
+  taskId: string;
+  reason: string;
+};
+
+export type SendThreadMessageRequest = {
+  topicId: string;
+  threadId: string;
+  text: string;
+  severity: ThreadTickPostMessageSeverity;
+};
+
+/** 治理层产出、调度层消费的「task 治理意图」联合类型。 */
+export type ThreadTaskIntent =
+  | { kind: "dispatch"; request: DispatchTaskRequest }
+  | { kind: "update"; request: UpdateTaskRequest }
+  | { kind: "cancel"; request: CancelTaskRequest };
 
 export type DispatchTaskFromThreadResult = {
   taskId: string;

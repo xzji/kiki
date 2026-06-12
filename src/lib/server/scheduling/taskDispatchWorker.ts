@@ -25,7 +25,7 @@ import {
   renewRuntimeJobLease,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
-import { executionSupervisor } from "@/lib/server/worker/executionSupervisor";
+import { processSupervisor } from "@/lib/runtime/processSupervisor";
 
 const DAEMON_VERSION = "0.1.0";
 const LEASE_RENEW_INTERVAL_MS = 30 * 1000;
@@ -176,7 +176,7 @@ async function executeClaimedJob(params: {
   let leaseLostMessage: string | null = null;
   const abortController = new AbortController();
   const requestId = job.requestId ?? `goal-task-${Date.now()}`;
-  executionSupervisor.registerJob({
+  processSupervisor.registerJob({
     requestId,
     jobId: job.id,
     leaseOwner,
@@ -206,8 +206,8 @@ async function executeClaimedJob(params: {
         });
         if (!renewResult.renewed) {
           leaseLostMessage = `任务 ${job.id} 续租失败：lease 已被其他 owner 占用或任务已不在 running 状态`;
-          // 统一交由 ExecutionSupervisor 中止，由 transport 的 abort 监听强杀进程组。
-          executionSupervisor.abortJob(requestId, leaseLostMessage);
+          // 统一交由 ProcessSupervisor 中止，由 transport 的 abort 监听强杀进程组。
+          processSupervisor.abortJob(requestId, leaseLostMessage);
           return;
         }
         const now = new Date().toISOString();
@@ -226,7 +226,7 @@ async function executeClaimedJob(params: {
     // 续租定时器 unref 并纳入 supervisor 生命周期：与 durationTimer 行为一致，
     // 极端路径下（finally 未执行）由 supervisor 销账时统一清理，避免残留 interval 阻止进程退出。
     renewTimer.unref?.();
-    executionSupervisor.attachRenewTimer(requestId, renewTimer);
+    processSupervisor.attachRenewTimer(requestId, renewTimer);
     await runGoalTask({
       requestId,
       goal: job.payload.goal,
@@ -239,8 +239,8 @@ async function executeClaimedJob(params: {
       resumeContext: job.payload.resumeContext,
       initialTrajectory: job.payload.resumeContext ? job.trajectory : [],
       signal: abortController.signal,
-      onProgressPing: (kind) => executionSupervisor.markProgress(requestId, kind),
-      onSpawn: (pid) => executionSupervisor.attachProcess(requestId, pid),
+      onProgressPing: (kind) => processSupervisor.markProgress(requestId, kind),
+      onSpawn: (pid) => processSupervisor.attachProcess(requestId, pid),
     });
     if (abortController.signal.aborted) {
       throw new Error(leaseLostMessage || `任务 ${job.id} 已因 lease 失效或超时中断`);
@@ -342,7 +342,7 @@ async function executeClaimedJob(params: {
       renewTimer = null;
     }
     // 统一销账：清理 supervisor 内存态（含总时长计时器），避免泄漏。
-    executionSupervisor.completeJob(requestId);
+    processSupervisor.completeJob(requestId);
   }
 }
 

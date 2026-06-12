@@ -1,9 +1,9 @@
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { readGoalsSnapshot, readRuntimeEnvironmentsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { runGoalSchedulerEngine } from "@/lib/server/worker/goalSchedulerEngine";
-import { runGoalDaemonSideEffects } from "@/lib/server/worker/goalNotificationWorker";
-import { dispatchReadyTasksToMachines } from "@/lib/server/worker/dispatchReadyTasksToMachines";
+import { runGoalSchedulerEngine } from "@/lib/server/scheduling/taskScheduler";
+import { runGoalDaemonSideEffects } from "@/lib/server/scheduling/goalSideEffects";
+import { dispatchReadyTasksToMachines } from "@/lib/server/scheduling/taskDispatcher";
 import { orchestratorConcurrencyBudget } from "@/lib/server/orchestrator/concurrencyBudget";
 import type { OrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { getDefaultRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";

@@ -11,9 +11,7 @@ export function normalizeInviteCode(code: string) {
 }
 
 export function isValidInviteCodeFormat(code: string) {
-  if (INITIAL_MULTI_USE_INVITE_CODES.some((inviteCode) => inviteCode.code === normalizeInviteCode(code))) return true;
-  if (!/^[A-Z0-9]{8}$/.test(code)) return false;
-  return /[A-Z]/.test(code) && /[0-9]/.test(code);
+  return /^[A-Z0-9]{8}$/.test(normalizeInviteCode(code));
 }
 
 function nowIso() {
@@ -93,7 +91,7 @@ export function consumeInviteCodeInTransaction(
 ) {
   const normalized = normalizeInviteCode(input.code);
   if (!isValidInviteCodeFormat(normalized)) {
-    return { ok: false as const, reason: "邀请码须为 8 位字母与数字组合", field: "inviteCode" as const };
+    return { ok: false as const, reason: "邀请码须为 8 位字母或数字组合", field: "inviteCode" as const };
   }
   const row = db
     .prepare(`SELECT code, max_uses, usage_count FROM invite_codes WHERE code = ? LIMIT 1`)
