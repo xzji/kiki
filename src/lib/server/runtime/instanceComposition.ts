@@ -70,6 +70,28 @@ function composeInstanceFromJob(input: {
   notification?: TaskInstance["notification"];
 }) {
   const nextStatus = runtimeJobStatusToTaskInstanceStatus(input.job.status);
+  const resultProgress = input.job.result
+    ? {
+        requestId: input.job.requestId ?? `goal-task-${input.job.id}`,
+        scope: "goal_task_execute" as const,
+        status: input.job.status === "failed" ? "failed" as const : "completed" as const,
+        phase: input.job.status === "failed" ? "error" as const : "completed" as const,
+        message:
+          typeof input.job.result.finalMessage === "string"
+            ? input.job.result.finalMessage
+            : input.job.status === "failed"
+              ? input.job.lastError ?? "任务执行失败"
+              : "任务执行完成",
+        startedAt: input.job.startedAt ?? input.job.createdAt,
+        updatedAt: input.job.updatedAt,
+        finishedAt: input.job.finishedAt,
+        error: input.job.status === "failed" ? input.job.lastError : undefined,
+        goalId: input.job.goalId,
+        taskId: input.job.taskId,
+        taskInstanceId: input.job.taskInstanceId,
+        resultPayload: input.job.result,
+      }
+    : null;
   const baseInstance: TaskInstance = {
     ...input.instance,
     notification: input.notification ?? input.instance.notification,
@@ -81,11 +103,12 @@ function composeInstanceFromJob(input: {
       lastAttemptAt: input.job.startedAt ?? input.job.updatedAt,
     },
   };
-  const derived = input.job.progress
+  const progress = input.job.progress ?? resultProgress;
+  const derived = progress
     ? deriveTaskInstanceFromProgress({
         task: input.task,
         instance: baseInstance,
-        progress: input.job.progress,
+        progress,
         logs: input.job.logs,
         trajectory: input.job.trajectory,
       })

@@ -82,6 +82,32 @@ function completeTunnelJob(input: {
       ? (input.trajectory as ExecutionTrajectoryStep[])
       : undefined;
   const blocker = (input.blocker as ExecutionBlocker | null | undefined) ?? undefined;
+  const now = new Date().toISOString();
+  const finalProgress =
+    input.result !== undefined
+      ? ({
+          requestId: active.job.requestId ?? `goal-task-${active.job.id}`,
+          scope: "goal_task_execute" as const,
+          status: status === "failed" ? "failed" : "completed",
+          phase: status === "failed" ? "error" : status === "awaiting_user" ? "reviewing" : "completed",
+          message:
+            typeof input.result?.finalMessage === "string"
+              ? input.result.finalMessage
+              : status === "failed"
+                ? input.error ?? "本地 machine 执行失败"
+                : status === "awaiting_user"
+                  ? "任务执行已暂停，等待用户补充必要信息"
+                  : "任务执行完成",
+          startedAt: active.job.startedAt ?? active.job.createdAt,
+          updatedAt: now,
+          finishedAt: now,
+          error: status === "failed" ? input.error ?? "本地 machine 执行失败" : undefined,
+          goalId: active.job.goalId,
+          taskId: active.job.taskId,
+          taskInstanceId: active.job.taskInstanceId,
+          resultPayload: input.result,
+        } satisfies GoalServerProgress)
+      : undefined;
 
   runWithUserContext(active.userId, () => {
     if (status === "awaiting_user") {
@@ -90,6 +116,7 @@ function completeTunnelJob(input: {
       updateGoalRuntimeJobExecution(active.job.id, {
         status: "awaiting_user",
         ...(blocker !== undefined ? { blocker } : {}),
+        ...(finalProgress !== undefined ? { progress: finalProgress } : {}),
         ...(trajectory !== undefined ? { trajectory } : {}),
         ...(input.result !== undefined ? { result: input.result } : {}),
         lastError: undefined,
@@ -101,6 +128,7 @@ function completeTunnelJob(input: {
     updateGoalRuntimeJobExecution(active.job.id, {
       status: status === "completed" ? "completed" : "failed",
       ...(blocker !== undefined ? { blocker } : {}),
+      ...(finalProgress !== undefined ? { progress: finalProgress } : {}),
       ...(trajectory !== undefined ? { trajectory } : {}),
       ...(input.result !== undefined ? { result: input.result } : {}),
       lastError: status === "completed" ? undefined : input.error ?? "本地 machine 执行失败",
