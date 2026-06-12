@@ -8,6 +8,7 @@ process.env.KIKI_MACHINE_EXECUTOR = "true";
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
 import { enterUserContext, runWithUserContext } from "@/lib/server/context/userContext";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
+import { setGoalTelemetryObserver } from "@/lib/server/goalTelemetry";
 import { getKikiDefaultSkillsStatus, installKikiDefaultSkills } from "@/lib/server/kikiSkills/installService";
 import { pickDirectoryWithOsascript } from "@/lib/server/runtime/selectWorkingDirectory";
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
@@ -119,6 +120,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
 
   let boundUserId: string | null = null;
   const runningJobs = new Set<string>();
+  const requestIdToRunningJob = new Map<string, string>();
   // 进行中的流式会话数（stream_prompt 不进 runningJobs，需单独计数，避免交接退出打断实时流）。
   const activeStreamSessionIds = new Set<string>();
   // 方案 A：前台进程在网页开启 24h、后台服务接管后置位，由主循环择机优雅退出。
@@ -137,6 +139,26 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   async function sendResult(result: MachineResult) {
     await outboundTransport.sendResult(result);
   }
+
+  function sendExecuteProgress(result: Extract<MachineResult, { type: "execute_progress" }>) {
+    void sendResult(result).catch((error) => {
+      appendRuntimeDaemonLog(`execute progress 回传失败：${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  setGoalTelemetryObserver({
+    onProgress(progress) {
+      const jobId = requestIdToRunningJob.get(progress.requestId);
+      if (!jobId) return;
+      sendExecuteProgress({ type: "execute_progress", jobId, progress });
+    },
+    onLog(log) {
+      if (!log.requestId) return;
+      const jobId = requestIdToRunningJob.get(log.requestId);
+      if (!jobId) return;
+      sendExecuteProgress({ type: "execute_progress", jobId, log });
+    },
+  });
 
   async function sendStreamChunk(sessionId: string, event: ClaudeStreamEvent, seq: number) {
     await outboundTransport.sendStreamChunk(sessionId, event, seq);
@@ -385,6 +407,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       // 异步执行，不阻塞 poll 循环（保持心跳与并发）。
       if (runningJobs.has(command.jobId)) return;
       runningJobs.add(command.jobId);
+      requestIdToRunningJob.set(command.requestId, command.jobId);
       void (async () => {
         try {
           const raw = command.payload as Partial<RuntimeJobPayload> & { trajectory?: ExecutionTrajectoryStep[] };
@@ -431,6 +454,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           });
         } finally {
           runningJobs.delete(command.jobId);
+          requestIdToRunningJob.delete(command.requestId);
         }
       })();
       return;

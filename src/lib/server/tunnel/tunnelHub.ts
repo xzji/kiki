@@ -20,6 +20,8 @@ import type {
   RuntimePermissionMode,
 } from "@/types/runtime";
 import type { KikiSkillsInstallPayload, KikiSkillsStatusPayload } from "@/lib/kikiSkills/types";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 
 export type RemoteDaemonServiceKind = "launchd" | "systemd" | "unsupported";
 
@@ -29,6 +31,8 @@ export type RemoteDaemonServiceStatus = {
   installed: boolean;
   running: boolean;
   path: string;
+  pid?: number | null;
+  daemonVersion?: string | null;
 };
 
 export type RemotePromptJsonPayload = {
@@ -104,6 +108,13 @@ export type MachineResult =
       trajectory?: unknown;
       result?: Record<string, unknown> | null;
     }
+  | {
+      type: "execute_progress";
+      jobId: string;
+      progress?: GoalServerProgress;
+      log?: GoalServerLogEntry;
+      trajectory?: ExecutionTrajectoryStep[];
+    }
   | { type: "discover_runtimes"; requestId: string; ok: boolean; items?: RuntimeDiscoveryItem[]; workingDirectory?: string; error?: string }
   | { type: "check_runtime"; requestId: string; ok: boolean; result?: RuntimeEnvironmentCheckResult; error?: string }
   | { type: "select_directory"; requestId: string; ok: boolean; path?: string; canceled?: boolean; error?: string }
@@ -135,6 +146,12 @@ type ExecuteResultListener = (input: {
   trajectory?: unknown;
   result?: Record<string, unknown> | null;
 }) => void;
+type ExecuteProgressListener = (input: {
+  jobId: string;
+  progress?: GoalServerProgress;
+  log?: GoalServerLogEntry;
+  trajectory?: ExecutionTrajectoryStep[];
+}) => void;
 type MachineDisconnectListener = (machineId: string) => void;
 type MachineCommandSender = (command: MachineCommand) => boolean;
 type MachineWsConnection = {
@@ -163,6 +180,7 @@ type TunnelHubState = {
   pendingRunPromptJson: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   pendingRunPromptText: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   executeResultListener: ExecuteResultListener | null;
+  executeProgressListener: ExecuteProgressListener | null;
   machineDisconnectListener: MachineDisconnectListener | null;
 };
 
@@ -190,6 +208,7 @@ function getState(): TunnelHubState {
       pendingRunPromptJson: new Map(),
       pendingRunPromptText: new Map(),
       executeResultListener: null,
+      executeProgressListener: null,
       machineDisconnectListener: null,
     };
   }
@@ -311,6 +330,15 @@ export function submitMachineResult(result: MachineResult) {
       blocker: result.blocker,
       trajectory: result.trajectory,
       result: result.result,
+    });
+    return;
+  }
+  if (result.type === "execute_progress") {
+    state.executeProgressListener?.({
+      jobId: result.jobId,
+      progress: result.progress,
+      log: result.log,
+      trajectory: result.trajectory,
     });
     return;
   }
@@ -451,6 +479,10 @@ export function authenticateMachineForResult(apiKey: string) {
 
 export function setTunnelExecuteResultListener(listener: ExecuteResultListener | null) {
   getState().executeResultListener = listener;
+}
+
+export function setTunnelExecuteProgressListener(listener: ExecuteProgressListener | null) {
+  getState().executeProgressListener = listener;
 }
 
 export function setMachineDisconnectListener(listener: MachineDisconnectListener | null) {

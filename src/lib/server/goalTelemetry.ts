@@ -21,6 +21,17 @@ function telemetryFilePath() {
 const progressByRequest = new Map<string, GoalServerProgress>();
 const logBuffer: GoalServerLogEntry[] = [];
 
+type GoalTelemetryObserver = {
+  onProgress?: (progress: GoalServerProgress) => void;
+  onLog?: (entry: GoalServerLogEntry) => void;
+};
+
+let telemetryObserver: GoalTelemetryObserver | null = null;
+
+export function setGoalTelemetryObserver(observer: GoalTelemetryObserver | null) {
+  telemetryObserver = observer;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -84,7 +95,7 @@ export function beginGoalTelemetry(input: {
   resultPayload?: Record<string, unknown> | null;
 }) {
   const now = nowIso();
-  progressByRequest.set(input.requestId, {
+  const progress: GoalServerProgress = {
     requestId: input.requestId,
     scope: input.scope,
     status: "running",
@@ -98,7 +109,9 @@ export function beginGoalTelemetry(input: {
     attemptCount: input.attemptCount,
     summary: input.summary,
     resultPayload: input.resultPayload,
-  });
+  };
+  progressByRequest.set(input.requestId, progress);
+  telemetryObserver?.onProgress?.(progress);
   appendGoalLog({
     requestId: input.requestId,
     scope: input.scope,
@@ -128,7 +141,7 @@ export function updateGoalTelemetry(input: {
 }) {
   const current = progressByRequest.get(input.requestId);
   const now = nowIso();
-  progressByRequest.set(input.requestId, {
+  const progress: GoalServerProgress = {
     requestId: input.requestId,
     scope: input.scope,
     status: current?.status ?? "running",
@@ -144,7 +157,9 @@ export function updateGoalTelemetry(input: {
     attemptCount: input.attemptCount ?? current?.attemptCount,
     summary: input.summary ?? current?.summary,
     resultPayload: input.resultPayload ?? current?.resultPayload,
-  });
+  };
+  progressByRequest.set(input.requestId, progress);
+  telemetryObserver?.onProgress?.(progress);
   appendGoalLog({
     requestId: input.requestId,
     scope: input.scope,
@@ -226,7 +241,7 @@ function finalizeGoalTelemetry(input: {
 }) {
   const current = progressByRequest.get(input.requestId);
   const now = nowIso();
-  progressByRequest.set(input.requestId, {
+  const progress: GoalServerProgress = {
     requestId: input.requestId,
     scope: input.scope,
     status: input.status,
@@ -242,7 +257,9 @@ function finalizeGoalTelemetry(input: {
     attemptCount: current?.attemptCount,
     summary: input.summary ?? current?.summary,
     resultPayload: input.resultPayload ?? current?.resultPayload,
-  });
+  };
+  progressByRequest.set(input.requestId, progress);
+  telemetryObserver?.onProgress?.(progress);
   appendGoalLog({
     requestId: input.requestId,
     scope: input.scope,
@@ -288,6 +305,7 @@ export function appendGoalLog(input: {
     status: input.status,
   };
   pushLog(entry);
+  telemetryObserver?.onLog?.(entry);
 
   const consolePrefix = `[${entry.scope}]${entry.requestId ? ` [${entry.requestId}]` : ""}`;
   const consoleLine = `${consolePrefix} ${entry.phase ? `[${entry.phase}] ` : ""}${entry.message}`;

@@ -1,4 +1,5 @@
 import path from "path";
+import { format } from "util";
 
 import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
 import type { RemoteDaemonServiceStatus } from "@/lib/server/tunnel/tunnelHub";
@@ -10,7 +11,9 @@ import {
   resolveInstallScriptPath,
   serviceStatus,
   uninstallService as uninstallDaemonService,
+  writeDaemonProcessState,
 } from "./service";
+import { ensureSingleDaemonInstance } from "./singleton";
 
 type Subcommand = "run" | "install" | "uninstall" | "status" | "version" | "help";
 const DAEMON_PACKAGE_VERSION = packageJson.version;
@@ -53,6 +56,38 @@ async function remoteServiceStatus(): Promise<RemoteDaemonServiceStatus> {
   return { platform: process.platform, ...(await serviceStatus()) };
 }
 
+function formatLocalTimestamp(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const offsetMinutes = -date.getTimezoneOffset();
+  const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ` +
+    `${offsetSign}${pad(Math.floor(absoluteOffset / 60))}:${pad(absoluteOffset % 60)}`
+  );
+}
+
+function prefixLogLines(message: string) {
+  const prefix = `[${formatLocalTimestamp()}] `;
+  return message
+    .split("\n")
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
+}
+
+function installTimestampedConsoleForDaemonRun() {
+  console.log = (...args: unknown[]) => {
+    process.stdout.write(`${prefixLogLines(format(...args))}\n`);
+  };
+  console.warn = (...args: unknown[]) => {
+    process.stderr.write(`${prefixLogLines(format(...args))}\n`);
+  };
+  console.error = (...args: unknown[]) => {
+    process.stderr.write(`${prefixLogLines(format(...args))}\n`);
+  };
+}
+
 function printHelp() {
   console.log(`kiki-daemon — Kiki 本地执行节点
 
@@ -90,9 +125,11 @@ async function main() {
       return;
     }
     console.log(`后台服务（${status.kind}）:`);
-    console.log(`  版本: ${DAEMON_PACKAGE_VERSION}`);
+    console.log(`  CLI 版本: ${DAEMON_PACKAGE_VERSION}`);
     console.log(`  已安装: ${status.installed ? "是" : "否"}`);
     console.log(`  运行中: ${status.running ? "是" : "否"}`);
+    if (status.pid) console.log(`  进程号: ${status.pid}`);
+    if (status.running) console.log(`  进程版本: ${status.daemonVersion ?? "未知"}`);
     if (status.path) console.log(`  配置文件: ${status.path}`);
     return;
   }
@@ -127,6 +164,8 @@ async function main() {
     return;
   }
 
+  installTimestampedConsoleForDaemonRun();
+
   const { serverUrl, apiKey } = requireConnectionArgs();
   const scriptPath = resolveInstallScriptPath();
   const environment = collectDaemonServiceEnv(process.env);
@@ -136,6 +175,13 @@ async function main() {
       "⚠️  当前通过 npx 临时缓存运行。若从网页开启 24h 运行，建议先全局安装：npm i -g @kiki_agent/daemon",
     );
   }
+  // 进程级单例：启动时主动终止其它存活的 daemon run 实例（含覆盖安装后残留的旧版进程、
+  // 游离前台进程），避免新旧进程用同一 apiKey 抢同一 machineId 的 WS 连接互相顶替。
+  ensureSingleDaemonInstance({
+    version: DAEMON_PACKAGE_VERSION,
+    log: (message) => console.log(`[kiki-daemon] ${message}`),
+  });
+  writeDaemonProcessState({ daemonVersion: DAEMON_PACKAGE_VERSION });
   // 守护进程兜底：偶发的未捕获异常不应让进程退出，交由重连循环恢复。
   process.on("unhandledRejection", (reason) => {
     console.error("[kiki-daemon] unhandledRejection:", reason instanceof Error ? reason.message : reason);

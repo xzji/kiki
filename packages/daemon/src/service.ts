@@ -49,6 +49,16 @@ function logsDir() {
   return dir;
 }
 
+function runtimeDir() {
+  const dir = path.join(kikiHome(), "runtime");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function daemonProcessStatePath() {
+  return path.join(runtimeDir(), "daemon-process.json");
+}
+
 /** 后台服务固定使用 ~/.kiki/data，避免 cwd 漂移到 `/` 导致写到 /data */
 function dataDir() {
   const dir = path.join(kikiHome(), "data");
@@ -69,6 +79,13 @@ function xmlEscape(value: string) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function xmlUnescape(value: string) {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 }
 
 function resolveServiceEnvironment(ctx: InstallContext) {
@@ -181,6 +198,92 @@ function tailDaemonStderr(maxLines = 12): string {
   }
 }
 
+type DaemonProcessState = {
+  pid: number;
+  daemonVersion: string;
+  startedAt: string;
+};
+
+export function writeDaemonProcessState(input: { daemonVersion: string }) {
+  const state: DaemonProcessState = {
+    pid: process.pid,
+    daemonVersion: input.daemonVersion,
+    startedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(daemonProcessStatePath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function readDaemonProcessState(pid: number | null): DaemonProcessState | null {
+  if (!pid) return null;
+  try {
+    const raw = fs.readFileSync(daemonProcessStatePath(), "utf8");
+    const parsed = JSON.parse(raw) as Partial<DaemonProcessState>;
+    if (parsed.pid !== pid || typeof parsed.daemonVersion !== "string") return null;
+    return {
+      pid,
+      daemonVersion: parsed.daemonVersion,
+      startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseLaunchdPid(stdout: string): number | null {
+  const match = stdout.match(/(?:^|\n)\s*pid = (\d+)/);
+  if (!match) return null;
+  const pid = Number.parseInt(match[1], 10);
+  return Number.isFinite(pid) && pid > 0 ? pid : null;
+}
+
+function readMacProgramArguments(plistPath: string): string[] {
+  try {
+    const content = fs.readFileSync(plistPath, "utf8");
+    const arrayMatch = content.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+    if (!arrayMatch) return [];
+    const args: string[] = [];
+    const stringPattern = /<string>([\s\S]*?)<\/string>/g;
+    let match: RegExpExecArray | null = stringPattern.exec(arrayMatch[1]);
+    while (match) {
+      args.push(xmlUnescape(match[1]));
+      match = stringPattern.exec(arrayMatch[1]);
+    }
+    return args;
+  } catch {
+    return [];
+  }
+}
+
+function readLinuxExecStart(unitPath: string): string[] {
+  try {
+    const content = fs.readFileSync(unitPath, "utf8");
+    const line = content
+      .split("\n")
+      .find((item) => item.startsWith("ExecStart="))
+      ?.slice("ExecStart=".length);
+    if (!line) return [];
+    const args: string[] = [];
+    const quotedPattern = /'((?:'\\''|[^'])*)'/g;
+    let match: RegExpExecArray | null = quotedPattern.exec(line);
+    while (match) {
+      args.push(match[1].replaceAll("'\\''", "'"));
+      match = quotedPattern.exec(line);
+    }
+    return args;
+  } catch {
+    return [];
+  }
+}
+
+async function readConfiguredDaemonVersion(args: string[]): Promise<string | null> {
+  const [nodePath, scriptPath] = args;
+  if (!nodePath || !scriptPath) return null;
+  const result = await execFileAsync(nodePath, [scriptPath, "version"], { timeout: 3000 }).catch(() => null);
+  const stdout = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+  const match = stdout.match(/^kiki-daemon\s+(.+)$/);
+  return match?.[1]?.trim() || null;
+}
+
 /**
  * install 之后轮询 serviceStatus()，确认进程确实稳定 running。
  * launchctl/systemctl 命令退出码为 0 仅代表“登记+拉起一次”，不代表进程能存活；
@@ -264,14 +367,26 @@ export async function serviceStatus() {
     const target = macPlistPath();
     const installed = fs.existsSync(target);
     let running = false;
+    let pid: number | null = null;
     if (installed) {
       const id = await uid();
       if (id) {
         const result = await execFileAsync("launchctl", ["print", `gui/${id}/${MAC_LABEL}`]).catch(() => null);
         running = Boolean(result && /state = running/.test(result.stdout));
+        pid = result ? parseLaunchdPid(result.stdout) : null;
       }
     }
-    return { kind: "launchd" as const, installed, running, path: target };
+    const processState = running ? readDaemonProcessState(pid) : null;
+    const configuredVersion =
+      running && !processState?.daemonVersion ? await readConfiguredDaemonVersion(readMacProgramArguments(target)) : null;
+    return {
+      kind: "launchd" as const,
+      installed,
+      running,
+      path: target,
+      pid,
+      daemonVersion: processState?.daemonVersion ?? configuredVersion,
+    };
   }
 
   if (process.platform === "linux") {
@@ -279,8 +394,24 @@ export async function serviceStatus() {
     const installed = fs.existsSync(target);
     const result = await execFileAsync("systemctl", ["--user", "is-active", LINUX_UNIT]).catch((error) => error);
     const running = Boolean(result && typeof result.stdout === "string" && result.stdout.trim() === "active");
-    return { kind: "systemd" as const, installed, running, path: target };
+    const pidResult = running
+      ? await execFileAsync("systemctl", ["--user", "show", LINUX_UNIT, "--property=MainPID", "--value"]).catch(() => null)
+      : null;
+    const pidText = pidResult?.stdout?.trim() ?? "";
+    const pid = pidText ? Number.parseInt(pidText, 10) : null;
+    const normalizedPid = pid && Number.isFinite(pid) && pid > 0 ? pid : null;
+    const processState = running ? readDaemonProcessState(normalizedPid) : null;
+    const configuredVersion =
+      running && !processState?.daemonVersion ? await readConfiguredDaemonVersion(readLinuxExecStart(target)) : null;
+    return {
+      kind: "systemd" as const,
+      installed,
+      running,
+      path: target,
+      pid: normalizedPid,
+      daemonVersion: processState?.daemonVersion ?? configuredVersion,
+    };
   }
 
-  return { kind: "unsupported" as const, installed: false, running: false, path: "" };
+  return { kind: "unsupported" as const, installed: false, running: false, path: "", pid: null, daemonVersion: null };
 }

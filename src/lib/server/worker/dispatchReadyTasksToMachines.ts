@@ -8,6 +8,7 @@ import { getOrchestratorConfig } from "@/lib/server/orchestrator/orchestratorCon
 import {
   getTunnelHub,
   setMachineDisconnectListener,
+  setTunnelExecuteProgressListener,
   setTunnelExecuteResultListener,
 } from "@/lib/server/tunnel/tunnelHub";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
+import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 
 const LEASE_RENEW_INTERVAL_MS = 30_000;
 const LEASE_RENEW_DURATION_MS = 2 * 60 * 1000;
@@ -33,6 +35,7 @@ type ActiveTunnelDispatch = {
 
 const inFlightTunnelJobs = new Set<string>();
 const activeTunnelDispatches = new Map<string, ActiveTunnelDispatch>();
+const MAX_TUNNEL_PROGRESS_LOGS = 200;
 
 function finishTunnelDispatch(jobId: string) {
   const active = activeTunnelDispatches.get(jobId);
@@ -116,6 +119,33 @@ function completeTunnelJob(input: {
   finishTunnelDispatch(input.jobId);
 }
 
+function mergeRuntimeJobLogs(existing: GoalServerLogEntry[], next?: GoalServerLogEntry) {
+  if (!next) return existing;
+  if (existing.some((entry) => entry.id === next.id)) return existing;
+  return [...existing, next].slice(-MAX_TUNNEL_PROGRESS_LOGS);
+}
+
+function handleTunnelJobProgress(input: {
+  jobId: string;
+  progress?: GoalServerProgress;
+  log?: GoalServerLogEntry;
+  trajectory?: ExecutionTrajectoryStep[];
+}) {
+  const active = activeTunnelDispatches.get(input.jobId);
+  if (!active) return;
+  runWithUserContext(active.userId, () => {
+    const current = getRuntimeJob(input.jobId) ?? active.job;
+    const logs = input.log ? mergeRuntimeJobLogs(current.logs, input.log) : undefined;
+    const next = updateGoalRuntimeJobExecution(input.jobId, {
+      ...(input.progress ? { progress: input.progress } : {}),
+      ...(logs ? { logs } : {}),
+      ...(input.trajectory && input.trajectory.length > 0 ? { trajectory: input.trajectory } : {}),
+      lastError: undefined,
+    });
+    if (next) activeTunnelDispatches.set(input.jobId, { ...active, job: next });
+  });
+}
+
 function handleMachineDisconnected(machineId: string) {
   Array.from(activeTunnelDispatches.entries()).forEach(([jobId, active]) => {
     if (active.machineId !== machineId) return;
@@ -193,6 +223,7 @@ export function reconcileMachineTunnelHello(input: {
 
 export function registerTunnelDispatchCallbacks() {
   setTunnelExecuteResultListener(completeTunnelJob);
+  setTunnelExecuteProgressListener(handleTunnelJobProgress);
   setMachineDisconnectListener(handleMachineDisconnected);
 }
 
@@ -261,6 +292,21 @@ export async function dispatchReadyTasksToMachines(input: {
     });
 
     runWithUserContext(userId, () => {
+      const now = new Date().toISOString();
+      updateGoalRuntimeJobExecution(job.id, {
+        progress: {
+          requestId,
+          scope: "goal_task_execute",
+          status: "running",
+          phase: "executing",
+          message: "任务已下发到本地 machine，等待 Agent 启动执行。",
+          startedAt: job.startedAt ?? now,
+          updatedAt: now,
+          goalId: job.goalId,
+          taskId: job.taskId,
+          taskInstanceId: job.taskInstanceId,
+        },
+      });
       projectRuntimeJobStatusProjection({
         job,
         status: "running",
