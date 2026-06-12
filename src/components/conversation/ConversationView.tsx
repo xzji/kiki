@@ -41,6 +41,7 @@ import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { ConversationMessage, Goal, GoalPlanningRunState, GoalWorkflowPhase } from "@/types/kiki";
 import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
 import type {
+  CliProcessEventInput,
   CliProcessEvent,
   ConversationCliProcess,
   QuotedConversationMessageContext,
@@ -551,6 +552,30 @@ export function ConversationView({ conversationId }: { conversationId: string })
       })),
     );
   };
+  const appendPlanningCliEvent = (
+    controller: AbortController,
+    assistantId: string,
+    event: CliProcessEventInput,
+  ) => {
+    if (!isActiveAssistantMessage(controller, assistantId)) return;
+    const { type, promptSection, outputDelta, ...eventInput } = event;
+    updateMessage(conversation.id, assistantId, (message) =>
+      withCliProcess(message, (process) => {
+        const nextPromptSections = promptSection
+          ? [
+              ...process.promptSections.filter((section) => section.id !== promptSection.id),
+              promptSection,
+            ]
+          : process.promptSections;
+        return {
+          ...process,
+          promptSections: nextPromptSections,
+          output: outputDelta ? `${process.output}${outputDelta}` : process.output,
+          events: [...process.events, createCliProcessEvent(process.runId, type, eventInput)],
+        };
+      }),
+    );
+  };
   const appendPlanningProgress = (
     controller: AbortController,
     assistantId: string,
@@ -932,6 +957,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
             }),
             requestId: sagaRequestId,
             signal: controller.signal,
+            onCliEvent: (event) => {
+              appendPlanningCliEvent(controller, assistantId, event);
+            },
           });
           if (result.kind === "awaiting_user") {
             const questionText = result.questions
@@ -1299,6 +1327,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
           conversationContext: buildRecentConversationContext(conversation.messages),
           requestId: sagaRequestId,
           signal: controller.signal,
+          onCliEvent: (event) => {
+            appendPlanningCliEvent(controller, assistantId, event);
+          },
         });
         if (result.kind === "awaiting_user") {
           const questionText = result.questions

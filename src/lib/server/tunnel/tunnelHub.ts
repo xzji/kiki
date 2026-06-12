@@ -1,7 +1,6 @@
 import {
   assertMachineFingerprint,
   authenticateMachineApiKey,
-  getOnlineMachinesForUser,
   touchMachineHeartbeat,
   type AuthenticatedMachine,
 } from "@/lib/server/services/machineService";
@@ -89,9 +88,22 @@ export type MachineCommand =
   | { type: "stream_prompt"; sessionId: string; payload: RemoteStreamPromptPayload }
   | { type: "cancel"; requestId: string; jobId: string };
 
+/** goal task 执行终态：本机执行完后回传，云端据此落 completed/failed/awaiting_user */
+export type MachineExecuteStatus = "completed" | "failed" | "awaiting_user";
+
 /** daemon 回传的命令结果 */
 export type MachineResult =
-  | { type: "execute"; jobId: string; ok: boolean; error?: string }
+  | {
+      type: "execute";
+      jobId: string;
+      ok: boolean;
+      error?: string;
+      /** 结构化终态。缺省时回退按 ok 推断（completed/failed），兼容旧版 daemon。 */
+      status?: MachineExecuteStatus;
+      blocker?: unknown;
+      trajectory?: unknown;
+      result?: Record<string, unknown> | null;
+    }
   | { type: "discover_runtimes"; requestId: string; ok: boolean; items?: RuntimeDiscoveryItem[]; workingDirectory?: string; error?: string }
   | { type: "check_runtime"; requestId: string; ok: boolean; result?: RuntimeEnvironmentCheckResult; error?: string }
   | { type: "select_directory"; requestId: string; ok: boolean; path?: string; canceled?: boolean; error?: string }
@@ -114,7 +126,15 @@ type WaitingPoll = {
   timer: NodeJS.Timeout;
 };
 
-type ExecuteResultListener = (input: { jobId: string; ok: boolean; error?: string }) => void;
+type ExecuteResultListener = (input: {
+  jobId: string;
+  ok: boolean;
+  error?: string;
+  status?: MachineExecuteStatus;
+  blocker?: unknown;
+  trajectory?: unknown;
+  result?: Record<string, unknown> | null;
+}) => void;
 type MachineDisconnectListener = (machineId: string) => void;
 type MachineCommandSender = (command: MachineCommand) => boolean;
 type MachineWsConnection = {
@@ -174,10 +194,6 @@ function getState(): TunnelHubState {
     };
   }
   return globalRef[HUB_STATE_KEY];
-}
-
-function isMachineOnlineDb(userId: string, machineId: string) {
-  return getOnlineMachinesForUser(userId).some((machine) => machine.id === machineId);
 }
 
 function isMachineHttpPollingOnline(machineId: string) {
@@ -287,7 +303,15 @@ export function submitMachineResult(result: MachineResult) {
       state.pendingExecutes.delete(result.jobId);
       pending.resolve({ ok: result.ok, error: result.error });
     }
-    state.executeResultListener?.({ jobId: result.jobId, ok: result.ok, error: result.error });
+    state.executeResultListener?.({
+      jobId: result.jobId,
+      ok: result.ok,
+      error: result.error,
+      status: result.status,
+      blocker: result.blocker,
+      trajectory: result.trajectory,
+      result: result.result,
+    });
     return;
   }
   if (result.type === "discover_runtimes") {
@@ -450,19 +474,13 @@ export function getTunnelHub() {
   const state = getState();
   return {
     isMachineOnline(machineId: string, userId: string) {
-      const state = getState();
+      void userId;
       if (isMachineWsOnline(machineId) || isMachineHttpPollingOnline(machineId)) return true;
-      if (state.wsPreferredMachines.has(machineId)) return false;
-      return isMachineOnlineDb(userId, machineId);
+      return false;
     },
     getOnlineMachineIdsForUser(userId: string) {
-      const state = getState();
-      const legacyDbMachineIds = getOnlineMachinesForUser(userId)
-        .map((machine) => machine.id)
-        .filter((machineId) => !state.wsPreferredMachines.has(machineId));
       return Array.from(
         new Set([
-          ...legacyDbMachineIds,
           ...getWsOnlineMachineIdsForUser(userId),
           ...getHttpPollingMachineIdsForUser(userId),
         ]),

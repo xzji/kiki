@@ -101,6 +101,19 @@ type RunGoalTaskInput = {
   onSpawn?: (pid: number) => void;
 };
 
+/**
+ * runGoalTask 的结构化终态。云端经 Tunnel 下发的 goal task 在本机执行完后，
+ * 需要把真实终态（含 awaiting_user 的 blocker / result）回传给服务端，
+ * 否则服务端只能看到 ok:true 而误判为 completed（"瘦回执" bug）。
+ */
+export type GoalTaskOutcome = {
+  status: "completed" | "failed" | "awaiting_user";
+  blocker?: ExecutionBlocker | null;
+  trajectory?: ExecutionTrajectoryStep[];
+  result?: Record<string, unknown> | null;
+  error?: string;
+};
+
 type DeliverableCheckStatus = "passed" | "failed" | "unknown";
 
 type DeliverableCheck = {
@@ -3010,7 +3023,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   };
 }
 
-export async function runGoalTask(input: RunGoalTaskInput) {
+export async function runGoalTask(input: RunGoalTaskInput): Promise<GoalTaskOutcome> {
   const agentRunId = input.agentRunId ?? createGoalTaskAgentRun(input);
   const tracedInput: RunGoalTaskInput = { ...input, agentRunId };
   let agentRunFinalized = false;
@@ -3141,7 +3154,12 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       resultPayload,
     });
     finishCurrentAgentRun("completed");
-    return;
+    return {
+      status: "awaiting_user",
+      blocker,
+      trajectory,
+      result: resultPayload,
+    };
   }
 
   writeTaskPromptFile({
@@ -3223,7 +3241,12 @@ export async function runGoalTask(input: RunGoalTaskInput) {
           resultPayload: failedResultPayload,
         });
         finishCurrentAgentRun("failed");
-        return;
+        return {
+          status: "failed",
+          error: errorMessage,
+          trajectory: result.trajectory,
+          result: failedResultPayload,
+        };
       }
       if (result.awaitingUser) {
         updateGoalTelemetry({
@@ -3263,7 +3286,12 @@ export async function runGoalTask(input: RunGoalTaskInput) {
         resultPayload,
       });
       finishCurrentAgentRun("completed");
-      return;
+      return {
+        status: result.awaitingUser ? "awaiting_user" : "completed",
+        blocker: result.blocker,
+        trajectory: result.trajectory,
+        result: resultPayload,
+      };
     } catch (error) {
       const category = classifyTaskRunError(error);
       const errorMessage = error instanceof Error ? error.message : "任务执行失败";
@@ -3315,6 +3343,9 @@ export async function runGoalTask(input: RunGoalTaskInput) {
       throw error;
     }
   }
+  // 重试次数耗尽仍未返回（理论上不可达：成功/失败分支均已 return/throw）。
+  // 显式返回 failed，保证返回类型完备，避免吞掉无回执的悬空态。
+  return { status: "failed", error: "任务重试次数耗尽，未获得最终结果" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!agentRunFinalized) {

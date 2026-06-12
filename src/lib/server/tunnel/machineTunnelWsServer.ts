@@ -161,7 +161,7 @@ export function initializeMachineTunnelWsServer(server: HttpServer) {
   if (state.initialized.has(server)) return;
   state.initialized.add(server);
 
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://localhost");

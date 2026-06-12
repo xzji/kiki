@@ -48,7 +48,8 @@ import {
 
 import { createClaudeJsonInvoke } from "@/lib/server/agentRuntime/claudeJsonInvoke";
 import { isTerminalStatus } from "@/lib/server/agentRuntime/sagaCoordinator";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import type { CliProcessEventInput, CliPromptSection, RuntimeEnvironment } from "@/types/runtime";
+import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
 import {
   runTopicInitSaga,
@@ -176,7 +177,98 @@ export type CreateDefaultTopicInitSagaInvokesInput = {
   cwd: string;
   runtimeEnv: RuntimeEnvironment;
   signal?: AbortSignal;
+  onCliEvent?: (event: CliProcessEventInput) => void;
 };
+
+type TopicInitSagaRole = "interviewer" | "planner" | "critic" | "refiner" | "spec" | "presenter";
+
+const TOPIC_INIT_SAGA_ROLE_TITLES: Record<TopicInitSagaRole, string> = {
+  interviewer: "Interviewer",
+  planner: "Planner",
+  critic: "Critic",
+  refiner: "Refiner",
+  spec: "Spec",
+  presenter: "Presenter",
+};
+
+function stringifyForTrace(value: unknown) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function createRolePromptSection(input: {
+  role: TopicInitSagaRole;
+  agentRunId: string;
+  prompt: string;
+}): CliPromptSection {
+  return {
+    id: `topic-saga-${input.agentRunId}-prompt`,
+    kind: "user",
+    title: `${TOPIC_INIT_SAGA_ROLE_TITLES[input.role]} Prompt`,
+    content: input.prompt,
+  };
+}
+
+function withSagaCliTrace(input: {
+  role: TopicInitSagaRole;
+  invoke: LlmInvoke;
+  onCliEvent?: (event: CliProcessEventInput) => void;
+}): LlmInvoke {
+  return async (request) => {
+    const roleTitle = TOPIC_INIT_SAGA_ROLE_TITLES[input.role];
+    input.onCliEvent?.({
+      type: "prompt",
+      title: `${roleTitle} Prompt`,
+      content: request.prompt,
+      promptSection: createRolePromptSection({
+        role: input.role,
+        agentRunId: request.agentRunId,
+        prompt: request.prompt,
+      }),
+    });
+    input.onCliEvent?.({
+      type: "thinking",
+      title: `${roleTitle} 运行中`,
+      content: "正在调用本地 Runtime 生成该角色结果。",
+    });
+    try {
+      const result = await input.invoke(request);
+      const rawText = result.rawText.trim();
+      input.onCliEvent?.({
+        type: "output",
+        title: `${roleTitle} 输出`,
+        content: rawText || "该步骤没有返回文本输出。",
+        outputDelta: `\n\n## ${roleTitle} 输出\n${rawText || "（空输出）"}`,
+      });
+      if (result.parsed) {
+        input.onCliEvent?.({
+          type: "assistant_trace",
+          title: `${roleTitle} 结构化结果`,
+          content: stringifyForTrace(result.parsed),
+        });
+      }
+      if (result.meta) {
+        input.onCliEvent?.({
+          type: "status",
+          title: `${roleTitle} 调用完成`,
+          content: stringifyForTrace(result.meta),
+        });
+      }
+      return result;
+    } catch (error) {
+      input.onCliEvent?.({
+        type: "error",
+        title: `${roleTitle} 执行失败`,
+        content: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
+}
 
 /**
  * Build the 5 default LlmInvokes.
@@ -246,7 +338,14 @@ export function createDefaultTopicInitSagaInvokes(
     degradedFallback: () => ({ specs: [] }),
   });
 
-  return { interview, plan, critic, refine, spec, present };
+  return {
+    interview: withSagaCliTrace({ role: "interviewer", invoke: interview, onCliEvent: input.onCliEvent }),
+    plan: withSagaCliTrace({ role: "planner", invoke: plan, onCliEvent: input.onCliEvent }),
+    critic: withSagaCliTrace({ role: "critic", invoke: critic, onCliEvent: input.onCliEvent }),
+    refine: withSagaCliTrace({ role: "refiner", invoke: refine, onCliEvent: input.onCliEvent }),
+    spec: withSagaCliTrace({ role: "spec", invoke: spec, onCliEvent: input.onCliEvent }),
+    present: withSagaCliTrace({ role: "presenter", invoke: present, onCliEvent: input.onCliEvent }),
+  };
 }
 
 export type RunTopicInitSagaWithDefaultsInput = TopicInitSagaSeed & {
@@ -259,6 +358,8 @@ export type RunTopicInitSagaWithDefaultsInput = TopicInitSagaSeed & {
   idempotencyKey?: string;
   /** Override max Critic↔Refiner cycles (default 2 per orchestrator). */
   maxRefineLoops?: number;
+  /** Optional real-time sink used by conversation UI to show each Saga role run. */
+  onCliEvent?: (event: CliProcessEventInput) => void;
 };
 
 /**
@@ -343,6 +444,7 @@ export async function runTopicInitSagaWithDefaults(
     cwd: input.cwd,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    onCliEvent: input.onCliEvent,
   });
 
   return runTopicInitSaga({

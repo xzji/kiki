@@ -117,6 +117,11 @@ export type CliProcessEvent = {
   input?: unknown;
 };
 
+export type CliProcessEventInput = Omit<CliProcessEvent, "id" | "createdAt"> & {
+  promptSection?: CliPromptSection;
+  outputDelta?: string;
+};
+
 export type ConversationCliProcess = {
   runId: string;
   status: "running" | "completed" | "error" | "aborted";

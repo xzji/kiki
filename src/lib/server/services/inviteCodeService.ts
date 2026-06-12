@@ -4,7 +4,7 @@ import { getRegistryDatabase } from "@/lib/server/db/registryClient";
 
 const INVITE_CODE_LENGTH = 8;
 const INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const INITIAL_MULTI_USE_INVITE_CODES = [{ code: "KIKIGOOD", maxUses: 100 }];
+const INITIAL_MULTI_USE_INVITE_CODES = [{ code: "KIKIG00D", maxUses: 100 }];
 
 export function normalizeInviteCode(code: string) {
   return code.trim().toUpperCase();

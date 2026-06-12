@@ -32,7 +32,6 @@ import { runWebSocketTransport } from "@/lib/daemon/transport/webSocketTransport
 import type { DaemonOutboundTransport } from "@/lib/daemon/transport/types";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
 
-const DAEMON_VERSION = "0.2.8";
 const DEVICE_ID_FILE = "daemon-device-id";
 
 function sleep(ms: number) {
@@ -48,6 +47,7 @@ export type RemoteDaemonServiceManager = {
 type RunRemoteDaemonLoopInput = {
   serverUrl: string;
   apiKey: string;
+  daemonVersion?: string;
   serviceManager?: RemoteDaemonServiceManager;
 };
 
@@ -98,7 +98,7 @@ async function executeRemoteJob(input: {
   initialTrajectory: ExecutionTrajectoryStep[];
 }) {
   const abortController = new AbortController();
-  await runGoalTask({
+  return runGoalTask({
     requestId: input.requestId,
     goal: input.payload.goal,
     subGoal: input.payload.subGoal,
@@ -114,7 +114,8 @@ async function executeRemoteJob(input: {
 export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   const base = normalizeBaseUrl(input.serverUrl);
   const fingerprint = osFingerprint();
-  appendRuntimeDaemonLog(`远程 daemon（v${DAEMON_VERSION}）启动，优先 WS`);
+  const daemonVersion = input.daemonVersion ?? "dev";
+  appendRuntimeDaemonLog(`远程 daemon（v${daemonVersion}）启动，优先 WS`);
 
   let boundUserId: string | null = null;
   const runningJobs = new Set<string>();
@@ -402,7 +403,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             resumeContext: raw.resumeContext,
           };
           const initialTrajectory = Array.isArray(raw.trajectory) ? raw.trajectory : [];
-          await runWithUserContext(boundUserId, () =>
+          const outcome = await runWithUserContext(boundUserId, () =>
             executeRemoteJob({
               jobId: command.jobId,
               requestId: command.requestId,
@@ -410,12 +411,22 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
               initialTrajectory,
             }),
           );
-          await sendResult({ type: "execute", jobId: command.jobId, ok: true });
+          await sendResult({
+            type: "execute",
+            jobId: command.jobId,
+            ok: outcome.status !== "failed",
+            error: outcome.status === "failed" ? outcome.error : undefined,
+            status: outcome.status,
+            blocker: outcome.blocker ?? undefined,
+            trajectory: outcome.trajectory,
+            result: outcome.result ?? undefined,
+          });
         } catch (error) {
           await sendResult({
             type: "execute",
             jobId: command.jobId,
             ok: false,
+            status: "failed",
             error: error instanceof Error ? error.message : "执行失败",
           });
         } finally {
@@ -430,7 +441,15 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   const callbacks = {
     log: appendRuntimeDaemonLog,
     sleep,
-    onCommand: handleCommand,
+    // WS 模式下命令由 ws "message" 事件回调触发：bindUser(hello_ack) 里的 enterWith 只对
+    // 当次回调的延续生效，不会传播到后续 command 回调（二者是 socket 的兄弟异步操作）。
+    // 必须在此用 runWithUserContext 显式包裹，使 handleCommand 同步创建的 stream_prompt /
+    // run_prompt_* 异步链继承用户上下文，否则 getCurrentUserId() 会抛「缺少用户上下文」，
+    // 导致流式对话静默失败、前端收不到任何回复。
+    onCommand: (command: MachineCommand) =>
+      boundUserId
+        ? runWithUserContext(boundUserId, () => handleCommand(command))
+        : handleCommand(command),
     onBindUser: bindUser,
   };
   const transportMode = process.env.KIKI_DAEMON_TRANSPORT ?? "auto";
@@ -439,7 +458,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       base,
       apiKey: input.apiKey,
       fingerprint,
-      daemonVersion: DAEMON_VERSION,
+      daemonVersion,
       callbacks,
       getHelloState: () => ({
         runningJobIds: Array.from(runningJobs),
@@ -457,7 +476,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     base,
     apiKey: input.apiKey,
     fingerprint,
-    daemonVersion: DAEMON_VERSION,
+    daemonVersion,
     callbacks,
     shouldExitAfterHandoff: () => shouldExitAfterHandoff,
     getPendingHandoffCount: () => runningJobs.size + activeStreamSessionIds.size,

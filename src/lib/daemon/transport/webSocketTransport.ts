@@ -1,6 +1,5 @@
 import WebSocket from "ws";
 
-import { createHttpPollingOutbound } from "@/lib/daemon/transport/httpPollingTransport";
 import { MACHINE_TUNNEL_WS_PATH, type MachineTunnelEnvelope } from "@/lib/server/tunnel/machineTunnelProtocol";
 import type {
   DaemonHelloState,
@@ -11,7 +10,6 @@ import type {
 const WS_INBOUND_WATCHDOG_MS = 70_000;
 const WS_MIN_RECONNECT_DELAY_MS = 1_000;
 const WS_MAX_RECONNECT_DELAY_MS = 30_000;
-const WS_FALLBACK_AFTER_FAILURES = 3;
 const MAX_PENDING_WS_OUTBOUND_ENVELOPES = 2_000;
 
 function sendEnvelopeOverWs(ws: WebSocket, envelope: MachineTunnelEnvelope) {
@@ -132,6 +130,7 @@ export async function runWebSocketTransport(input: {
 
     await new Promise<void>((resolve) => {
       const currentWs = new WebSocket(wsUrl, {
+        perMessageDeflate: false,
         headers: {
           "x-machine-api-key": input.apiKey,
           "x-machine-fingerprint": input.fingerprint,
@@ -142,8 +141,6 @@ export async function runWebSocketTransport(input: {
       currentWs.on("open", () => {
         if (ws !== currentWs) return;
         openedAt = Date.now();
-        consecutiveFailures = 0;
-        reconnectDelay = WS_MIN_RECONNECT_DELAY_MS;
         activeWs = currentWs;
         input.callbacks.log("WS tunnel 已连接");
         resetWatchdog();
@@ -215,16 +212,12 @@ export async function runWebSocketTransport(input: {
     });
 
     const lifetimeMs = openedAt ? Date.now() - openedAt : 0;
-    if (lifetimeMs < 5_000) consecutiveFailures += 1;
-    if (input.transportMode !== "ws" && consecutiveFailures >= WS_FALLBACK_AFTER_FAILURES) {
-      const httpOutbound = createHttpPollingOutbound({
-        base: input.base,
-        apiKey: input.apiKey,
-        log: input.callbacks.log,
-      });
-      await bufferedOutbound.flushPendingToTransport(httpOutbound);
-      input.callbacks.log(`WS 连续失败 ${consecutiveFailures} 次，自动降级到 HTTP 长轮询`);
-      return "fallback";
+    if (lifetimeMs < 5_000) {
+      consecutiveFailures += 1;
+      input.callbacks.log(`WS 快速断连（${lifetimeMs}ms），连续失败 ${consecutiveFailures} 次`);
+    } else {
+      consecutiveFailures = 0;
+      reconnectDelay = WS_MIN_RECONNECT_DELAY_MS;
     }
     input.callbacks.log(`WS 将在 ${reconnectDelay / 1000}s 后重连…`);
     await input.callbacks.sleep(reconnectDelay);

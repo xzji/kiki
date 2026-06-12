@@ -16,6 +16,8 @@ import {
   renewRuntimeJobLease,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 
 const LEASE_RENEW_INTERVAL_MS = 30_000;
 const LEASE_RENEW_DURATION_MS = 2 * 60 * 1000;
@@ -57,19 +59,53 @@ function requeueTunnelJob(active: ActiveTunnelDispatch, reason: string) {
   });
 }
 
-function completeTunnelJob(input: { jobId: string; ok: boolean; error?: string }) {
+function completeTunnelJob(input: {
+  jobId: string;
+  ok: boolean;
+  error?: string;
+  status?: "completed" | "failed" | "awaiting_user";
+  blocker?: unknown;
+  trajectory?: unknown;
+  result?: Record<string, unknown> | null;
+}) {
   const active = activeTunnelDispatches.get(input.jobId);
   if (!active) return;
 
+  // 终态以 daemon 回传的结构化 status 为准；缺省（旧版 daemon 瘦回执）回退按 ok 推断。
+  const status = input.status ?? (input.ok ? "completed" : "failed");
+  // 仅在回传非空轨迹时覆盖，避免空数组冲掉云端 job 下发时的初始 trajectory 快照。
+  const trajectory =
+    Array.isArray(input.trajectory) && input.trajectory.length > 0
+      ? (input.trajectory as ExecutionTrajectoryStep[])
+      : undefined;
+  const blocker = (input.blocker as ExecutionBlocker | null | undefined) ?? undefined;
+
   runWithUserContext(active.userId, () => {
+    if (status === "awaiting_user") {
+      // 本机执行后产出 blocker（如缺少用户补充信息），落 awaiting_user 并把 blocker/result
+      // 投影到 UI，避免任务永远停留在「等待 Agent 开始执行」的悬空态。
+      updateGoalRuntimeJobExecution(active.job.id, {
+        status: "awaiting_user",
+        ...(blocker !== undefined ? { blocker } : {}),
+        ...(trajectory !== undefined ? { trajectory } : {}),
+        ...(input.result !== undefined ? { result: input.result } : {}),
+        lastError: undefined,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+      });
+      return;
+    }
     updateGoalRuntimeJobExecution(active.job.id, {
-      status: input.ok ? "completed" : "failed",
-      lastError: input.ok ? undefined : input.error ?? "本地 machine 执行失败",
+      status: status === "completed" ? "completed" : "failed",
+      ...(blocker !== undefined ? { blocker } : {}),
+      ...(trajectory !== undefined ? { trajectory } : {}),
+      ...(input.result !== undefined ? { result: input.result } : {}),
+      lastError: status === "completed" ? undefined : input.error ?? "本地 machine 执行失败",
       finishedAt: new Date().toISOString(),
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
     });
-    if (!input.ok) {
+    if (status === "failed") {
       projectRuntimeJobStatusProjection({
         job: active.job,
         status: "failed",
@@ -121,7 +157,15 @@ export function reconcileMachineTunnelHello(input: {
       if (!job) return;
       if (job.userId !== input.userId) return;
       if (job.runtimeTransport !== "cloud_control_plane") return;
-      if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return;
+      // awaiting_user 同属"执行已结束"语义（本机已 return，等待用户补充信息），
+      // daemon 正常不会在 runningJobIds 中上报它；此处一并跳过做防御，避免误恢复为 running。
+      if (
+        job.status === "completed" ||
+        job.status === "failed" ||
+        job.status === "cancelled" ||
+        job.status === "awaiting_user"
+      )
+        return;
 
       const leaseOwner = job.leaseOwner || DEFAULT_TUNNEL_LEASE_OWNER;
       const nextJob =

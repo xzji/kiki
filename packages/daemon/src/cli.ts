@@ -3,6 +3,7 @@ import path from "path";
 import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
 import type { RemoteDaemonServiceStatus } from "@/lib/server/tunnel/tunnelHub";
 
+import packageJson from "../package.json";
 import { collectDaemonServiceEnv } from "./pathEnv";
 import {
   installService as installDaemonService,
@@ -11,7 +12,8 @@ import {
   uninstallService as uninstallDaemonService,
 } from "./service";
 
-type Subcommand = "run" | "install" | "uninstall" | "status" | "help";
+type Subcommand = "run" | "install" | "uninstall" | "status" | "version" | "help";
+const DAEMON_PACKAGE_VERSION = packageJson.version;
 
 function readArg(flag: string): string | undefined {
   const direct = process.argv.find((arg) => arg.startsWith(`${flag}=`));
@@ -23,10 +25,17 @@ function readArg(flag: string): string | undefined {
 
 function resolveSubcommand(): Subcommand {
   const positional = process.argv.slice(2).find((arg) => !arg.startsWith("-"));
-  if (positional === "install" || positional === "uninstall" || positional === "status" || positional === "help") {
+  if (
+    positional === "install" ||
+    positional === "uninstall" ||
+    positional === "status" ||
+    positional === "version" ||
+    positional === "help"
+  ) {
     return positional;
   }
   if (process.argv.includes("--help") || process.argv.includes("-h")) return "help";
+  if (process.argv.includes("--version") || process.argv.includes("-v")) return "version";
   return "run";
 }
 
@@ -52,6 +61,7 @@ function printHelp() {
   kiki-daemon install    --server-url <url> --api-key <key>   注册后台服务 + 开机自启
   kiki-daemon uninstall                                        卸载后台服务
   kiki-daemon status                                           查看后台服务状态
+  kiki-daemon version                                          查看当前版本
   kiki-daemon help                                             显示本帮助
 
 示例:
@@ -67,13 +77,20 @@ async function main() {
     return;
   }
 
+  if (subcommand === "version") {
+    console.log(`kiki-daemon ${DAEMON_PACKAGE_VERSION}`);
+    return;
+  }
+
   if (subcommand === "status") {
     const status = await serviceStatus();
     if (status.kind === "unsupported") {
       console.log(`当前平台 ${process.platform} 不支持后台服务管理。`);
+      console.log(`版本: ${DAEMON_PACKAGE_VERSION}`);
       return;
     }
     console.log(`后台服务（${status.kind}）:`);
+    console.log(`  版本: ${DAEMON_PACKAGE_VERSION}`);
     console.log(`  已安装: ${status.installed ? "是" : "否"}`);
     console.log(`  运行中: ${status.running ? "是" : "否"}`);
     if (status.path) console.log(`  配置文件: ${status.path}`);
@@ -129,6 +146,7 @@ async function main() {
   await runRemoteDaemonLoop({
     serverUrl,
     apiKey,
+    daemonVersion: DAEMON_PACKAGE_VERSION,
     serviceManager: {
       async installService() {
         const installScriptPath = resolveInstallScriptPath();

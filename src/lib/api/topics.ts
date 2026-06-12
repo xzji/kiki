@@ -2,7 +2,7 @@
 
 import type { GoalBreakdownDraft } from "@/types/kiki";
 import type { Goal } from "@/types/kiki";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import type { CliProcessEventInput, RuntimeEnvironment } from "@/types/runtime";
 
 export type TopicSagaPlanResult =
   | {
@@ -39,6 +39,17 @@ export class TopicSagaPlanError extends Error {
   }
 }
 
+type TopicSagaPlanStreamFrame =
+  | { type: "cli_event"; event: CliProcessEventInput }
+  | { type: "result"; result: TopicSagaPlanResult }
+  | {
+      type: "error";
+      reason?: string;
+      sagaId?: string;
+      failedStep?: string;
+      failedAgentRunId?: string;
+    };
+
 export async function generateTopicSagaPlan(input: {
   topicText: string;
   runtimeEnv: RuntimeEnvironment;
@@ -49,17 +60,59 @@ export async function generateTopicSagaPlan(input: {
   maxRefineLoops?: number;
   requestId?: string;
   signal?: AbortSignal;
+  onCliEvent?: (event: CliProcessEventInput) => void;
 }): Promise<TopicSagaPlanResult> {
-  const { signal, requestId, ...body } = input;
+  const { signal, requestId, onCliEvent, ...body } = input;
   const response = await fetch("/api/topics/plan", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-topic-saga-request-id": requestId ?? `topic-saga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, stream: Boolean(onCliEvent) }),
     signal,
   });
+  if (onCliEvent && response.ok) {
+    if (!response.body) {
+      throw new TopicSagaPlanError({ reason: "Saga 流式响应为空" });
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult: TopicSagaPlanResult | null = null;
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      const frame = JSON.parse(line) as TopicSagaPlanStreamFrame;
+      if (frame.type === "cli_event") {
+        onCliEvent(frame.event);
+        return;
+      }
+      if (frame.type === "result") {
+        finalResult = frame.result;
+        return;
+      }
+      throw new TopicSagaPlanError({
+        reason: frame.reason || "5 角色 Saga 规划失败",
+        sagaId: frame.sagaId,
+        failedStep: frame.failedStep,
+        failedAgentRunId: frame.failedAgentRunId,
+      });
+    };
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handleLine(line);
+    }
+    buffer += decoder.decode();
+    handleLine(buffer);
+    if (!finalResult) {
+      throw new TopicSagaPlanError({ reason: "Saga 流式响应缺少最终结果" });
+    }
+    return finalResult;
+  }
   const data = (await response.json()) as TopicSagaPlanResult & {
     reason?: string;
     sagaId?: string;
