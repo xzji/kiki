@@ -153,6 +153,38 @@ function mergeRuntimeJobLogs(existing: GoalServerLogEntry[], next?: GoalServerLo
   return [...existing, next].slice(-MAX_TUNNEL_PROGRESS_LOGS);
 }
 
+function logStatusToTrajectoryStatus(status: GoalServerLogEntry["status"]): ExecutionTrajectoryStep["status"] {
+  if (status === "failed") return "failed";
+  if (status === "completed") return "completed";
+  if (status === "awaiting_user") return "awaiting_user";
+  return "running";
+}
+
+function logToTrajectoryStep(log: GoalServerLogEntry, index: number): ExecutionTrajectoryStep {
+  const isToolLike = log.eventType === "tool_call_started" || log.eventType === "tool_call_finished" || Boolean(log.toolName);
+  return {
+    id: `remote-log-${log.id}`,
+    index,
+    type: isToolLike ? "tool_call" : log.status === "completed" ? "result" : "assistant",
+    status: logStatusToTrajectoryStatus(log.status),
+    title: log.message,
+    thought: log.details,
+    ...(log.toolName ? { toolCall: { name: log.toolName, summary: log.message } } : {}),
+    startedAt: log.timestamp,
+    ...(log.status === "completed" || log.status === "failed" || log.status === "awaiting_user"
+      ? { endedAt: log.timestamp }
+      : {}),
+  };
+}
+
+function mergeRuntimeJobTrajectoryFromLog(existing: ExecutionTrajectoryStep[], log?: GoalServerLogEntry) {
+  if (!log) return undefined;
+  const stepId = `remote-log-${log.id}`;
+  if (existing.some((step) => step.id === stepId)) return existing;
+  const next = logToTrajectoryStep(log, existing.length);
+  return [...existing, next].slice(-MAX_TUNNEL_PROGRESS_LOGS).map((step, index) => ({ ...step, index }));
+}
+
 function handleTunnelJobProgress(input: {
   jobId: string;
   progress?: GoalServerProgress;
@@ -164,10 +196,12 @@ function handleTunnelJobProgress(input: {
   runWithUserContext(active.userId, () => {
     const current = getRuntimeJob(input.jobId) ?? active.job;
     const logs = input.log ? mergeRuntimeJobLogs(current.logs, input.log) : undefined;
+    const trajectoryFromLog = input.log ? mergeRuntimeJobTrajectoryFromLog(current.trajectory, input.log) : undefined;
+    const trajectory = input.trajectory && input.trajectory.length > 0 ? input.trajectory : trajectoryFromLog;
     const next = updateGoalRuntimeJobExecution(input.jobId, {
       ...(input.progress ? { progress: input.progress } : {}),
       ...(logs ? { logs } : {}),
-      ...(input.trajectory && input.trajectory.length > 0 ? { trajectory: input.trajectory } : {}),
+      ...(trajectory && trajectory.length > 0 ? { trajectory } : {}),
       lastError: undefined,
     });
     if (next) activeTunnelDispatches.set(input.jobId, { ...active, job: next });
