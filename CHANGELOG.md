@@ -13,6 +13,7 @@
 - tunnelHub 支持按 machineId 优先路由到 WS 连接，无 WS 连接时回落到既有长轮询队列；在线判定合并 WS 内存连接与 DB 心跳。
 - 会话事件 SSE 改为自适应轮询：活跃期 400ms、空闲期 2s，配合发送端约 120ms 的消息更新去抖合帧，观察方流式收敛更平滑、DB 压力更低。
 - 将 `@kiki_agent/daemon` 版本提升到 `0.2.11`，进一步强化 WS tunnel 稳定性、goal task 终态回执与前台/后台运行提示。
+- 将 `@kiki_agent/daemon` 版本提升到 `0.2.16`，新增 daemon 分层日志能力：默认记录生命周期、连接、心跳、命令、执行与流式元数据，支持结构化 `daemon.log`、大小轮转与显式 trace 双开关。
 - Topic 初始化 Saga 运行过程现在可实时映射为 CLI 过程事件，前端可直接看到 Interviewer/Planner/Critic/Refiner/Spec/Presenter 的 prompt、输出和结构化结果。
 
 ### Fixed

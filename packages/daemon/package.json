@@ -1,6 +1,6 @@
 {
   "name": "@kiki_agent/daemon",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "Kiki 本地执行节点 daemon：连接云端编排器并在本机运行任务。",
   "license": "MIT",
   "type": "commonjs",

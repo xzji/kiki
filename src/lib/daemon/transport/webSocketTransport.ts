@@ -6,6 +6,7 @@ import type {
   DaemonOutboundTransport,
   DaemonTransportCallbacks,
 } from "@/lib/daemon/transport/types";
+import type { DaemonLogDomain, DaemonLogLevel } from "@/lib/daemon/daemonLogger";
 
 const WS_INBOUND_WATCHDOG_MS = 70_000;
 const WS_MIN_RECONNECT_DELAY_MS = 1_000;
@@ -24,14 +25,21 @@ function sendEnvelopeOverWs(ws: WebSocket, envelope: MachineTunnelEnvelope) {
 
 function createBufferedWsOutbound(input: {
   getActiveWs: () => WebSocket | null;
-  log: (message: string) => void;
+  logEvent: (
+    level: DaemonLogLevel,
+    domain: DaemonLogDomain,
+    message: string,
+    fields?: Record<string, string | number | boolean | null | undefined>,
+  ) => void;
 }) {
   const pendingOutbound: MachineTunnelEnvelope[] = [];
 
   function enqueuePending(envelope: MachineTunnelEnvelope) {
     if (pendingOutbound.length >= MAX_PENDING_WS_OUTBOUND_ENVELOPES) {
       pendingOutbound.shift();
-      input.log(`WS 待补发队列超过 ${MAX_PENDING_WS_OUTBOUND_ENVELOPES}，已丢弃最旧分片`);
+      input.logEvent("info", "stream", "WS pending outbound overflow, dropped oldest", {
+        maxPending: MAX_PENDING_WS_OUTBOUND_ENVELOPES,
+      });
     }
     pendingOutbound.push(envelope);
   }
@@ -53,7 +61,7 @@ function createBufferedWsOutbound(input: {
       flushed += 1;
     }
     if (flushed > 0) {
-      input.log(`WS 已补发 ${flushed} 条断线期间结果/流式分片`);
+      input.logEvent("info", "stream", "WS flushed pending outbound", { flushed });
     }
   }
 
@@ -71,7 +79,7 @@ function createBufferedWsOutbound(input: {
       }
     }
     if (flushed > 0) {
-      input.log(`WS 降级前已通过 HTTP 补发 ${flushed} 条结果/流式分片`);
+      input.logEvent("info", "stream", "WS flushed pending outbound via HTTP fallback", { flushed });
     }
   }
 
@@ -103,7 +111,7 @@ export async function runWebSocketTransport(input: {
   let activeWs: WebSocket | null = null;
   const bufferedOutbound = createBufferedWsOutbound({
     getActiveWs: () => activeWs,
-    log: input.callbacks.log,
+    logEvent: input.callbacks.logEvent,
   });
   input.setOutboundTransport(bufferedOutbound.transport);
 
@@ -111,6 +119,7 @@ export async function runWebSocketTransport(input: {
     let ws: WebSocket | null = null;
     let openedAt = 0;
     let watchdogTimer: NodeJS.Timeout | null = null;
+    let heartbeatSeen = false;
 
     const clearWatchdog = () => {
       if (!watchdogTimer) return;
@@ -120,13 +129,15 @@ export async function runWebSocketTransport(input: {
     const resetWatchdog = () => {
       clearWatchdog();
       watchdogTimer = setTimeout(() => {
-        input.callbacks.log(`WS ${WS_INBOUND_WATCHDOG_MS / 1000}s 无入站消息，强制重连…`);
+        input.callbacks.logEvent("info", "conn", "WS inbound watchdog timeout", {
+          watchdogMs: WS_INBOUND_WATCHDOG_MS,
+        });
         ws?.terminate();
       }, WS_INBOUND_WATCHDOG_MS);
     };
 
     input.setOutboundTransport(bufferedOutbound.transport);
-    input.callbacks.log(`尝试建立 WS tunnel：${wsUrl}`);
+    input.callbacks.logEvent("info", "conn", "WS tunnel connecting", { wsUrl });
 
     await new Promise<void>((resolve) => {
       const currentWs = new WebSocket(wsUrl, {
@@ -142,7 +153,10 @@ export async function runWebSocketTransport(input: {
         if (ws !== currentWs) return;
         openedAt = Date.now();
         activeWs = currentWs;
-        input.callbacks.log("WS tunnel 已连接");
+        input.callbacks.logEvent("info", "conn", "WS tunnel connected", {
+          daemonVersion: input.daemonVersion,
+          fingerprint: input.fingerprint,
+        });
         resetWatchdog();
         input.setOutboundTransport(bufferedOutbound.transport);
         const helloState = input.getHelloState();
@@ -173,11 +187,11 @@ export async function runWebSocketTransport(input: {
         try {
           envelope = JSON.parse(data.toString()) as MachineTunnelEnvelope;
         } catch {
-          input.callbacks.log("WS 收到 invalid_json，已忽略");
+          input.callbacks.logEvent("info", "err", "WS invalid json ignored");
           return;
         }
         if (!envelope || typeof envelope.kind !== "string") {
-          input.callbacks.log("WS 收到未知消息，已忽略");
+          input.callbacks.logEvent("info", "err", "WS unknown message ignored");
           return;
         }
         if (envelope.kind === "hello_ack") {
@@ -185,15 +199,22 @@ export async function runWebSocketTransport(input: {
           return;
         }
         if (envelope.kind === "ping") {
+          if (!heartbeatSeen) {
+            heartbeatSeen = true;
+            input.callbacks.logEvent("info", "hb", "WS heartbeat established");
+          }
           sendEnvelopeOverWs(currentWs, { kind: "pong", nonce: envelope.nonce });
           return;
         }
-        if (envelope.kind === "pong") return;
+        if (envelope.kind === "pong") {
+          input.callbacks.logEvent("debug", "hb", "WS pong received");
+          return;
+        }
         if (envelope.kind === "command") {
           void input.callbacks.onCommand(envelope.command);
           return;
         }
-        input.callbacks.log(`WS 收到不适用于 daemon 的消息：${envelope.kind}`);
+        input.callbacks.logEvent("info", "err", "WS unsupported envelope ignored", { kind: envelope.kind });
       });
 
       currentWs.on("close", (code, reason) => {
@@ -201,25 +222,32 @@ export async function runWebSocketTransport(input: {
         clearWatchdog();
         if (activeWs === currentWs) activeWs = null;
         input.setOutboundTransport(bufferedOutbound.transport);
-        input.callbacks.log(`WS tunnel 断开（code=${code}, reason=${reason.toString("utf8") || "none"}）`);
+        input.callbacks.logEvent("info", "conn", "WS tunnel closed", {
+          code,
+          reason: reason.toString("utf8") || "none",
+          lifetimeMs: openedAt ? Date.now() - openedAt : 0,
+        });
         resolve();
       });
 
       currentWs.on("error", (error) => {
         if (ws !== currentWs) return;
-        input.callbacks.log(`WS tunnel 错误：${error.message}`);
+        input.callbacks.logEvent("info", "err", "WS tunnel error", { error: error.message });
       });
     });
 
     const lifetimeMs = openedAt ? Date.now() - openedAt : 0;
     if (lifetimeMs < 5_000) {
       consecutiveFailures += 1;
-      input.callbacks.log(`WS 快速断连（${lifetimeMs}ms），连续失败 ${consecutiveFailures} 次`);
+      input.callbacks.logEvent("info", "conn", "WS quick disconnect", {
+        lifetimeMs,
+        consecutiveFailures,
+      });
     } else {
       consecutiveFailures = 0;
       reconnectDelay = WS_MIN_RECONNECT_DELAY_MS;
     }
-    input.callbacks.log(`WS 将在 ${reconnectDelay / 1000}s 后重连…`);
+    input.callbacks.logEvent("debug", "conn", "WS reconnect scheduled", { reconnectDelayMs: reconnectDelay });
     await input.callbacks.sleep(reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, WS_MAX_RECONNECT_DELAY_MS);
   }

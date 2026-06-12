@@ -1,5 +1,6 @@
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
 import type { MachineCommand, MachineResult } from "@/lib/server/tunnel/tunnelHub";
+import type { DaemonLogDomain, DaemonLogLevel } from "@/lib/daemon/daemonLogger";
 
 export type DaemonOutboundTransport = {
   sendResult: (result: MachineResult) => Promise<void>;
@@ -8,6 +9,12 @@ export type DaemonOutboundTransport = {
 
 export type DaemonTransportCallbacks = {
   log: (message: string) => void;
+  logEvent: (
+    level: DaemonLogLevel,
+    domain: DaemonLogDomain,
+    message: string,
+    fields?: Record<string, string | number | boolean | null | undefined>,
+  ) => void;
   sleep: (ms: number) => Promise<void>;
   onCommand: (command: MachineCommand) => Promise<void> | void;
   onBindUser: (userId: string) => void;

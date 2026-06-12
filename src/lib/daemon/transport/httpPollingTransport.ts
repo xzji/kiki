@@ -1,5 +1,6 @@
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
 import type { MachineCommand, MachineResult } from "@/lib/server/tunnel/tunnelHub";
+import type { DaemonLogDomain, DaemonLogLevel } from "@/lib/daemon/daemonLogger";
 import { fetchWithTimeout, type DaemonOutboundTransport, type DaemonTransportCallbacks } from "@/lib/daemon/transport/types";
 
 const POLL_PATH = "/api/machine-tunnel/poll";
@@ -24,7 +25,12 @@ async function readPollFailureReason(response: Response): Promise<string> {
 export function createHttpPollingOutbound(input: {
   base: string;
   apiKey: string;
-  log: (message: string) => void;
+  logEvent: (
+    level: DaemonLogLevel,
+    domain: DaemonLogDomain,
+    message: string,
+    fields?: Record<string, string | number | boolean | null | undefined>,
+  ) => void;
 }): DaemonOutboundTransport {
   const resultUrl = `${input.base}${RESULT_PATH}`;
   const streamChunkUrl = `${input.base}${STREAM_CHUNK_PATH}`;
@@ -41,7 +47,10 @@ export function createHttpPollingOutbound(input: {
         RESULT_FETCH_TIMEOUT_MS,
       );
     } catch (error) {
-      input.log(`回传结果失败：${error instanceof Error ? error.message : String(error)}`);
+      input.logEvent("info", "err", "HTTP result send failed", {
+        type: result.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -60,11 +69,19 @@ export function createHttpPollingOutbound(input: {
         );
         if (response.ok) return;
         if (attempt === 1) {
-          input.log(`流式回传失败：HTTP ${response.status}`);
+          input.logEvent("info", "err", "HTTP stream chunk send failed", {
+            sessionId,
+            seq,
+            status: response.status,
+          });
         }
       } catch (error) {
         if (attempt === 1) {
-          input.log(`流式回传失败：${error instanceof Error ? error.message : String(error)}`);
+          input.logEvent("info", "err", "HTTP stream chunk send failed", {
+            sessionId,
+            seq,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
@@ -83,7 +100,11 @@ export async function runHttpPollingTransport(input: {
   getPendingHandoffCount: () => number;
 }): Promise<never> {
   const pollUrl = `${input.base}${POLL_PATH}`;
-  input.callbacks.log(`远程 daemon（HTTP 长轮询 v${input.daemonVersion}）连接 ${pollUrl}`);
+  input.callbacks.logEvent("info", "conn", "HTTP polling started", {
+    pollUrl,
+    daemonVersion: input.daemonVersion,
+    fingerprint: input.fingerprint,
+  });
 
   let consecutiveAuthFailures = 0;
   let handoffWaitLogged = false;
@@ -107,26 +128,34 @@ export async function runHttpPollingTransport(input: {
           (consecutiveAuthFailures > AUTH_FAILURE_WARN_THRESHOLD &&
             (consecutiveAuthFailures - AUTH_FAILURE_WARN_THRESHOLD) % AUTH_FAILURE_REMINDER_EVERY === 0);
         if (shouldWarn) {
-          input.callbacks.log(
-            `⚠️ 鉴权持续失败（原因：${reason}，本机指纹：${input.fingerprint}）。` +
-              `进程仍在运行但服务端判定离线，重试无法自动恢复。` +
-              `通常因 api-key 失效或该机器记录已被新连接顶替删除。` +
-              `请到网页「运行环境」重新生成连接命令并执行：npm i -g @kiki_agent/daemon@latest && kiki-daemon install --server-url ${input.base} --api-key <新key>`,
-          );
+          input.callbacks.logEvent("info", "err", "HTTP polling auth still failing", {
+            reason,
+            fingerprint: input.fingerprint,
+            failures: consecutiveAuthFailures,
+          });
         } else if (consecutiveAuthFailures < AUTH_FAILURE_WARN_THRESHOLD) {
-          input.callbacks.log(`poll 鉴权失败（${reason}），${AUTH_FAILURE_BACKOFF_MS / 1000}s 后重试…`);
+          input.callbacks.logEvent("info", "err", "HTTP polling auth failed", {
+            reason,
+            backoffMs: AUTH_FAILURE_BACKOFF_MS,
+            failures: consecutiveAuthFailures,
+          });
         }
         await input.callbacks.sleep(AUTH_FAILURE_BACKOFF_MS);
         continue;
       }
       if (!response.ok) {
         consecutiveAuthFailures = 0;
-        input.callbacks.log(`poll 返回 HTTP ${response.status}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
+        input.callbacks.logEvent("info", "conn", "HTTP polling non-ok response", {
+          status: response.status,
+          retryAfterMs: RECONNECT_DELAY_MS,
+        });
         await input.callbacks.sleep(RECONNECT_DELAY_MS);
         continue;
       }
       if (consecutiveAuthFailures > 0) {
-        input.callbacks.log("鉴权恢复，连接已重新建立。");
+        input.callbacks.logEvent("info", "conn", "HTTP polling auth recovered", {
+          previousFailures: consecutiveAuthFailures,
+        });
         consecutiveAuthFailures = 0;
       }
 
@@ -144,17 +173,20 @@ export async function runHttpPollingTransport(input: {
         const pending = input.getPendingHandoffCount();
         if (pending > 0) {
           if (!handoffWaitLogged) {
-            input.callbacks.log(`后台服务已接管，待 ${pending} 个在途任务/流式会话完成后前台进程将退出…`);
+            input.callbacks.logEvent("info", "life", "handoff waiting for active work", { pending });
             handoffWaitLogged = true;
           }
         } else {
-          input.callbacks.log("后台服务已接管 24h 运行，前台进程优雅退出（交接完成）。");
+          input.callbacks.logEvent("info", "life", "handoff complete, exiting foreground daemon");
           await input.callbacks.sleep(200);
           process.exit(0);
         }
       }
     } catch (error) {
-      input.callbacks.log(`poll 失败：${error instanceof Error ? error.message : String(error)}，${RECONNECT_DELAY_MS / 1000}s 后重试…`);
+      input.callbacks.logEvent("info", "conn", "HTTP polling failed", {
+        error: error instanceof Error ? error.message : String(error),
+        retryAfterMs: RECONNECT_DELAY_MS,
+      });
       await input.callbacks.sleep(RECONNECT_DELAY_MS);
     }
   }

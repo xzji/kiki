@@ -6,6 +6,7 @@ import path from "path";
 process.env.KIKI_MACHINE_EXECUTOR = "true";
 
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
+import { createDaemonTrace, logDaemonEvent, logTraceEnabledWarning } from "@/lib/daemon/daemonLogger";
 import { enterUserContext, runWithUserContext } from "@/lib/server/context/userContext";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
 import { setGoalTelemetryObserver } from "@/lib/server/goalTelemetry";
@@ -92,6 +93,52 @@ function osFingerprint() {
   return `device:${process.platform}-${process.arch}:${readOrCreateDeviceId()}`;
 }
 
+function safeJsonBytes(value: unknown) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value));
+  } catch {
+    return 0;
+  }
+}
+
+function commandPayloadKeys(command: MachineCommand) {
+  const payload = "payload" in command ? command.payload : null;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  return Object.keys(payload).join(",");
+}
+
+function commandLogFields(command: MachineCommand) {
+  return {
+    type: command.type,
+    requestId: "requestId" in command ? command.requestId : undefined,
+    sessionId: "sessionId" in command ? command.sessionId : undefined,
+    jobId: "jobId" in command ? command.jobId : undefined,
+    bytes: safeJsonBytes(command),
+  };
+}
+
+function resultLogFields(result: MachineResult) {
+  const maybe = result as MachineResult & {
+    requestId?: string;
+    sessionId?: string;
+    jobId?: string;
+    ok?: boolean;
+    status?: string;
+    error?: string;
+    trajectory?: unknown[];
+  };
+  return {
+    type: result.type,
+    requestId: maybe.requestId,
+    sessionId: maybe.sessionId,
+    jobId: maybe.jobId,
+    ok: maybe.ok,
+    status: maybe.status,
+    error: maybe.error,
+    trajectorySteps: Array.isArray(maybe.trajectory) ? maybe.trajectory.length : undefined,
+  };
+}
+
 async function executeRemoteJob(input: {
   jobId: string;
   requestId: string;
@@ -116,11 +163,18 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   const base = normalizeBaseUrl(input.serverUrl);
   const fingerprint = osFingerprint();
   const daemonVersion = input.daemonVersion ?? "dev";
-  appendRuntimeDaemonLog(`远程 daemon（v${daemonVersion}）启动，优先 WS`);
+  logTraceEnabledWarning();
+  logDaemonEvent("info", "life", "remote daemon started", {
+    daemonVersion,
+    transport: process.env.KIKI_DAEMON_TRANSPORT ?? "auto",
+    fingerprint,
+  });
 
   let boundUserId: string | null = null;
   const runningJobs = new Set<string>();
   const requestIdToRunningJob = new Map<string, string>();
+  const commandStartedAtByRequestId = new Map<string, number>();
+  const commandStartedAtByJobId = new Map<string, number>();
   // 进行中的流式会话数（stream_prompt 不进 runningJobs，需单独计数，避免交接退出打断实时流）。
   const activeStreamSessionIds = new Set<string>();
   // 方案 A：前台进程在网页开启 24h、后台服务接管后置位，由主循环择机优雅退出。
@@ -129,7 +183,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   let outboundTransport: DaemonOutboundTransport = createHttpPollingOutbound({
     base,
     apiKey: input.apiKey,
-    log: appendRuntimeDaemonLog,
+    logEvent: logDaemonEvent,
   });
 
   function setOutboundTransport(transport: DaemonOutboundTransport) {
@@ -138,11 +192,26 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
 
   async function sendResult(result: MachineResult) {
     await outboundTransport.sendResult(result);
+    const fields = resultLogFields(result);
+    const requestStartedAt = fields.requestId ? commandStartedAtByRequestId.get(fields.requestId) : undefined;
+    const jobStartedAt = fields.jobId ? commandStartedAtByJobId.get(fields.jobId) : undefined;
+    const startedAt = requestStartedAt ?? jobStartedAt;
+    logDaemonEvent("info", result.type === "execute_progress" ? "exec" : "cmd", "done", {
+      ...fields,
+      durationMs: startedAt ? Date.now() - startedAt : undefined,
+    });
+    if (result.type !== "execute_progress") {
+      if (fields.requestId) commandStartedAtByRequestId.delete(fields.requestId);
+      if (fields.jobId) commandStartedAtByJobId.delete(fields.jobId);
+    }
   }
 
   function sendExecuteProgress(result: Extract<MachineResult, { type: "execute_progress" }>) {
     void sendResult(result).catch((error) => {
-      appendRuntimeDaemonLog(`execute progress 回传失败：${error instanceof Error ? error.message : String(error)}`);
+      logDaemonEvent("info", "err", "execute progress send failed", {
+        jobId: result.jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
   }
 
@@ -161,6 +230,14 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   });
 
   async function sendStreamChunk(sessionId: string, event: ClaudeStreamEvent, seq: number) {
+    if (event.type === "done" || event.type === "error") {
+      logDaemonEvent(event.type === "error" ? "info" : "debug", event.type === "error" ? "err" : "stream", "stream chunk send", {
+        sessionId,
+        seq,
+        eventType: event.type,
+        error: event.type === "error" ? event.message : undefined,
+      });
+    }
     await outboundTransport.sendStreamChunk(sessionId, event, seq);
   }
 
@@ -171,17 +248,31 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       conversationId: payload.conversationId,
     });
     const runner = mode === "json" ? runRuntimePromptJson : runRuntimePromptText;
-    return runner({
-      prompt: payload.prompt,
-      runtimeEnv: payload.runtimeEnv,
-      cwd,
-      conversationId: payload.conversationId,
-      permissionMode: payload.permissionMode,
-      toolPolicy: payload.toolPolicy,
-      filePolicy: payload.filePolicy,
-      channelPolicy: payload.channelPolicy,
-      traceContext: payload.traceContext,
+    const trace = createDaemonTrace({
+      type: mode === "json" ? "run_prompt_json" : "run_prompt_text",
+      requestId: payload.traceContext?.requestId,
+      metadata: { conversationId: payload.conversationId, cwd },
     });
+    trace?.writePrompt(payload.prompt);
+    try {
+      const result = await runner({
+        prompt: payload.prompt,
+        runtimeEnv: payload.runtimeEnv,
+        cwd,
+        conversationId: payload.conversationId,
+        permissionMode: payload.permissionMode,
+        toolPolicy: payload.toolPolicy,
+        filePolicy: payload.filePolicy,
+        channelPolicy: payload.channelPolicy,
+        traceContext: payload.traceContext,
+      });
+      trace?.writeOutput(result);
+      trace?.finish("completed");
+      return result;
+    } catch (error) {
+      trace?.finish("failed", error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   }
 
   function bindUser(userId: string) {
@@ -189,10 +280,15 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     boundUserId = userId;
     provisionUserWorkspace(userId);
     enterUserContext(userId);
-    appendRuntimeDaemonLog(`machine 已绑定用户 ${userId}`);
+    logDaemonEvent("info", "life", "machine bound user", { userId });
   }
 
   async function handleCommand(command: MachineCommand) {
+    const startedAt = Date.now();
+    if ("requestId" in command) commandStartedAtByRequestId.set(command.requestId, startedAt);
+    if ("jobId" in command) commandStartedAtByJobId.set(command.jobId, startedAt);
+    logDaemonEvent("info", "cmd", "recv", commandLogFields(command));
+    logDaemonEvent("debug", "cmd", "payload keys", { ...commandLogFields(command), keys: commandPayloadKeys(command) });
     if (command.type === "discover_runtimes") {
       try {
         const result = await discoverLocalRuntimes();
@@ -360,9 +456,19 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     }
     if (command.type === "stream_prompt") {
       activeStreamSessionIds.add(command.sessionId);
+      logDaemonEvent("info", "stream", "start", {
+        sessionId: command.sessionId,
+        bytes: safeJsonBytes(command.payload),
+      });
       void (async () => {
         const payload = command.payload as RemoteStreamPromptPayload;
         let seq = 0;
+        const trace = createDaemonTrace({
+          type: "stream_prompt",
+          sessionId: command.sessionId,
+          metadata: { conversationId: payload.conversationId, runtimeKind: payload.runtimeKind },
+        });
+        trace?.writePrompt(payload.message);
         const cwd = resolveLocalCliCwd({
           cwd: payload.workingDirectory,
           fallbackWorkingDirectory: payload.workingDirectory,
@@ -384,10 +490,13 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             channelPolicy: payload.channelPolicy,
             conversationId: payload.conversationId,
             onEvent: (event) => {
+              trace?.appendStreamEvent({ seq, event });
               void sendStreamChunk(command.sessionId, event, seq++);
             },
           });
+          trace?.finish("completed");
         } catch (error) {
+          trace?.finish("failed", error instanceof Error ? error.message : String(error));
           await sendStreamChunk(
             command.sessionId,
             {
@@ -399,6 +508,11 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           await sendStreamChunk(command.sessionId, { type: "done" }, seq++);
         } finally {
           activeStreamSessionIds.delete(command.sessionId);
+          logDaemonEvent("info", "stream", "done", {
+            sessionId: command.sessionId,
+            durationMs: Date.now() - startedAt,
+            chunks: seq,
+          });
         }
       })();
       return;
@@ -408,9 +522,20 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       if (runningJobs.has(command.jobId)) return;
       runningJobs.add(command.jobId);
       requestIdToRunningJob.set(command.requestId, command.jobId);
+      logDaemonEvent("info", "exec", "start", {
+        requestId: command.requestId,
+        jobId: command.jobId,
+        bytes: safeJsonBytes(command.payload),
+      });
       void (async () => {
+        const trace = createDaemonTrace({
+          type: "execute",
+          requestId: command.requestId,
+          jobId: command.jobId,
+        });
         try {
           const raw = command.payload as Partial<RuntimeJobPayload> & { trajectory?: ExecutionTrajectoryStep[] };
+          trace?.writePayload(raw);
           if (!raw.goal || !raw.subGoal || !raw.task || !raw.instance || !raw.runtimeEnv) {
             throw new Error("execute payload 不完整");
           }
@@ -434,6 +559,16 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
               initialTrajectory,
             }),
           );
+          logDaemonEvent("info", "exec", "done", {
+            requestId: command.requestId,
+            jobId: command.jobId,
+            status: outcome.status,
+            hasBlocker: Boolean(outcome.blocker),
+            trajectorySteps: outcome.trajectory?.length ?? 0,
+            durationMs: Date.now() - startedAt,
+          });
+          trace?.writeOutput(outcome);
+          trace?.finish("completed");
           await sendResult({
             type: "execute",
             jobId: command.jobId,
@@ -445,6 +580,13 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             result: outcome.result ?? undefined,
           });
         } catch (error) {
+          trace?.finish("failed", error instanceof Error ? error.message : String(error));
+          logDaemonEvent("info", "err", "execute failed", {
+            requestId: command.requestId,
+            jobId: command.jobId,
+            durationMs: Date.now() - startedAt,
+            error: error instanceof Error ? error.message : "执行失败",
+          });
           await sendResult({
             type: "execute",
             jobId: command.jobId,
@@ -459,11 +601,12 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       })();
       return;
     }
-    appendRuntimeDaemonLog(`忽略未知或暂不支持的命令：${command.type}`);
+    logDaemonEvent("info", "cmd", "ignored unsupported command", { type: command.type });
   }
 
   const callbacks = {
     log: appendRuntimeDaemonLog,
+    logEvent: logDaemonEvent,
     sleep,
     // WS 模式下命令由 ws "message" 事件回调触发：bindUser(hello_ack) 里的 enterWith 只对
     // 当次回调的延续生效，不会传播到后续 command 回调（二者是 socket 的兄弟异步操作）。
@@ -492,8 +635,8 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       transportMode,
     });
     if (transportMode === "ws") return;
-    setOutboundTransport(createHttpPollingOutbound({ base, apiKey: input.apiKey, log: appendRuntimeDaemonLog }));
-    appendRuntimeDaemonLog("HTTP 长轮询兜底启动");
+    setOutboundTransport(createHttpPollingOutbound({ base, apiKey: input.apiKey, logEvent: logDaemonEvent }));
+    logDaemonEvent("info", "conn", "HTTP polling fallback started", { reason: "ws_fallback" });
   }
 
   await runHttpPollingTransport({
