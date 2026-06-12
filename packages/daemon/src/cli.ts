@@ -8,6 +8,7 @@ import packageJson from "../package.json";
 import { collectDaemonServiceEnv } from "./pathEnv";
 import {
   installService as installDaemonService,
+  readInstalledServiceConnection,
   resolveInstallScriptPath,
   serviceStatus,
   uninstallService as uninstallDaemonService,
@@ -52,6 +53,24 @@ function requireConnectionArgs() {
   return { serverUrl, apiKey };
 }
 
+function resolveInstallConnectionArgs() {
+  const installed = readInstalledServiceConnection();
+  const serverUrl = readArg("--server-url") ?? installed?.serverUrl;
+  const apiKey = readArg("--api-key") ?? installed?.apiKey;
+  if (!serverUrl || !apiKey) {
+    console.error(
+      "缺少参数：首次安装需要 --server-url <https://...> 与 --api-key <sk_machine_...>；" +
+        "已安装过的机器可直接执行 kiki-daemon install 复用原配置。",
+    );
+    process.exit(1);
+  }
+  return {
+    serverUrl,
+    apiKey,
+    reusedExisting: Boolean(installed && !readArg("--server-url") && !readArg("--api-key")),
+  };
+}
+
 async function remoteServiceStatus(): Promise<RemoteDaemonServiceStatus> {
   return { platform: process.platform, ...(await serviceStatus()) };
 }
@@ -93,7 +112,7 @@ function printHelp() {
 
 用法:
   kiki-daemon run        --server-url <url> --api-key <key>   前台运行（关终端即停止）
-  kiki-daemon install    --server-url <url> --api-key <key>   注册后台服务 + 开机自启
+  kiki-daemon install    [--server-url <url> --api-key <key>] 注册后台服务 + 开机自启（已安装时可复用原配置）
   kiki-daemon uninstall                                        卸载后台服务
   kiki-daemon status                                           查看后台服务状态
   kiki-daemon version                                          查看当前版本
@@ -101,6 +120,7 @@ function printHelp() {
 
 示例:
   npm i -g @kiki_agent/daemon@latest && kiki-daemon install --server-url https://kiki.example.com --api-key sk_machine_xxx
+  npm i -g @kiki_agent/daemon@latest && kiki-daemon install
 `);
 }
 
@@ -141,7 +161,7 @@ async function main() {
   }
 
   if (subcommand === "install") {
-    const { serverUrl, apiKey } = requireConnectionArgs();
+    const { serverUrl, apiKey, reusedExisting } = resolveInstallConnectionArgs();
     const scriptPath = resolveInstallScriptPath();
     if (scriptPath.includes(`${path.sep}_npx${path.sep}`)) {
       console.warn(
@@ -158,6 +178,7 @@ async function main() {
     });
     const pathDirs = (collectDaemonServiceEnv(process.env).PATH || "").split(path.delimiter).length;
     console.log(`已安装并启动后台服务（${result.kind}）：${result.path}`);
+    if (reusedExisting) console.log("已复用现有后台服务的 server-url/api-key 配置。");
     console.log(`后台 PATH 已写入 ${pathDirs} 个目录（含 ~/.local/bin、Homebrew 等常见路径）。`);
     console.log("现在可以关闭终端，daemon 将在后台常驻并随开机自启。");
     console.log("查看状态：kiki-daemon status");

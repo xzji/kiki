@@ -22,6 +22,11 @@ export type InstallContext = {
   environment?: Record<string, string>;
 };
 
+export type InstalledServiceConnection = {
+  serverUrl: string;
+  apiKey: string;
+};
+
 /** install 时写入 plist/unit 的脚本路径；若通过 npx 调用但已全局安装，优先用全局路径。 */
 export function resolveInstallScriptPath(entryPath = process.argv[1] || __filename) {
   const current = fs.realpathSync(entryPath);
@@ -273,6 +278,31 @@ function readLinuxExecStart(unitPath: string): string[] {
   } catch {
     return [];
   }
+}
+
+function readFlagValue(args: string[], flag: string) {
+  const direct = args.find((arg) => arg.startsWith(`${flag}=`));
+  if (direct) return direct.slice(flag.length + 1);
+  const index = args.indexOf(flag);
+  if (index >= 0) return args[index + 1];
+  return undefined;
+}
+
+function extractServiceConnection(args: string[]): InstalledServiceConnection | null {
+  const serverUrl = readFlagValue(args, "--server-url")?.trim();
+  const apiKey = readFlagValue(args, "--api-key")?.trim();
+  if (!serverUrl || !apiKey) return null;
+  return { serverUrl, apiKey };
+}
+
+export function readInstalledServiceConnection(): InstalledServiceConnection | null {
+  if (process.platform === "darwin") {
+    return extractServiceConnection(readMacProgramArguments(macPlistPath()));
+  }
+  if (process.platform === "linux") {
+    return extractServiceConnection(readLinuxExecStart(linuxUnitPath()));
+  }
+  return null;
 }
 
 async function readConfiguredDaemonVersion(args: string[]): Promise<string | null> {
