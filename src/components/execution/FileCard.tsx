@@ -14,10 +14,17 @@ function formatBytes(size?: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function shouldShowSummary(artifact: ArtifactRef) {
+  const summary = artifact.summary?.trim();
+  if (!summary) return false;
+  return summary !== `已生成文件 ${artifact.label}`;
+}
+
 export function FileCard({ artifact }: { artifact: ArtifactRef }) {
   const href = artifact.previewUrl || `/api/artifacts/${encodeURIComponent(artifact.id)}`;
   const [showEditor, setShowEditor] = useState(false);
   const isXlsx = artifact.mime === XLSX_MIME || artifact.label.toLowerCase().endsWith(".xlsx");
+  const showSummary = shouldShowSummary(artifact);
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_6px_18px_rgba(15,23,42,0.03)]">
       <div className="flex items-start gap-3">
@@ -31,7 +38,7 @@ export function FileCard({ artifact }: { artifact: ArtifactRef }) {
             <span className="text-[#D0D7DE]">/</span>
             <span>{formatBytes(artifact.size)}</span>
           </div>
-          {artifact.summary ? <div className="mt-2 text-[13px] leading-5 text-[#6B7280]">{artifact.summary}</div> : null}
+          {showSummary ? <div className="mt-2 text-[13px] leading-5 text-[#6B7280]">{artifact.summary}</div> : null}
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">

@@ -92,6 +92,24 @@ export function validateRegisterInput(input: {
   return { ok: true as const, email, displayName };
 }
 
+function validateDisplayName(displayName: string) {
+  const normalized = displayName.trim();
+  if (!normalized) {
+    return { ok: false as const, reason: "昵称不能为空" };
+  }
+  if (normalized.length > 30) {
+    return { ok: false as const, reason: "昵称不能超过 30 字" };
+  }
+  return { ok: true as const, displayName: normalized };
+}
+
+function validatePasswordFormat(password: string) {
+  if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return { ok: false as const, reason: "密码至少 8 位且包含字母和数字" };
+  }
+  return { ok: true as const };
+}
+
 export type AuthSession = {
   token: string;
   user: PublicUser;
@@ -205,6 +223,90 @@ export function loginUser(input: {
   }
   const session = createSessionForUser(user.id);
   return { ok: true, session };
+}
+
+export function updateUserDisplayName(input: {
+  userId: string;
+  displayName: string;
+}): { ok: true; user: PublicUser } | { ok: false; reason: string } {
+  const validated = validateDisplayName(input.displayName);
+  if (!validated.ok) {
+    return { ok: false, reason: validated.reason };
+  }
+
+  const db = getRegistryDatabase();
+  const timestamp = nowIso();
+  const result = db
+    .prepare(
+      `
+        UPDATE users
+        SET display_name = ?, updated_at = ?
+        WHERE id = ? AND status = 'active'
+      `,
+    )
+    .run(validated.displayName, timestamp, input.userId);
+  if (result.changes !== 1) {
+    return { ok: false, reason: "用户不存在或已停用" };
+  }
+
+  const row = db
+    .prepare(`SELECT id, email, display_name FROM users WHERE id = ? AND status = 'active' LIMIT 1`)
+    .get(input.userId) as Pick<UserRow, "id" | "email" | "display_name"> | undefined;
+  if (!row) {
+    return { ok: false, reason: "用户不存在或已停用" };
+  }
+  return { ok: true, user: toPublicUser(row) };
+}
+
+export function changeUserPassword(input: {
+  userId: string;
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}): { ok: true } | { ok: false; reason: string; field?: "currentPassword" | "newPassword" | "confirmPassword" } {
+  if (!input.currentPassword) {
+    return { ok: false, reason: "请输入当前密码", field: "currentPassword" };
+  }
+  const passwordFormat = validatePasswordFormat(input.newPassword);
+  if (!passwordFormat.ok) {
+    return { ok: false, reason: passwordFormat.reason, field: "newPassword" };
+  }
+  if (input.newPassword !== input.confirmPassword) {
+    return { ok: false, reason: "两次输入的新密码不一致", field: "confirmPassword" };
+  }
+
+  const db = getRegistryDatabase();
+  const user = db
+    .prepare(
+      `
+        SELECT id, email, password_hash, password_salt, display_name, status
+        FROM users
+        WHERE id = ? AND status = 'active'
+        LIMIT 1
+      `,
+    )
+    .get(input.userId) as UserRow | undefined;
+  if (!user) {
+    return { ok: false, reason: "用户不存在或已停用" };
+  }
+  if (!verifyPassword(input.currentPassword, user)) {
+    return { ok: false, reason: "当前密码不正确", field: "currentPassword" };
+  }
+  if (verifyPassword(input.newPassword, user)) {
+    return { ok: false, reason: "新密码不能和当前密码相同", field: "newPassword" };
+  }
+
+  const salt = randomBytes(16).toString("hex");
+  const passwordHash = hashPassword(input.newPassword, salt);
+  db.prepare(
+    `
+      UPDATE users
+      SET password_hash = ?, password_salt = ?, updated_at = ?
+      WHERE id = ? AND status = 'active'
+    `,
+  ).run(passwordHash, salt, nowIso(), input.userId);
+
+  return { ok: true };
 }
 
 export function resolveSessionFromToken(token: string | null | undefined): PublicUser | null {

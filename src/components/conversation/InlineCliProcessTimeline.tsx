@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, AlertCircle, CheckCircle2, ChevronDown, Circle, FileText, Terminal } from "lucide-react";
+import { AlertCircle, ChevronDown, Circle, FileText, Terminal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { CliProcessEvent, ConversationCliProcess } from "@/types/runtime";
@@ -18,13 +18,6 @@ function formatTime(value: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
-}
-
-function statusText(status: ConversationCliProcess["status"]) {
-  if (status === "completed") return "已完成";
-  if (status === "error") return "失败";
-  if (status === "aborted") return "已中断";
-  return "运行中";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -56,6 +49,7 @@ function eventTimeValue(event: CliProcessEvent) {
 
 function normalizeEvents(events: CliProcessEvent[]): TimelineEvent[] {
   return events
+    .filter((event) => event.type !== "prompt" && event.type !== "status" && event.type !== "assistant_trace")
     .map((event, order) => ({ ...event, order }))
     .sort((a, b) => eventTimeValue(a) - eventTimeValue(b) || a.order - b.order);
 }
@@ -83,7 +77,6 @@ function eventTitle(event: CliProcessEvent) {
     return `调用子代理：${subagentInfo(event).description}`;
   }
   if (event.type === "thinking") return "思考";
-  if (event.type === "assistant_trace") return "过程记录";
   if (event.type === "tool_call") return `调用工具：${event.toolName || event.title || "Tool"}`;
   if (event.type === "status") return event.title || "状态更新";
   if (event.type === "error") return event.title || "任务失败";
@@ -102,14 +95,18 @@ function eventSummary(event: CliProcessEvent) {
 }
 
 function eventBadge(event: CliProcessEvent) {
-  if (isSubagentToolCall(event)) return "subagent";
+  if (isSubagentToolCall(event)) return "子代理";
+  if (event.type === "thinking") return "思考";
+  if (event.type === "tool_call") return "工具";
+  if (event.type === "error") return "错误";
+  if (event.type === "file_artifact") return "附件";
+  if (event.type === "output") return "输出";
   return event.type;
 }
 
 function eventIcon(event: CliProcessEvent) {
   if (event.type === "error") return <AlertCircle className="h-3.5 w-3.5" />;
   if (event.type === "file_artifact") return <FileText className="h-3.5 w-3.5" />;
-  if (event.type === "status") return <Activity className="h-3.5 w-3.5" />;
   if (event.type === "tool_call") return <Terminal className="h-3.5 w-3.5" />;
   return <Circle className="h-3.5 w-3.5" />;
 }
@@ -118,11 +115,18 @@ function shouldShowDetails(event: CliProcessEvent) {
   return Boolean(event.content || event.input !== undefined || isSubagentToolCall(event));
 }
 
+function detailText(event: CliProcessEvent) {
+  if (event.type === "thinking") return "展开思考";
+  if (isSubagentToolCall(event)) return "展开子代理";
+  if (event.type === "tool_call") return "展开参数";
+  return "展开";
+}
+
 function EventDetails({ event }: { event: CliProcessEvent }) {
   const isSubagent = isSubagentToolCall(event);
   const info = isSubagent ? subagentInfo(event) : null;
   return (
-    <div className="space-y-2 border-t border-[#EEF0F3] px-3 py-2.5">
+    <div className="ml-7 space-y-2 pb-2 pr-2">
       {isSubagent && info ? (
         <div className="space-y-1.5 text-[12px] leading-5 text-[#374151]">
           {info.agentType ? (
@@ -136,19 +140,19 @@ function EventDetails({ event }: { event: CliProcessEvent }) {
             {info.description}
           </div>
           {info.prompt ? (
-            <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-white px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
+            <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#F6F8FA] px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
               {info.prompt}
             </pre>
           ) : null}
         </div>
       ) : null}
       {event.content ? (
-        <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-white px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
+        <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#F6F8FA] px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
           {event.content}
         </pre>
       ) : null}
       {event.input !== undefined ? (
-        <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-white px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
+        <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#F6F8FA] px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
           {JSON.stringify(event.input, null, 2)}
         </pre>
       ) : null}
@@ -159,31 +163,37 @@ function EventDetails({ event }: { event: CliProcessEvent }) {
 function TimelineEventCard({ event }: { event: TimelineEvent }) {
   const hasDetails = shouldShowDetails(event);
   const summary = eventSummary(event);
+  const isThinking = event.type === "thinking";
   return (
-    <details
-      className={cn(
-        "group/timeline rounded-lg border bg-[#FAFBFC]",
-        event.type === "error" ? "border-[#FFB4A8] bg-[#FFF7F5]" : "border-[#EEF0F3]",
-      )}
-    >
-      <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-2 marker:hidden select-none [&::-webkit-details-marker]:hidden">
+    <details className={cn("group/timeline pl-3", !isThinking && "border-l border-[#E5E7EB]")}>
+      <summary
+        className={cn(
+          "flex cursor-pointer list-none items-start gap-2 marker:hidden select-none [&::-webkit-details-marker]:hidden",
+          isThinking ? "py-1 text-[#6B7280]" : "py-1.5",
+        )}
+      >
         <span
           className={cn(
-            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border bg-white",
-            event.type === "error" ? "border-[#FFB4A8] text-[#B42318]" : "border-[#D0D7DE] text-[#6B7280]",
+            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center",
+            isThinking ? "text-[#8C9198]" : event.type === "error" ? "text-[#B42318]" : "text-[#8C9198]",
           )}
         >
           {eventIcon(event)}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[12px] font-semibold text-[#1F2328]">{eventTitle(event)}</span>
-            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-mono text-[10px] text-[#6B7280]">
+            <span className={cn("truncate text-[12px]", isThinking ? "font-medium text-[#6B7280]" : "font-semibold text-[#1F2328]")}>
+              {eventTitle(event)}
+            </span>
+            <span className="shrink-0 rounded bg-[#F6F8FA] px-1.5 py-0.5 text-[10px] text-[#6B7280]">
               {eventBadge(event)}
             </span>
+            <span className="shrink-0 text-[10px] text-[#8C9198]">{formatTime(event.createdAt)}</span>
+            {hasDetails ? (
+              <span className="shrink-0 text-[10px] text-[#8C9198] group-open/timeline:hidden">{detailText(event)}</span>
+            ) : null}
           </span>
-          <span className="mt-0.5 block text-[10px] text-[#8C9198]">{formatTime(event.createdAt)}</span>
-          {summary ? <span className="mt-1 block truncate text-[12px] text-[#4B5563]">{summary}</span> : null}
+          {summary && !isThinking ? <span className="mt-1 block truncate text-[12px] text-[#4B5563]">{summary}</span> : null}
         </span>
         {hasDetails ? (
           <ChevronDown className="mt-1 h-3.5 w-3.5 shrink-0 text-[#8C9198] transition group-open/timeline:rotate-180" />
@@ -202,35 +212,18 @@ export function InlineCliProcessTimeline({ process }: { process: ConversationCli
   const events = normalizeEvents(process.events);
   if (!events.length) return null;
   const subagentCount = countSubagents(events);
-  const defaultOpen = process.status === "running";
   return (
-    <details className="mt-3 max-w-3xl rounded-xl border border-[#E5E7EB] bg-white" open={defaultOpen}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 marker:hidden select-none [&::-webkit-details-marker]:hidden">
-        <span className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-              process.status === "error"
-                ? "bg-[#FEF2F2] text-[#B42318]"
-                : process.status === "running"
-                  ? "bg-[#EEF4FF] text-[#175CD3]"
-                  : "bg-[#F0FDF4] text-[#166534]",
-            )}
-          >
-            {process.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Activity className="h-3.5 w-3.5" />}
-          </span>
-          <span className="truncate text-[12px] font-semibold text-[#1F2328]">
-            执行过程 · {statusText(process.status)} · {events.length} 条事件
-            {subagentCount ? ` · ${subagentCount} 个子代理` : ""}
-          </span>
-        </span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-[#8C9198] transition group-open:rotate-180" />
-      </summary>
-      <div className="space-y-2 border-t border-[#F0F1F3] px-3 py-3">
+    <div className="mt-3 max-w-3xl space-y-1 text-[12px]">
+      <div className="flex items-center gap-2 text-[#6B7280]">
+        <span className="font-medium text-[#374151]">执行过程</span>
+        <span>{events.length} 条事件</span>
+        {subagentCount ? <span>{subagentCount} 个子代理</span> : null}
+      </div>
+      <div className="space-y-1">
         {events.map((event) => (
           <TimelineEventCard key={`${event.id}:${event.order}`} event={event} />
         ))}
       </div>
-    </details>
+    </div>
   );
 }

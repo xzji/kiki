@@ -81,6 +81,7 @@ export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
         conversationId: options.conversationId,
         resumeSessionId: options.resumeSessionId,
         contextPack: options.contextPack,
+        collectFileArtifacts: options.collectFileArtifacts,
         workspacePolicy: options.workspacePolicy,
         systemPromptMode: options.systemPromptMode,
         quotedMessage: options.quotedMessage,

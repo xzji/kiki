@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { createSubGoalCommand } from "@/lib/api/goal-commands";
+import { isImeCompositionKeyEvent } from "@/lib/browser/ime";
 import { createIdempotencyKey, deriveOpaqueId } from "@/lib/opaqueIds";
 import { useGoalStore } from "@/stores/goalStore";
 
@@ -95,6 +96,7 @@ export function ThreadCreateDrawer({ open, goalId, onClose }: Props) {
             placeholder="例：完成一轮完整模考"
             className="mt-2 w-full rounded-lg border border-[#E5E7EB] bg-[#F5F6F8] px-3 py-2 text-sm text-[#1F2328] outline-none focus:border-[#1F2328]"
             onKeyDown={(e) => {
+              if (isImeCompositionKeyEvent(e)) return;
               if (e.key === "Enter") handleSubmit();
             }}
           />

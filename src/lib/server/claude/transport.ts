@@ -122,6 +122,7 @@ export type ClaudeStreamOptions = {
   conversationId?: string;
   assistantMessageId?: string;
   assistantCreatedAt?: string;
+  collectFileArtifacts?: boolean;
   signal?: AbortSignal;
   onEvent: (event: RuntimeStreamEvent) => void;
   /** spawn 成功后回传子进程 pid，供上层（如 ProcessSupervisor）绑定 OS 进程做生命周期管理。 */
@@ -490,12 +491,12 @@ export function buildWorkspaceSystemPrompt(input: {
   const parts: string[] = [];
 
   if (redactionMode === "strict" && includeConversationIdentity) {
-    const workspaceLabel = `isolated-session-${createHash("sha256").update(input.workspaceDir).digest("hex").slice(0, 8)}`;
+    const workspaceLabel = `workspace-${createHash("sha256").update(input.workspaceDir).digest("hex").slice(0, 8)}`;
     parts.push(
-      "你是 KiKi 当前会话助手，不是代码仓库开发助手。",
-      `当前工作目录是隔离 workspace：${workspaceLabel}`,
+      "你是 KiKi 当前会话助手。",
+      `当前工作目录标签：${workspaceLabel}`,
       "你只能依据当前上下文包、用户消息和当前工作目录内的文件回答。",
-      "不得读取父目录、项目源码目录、其他会话 workspace 或 IDE 上下文。",
+      "不要读取与当前问题无关的父目录、其他会话 workspace 或 IDE 上下文。",
       "如果用户要求继续/恢复，但当前上下文包没有可恢复状态，请说明当前会话没有找到可恢复任务。",
     );
   }
@@ -762,7 +763,8 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
   // 仅在会话模式且开启 shell 时，对 workspace 做运行前快照，
   // 用于成功后采集脚本生成的「最终产出物」作为会话附件；任务/目标运行不回传附件。
   const shellEnabled = resolvedToolPolicy.enabledCapabilities.includes("shell");
-  const workspaceSnapshot = shellEnabled && !isTaskPrompt ? snapshotWorkspaceFiles(cwd) : null;
+  const shouldCollectFileArtifacts = options.collectFileArtifacts ?? true;
+  const workspaceSnapshot = shouldCollectFileArtifacts && shellEnabled && !isTaskPrompt ? snapshotWorkspaceFiles(cwd) : null;
   const redactionMode = isTaskPrompt ? "passthrough" : "strict";
   const effectiveWorkspacePolicy = options.workspacePolicy ?? (isTaskPrompt ? "task" : undefined);
   const includeConversationIdentity = !isTaskPrompt && options.systemPromptMode === "conversation";
@@ -868,6 +870,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     };
 
     const emitPendingFileEvents = () => {
+      if (!shouldCollectFileArtifacts) return true;
       if (workspaceSnapshot) {
         for (const changedPath of diffWorkspaceFiles(cwd, workspaceSnapshot)) {
           pendingFilePaths.add(changedPath);

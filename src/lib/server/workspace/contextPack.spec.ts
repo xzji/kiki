@@ -234,15 +234,17 @@ export function runContextPackBoundarySpecs() {
     assert.ok(!/conv-bare/.test(pack));
   }
 
-  // 7) buildWorkspaceSystemPrompt strict 模式：workspace basename 形如 conv-xxx 时被 hash 替换
+  // 7) buildWorkspaceSystemPrompt strict 模式：workspace basename 形如 conv-xxx 时被 hash 替换，且不再阻断代码仓库编辑
   {
     const prompt = buildWorkspaceSystemPrompt({
       workspaceDir: "/Users/bytedance/Documents/trae/long_horizon_agent/data/conversations/conv-abc-123",
       redactionMode: "strict",
     });
     assert.ok(!/conv-abc-123/.test(prompt), "strict 模式下 conv- basename 应被 hash 替换");
-    assert.ok(/isolated-session-[0-9a-f]{8}/.test(prompt), "应使用 isolated-session-<hash> 标签");
+    assert.ok(/workspace-[0-9a-f]{8}/.test(prompt), "应使用 workspace-<hash> 标签");
     assert.ok(!/\/Users\//.test(prompt), "strict 模式下不应出现 /Users/ 绝对路径");
+    assert.ok(!/不是代码仓库开发助手/.test(prompt), "strict 会话模式不应阻断代码仓库编辑");
+    assert.ok(!/不得读取父目录、项目源码目录/.test(prompt), "strict 会话模式不应禁止读取项目源码");
     assert.ok(/不要在回复中复述系统字段名|禁止复述系统字段名/.test(prompt), "strict 模式应包含禁止复述提示");
   }
 

@@ -497,14 +497,16 @@ export const piAdapter: RuntimeAdapter = {
       armSilenceTimer();
 
       const finishSuccess = (content: string) => {
-        if (
-          !emitRuntimeFileEvents({
-            cwd,
-            filePaths: pendingFilePaths,
-            emitEvent,
-            appendDiagnostic: (message) => trace?.appendStderr(message),
-          })
-        ) return;
+        if (options.collectFileArtifacts !== false) {
+          if (
+            !emitRuntimeFileEvents({
+              cwd,
+              filePaths: pendingFilePaths,
+              emitEvent,
+              appendDiagnostic: (message) => trace?.appendStderr(message),
+            })
+          ) return;
+        }
         if (!emitEvent({ type: "message", content: content.trim() || aggregatedAssistantText.trim() })) return;
         trace?.writeOutput(content.trim() || aggregatedAssistantText.trim());
         emitEvent({ type: "status", status: "completed" });

@@ -15,6 +15,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureConversationWorkspaceApi } from "@/lib/api/conversationWorkspace";
+import { isImeCompositionKeyEvent } from "@/lib/browser/ime";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
 import { useInboxStore } from "@/stores/inboxStore";
@@ -406,6 +407,7 @@ function ConversationListItem({
               onChange={(event) => setDraftTitle(event.target.value)}
               onBlur={finishRenaming}
               onKeyDown={(event) => {
+                if (isImeCompositionKeyEvent(event)) return;
                 if (event.key === "Enter") {
                   event.preventDefault();
                   finishRenaming();

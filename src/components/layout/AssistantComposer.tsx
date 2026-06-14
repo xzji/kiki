@@ -3,6 +3,7 @@
 import { ArrowUp, ChevronDown, Link2, Plus, Square, X } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
+import { isImeCompositionKeyEvent } from "@/lib/browser/ime";
 import { getSlashCommandSuggestions } from "@/lib/slashCommands";
 import type { SlashCommand } from "@/lib/slashCommands";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
@@ -74,6 +75,7 @@ export function AssistantComposer({
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const isEmpty = value.trim().length === 0;
   const slashTrigger = disabled || selectedCommand ? null : getSlashCommandTrigger(value, cursorIndex);
   const commandSuggestions = slashTrigger ? getSlashCommandSuggestions(`/${slashTrigger.query}`) : [];
@@ -200,8 +202,15 @@ export function AssistantComposer({
             onKeyUp={(event) => {
               setCursorIndex(event.currentTarget.selectionStart);
             }}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+            }}
             disabled={disabled}
             onKeyDown={(event) => {
+              if (isImeCompositionKeyEvent(event, isComposingRef.current)) return;
               if (
                 selectedCommand &&
                 event.key === "Backspace" &&

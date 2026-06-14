@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import path from "path";
 
 import { streamClaudeCli } from "@/lib/server/claudeCli";
 import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
@@ -26,6 +27,7 @@ import { applyConversationCommand } from "@/lib/server/services/conversationComm
 import { listConversationMessages } from "@/lib/server/repositories/conversationMessagesRepository";
 import type { ClaudeChatRequest } from "@/types/runtime";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { normalizeWorkingDirectory } from "@/lib/server/runtimePath";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,9 +105,12 @@ async function POSTHandler(request: NextRequest) {
           writeTextFileAtomic(getConversationContextFilePath(body.conversationId), contextPack);
         }
 
+        const cliWorkingDirectory = body.runtimeEnv.workingDirectory || workspace.workspaceDir;
+        const collectFileArtifacts =
+          path.resolve(normalizeWorkingDirectory(cliWorkingDirectory)) === path.resolve(workspace.workspaceDir);
         await streamClaudeCli({
           message: body.message,
-          workingDirectory: workspace.workspaceDir,
+          workingDirectory: cliWorkingDirectory,
           cliPath: body.runtimeEnv.cliPath,
           permissionMode: body.runtimeEnv.permissionMode,
           runtimeKind: body.runtimeEnv.runtimeKind,
@@ -114,6 +119,7 @@ async function POSTHandler(request: NextRequest) {
           conversationId: body.conversationId,
           assistantMessageId: body.assistantMessageId,
           assistantCreatedAt: body.assistantCreatedAt,
+          collectFileArtifacts,
           quotedMessage: body.quotedMessage,
           contextPack,
           workspacePolicy: body.workspaceMode || "conversation",
@@ -171,7 +177,7 @@ async function POSTHandler(request: NextRequest) {
                 userMessage: body.message,
                 assistantText: finalAssistantText,
                 runtimeEnv: body.runtimeEnv,
-                cwd: workspace.workspaceDir,
+                cwd: cliWorkingDirectory,
                 explicitMemoryIntent: gate.explicitMemoryIntent,
               });
             } catch (error) {

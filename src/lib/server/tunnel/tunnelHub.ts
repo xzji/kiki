@@ -67,6 +67,7 @@ export type RemoteStreamPromptPayload = {
   conversationId?: string;
   resumeSessionId?: string;
   contextPack?: string;
+  collectFileArtifacts?: boolean;
   workspacePolicy?: "conversation" | "task" | string;
   systemPromptMode?: "conversation" | "neutral";
   quotedMessage?: QuotedConversationMessageContext | null;

@@ -114,6 +114,7 @@ export function UserMenu() {
       <SettingsModal
         open={settingsOpen}
         user={user}
+        onUserChange={setUser}
         defaultTab={settingsTab}
         onClose={() => setSettingsOpen(false)}
       />

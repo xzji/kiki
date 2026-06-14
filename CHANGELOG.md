@@ -6,6 +6,12 @@
 
 ### Changed
 - 设置弹窗的账户页改为读取当前登录用户信息：`UserMenu` 会向 `SettingsModal` 透传用户对象，账户卡片与资料字段不再展示硬编码的昵称和邮箱，而是显示真实账号信息并兼容未加载态。
+- 账户设置继续扩展为可编辑个人资料：新增昵称修改与密码修改表单，前端通过受保护的 `/api/auth/profile`、`/api/auth/password` 接口提交，成功后会同步刷新左下角用户菜单中的显示信息。
+- 会话内联 CLI 时间线改为更紧凑的展示：过滤 prompt/status/assistant_trace 噪音事件，统一中文 badge 与摘要文案，减少消息气泡中的过程噪声。
+- Claude 会话桥接与运行时上下文链路继续收口：resume session 仍由服务端按 runtimeKind 单点持久化，同时补齐 Pi/Claude transport、remote CLI proxy 与 workspace context pack 的对齐。
+
+### Added
+- 新增账户资料与密码修改接口，以及对应的服务端鉴权/校验逻辑：昵称限制 30 字以内，密码要求至少 8 位且同时包含字母和数字，并校验当前密码与新旧密码重复场景。
 
 ## 2026-06-12
 

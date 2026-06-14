@@ -525,7 +525,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         const cwd = resolveLocalCliCwd({
           cwd: payload.workingDirectory,
           fallbackWorkingDirectory: payload.workingDirectory,
-          conversationId: payload.conversationId,
+          conversationId: payload.workspacePolicy === "conversation" ? undefined : payload.conversationId,
         });
         try {
           await streamRuntimePrompt({
@@ -536,6 +536,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             runtimeKind: payload.runtimeKind,
             resumeSessionId: payload.resumeSessionId,
             contextPack: payload.contextPack,
+            collectFileArtifacts: payload.collectFileArtifacts,
             workspacePolicy: payload.workspacePolicy,
             systemPromptMode: payload.systemPromptMode,
             quotedMessage: payload.quotedMessage,
