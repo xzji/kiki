@@ -19,18 +19,20 @@ import { MemoryEditor } from "@/components/memory/MemoryEditor";
 import { BackendLogsPanel } from "./BackendLogsPanel";
 import { RuntimeEnvironmentPanel } from "./RuntimeEnvironmentPanel";
 
-const ACCOUNT_PROFILE = {
-  initial: "J",
-  name: "Josh",
-  email: "shadowjxz@gmail.com",
+type SettingsUser = {
+  id: string;
+  email: string;
+  displayName: string;
 };
 
 export function SettingsModal({
   open,
+  user,
   defaultTab = "account",
   onClose,
 }: {
   open: boolean;
+  user: SettingsUser | null;
   defaultTab?: SettingsTab;
   onClose: () => void;
 }) {
@@ -141,7 +143,7 @@ export function SettingsModal({
             </div>
           </div>
           <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
-            {activeTab === "account" ? <AccountPanel /> : null}
+            {activeTab === "account" ? <AccountPanel user={user} /> : null}
             {activeTab === "runtime" ? <RuntimeEnvironmentPanel /> : null}
             {activeTab === "memory" ? <UserMemoryPanel /> : null}
             {activeTab === "easter-egg" ? (
@@ -178,20 +180,31 @@ function UserMemoryPanel() {
   );
 }
 
-function AccountPanel() {
+function AccountPanel({ user }: { user: SettingsUser | null }) {
+  const displayName = user?.displayName.trim() || "用户";
+  const email = user?.email.trim() || "正在读取当前账号信息";
+  const initial = displayName.charAt(0).toUpperCase() || "U";
+
   return (
-    <div className="max-w-[560px] space-y-6">
-      <div className="flex items-center gap-4 rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full border border-[#D0D7DE] bg-[#E9E6FF] text-lg font-medium text-[#5F5AA2]">
-          {ACCOUNT_PROFILE.initial}
+    <div className="w-full space-y-5">
+      <div className="flex w-full items-center justify-between gap-6 rounded-2xl border border-[#E5E7EB] bg-white px-6 py-6">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="flex h-16 w-16 flex-none items-center justify-center rounded-full border border-[#D0D7DE] bg-[#E9E6FF] text-lg font-medium text-[#5F5AA2]">
+            {initial}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-[17px] font-medium text-[#111]">{displayName}</div>
+            <div className="mt-1 truncate text-[13px] text-[#6B7280]">{email}</div>
+          </div>
         </div>
-        <div className="min-w-0">
-          <div className="text-[16px] font-medium text-[#111]">{ACCOUNT_PROFILE.name}</div>
-          <div className="mt-1 text-[13px] text-[#6B7280]">KiKi Agent 账户</div>
+        <div className="flex-none rounded-full border border-[#E5E7EB] bg-[#FAFAFB] px-3 py-1 text-[12px] text-[#4B5563]">
+          KiKi Agent 账户
         </div>
       </div>
-      <InfoField label="昵称" value={ACCOUNT_PROFILE.name} />
-      <InfoField label="绑定邮箱" value={ACCOUNT_PROFILE.email} />
+      <div className="grid w-full grid-cols-2 gap-4">
+        <InfoField label="昵称" value={displayName} />
+        <InfoField label="绑定邮箱" value={email} />
+      </div>
     </div>
   );
 }

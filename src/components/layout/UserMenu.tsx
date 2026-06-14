@@ -113,6 +113,7 @@ export function UserMenu() {
       </button>
       <SettingsModal
         open={settingsOpen}
+        user={user}
         defaultTab={settingsTab}
         onClose={() => setSettingsOpen(false)}
       />
