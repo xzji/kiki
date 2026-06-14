@@ -23,14 +23,19 @@ import {
 } from "@/lib/api/conversation-commands";
 import { migrateConversationIds, normalizeGoalId } from "@/lib/opaqueIds";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
-import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
+import type { Conversation, ConversationMessage, ConversationSummary, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 import type { CliProcessEvent, CliPromptSection, ConversationCliProcess } from "@/types/runtime";
 
 type ConversationStore = {
   conversations: Conversation[];
   conversationsHydrated: boolean;
   setConversationsHydrated: (hydrated: boolean) => void;
-  hydrateConversations: (conversations: Conversation[]) => void;
+  hydrateConversations: (conversations: Array<Conversation | ConversationSummary>) => void;
+  hydrateConversationMessages: (
+    conversationId: string,
+    messages: ConversationMessage[],
+    options?: { mode?: "replace" | "append" },
+  ) => void;
   applyConversationEvent: (event: ConversationEventRecord) => void;
   setConversationBackgroundIssue: (
     conversationId: string,
@@ -88,19 +93,86 @@ function sanitizeConversationMessageContent(content: string) {
     .trim();
 }
 
-function sanitizeConversationHistory(conversations: Conversation[]) {
+function compareMessagesForSummary(a: ConversationMessage, b: ConversationMessage) {
+  const byTime = +new Date(a.createdAt) - +new Date(b.createdAt);
+  if (byTime !== 0) return byTime;
+  if (a.role === b.role) return 0;
+  return a.role === "user" ? -1 : 1;
+}
+
+function deriveConversationMessageSummary(messages: ConversationMessage[]) {
+  const sorted = [...messages].sort(compareMessagesForSummary);
+  const lastMessage = sorted[sorted.length - 1];
+  return {
+    messageCount: messages.length,
+    unreadCount: messages.filter((message) => message.unread).length,
+    lastMessage,
+  };
+}
+
+function sanitizeMessage(message: ConversationMessage): ConversationMessage {
+  return {
+    ...message,
+    content: sanitizeConversationMessageContent(message.content),
+  } as ConversationMessage;
+}
+
+function normalizeConversationForStore(
+  conversation: Conversation | ConversationSummary,
+  local?: Conversation,
+): Conversation {
+  const rawMessages = "messages" in conversation && Array.isArray(conversation.messages)
+    ? conversation.messages
+    : [];
+  const messages = rawMessages.map(sanitizeMessage);
+  const normalized = migrateConversationIds({
+    ...(conversation as Conversation),
+    messages,
+  });
+  const incomingSummaryOnly = conversation.messagesLoaded === false && !("messages" in conversation);
+  if (incomingSummaryOnly) {
+    const localMessages = local?.messages ?? [];
+    const localDerived = localMessages.length > 0 ? deriveConversationMessageSummary(localMessages) : null;
+    return {
+      ...normalized,
+      messages: localMessages,
+      messagesLoaded: local?.messagesLoaded === true ? true : false,
+      messageCount: localDerived?.messageCount ?? conversation.messageCount,
+      unreadCount: localDerived?.unreadCount ?? conversation.unreadCount,
+      lastMessage: localDerived?.lastMessage ?? conversation.lastMessage,
+    };
+  }
+  const merged = local ? mergeConversationPreservingCliProcess(local, normalized) : normalized;
+  const derived = deriveConversationMessageSummary(merged.messages);
+  return {
+    ...merged,
+    messagesLoaded: conversation.messagesLoaded ?? true,
+    messageCount: derived.messageCount,
+    unreadCount: derived.unreadCount,
+    lastMessage: derived.lastMessage,
+  };
+}
+
+function refreshConversationSummary(conversation: Conversation): Conversation {
+  const derived = deriveConversationMessageSummary(conversation.messages);
+  return {
+    ...conversation,
+    messageCount: derived.messageCount,
+    unreadCount: derived.unreadCount,
+    lastMessage: derived.lastMessage,
+  };
+}
+
+function markMessageUnread(message: ConversationMessage | undefined, unread: boolean) {
+  return message ? ({ ...message, unread } as ConversationMessage) : message;
+}
+
+function sanitizeConversationHistory(conversations: Array<Conversation | ConversationSummary>, localById?: Map<string, Conversation>) {
   return conversations
-    .map((conversation) => migrateConversationIds(conversation))
+    .map((conversation) => normalizeConversationForStore(conversation, localById?.get(conversation.id)))
     .filter((conversation) => !MOCK_CONVERSATION_IDS.has(conversation.id))
     .filter((conversation) => !conversation.goalId || !MOCK_GOAL_IDS.has(conversation.goalId))
-    .filter((conversation) => !LEGACY_MOCK_CONVERSATION_TITLES.has(conversation.title))
-    .map((conversation) => ({
-      ...conversation,
-      messages: conversation.messages.map((message) => ({
-        ...message,
-        content: sanitizeConversationMessageContent(message.content),
-      })),
-    }));
+    .filter((conversation) => !LEGACY_MOCK_CONVERSATION_TITLES.has(conversation.title));
 }
 
 function mergeById<T extends { id: string }>(primary: T[], secondary: T[]) {
@@ -402,48 +474,98 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
       case "conversation.planning_run_state_updated":
         return { ...conversation, planningRunState: payload.state ?? undefined };
       case "conversation.read":
-        return { ...conversation, messages: conversation.messages.map((message) => ({ ...message, unread: false })) };
-      case "conversation.unread": {
-        const lastIndex = conversation.messages.length - 1;
         return {
           ...conversation,
-          messages: conversation.messages.map((message, index) =>
-            index === lastIndex ? { ...message, unread: true } : message,
-          ),
+          messages: conversation.messages.map((message) => ({ ...message, unread: false })),
+          unreadCount: 0,
+          lastMessage: markMessageUnread(conversation.lastMessage, false),
+        };
+      case "conversation.unread": {
+        const lastIndex = conversation.messages.length - 1;
+        const messages = conversation.messages.map((message, index) =>
+          index === lastIndex ? { ...message, unread: true } : message,
+        );
+        return {
+          ...conversation,
+          messages,
+          unreadCount: Math.max(1, conversation.unreadCount ?? 0),
+          lastMessage: markMessageUnread(conversation.lastMessage ?? messages[lastIndex], true),
         };
       }
       case "message.appended": {
         if (!payload.message) return conversation;
-        return conversation.messages.some((message) => message.id === payload.message?.id)
-          ? conversation
-          : { ...conversation, messages: [...conversation.messages, payload.message] };
+        const exists = conversation.messages.some((message) => message.id === payload.message?.id);
+        const shouldAppendToMessages = conversation.messagesLoaded !== false || conversation.messages.length > 0;
+        const messages = !exists && shouldAppendToMessages
+          ? [...conversation.messages, payload.message]
+          : conversation.messages;
+        return {
+          ...conversation,
+          messages,
+          updatedAt: payload.message.createdAt,
+          messageCount: (conversation.messageCount ?? conversation.messages.length) + (exists ? 0 : 1),
+          unreadCount: (conversation.unreadCount ?? deriveConversationMessageSummary(conversation.messages).unreadCount) +
+            (!exists && payload.message.unread ? 1 : 0),
+          lastMessage: payload.message,
+        };
       }
       case "message.updated": {
         if (!payload.message) return conversation;
         // 顺序安全守卫：丢弃比已应用版本更旧或重复的快照，避免旧快照临时覆盖正确内容。
         if (!shouldApplyMessageVersion(payload.message.id, payload.version)) return conversation;
+        const messages = conversation.messages.map((message) =>
+          message.id === payload.message?.id && payload.message
+            ? mergeMessagePreservingCliProcess(message, payload.message)
+            : message,
+        );
+        const lastMessage =
+          conversation.lastMessage?.id === payload.message.id
+            ? mergeMessagePreservingCliProcess(conversation.lastMessage, payload.message)
+            : conversation.lastMessage;
         return {
           ...conversation,
-          messages: conversation.messages.map((message) =>
-            message.id === payload.message?.id && payload.message
-              ? mergeMessagePreservingCliProcess(message, payload.message)
-              : message,
-          ),
+          messages,
+          lastMessage,
         };
       }
-      case "message.deleted":
+      case "message.deleted": {
         if (payload.messageId) forgetMessageRuntimeState(payload.messageId);
+        const removed = conversation.messages.find((message) => message.id === payload.messageId);
+        const messages = conversation.messages.filter((message) => message.id !== payload.messageId);
+        const deletedLastMessage = conversation.lastMessage?.id === payload.messageId;
+        const derived = deriveConversationMessageSummary(messages);
         return {
           ...conversation,
-          messages: conversation.messages.filter((message) => message.id !== payload.messageId),
-        };
-      case "message.read":
-        return {
-          ...conversation,
-          messages: conversation.messages.map((message) =>
-            message.id === payload.messageId ? { ...message, unread: false } : message,
+          messages,
+          messagesLoaded: deletedLastMessage && messages.length === 0 ? false : conversation.messagesLoaded,
+          messageCount: Math.max(0, (conversation.messageCount ?? conversation.messages.length) - (removed ? 1 : 0)),
+          unreadCount: Math.max(
+            0,
+            (conversation.unreadCount ?? deriveConversationMessageSummary(conversation.messages).unreadCount) -
+              (removed?.unread ? 1 : 0),
           ),
+          lastMessage: deletedLastMessage ? derived.lastMessage : conversation.lastMessage,
         };
+      }
+      case "message.read":
+        {
+          const target = conversation.messages.find((message) => message.id === payload.messageId);
+          const messages = conversation.messages.map((message) =>
+            message.id === payload.messageId ? { ...message, unread: false } : message,
+          );
+          const lastMessage =
+            conversation.lastMessage?.id === payload.messageId
+              ? markMessageUnread(conversation.lastMessage, false)
+              : conversation.lastMessage;
+          return {
+            ...conversation,
+            messages,
+            lastMessage,
+            unreadCount: target?.unread
+              ? Math.max(0, (conversation.unreadCount ?? deriveConversationMessageSummary(conversation.messages).unreadCount) - 1)
+              : conversation.unreadCount,
+          };
+        }
       default:
         return conversation;
     }
@@ -458,15 +580,32 @@ export const useConversationStore = create<ConversationStore>()(
       hydrateConversations: (conversations) => {
         const localConversations = get().conversations;
         const localById = new Map(localConversations.map((conversation) => [conversation.id, conversation]));
-        const sanitized = sanitizeConversationHistory(mergeConversationsById(conversations));
+        const sanitized = sanitizeConversationHistory(conversations, localById);
         const remoteIds = new Set(sanitized.map((conversation) => conversation.id));
-        const mergedRemote = sanitized.map((conversation) =>
-          mergeConversationPreservingCliProcess(localById.get(conversation.id), conversation),
-        );
         const localOptimistic = localConversations.filter(
           (conversation) => isLocalOptimisticConversation(conversation) && !remoteIds.has(conversation.id),
         );
-        set({ conversations: mergeConversationsById(mergedRemote, localOptimistic) });
+        set({ conversations: mergeConversationsById(sanitized, localOptimistic) });
+      },
+      hydrateConversationMessages: (conversationId, messages, options) => {
+        const mode = options?.mode ?? "replace";
+        set({
+          conversations: get().conversations.map((conversation) => {
+            if (conversation.id !== conversationId) return conversation;
+            const sanitizedMessages = messages.map(sanitizeMessage);
+            const nextMessages =
+              mode === "append"
+                ? mergeById(sanitizedMessages, conversation.messages)
+                : sanitizedMessages;
+            return refreshConversationSummary(
+              mergeConversationPreservingCliProcess(conversation, {
+                ...conversation,
+                messages: nextMessages,
+                messagesLoaded: true,
+              }),
+            );
+          }),
+        });
       },
       applyConversationEvent: (event) => {
         set({ conversations: applyConversationEventToList(get().conversations, event) });
@@ -484,6 +623,9 @@ export const useConversationStore = create<ConversationStore>()(
           id: `conv-new-${Date.now()}`,
           title: title || "新会话",
           messages: [],
+          messagesLoaded: true,
+          messageCount: 0,
+          unreadCount: 0,
           updatedAt: now,
           status: "idle",
         };
@@ -502,11 +644,12 @@ export const useConversationStore = create<ConversationStore>()(
         set({
           conversations: get().conversations.map((item) =>
             item.id === conversationId
-              ? {
+              ? refreshConversationSummary({
                   ...item,
                   messages: [...item.messages, message],
+                  messagesLoaded: item.messagesLoaded ?? true,
                   updatedAt: message.createdAt,
-                }
+                })
               : item,
           ),
         });
@@ -520,12 +663,12 @@ export const useConversationStore = create<ConversationStore>()(
         set({
           conversations: get().conversations.map((item) =>
             item.id === conversationId
-              ? {
+              ? refreshConversationSummary({
                   ...item,
                   messages: item.messages.map((message) =>
                     message.id === messageId ? updater(message) : message,
                   ),
-                }
+                })
               : item,
           ),
         });
@@ -547,6 +690,8 @@ export const useConversationStore = create<ConversationStore>()(
               ? {
                   ...item,
                   messages: item.messages.map((msg) => ({ ...msg, unread: false })),
+                  unreadCount: 0,
+                  lastMessage: markMessageUnread(item.lastMessage, false),
                 }
               : item,
           ),
@@ -556,13 +701,22 @@ export const useConversationStore = create<ConversationStore>()(
       markConversationUnread: (conversationId) => {
         set({
           conversations: get().conversations.map((item) => {
-            if (item.id !== conversationId || item.messages.length === 0) return item;
+            if (item.id !== conversationId) return item;
+            if (item.messages.length === 0) {
+              return {
+                ...item,
+                unreadCount: Math.max(1, item.unreadCount ?? 0),
+                lastMessage: markMessageUnread(item.lastMessage, true),
+              };
+            }
             const lastIndex = item.messages.length - 1;
             return {
               ...item,
               messages: item.messages.map((msg, index) =>
                 index === lastIndex ? { ...msg, unread: true } : msg,
               ),
+              unreadCount: Math.max(1, item.unreadCount ?? 0),
+              lastMessage: markMessageUnread(item.lastMessage ?? item.messages[lastIndex], true),
             };
           }),
         });
@@ -577,6 +731,9 @@ export const useConversationStore = create<ConversationStore>()(
                   messages: item.messages.map((msg) =>
                     msg.id === messageId ? { ...msg, unread: false } : msg,
                   ),
+                  unreadCount: Math.max(0, (item.unreadCount ?? 0) - 1),
+                  lastMessage:
+                    item.lastMessage?.id === messageId ? markMessageUnread(item.lastMessage, false) : item.lastMessage,
                 }
               : item,
           ),
@@ -590,11 +747,11 @@ export const useConversationStore = create<ConversationStore>()(
             if (item.id !== conversationId) return item;
             const nextMessages = item.messages.filter((msg) => msg.id !== messageId);
             const latest = nextMessages[nextMessages.length - 1];
-            return {
+            return refreshConversationSummary({
               ...item,
               messages: nextMessages,
               updatedAt: latest?.createdAt ?? item.updatedAt,
-            };
+            });
           }),
         });
         sendConversationCommand(deleteConversationMessageCommand(conversationId, messageId));
@@ -684,5 +841,5 @@ export const useConversationStore = create<ConversationStore>()(
 );
 
 export function getConversationUnreadCount(conversation: Conversation) {
-  return conversation.messages.filter((msg) => msg.unread).length;
+  return conversation.unreadCount ?? conversation.messages.filter((msg) => msg.unread).length;
 }

@@ -12,8 +12,9 @@
  */
 
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
+import type { TriggerSpec } from "@/types/trigger";
 
-export type ThreadLoopInterval =
+export type LegacyThreadLoopInterval =
   | "realtime"
   | "hourly"
   | "daily"
@@ -21,9 +22,15 @@ export type ThreadLoopInterval =
   | { kind: "cron"; expr: string }
   | "one_shot";
 
+export type ThreadLoopInterval = LegacyThreadLoopInterval | TriggerSpec;
+
 export type ThreadStatus = "active" | "paused" | "archived";
 
 export type TopicStatus = "collecting_info" | "active" | "paused" | "archived";
+
+export type TopicPhase = "idle" | "running" | "completed" | "failed" | "dispatch_partial_failure";
+
+export const DEFAULT_TOPIC_LOOP: TriggerSpec = { kind: "daily" };
 
 export type Thread = {
   id: string;
@@ -35,6 +42,7 @@ export type Thread = {
    * Task 执行频率由各自 taskType + triggerRule 自持。
    */
   loopInterval: ThreadLoopInterval;
+  loopTrigger?: TriggerSpec;
   /** 板块终止条件；monitoring 类 Thread 可留空表示无自然终止。 */
   terminationCondition?: string;
   status: ThreadStatus;
@@ -56,6 +64,16 @@ export type Topic = {
   conversationId?: string;
   title: string;
   summary: string;
+  /** Topic 元规划 loop 节拍；不是 Task 执行频率。 */
+  loop: TriggerSpec;
+  /** 最近一次 Topic governance tick 的状态阶段。 */
+  phase: TopicPhase;
+  lastTickAt?: string;
+  nextTickAt?: string;
+  /** 连续无产出次数（silent 累计），仅用于调度/cadence 信号。 */
+  silentCount: number;
+  /** 连续 tick 失败次数。 */
+  failureCount: number;
   /** 可选 — 仅当用户显式给出时填写。 */
   deadline?: string;
   /** 可选 — 仅当用户显式给出时填写。 */
@@ -72,7 +90,7 @@ export const TOPIC_MAX_THREADS = 5;
 
 /** silent 自适应阈值表（§9.3 问题 12）。 */
 export const THREAD_SILENT_ALERT_THRESHOLDS: Record<
-  Exclude<ThreadLoopInterval, { kind: "cron"; expr: string }>,
+  Exclude<LegacyThreadLoopInterval, { kind: "cron"; expr: string }>,
   number | null
 > = {
   realtime: 24 * 7,
@@ -91,6 +109,9 @@ export const THREAD_FAILURE_PAUSE_THRESHOLD = 5;
 
 /** post_message 严重级别（与现有 inbox severity 取值对齐）。 */
 export type ThreadTickPostMessageSeverity = "info" | "warning" | "important";
+
+/** ThreadRunner 对本轮治理判断的置信度。 */
+export type ThreadTickConfidence = "high" | "medium" | "low";
 
 /**
  * Thread tick 单次输出的动作契约。
@@ -145,6 +166,8 @@ export type ThreadTickAction =
  * memoryDelta 会被 ThreadRunner 浅合并写回 thread.memory（payload ≤ 8KB 硬约束）。
  */
 export type ThreadTickOutput = {
+  assessment: string;
+  confidence: ThreadTickConfidence;
   actions: ThreadTickAction[];
   memoryDelta?: Record<string, unknown>;
 };

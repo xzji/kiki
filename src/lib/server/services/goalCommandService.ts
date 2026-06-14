@@ -11,6 +11,7 @@ import { writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
 import type { GoalEventRecord } from "@/types/goalEventLog";
 import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
 import type { ExecutionKind, Goal, GoalWorkflow, SubGoal, Task, TaskExpectedResult, TaskSpec } from "@/types/kiki";
+import type { TriggerSpec } from "@/types/trigger";
 
 type TaskCommandInput = {
   title: string;
@@ -19,6 +20,7 @@ type TaskCommandInput = {
   expectedResult?: TaskExpectedResult;
   taskType: Task["taskType"];
   triggerRule: string;
+  trigger?: TriggerSpec;
   deadline?: string;
   executionKind: ExecutionKind;
   taskSpec?: TaskSpec;
@@ -292,6 +294,7 @@ function createTask(input: { subGoalId: string; task: TaskCommandInput; idempote
     expectedResult: task.expectedResult,
     taskType: task.taskType,
     triggerRule: task.triggerRule,
+    trigger: task.trigger,
     deadline: task.deadline,
     progress: 0,
     instances: [],
@@ -311,6 +314,7 @@ function hasTaskDefinitionChanged(task: Task, next: TaskCommandInput) {
     expectedResult: task.expectedResult,
     taskType: task.taskType,
     triggerRule: task.triggerRule,
+    trigger: task.trigger,
   }) !== hashValue({
     title: next.title,
     description: next.description ?? "",
@@ -318,6 +322,7 @@ function hasTaskDefinitionChanged(task: Task, next: TaskCommandInput) {
     expectedResult: next.expectedResult,
     taskType: next.taskType,
     triggerRule: next.triggerRule,
+    trigger: next.trigger,
   });
 }
 
@@ -416,6 +421,7 @@ function applyCommandToGoals(goals: Goal[], command: GoalCommand, idempotencyKey
                       expectedResult: nextTaskInput.expectedResult,
                       taskType: nextTaskInput.taskType,
                       triggerRule: nextTaskInput.triggerRule,
+                      trigger: nextTaskInput.trigger,
                       deadline: nextTaskInput.deadline,
                       executionKind: nextTaskInput.executionKind,
                       resultViewKind: normalizeTaskResultViewKind(nextTaskInput.executionKind),

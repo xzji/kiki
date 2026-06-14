@@ -4,6 +4,7 @@ import {
   normalizeTaskId,
 } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
+import { appendGovernanceEvent } from "@/lib/server/repositories/governanceEventOutboxRepository";
 import {
   markTaskNotificationDeliveredState,
   upsertTaskNotificationStateFromProgress,
@@ -114,7 +115,7 @@ function appendInstanceStatusChangedEvent(input: {
   });
 }
 
-export function requestThreadGovernanceTick(threadId: string, now = new Date()) {
+export function wakeThreadGovernanceLoop(threadId: string, now = new Date()) {
   const thread = findThreadById(threadId);
   if (!thread || thread.status !== "active") return false;
   const nextTickAtMs = thread.nextTickAt ? new Date(thread.nextTickAt).getTime() : Number.POSITIVE_INFINITY;
@@ -126,6 +127,50 @@ export function requestThreadGovernanceTick(threadId: string, now = new Date()) 
     if (error instanceof ThreadRevisionMismatchError) return false;
     throw error;
   }
+}
+
+export function requestThreadGovernanceTick(threadId: string, now = new Date()) {
+  const thread = findThreadById(threadId);
+  if (!thread || thread.status !== "active") return false;
+  const nextTickAtMs = thread.nextTickAt ? new Date(thread.nextTickAt).getTime() : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(nextTickAtMs) && nextTickAtMs <= now.getTime()) return false;
+  appendGovernanceEvent({
+    eventType: "thread_governance_tick_requested",
+    source: "manual",
+    topicId: thread.topicId,
+    threadId: thread.id,
+    idempotencyKey: createIdempotencyKey("thread_governance_tick.request", thread.id, now.toISOString()),
+    createdAt: now.toISOString(),
+    payload: {
+      requestedAt: now.toISOString(),
+      reason: "thread governance tick requested",
+    },
+  });
+  return true;
+}
+
+function appendTerminalTaskGovernanceEvent(input: {
+  job: RuntimeJobRecord;
+  status: "completed" | "failed";
+}) {
+  const eventType = input.status === "completed" ? "task_completed" : "task_failed";
+  const source = input.status === "completed" ? "task_completed" : "task_failed";
+  appendGovernanceEvent({
+    eventType,
+    source,
+    topicId: input.job.goalId ?? input.job.payload.goal.id,
+    threadId: input.job.payload.subGoal.id,
+    taskId: input.job.taskId ?? input.job.payload.task.id,
+    instanceId: input.job.taskInstanceId ?? input.job.payload.instance.id,
+    idempotencyKey: createIdempotencyKey("governance.task_terminal", input.job.id, input.status),
+    createdAt: input.job.updatedAt,
+    payload: {
+      runtimeJobId: input.job.id,
+      requestId: input.job.requestId,
+      status: input.status,
+      reason: input.job.lastError,
+    },
+  });
 }
 
 export function writeGoalsProjection(goals: Goal[], expectedRevision?: number): SnapshotWriteResult {
@@ -300,7 +345,10 @@ export function updateGoalRuntimeJobExecution(
     });
   }
   if (next && (updates.status === "completed" || updates.status === "failed")) {
-    requestThreadGovernanceTick(next.payload.subGoal.id, new Date(next.updatedAt));
+    appendTerminalTaskGovernanceEvent({
+      job: next,
+      status: updates.status,
+    });
   }
   return next;
 }

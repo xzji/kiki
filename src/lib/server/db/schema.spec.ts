@@ -105,8 +105,8 @@ function rerunAllMigrations(db: Database.Database) {
 }
 
 export function runSchemaSpecs() {
-  // 0. 确保 schema_version 常量已经升到 16
-  assert.equal(KIKI_DB_SCHEMA_VERSION, 16);
+  // 0. 确保 schema_version 常量已经升到最新迁移版本
+  assert.equal(KIKI_DB_SCHEMA_VERSION, 19);
 
   const dbA = bootstrapPathA();
   const dbB = bootstrapPathB();
@@ -131,6 +131,9 @@ export function runSchemaSpecs() {
       "agent_snapshots",
       "runtime_state_snapshots",
       "task_notification_states",
+      "governance_event_outbox",
+      "governance_event_outbox_consumption",
+      "governance_tick_jobs",
     ];
     for (const table of keyTables) {
       const colsA = listColumns(dbA, table).map((c) => c.name);
@@ -152,6 +155,17 @@ export function runSchemaSpecs() {
     assert.ok(jobCols.includes("saga_instance_id"));
     // 双写期保留 goal_id 列
     assert.ok(jobCols.includes("goal_id"));
+
+    const outboxCols = listColumns(dbA, "governance_event_outbox").map((c) => c.name);
+    assert.ok(outboxCols.includes("idempotency_key"));
+    assert.ok(outboxCols.includes("payload_json"));
+    assert.ok(outboxCols.includes("event_type"));
+
+    const tickJobCols = listColumns(dbA, "governance_tick_jobs").map((c) => c.name);
+    assert.ok(tickJobCols.includes("status"));
+    assert.ok(tickJobCols.includes("base_revision"));
+    assert.ok(tickJobCols.includes("lease_token"));
+    assert.ok(tickJobCols.includes("lease_expires_at"));
 
     // 4. §10.4 goal_id → topic_id 回填：模拟老库升级场景
     //    创建一个完整 v10 schema 的库，INSERT 一条仅含 goal_id 的 runtime_jobs，

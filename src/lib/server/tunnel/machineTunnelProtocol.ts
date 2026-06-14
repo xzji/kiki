@@ -9,6 +9,7 @@ export type MachineTunnelHello = {
   fingerprint: string;
   capabilities: string[];
   runningJobIds: string[];
+  runningGovernanceJobIds: string[];
   activeStreamSessionIds: string[];
 };
 

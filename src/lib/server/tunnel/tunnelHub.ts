@@ -22,6 +22,12 @@ import type {
 import type { KikiSkillsInstallPayload, KikiSkillsStatusPayload } from "@/lib/kikiSkills/types";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
+import type {
+  GovernanceTickMachineCommand,
+  GovernanceTickMachineResult,
+  GovernanceTickOutcome,
+} from "@/lib/server/governance/governanceTickProtocol";
+import { isGovernanceTickMachineResult } from "@/lib/server/governance/governanceTickProtocol";
 
 export type RemoteDaemonServiceKind = "launchd" | "systemd" | "unsupported";
 
@@ -80,6 +86,7 @@ export type RemoteStreamPromptPayload = {
 /** 下发给本机 daemon 的命令 */
 export type MachineCommand =
   | { type: "execute"; requestId: string; jobId: string; payload: Record<string, unknown> }
+  | GovernanceTickMachineCommand
   | { type: "discover_runtimes"; requestId: string }
   | { type: "check_runtime"; requestId: string; payload: RuntimeEnvironmentCheckInput }
   | { type: "select_directory"; requestId: string }
@@ -108,6 +115,7 @@ export type MachineResult =
       trajectory?: unknown;
       result?: Record<string, unknown> | null;
     }
+  | GovernanceTickMachineResult
   | {
       type: "execute_progress";
       jobId: string;
@@ -124,6 +132,8 @@ export type MachineResult =
   | { type: "daemon_service_autostart"; requestId: string; ok: boolean; result?: RemoteDaemonServiceStatus; error?: string }
   | { type: "run_prompt_json"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string }
   | { type: "run_prompt_text"; requestId: string; ok: boolean; result?: ClaudePromptJsonResult; error?: string };
+
+export type { GovernanceTickOutcome };
 
 type PendingTunnelRequest<T> = {
   machineId: string;
@@ -152,6 +162,7 @@ type ExecuteProgressListener = (input: {
   log?: GoalServerLogEntry;
   trajectory?: ExecutionTrajectoryStep[];
 }) => void;
+type GovernanceTickResultListener = (result: GovernanceTickMachineResult) => void;
 type MachineDisconnectListener = (machineId: string) => void;
 type MachineCommandSender = (command: MachineCommand) => boolean;
 type MachineWsConnection = {
@@ -181,6 +192,7 @@ type TunnelHubState = {
   pendingRunPromptText: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
   executeResultListener: ExecuteResultListener | null;
   executeProgressListener: ExecuteProgressListener | null;
+  governanceTickResultListener: GovernanceTickResultListener | null;
   machineDisconnectListener: MachineDisconnectListener | null;
 };
 
@@ -209,6 +221,7 @@ function getState(): TunnelHubState {
       pendingRunPromptText: new Map(),
       executeResultListener: null,
       executeProgressListener: null,
+      governanceTickResultListener: null,
       machineDisconnectListener: null,
     };
   }
@@ -340,6 +353,10 @@ export function submitMachineResult(result: MachineResult) {
       log: result.log,
       trajectory: result.trajectory,
     });
+    return;
+  }
+  if (isGovernanceTickMachineResult(result)) {
+    state.governanceTickResultListener?.(result);
     return;
   }
   if (result.type === "discover_runtimes") {
@@ -485,6 +502,10 @@ export function setTunnelExecuteProgressListener(listener: ExecuteProgressListen
   getState().executeProgressListener = listener;
 }
 
+export function setTunnelGovernanceTickResultListener(listener: GovernanceTickResultListener | null) {
+  getState().governanceTickResultListener = listener;
+}
+
 export function setMachineDisconnectListener(listener: MachineDisconnectListener | null) {
   getState().machineDisconnectListener = listener;
 }
@@ -525,6 +546,9 @@ export function getTunnelHub() {
         requestId: input.requestId,
         payload: input.payload,
       });
+    },
+    sendGovernanceTick(input: { machineId: string; command: GovernanceTickMachineCommand }) {
+      enqueueCommand(input.machineId, input.command);
     },
     requestDiscoverRuntimes(input: { machineId: string; timeoutMs?: number }) {
       const requestId = `discover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

@@ -1,8 +1,11 @@
 import { migrateConversationIds } from "@/lib/opaqueIds";
 import { resolveCurrentUserId } from "@/lib/server/context/resolveUserId";
 import { getDatabase } from "@/lib/server/db/client";
-import { listConversationMessages } from "@/lib/server/repositories/conversationMessagesRepository";
-import type { Conversation, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
+import {
+  listConversationMessages,
+  mapConversationMessageRow,
+} from "@/lib/server/repositories/conversationMessagesRepository";
+import type { Conversation, ConversationMessage, ConversationSummary, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 import type { Topic } from "@/types/topic";
 
 type ConversationRow = {
@@ -421,6 +424,17 @@ export type ConversationMeta = Omit<Conversation, "messages"> & {
   lastMessageAt?: string;
 };
 
+type ConversationMessageSummaryRow = {
+  conversation_id: string;
+  message_count: number;
+  unread_count: number | null;
+  last_seq: number | null;
+};
+
+type ConversationLastMessageRow = Parameters<typeof mapConversationMessageRow>[0] & {
+  conversation_id: string;
+};
+
 function mapConversationMetaRow(row: ConversationRow & { message_count: number; last_message_at: string | null }) {
   const conversation = mapConversationRow(row);
   return {
@@ -451,6 +465,70 @@ export function listConversationMetas() {
     )
     .all() as Array<ConversationRow & { message_count: number; last_message_at: string | null }>;
   return rows.map(mapConversationMetaRow);
+}
+
+export function listConversationSummaries(): ConversationSummary[] {
+  const db = getDatabase();
+  const conversationRows = db
+    .prepare(
+      `
+        SELECT *
+        FROM conversations
+        ORDER BY pinned DESC, updated_at DESC
+      `,
+    )
+    .all() as ConversationRow[];
+
+  if (conversationRows.length === 0) return [];
+
+  const statsRows = db
+    .prepare(
+      `
+        SELECT
+          conversation_id,
+          COUNT(*) AS message_count,
+          SUM(CASE WHEN unread = 1 THEN 1 ELSE 0 END) AS unread_count,
+          MAX(seq) AS last_seq
+        FROM conversation_messages
+        GROUP BY conversation_id
+      `,
+    )
+    .all() as ConversationMessageSummaryRow[];
+  const statsByConversationId = new Map(statsRows.map((row) => [row.conversation_id, row]));
+
+  const lastMessageRows = db
+    .prepare(
+      `
+        SELECT m.*
+        FROM conversation_messages m
+        JOIN (
+          SELECT conversation_id, MAX(seq) AS last_seq
+          FROM conversation_messages
+          GROUP BY conversation_id
+        ) latest
+          ON latest.conversation_id = m.conversation_id
+         AND latest.last_seq = m.seq
+      `,
+    )
+    .all() as ConversationLastMessageRow[];
+  const lastMessageByConversationId = new Map<string, ConversationMessage>();
+  for (const row of lastMessageRows) {
+    lastMessageByConversationId.set(row.conversation_id, mapConversationMessageRow(row));
+  }
+
+  return conversationRows.map((row) => {
+    const conversation = mapConversationRow(row);
+    const stats = statsByConversationId.get(row.id);
+    const summary: ConversationSummary = {
+      ...conversation,
+      messagesLoaded: false,
+      messageCount: stats?.message_count ?? 0,
+      unreadCount: stats?.unread_count ?? 0,
+      lastMessage: lastMessageByConversationId.get(row.id),
+    };
+    delete (summary as Partial<Conversation>).messages;
+    return summary;
+  });
 }
 
 export function getConversationRevision(conversationId: string) {

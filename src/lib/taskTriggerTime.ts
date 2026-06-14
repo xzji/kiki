@@ -1,5 +1,7 @@
 import type { Goal, Task } from "@/types/kiki";
 import type { Thread, ThreadLoopInterval } from "@/types/topic";
+import { CronExpressionParser } from "cron-parser";
+import { normalizeTriggerSpec, type TriggerSpec, type TriggerSpecInput } from "@/types/trigger";
 
 export type ParsedTaskTriggerTime = {
   hour: number;
@@ -175,7 +177,288 @@ function hasInstanceOnDay(task: Task, date: Date) {
   return task.instances.some((instance) => instance.dateLabel === label);
 }
 
+function parseTimeOfDay(value: string | undefined): ParsedTaskTriggerTime {
+  const match = value?.trim().match(/^([01]?\d|2[0-3])[:：]([0-5]\d)$/);
+  if (!match) return { hour: 9, minute: 0 };
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
+
+function formatterForTimezone(timezone?: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone ?? "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+}
+
+function zonedParts(date: Date, timezone?: string) {
+  const parts = formatterForTimezone(timezone).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+function zonedWeekday(date: Date, timezone?: string) {
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: timezone ?? "UTC", weekday: "short" }).format(date);
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday);
+}
+
+function zonedDateKey(date: Date, timezone?: string) {
+  const parts = zonedParts(date, timezone);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function getTimezoneOffsetMs(date: Date, timezone?: string) {
+  if (!timezone) return 0;
+  const parts = zonedParts(date, timezone);
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return asUtc - date.getTime();
+}
+
+function zonedDateTimeToUtc(
+  timezone: string | undefined,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+) {
+  if (!timezone) return new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  for (let i = 0; i < 3; i += 1) {
+    guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0) - getTimezoneOffsetMs(guess, timezone));
+  }
+  return guess;
+}
+
+function addZonedDays(parts: ReturnType<typeof zonedParts>, days: number) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days, 12, 0, 0, 0));
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+}
+
+function addZonedMonths(parts: ReturnType<typeof zonedParts>, months: number) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1 + months, 1, 12, 0, 0, 0));
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+}
+
+function lastDayOfMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function hasInstanceOnZonedDay(task: Task, date: Date, timezone?: string) {
+  const key = zonedDateKey(date, timezone).slice(5);
+  return task.instances.some((instance) => instance.dateLabel === key);
+}
+
+function cronNextAfter(spec: Extract<TriggerSpec, { kind: "cron" }>, after: Date): Date | null {
+  try {
+    return CronExpressionParser.parse(spec.expr, {
+      currentDate: after,
+      tz: spec.timezone,
+    }).next().toDate();
+  } catch {
+    return null;
+  }
+}
+
+function cronPreviousAtOrBefore(spec: Extract<TriggerSpec, { kind: "cron" }>, now: Date): Date | null {
+  const anchor = new Date(now.getTime() + 1);
+  try {
+    const previous = CronExpressionParser.parse(spec.expr, {
+      currentDate: anchor,
+      tz: spec.timezone,
+    }).prev().toDate();
+    return previous.getTime() <= now.getTime() ? previous : null;
+  } catch {
+    return null;
+  }
+}
+
+function fixedNextAfter(last: Date | null, now: Date, intervalMs: number) {
+  if (!last || Number.isNaN(last.getTime())) return new Date(now.getTime());
+  const elapsed = now.getTime() - last.getTime();
+  const slotsAhead = Math.max(1, Math.floor(elapsed / intervalMs) + 1);
+  return new Date(last.getTime() + slotsAhead * intervalMs);
+}
+
+function fixedPreviousDueAt(last: Date | null, now: Date, intervalMs: number) {
+  if (!last || Number.isNaN(last.getTime())) return new Date(now.getTime());
+  const elapsed = now.getTime() - last.getTime();
+  if (elapsed < intervalMs) return null;
+  const slots = Math.floor(elapsed / intervalMs);
+  return new Date(last.getTime() + slots * intervalMs);
+}
+
+function monthlyNextAfter(
+  spec: Extract<TriggerSpec, { kind: "monthly" }>,
+  after: Date,
+): Date | null {
+  const timezone = spec.timezone;
+  const time = parseTimeOfDay(spec.time ?? DEFAULT_SCHEDULE_TIME);
+  const days = (spec.daysOfMonth?.length ? spec.daysOfMonth : [1])
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 31)
+    .sort((a, b) => a - b);
+  if (days.length === 0) return null;
+  const afterMs = after.getTime();
+  const parts = zonedParts(after, timezone);
+  for (let monthOffset = 0; monthOffset < 24; monthOffset += 1) {
+    const ym = addZonedMonths(parts, monthOffset);
+    const lastDay = lastDayOfMonth(ym.year, ym.month);
+    for (const day of days) {
+      const candidate = zonedDateTimeToUtc(timezone, ym.year, ym.month, Math.min(day, lastDay), time.hour, time.minute);
+      if (candidate.getTime() > afterMs) return candidate;
+    }
+  }
+  return null;
+}
+
+function dailyNextAfter(
+  spec: Extract<TriggerSpec, { kind: "daily" }>,
+  after: Date,
+): Date | null {
+  const time = parseTimeOfDay(spec.time ?? DEFAULT_SCHEDULE_TIME);
+  const parts = zonedParts(after, spec.timezone);
+  for (let dayOffset = 0; dayOffset < 370; dayOffset += 1) {
+    const d = addZonedDays(parts, dayOffset);
+    const candidate = zonedDateTimeToUtc(spec.timezone, d.year, d.month, d.day, time.hour, time.minute);
+    if (candidate.getTime() > after.getTime()) return candidate;
+  }
+  return null;
+}
+
+function weeklyNextAfter(
+  spec: Extract<TriggerSpec, { kind: "weekly" }>,
+  after: Date,
+): Date | null {
+  const weekdays = spec.weekdays?.length ? spec.weekdays : [1];
+  const time = parseTimeOfDay(spec.time ?? DEFAULT_SCHEDULE_TIME);
+  const parts = zonedParts(after, spec.timezone);
+  for (let dayOffset = 0; dayOffset < 370; dayOffset += 1) {
+    const d = addZonedDays(parts, dayOffset);
+    const candidate = zonedDateTimeToUtc(spec.timezone, d.year, d.month, d.day, time.hour, time.minute);
+    if (candidate.getTime() <= after.getTime()) continue;
+    if (weekdays.includes(zonedWeekday(candidate, spec.timezone))) return candidate;
+  }
+  return null;
+}
+
+function isWithinPhaseWindow(phase: {
+  start?: string;
+  end?: string;
+  timezone?: string;
+  daysOfWeek?: number[];
+  daysOfMonth?: number[];
+  months?: number[];
+}, now: Date, parentTimezone?: string) {
+  const timezone = phase.timezone ?? parentTimezone;
+  const parts = zonedParts(now, timezone);
+  if (phase.months?.length && !phase.months.includes(parts.month)) return false;
+  if (phase.daysOfMonth?.length && !phase.daysOfMonth.includes(parts.day)) return false;
+  if (phase.daysOfWeek?.length && !phase.daysOfWeek.includes(zonedWeekday(now, timezone))) return false;
+  const start = phase.start ? parseTimeOfDay(phase.start) : undefined;
+  const end = phase.end ? parseTimeOfDay(phase.end) : undefined;
+  const minuteOfDay = parts.hour * 60 + parts.minute;
+  if (start) {
+    const startMinute = start.hour * 60 + start.minute;
+    if (minuteOfDay < startMinute) return false;
+  }
+  if (end) {
+    const endMinute = end.hour * 60 + end.minute;
+    if (minuteOfDay > endMinute) return false;
+  }
+  return true;
+}
+
+export function isTriggerSpecInPhasedWindow(spec: TriggerSpecInput, now: Date): boolean {
+  const normalized = normalizeTriggerSpec(spec);
+  if (!normalized) return true;
+  if (normalized.kind === "phased") {
+    return normalized.phases.some((phase) => isWithinPhaseWindow(phase, now, normalized.timezone));
+  }
+  if (normalized.kind === "composed") {
+    const phaseChecks = normalized.triggers
+      .filter((trigger) => trigger.kind === "phased")
+      .map((trigger) => isTriggerSpecInPhasedWindow(trigger, now));
+    return phaseChecks.length === 0 || phaseChecks.every(Boolean);
+  }
+  return true;
+}
+
+function triggerNextAfter(spec: TriggerSpec, after: Date): Date | null {
+  switch (spec.kind) {
+    case "immediate":
+      return new Date(after.getTime());
+    case "one_shot":
+    case "event":
+      return null;
+    case "realtime":
+      return new Date(after.getTime() + THREAD_LOOP_INTERVAL_REALTIME_MS);
+    case "hourly":
+      return new Date(after.getTime() + THREAD_LOOP_INTERVAL_HOURLY_MS);
+    case "interval":
+      return new Date(after.getTime() + spec.everyMs);
+    case "daily":
+      return dailyNextAfter(spec, after);
+    case "weekly":
+      return weeklyNextAfter(spec, after);
+    case "monthly":
+      return monthlyNextAfter(spec, after);
+    case "cron":
+      return cronNextAfter(spec, after);
+    case "phased": {
+      const candidates = spec.phases
+        .filter((phase) => isWithinPhaseWindow(phase, after, spec.timezone))
+        .map((phase) => triggerNextAfter(phase.trigger ?? { kind: "immediate" }, after))
+        .filter((date): date is Date => Boolean(date));
+      if (candidates.length > 0) return new Date(Math.min(...candidates.map((date) => date.getTime())));
+      return nextPhaseWindowStart(spec, after);
+    }
+    case "composed": {
+      const candidates = spec.triggers
+        .map((trigger) => triggerNextAfter(trigger, after))
+        .filter((date): date is Date => Boolean(date));
+      if (candidates.length === 0) return null;
+      return new Date(Math.min(...candidates.map((date) => date.getTime())));
+    }
+  }
+}
+
+function nextPhaseWindowStart(spec: Extract<TriggerSpec, { kind: "phased" }>, after: Date): Date | null {
+  const candidates: Date[] = [];
+  const base = zonedParts(after, spec.timezone);
+  for (const phase of spec.phases) {
+    const timezone = phase.timezone ?? spec.timezone;
+    const start = parseTimeOfDay(phase.start ?? "00:00");
+    for (let dayOffset = 0; dayOffset < 370; dayOffset += 1) {
+      const d = addZonedDays(base, dayOffset);
+      const candidate = zonedDateTimeToUtc(timezone, d.year, d.month, d.day, start.hour, start.minute);
+      if (candidate.getTime() <= after.getTime()) continue;
+      if (isWithinPhaseWindow({ ...phase, start: undefined, end: undefined }, candidate, spec.timezone)) {
+        candidates.push(candidate);
+        break;
+      }
+    }
+  }
+  return candidates.length > 0 ? new Date(Math.min(...candidates.map((date) => date.getTime()))) : null;
+}
+
 export function isTaskTriggerDue(task: Task, now: Date) {
+  const structuredTrigger = normalizeTriggerSpec(task.trigger);
+  if (structuredTrigger) {
+    return isStructuredTaskTriggerDue(task, structuredTrigger, now);
+  }
+
   const parsed = parseTaskTriggerRule(task.triggerRule, now);
   if (task.taskType === "one_shot") {
     if (task.instances.length > 0) return false;
@@ -219,6 +502,70 @@ export function isTaskTriggerDue(task: Task, now: Date) {
   return false;
 }
 
+function isStructuredTaskTriggerDue(task: Task, spec: TriggerSpec, now: Date): boolean {
+  const latest = latestInstanceTime(task);
+  const oneShotAlreadyRan = task.taskType === "one_shot" && task.instances.length > 0;
+
+  switch (spec.kind) {
+    case "event":
+      return false;
+    case "one_shot":
+      return task.instances.length === 0;
+    case "immediate":
+      return task.taskType === "one_shot" ? task.instances.length === 0 : latest === undefined;
+    case "realtime":
+      return !oneShotAlreadyRan && (latest === undefined || now.getTime() - latest >= THREAD_LOOP_INTERVAL_REALTIME_MS);
+    case "hourly":
+      return !oneShotAlreadyRan && (latest === undefined || now.getTime() - latest >= THREAD_LOOP_INTERVAL_HOURLY_MS);
+    case "interval":
+      return !oneShotAlreadyRan && (latest === undefined || now.getTime() - latest >= spec.everyMs);
+    case "daily": {
+      if (oneShotAlreadyRan || hasInstanceOnZonedDay(task, now, spec.timezone)) return false;
+      const time = parseTimeOfDay(spec.time ?? DEFAULT_SCHEDULE_TIME);
+      const parts = zonedParts(now, spec.timezone);
+      const due = zonedDateTimeToUtc(spec.timezone, parts.year, parts.month, parts.day, time.hour, time.minute);
+      return now.getTime() >= due.getTime();
+    }
+    case "weekly": {
+      if (oneShotAlreadyRan || hasInstanceOnZonedDay(task, now, spec.timezone)) return false;
+      const weekdays = spec.weekdays?.length ? spec.weekdays : [1];
+      if (!weekdays.includes(zonedWeekday(now, spec.timezone))) return false;
+      const time = parseTimeOfDay(spec.time ?? DEFAULT_SCHEDULE_TIME);
+      const parts = zonedParts(now, spec.timezone);
+      const due = zonedDateTimeToUtc(spec.timezone, parts.year, parts.month, parts.day, time.hour, time.minute);
+      return now.getTime() >= due.getTime();
+    }
+    case "monthly": {
+      if (oneShotAlreadyRan || hasInstanceOnZonedDay(task, now, spec.timezone)) return false;
+      const parts = zonedParts(now, spec.timezone);
+      const days = spec.daysOfMonth?.length ? spec.daysOfMonth : [1];
+      if (!days.includes(parts.day)) return false;
+      const time = parseTimeOfDay(spec.time ?? DEFAULT_SCHEDULE_TIME);
+      const due = zonedDateTimeToUtc(spec.timezone, parts.year, parts.month, parts.day, time.hour, time.minute);
+      return now.getTime() >= due.getTime();
+    }
+    case "cron": {
+      if (oneShotAlreadyRan) return false;
+      const previous = cronPreviousAtOrBefore(spec, now);
+      if (!previous) return false;
+      if (latest === undefined) return now.getTime() - previous.getTime() <= CRON_LOOKBACK_MS;
+      return previous.getTime() > latest;
+    }
+    case "phased": {
+      if (oneShotAlreadyRan || !isTriggerSpecInPhasedWindow(spec, now)) return false;
+      return spec.phases
+        .filter((phase) => isWithinPhaseWindow(phase, now, spec.timezone))
+        .some((phase) => isStructuredTaskTriggerDue(task, phase.trigger ?? { kind: "immediate" }, now));
+    }
+    case "composed": {
+      if (spec.operator === "all") {
+        return spec.triggers.length > 0 && spec.triggers.every((trigger) => isStructuredTaskTriggerDue(task, trigger, now));
+      }
+      return spec.triggers.some((trigger) => isStructuredTaskTriggerDue(task, trigger, now));
+    }
+  }
+}
+
 export function normalizeGoalTriggerRules(goal: Goal): Goal {
   return {
     ...goal,
@@ -250,36 +597,54 @@ export type ParsedThreadLoopInterval =
   | { kind: "hourly"; intervalMs: number }
   | { kind: "daily"; intervalMs: number }
   | { kind: "weekly"; intervalMs: number }
-  | { kind: "cron"; expr: string }
+  | { kind: "monthly"; spec: Extract<TriggerSpec, { kind: "monthly" }> }
+  | { kind: "interval"; intervalMs: number }
+  | { kind: "cron"; expr: string; timezone?: string }
+  | { kind: "phased"; spec: Extract<TriggerSpec, { kind: "phased" }> }
+  | { kind: "event"; spec: Extract<TriggerSpec, { kind: "event" }> }
+  | { kind: "composed"; spec: Extract<TriggerSpec, { kind: "composed" }> }
   | { kind: "one_shot" };
 
 const THREAD_LOOP_INTERVAL_REALTIME_MS = 60_000;
 const THREAD_LOOP_INTERVAL_HOURLY_MS = 60 * 60_000;
 const THREAD_LOOP_INTERVAL_DAILY_MS = 24 * THREAD_LOOP_INTERVAL_HOURLY_MS;
 const THREAD_LOOP_INTERVAL_WEEKLY_MS = 7 * THREAD_LOOP_INTERVAL_DAILY_MS;
+const DEFAULT_SCHEDULE_TIME = "09:00";
+const CRON_LOOKBACK_MS = 60_000;
 
-export function parseThreadLoopInterval(li: ThreadLoopInterval): ParsedThreadLoopInterval {
-  if (typeof li === "string") {
-    switch (li) {
-      case "realtime":
-        return { kind: "realtime", intervalMs: THREAD_LOOP_INTERVAL_REALTIME_MS };
-      case "hourly":
-        return { kind: "hourly", intervalMs: THREAD_LOOP_INTERVAL_HOURLY_MS };
-      case "daily":
-        return { kind: "daily", intervalMs: THREAD_LOOP_INTERVAL_DAILY_MS };
-      case "weekly":
-        return { kind: "weekly", intervalMs: THREAD_LOOP_INTERVAL_WEEKLY_MS };
-      case "one_shot":
-        return { kind: "one_shot" };
-    }
+export function parseThreadLoopInterval(li: ThreadLoopInterval | TriggerSpec): ParsedThreadLoopInterval {
+  const normalized = normalizeTriggerSpec(li);
+  if (!normalized) {
     // 运行期数据脏化（脱离类型保证）→ 兜底为 one_shot，避免静默走入 cron 分支。
     return { kind: "one_shot" };
   }
-  if (li && typeof li === "object" && (li as { kind?: string }).kind === "cron") {
-    const expr = typeof li.expr === "string" ? li.expr.trim() : "";
-    return { kind: "cron", expr };
+  switch (normalized.kind) {
+    case "realtime":
+      return { kind: "realtime", intervalMs: THREAD_LOOP_INTERVAL_REALTIME_MS };
+    case "hourly":
+      return { kind: "hourly", intervalMs: THREAD_LOOP_INTERVAL_HOURLY_MS };
+    case "daily":
+      return { kind: "daily", intervalMs: THREAD_LOOP_INTERVAL_DAILY_MS };
+    case "weekly":
+      return { kind: "weekly", intervalMs: THREAD_LOOP_INTERVAL_WEEKLY_MS };
+    case "interval":
+      return { kind: "interval", intervalMs: normalized.everyMs };
+    case "cron":
+      return normalized.timezone
+        ? { kind: "cron", expr: normalized.expr, timezone: normalized.timezone }
+        : { kind: "cron", expr: normalized.expr };
+    case "monthly":
+      return { kind: "monthly", spec: normalized };
+    case "phased":
+      return { kind: "phased", spec: normalized };
+    case "event":
+      return { kind: "event", spec: normalized };
+    case "composed":
+      return { kind: "composed", spec: normalized };
+    case "one_shot":
+    case "immediate":
+      return { kind: "one_shot" };
   }
-  return { kind: "one_shot" };
 }
 
 /**
@@ -296,21 +661,72 @@ export function parseThreadLoopInterval(li: ThreadLoopInterval): ParsedThreadLoo
  */
 export function computeNextTickAt(thread: Thread, now: Date): Date | null {
   const parsed = parseThreadLoopInterval(thread.loopInterval);
-  if (parsed.kind === "one_shot" || parsed.kind === "cron") {
+  if (parsed.kind === "one_shot" || parsed.kind === "event") {
     return null;
   }
-  const intervalMs = parsed.intervalMs;
-  if (!thread.lastTickAt) {
-    return new Date(now.getTime());
+  const last = thread.lastTickAt ? new Date(thread.lastTickAt) : null;
+  if (parsed.kind === "cron") {
+    return cronNextAfter(
+      parsed.timezone
+        ? { kind: "cron", expr: parsed.expr, timezone: parsed.timezone }
+        : { kind: "cron", expr: parsed.expr },
+      now,
+    );
   }
-  const last = new Date(thread.lastTickAt);
-  if (Number.isNaN(last.getTime())) {
-    return new Date(now.getTime());
+  if (parsed.kind === "monthly") {
+    return monthlyNextAfter(parsed.spec, now);
   }
-  const elapsed = now.getTime() - last.getTime();
-  // 找到 lastTickAt 之后第一个严格 > now 的 tick：
-  //   N = floor(elapsed / intervalMs) + 1，结果 = last + N * intervalMs。
-  // 当 last 在未来（elapsed < 0），N 退化为 0 或负数；统一兜底为 1，避免返回 ≤ now。
-  const slotsAhead = Math.max(1, Math.floor(elapsed / intervalMs) + 1);
-  return new Date(last.getTime() + slotsAhead * intervalMs);
+  if (parsed.kind === "phased") {
+    return triggerNextAfter(parsed.spec, now);
+  }
+  if (parsed.kind === "composed") {
+    return triggerNextAfter(parsed.spec, now);
+  }
+  return fixedNextAfter(last, now, parsed.intervalMs);
+}
+
+export function computeThreadDueTickAt(thread: Thread, now: Date): Date | null {
+  const parsed = parseThreadLoopInterval(thread.loopInterval);
+  const last = thread.lastTickAt ? new Date(thread.lastTickAt) : null;
+  switch (parsed.kind) {
+    case "one_shot":
+      return thread.lastTickAt ? null : new Date(now.getTime());
+    case "event":
+      return null;
+    case "cron": {
+      const previous = cronPreviousAtOrBefore(
+        parsed.timezone
+          ? { kind: "cron", expr: parsed.expr, timezone: parsed.timezone }
+          : { kind: "cron", expr: parsed.expr },
+        now,
+      );
+      if (!previous) return null;
+      if (!last || Number.isNaN(last.getTime())) {
+        return now.getTime() - previous.getTime() <= CRON_LOOKBACK_MS ? previous : null;
+      }
+      return previous.getTime() > last.getTime() ? previous : null;
+    }
+    case "monthly": {
+      const anchor = !last || Number.isNaN(last.getTime()) ? new Date(now.getTime() - 32 * THREAD_LOOP_INTERVAL_DAILY_MS) : last;
+      const next = monthlyNextAfter(parsed.spec, anchor);
+      return next && next.getTime() <= now.getTime() ? next : null;
+    }
+    case "phased": {
+      if (!isTriggerSpecInPhasedWindow(parsed.spec, now)) return null;
+      const phaseDue = parsed.spec.phases
+        .filter((phase) => isWithinPhaseWindow(phase, now, parsed.spec.timezone))
+        .map((phase) => triggerNextAfter(phase.trigger ?? { kind: "immediate" }, last ?? new Date(now.getTime() - 1)))
+        .filter((date): date is Date => date !== null && date.getTime() <= now.getTime());
+      return phaseDue.length > 0 ? new Date(Math.min(...phaseDue.map((date) => date.getTime()))) : null;
+    }
+    case "composed": {
+      const due = parsed.spec.triggers
+        .map((trigger) => computeThreadDueTickAt({ ...thread, loopInterval: trigger }, now))
+        .filter((date): date is Date => Boolean(date));
+      if (parsed.spec.operator === "all" && due.length !== parsed.spec.triggers.length) return null;
+      return due.length > 0 ? new Date(Math.min(...due.map((date) => date.getTime()))) : null;
+    }
+    default:
+      return fixedPreviousDueAt(last, now, parsed.intervalMs);
+  }
 }

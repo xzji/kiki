@@ -1,11 +1,15 @@
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import { getRegistryDatabase } from "@/lib/server/db/registryClient";
 import { getDatabase } from "@/lib/server/db/client";
+import { countPendingGovernanceEventBridgeDeliveries } from "@/lib/server/repositories/governanceEventOutboxRepository";
+import { countPendingGovernanceTickJobs } from "@/lib/server/repositories/governanceTickJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 
 export type OrchestratorUserCandidate = {
   userId: string;
   queuedJobs: number;
+  pendingGovernanceJobs: number;
+  pendingGovernanceEvents: number;
   hasGoals: boolean;
 };
 
@@ -30,10 +34,14 @@ function inspectUserWork(userId: string): OrchestratorUserCandidate {
         `,
       )
       .get(new Date().toISOString()) as { count: number };
+    const pendingGovernanceJobs = countPendingGovernanceTickJobs();
+    const pendingGovernanceEvents = countPendingGovernanceEventBridgeDeliveries();
     const goals = readGoalsSnapshot([]);
     return {
       userId,
       queuedJobs: queuedRow.count ?? 0,
+      pendingGovernanceJobs,
+      pendingGovernanceEvents,
       hasGoals: goals.length > 0,
     };
   });
@@ -43,9 +51,20 @@ function inspectUserWork(userId: string): OrchestratorUserCandidate {
 export function listUsersForOrchestratorTick(): OrchestratorUserCandidate[] {
   return listActiveUserIds()
     .map((userId) => inspectUserWork(userId))
-    .filter((candidate) => candidate.queuedJobs > 0 || candidate.hasGoals);
+    .filter(
+      (candidate) =>
+        candidate.queuedJobs > 0 ||
+        candidate.pendingGovernanceJobs > 0 ||
+        candidate.pendingGovernanceEvents > 0 ||
+        candidate.hasGoals,
+    );
 }
 
 export function listUsersWithPendingWork() {
-  return listUsersForOrchestratorTick().filter((candidate) => candidate.queuedJobs > 0);
+  return listUsersForOrchestratorTick().filter(
+    (candidate) =>
+      candidate.queuedJobs > 0 ||
+      candidate.pendingGovernanceJobs > 0 ||
+      candidate.pendingGovernanceEvents > 0,
+  );
 }

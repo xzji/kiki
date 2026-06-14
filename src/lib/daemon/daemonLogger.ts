@@ -4,7 +4,7 @@ import path from "path";
 import { getRuntimeLogsDir } from "@/lib/server/storage/paths";
 
 export type DaemonLogLevel = "info" | "debug" | "trace";
-export type DaemonLogDomain = "life" | "conn" | "hb" | "cmd" | "exec" | "stream" | "err";
+export type DaemonLogDomain = "life" | "conn" | "hb" | "cmd" | "exec" | "stream" | "err" | "loop";
 
 type DaemonLogFields = Record<string, string | number | boolean | null | undefined>;
 

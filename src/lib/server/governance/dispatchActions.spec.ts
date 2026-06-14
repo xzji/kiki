@@ -49,12 +49,19 @@ function makeTask(id: string, title = "既有任务"): Task {
   };
 }
 
+function makeOutput(actions: ThreadTickOutput["actions"]): ThreadTickOutput {
+  return {
+    assessment: "派发器测试输出",
+    confidence: "high",
+    actions,
+  };
+}
+
 export async function runDispatchActionsSpecs() {
   // ---------- happy: 多动作叠加 + 顺序断言 ----------
   {
     const callOrder: string[] = [];
-    const output: ThreadTickOutput = {
-      actions: [
+    const output = makeOutput([
         { kind: "post_message", threadId: THREAD_ID, text: "msg-A", severity: "info" },
         {
           kind: "dispatch_task",
@@ -64,8 +71,7 @@ export async function runDispatchActionsSpecs() {
         },
         { kind: "silent", reason: "no-op" },
         { kind: "post_message", threadId: THREAD_ID, text: "msg-B", severity: "warning" },
-      ],
-    };
+    ]);
     const result = await dispatchThreadActions({
       topicId: TOPIC_ID,
       threadId: THREAD_ID,
@@ -94,8 +100,7 @@ export async function runDispatchActionsSpecs() {
   {
     const callOrder: string[] = [];
     const currentTasks = [makeTask("task-existing")];
-    const output: ThreadTickOutput = {
-      actions: [
+    const output = makeOutput([
         {
           kind: "update_task",
           threadId: THREAD_ID,
@@ -109,8 +114,7 @@ export async function runDispatchActionsSpecs() {
           taskId: "task-existing",
           reason: "关注点关闭",
         },
-      ],
-    };
+    ]);
     const result = await dispatchThreadActions({
       topicId: TOPIC_ID,
       threadId: THREAD_ID,
@@ -139,14 +143,12 @@ export async function runDispatchActionsSpecs() {
   {
     let dispatchCalls = 0;
     let messageCalls = 0;
-    const output: ThreadTickOutput = {
-      actions: [
+    const output = makeOutput([
         { kind: "dispatch_task", threadId: THREAD_ID, reason: "r1", taskDraft: makeDraft("t1") },
         { kind: "dispatch_task", threadId: THREAD_ID, reason: "r2", taskDraft: makeDraft("t2") },
         { kind: "post_message", threadId: THREAD_ID, text: "m1", severity: "info" },
         { kind: "post_message", threadId: THREAD_ID, text: "m2", severity: "info" },
-      ],
-    };
+    ]);
     const result = await dispatchThreadActions({
       topicId: TOPIC_ID,
       threadId: THREAD_ID,
@@ -178,16 +180,14 @@ export async function runDispatchActionsSpecs() {
   // ---------- threadId 防御：错配 action 被记录为 error 且不调用 callback ----------
   {
     let dispatchCalled = 0;
-    const output: ThreadTickOutput = {
-      actions: [
+    const output = makeOutput([
         {
           kind: "dispatch_task",
           threadId: "OTHER-THREAD",
           reason: "x",
           taskDraft: makeDraft("x"),
         },
-      ],
-    };
+    ]);
     const result = await dispatchThreadActions({
       topicId: TOPIC_ID,
       threadId: THREAD_ID,
@@ -211,7 +211,7 @@ export async function runDispatchActionsSpecs() {
     const result = await dispatchThreadActions({
       topicId: TOPIC_ID,
       threadId: THREAD_ID,
-      output: { actions: [{ kind: "silent", reason: "无信号" }] },
+      output: makeOutput([{ kind: "silent", reason: "无信号" }]),
       callbacks: {
         dispatchTask: async () => {
           totalCalls += 1;
@@ -233,7 +233,7 @@ export async function runDispatchActionsSpecs() {
     const result = await dispatchThreadActions({
       topicId: TOPIC_ID,
       threadId: THREAD_ID,
-      output: { actions: [] },
+      output: makeOutput([]),
       callbacks: { dispatchTask: noopDispatch(), sendThreadMessage: noopSend() },
     });
     assert.equal(result.dispatchedTasks.length, 0);

@@ -13,8 +13,11 @@
  */
 
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
+import type { Task } from "@/types/kiki";
+import { normalizeTriggerSpec } from "@/types/trigger";
 import {
   THREAD_TICK_POST_MESSAGE_TEXT_LIMIT,
+  type ThreadTickConfidence,
   type ThreadTickAction,
   type ThreadTickOutput,
   type ThreadTickPostMessageSeverity,
@@ -27,6 +30,22 @@ const POST_MESSAGE_SEVERITIES: ReadonlySet<ThreadTickPostMessageSeverity> = new 
 ]);
 
 const PAYLOAD_BYTE_LIMIT = 8 * 1024;
+const ASSESSMENT_TEXT_LIMIT = 120;
+const MAX_ACTIONS_PER_TICK = 5;
+const MAX_DISPATCH_ACTIONS_PER_TICK = 2;
+const MAX_CANCEL_ACTIONS_PER_TICK = 2;
+
+const CONFIDENCES: ReadonlySet<ThreadTickConfidence> = new Set<ThreadTickConfidence>([
+  "high",
+  "medium",
+  "low",
+]);
+
+export type ParseThreadTickOutputContext = {
+  expectedThreadId: string;
+  terminationCondition?: string;
+  currentTasks?: Task[];
+};
 
 export class ThreadTickOutputValidationError extends Error {
   constructor(
@@ -39,13 +58,71 @@ export class ThreadTickOutputValidationError extends Error {
       | "unknown_kind"
       | "missing_field"
       | "invalid_severity"
+      | "invalid_confidence"
       | "thread_id_mismatch"
       | "post_message_too_long"
       | "payload_too_large"
-      | "task_draft_invalid",
+      | "task_draft_invalid"
+      | "unknown_root_field"
+      | "assessment_too_long"
+      | "too_many_actions"
+      | "low_confidence_high_risk"
+      | "archive_without_termination_condition"
+      | "archive_missing_evidence"
+      | "cancel_missing_evidence"
+      | "duplicate_dispatch_task",
   ) {
     super(message);
     this.name = "ThreadTickOutputValidationError";
+  }
+}
+
+function asConfidence(value: unknown): ThreadTickConfidence {
+  if (typeof value !== "string" || !CONFIDENCES.has(value as ThreadTickConfidence)) {
+    throw new ThreadTickOutputValidationError(
+      `confidence 必须是 high / medium / low，实际为 ${String(value)}`,
+      "invalid_confidence",
+    );
+  }
+  return value as ThreadTickConfidence;
+}
+
+function normalizeComparableText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^0-9a-z\u4e00-\u9fff]+/gi, "")
+    .trim();
+}
+
+function containsMeaningfulOverlap(left: string, right: string): boolean {
+  const a = normalizeComparableText(left);
+  const b = normalizeComparableText(right);
+  if (!a || !b) return false;
+  if (a.length >= 4 && b.includes(a)) return true;
+  if (b.length >= 4 && a.includes(b)) return true;
+  return false;
+}
+
+function hasArchiveEvidence(text: string): boolean {
+  return /(taskId|instanceId|task[-_\w]*|inst[-_\w]*|instance[-_\w]*|任务|实例|证据|结果|result)/i.test(text);
+}
+
+function hasCancelEvidence(text: string): boolean {
+  return (
+    /(关注点.*(消失|关闭)|永久|已完成.*无需继续|无需继续)/i.test(text) ||
+    /((替代|取代|替换).*(taskId|task[-_\w]+)|(taskId|task[-_\w]+).*(替代|取代|替换))/i.test(text)
+  );
+}
+
+function assertNoUnknownRootFields(root: Record<string, unknown>) {
+  const allowed = new Set(["assessment", "confidence", "actions", "memoryDelta"]);
+  for (const key of Object.keys(root)) {
+    if (!allowed.has(key)) {
+      throw new ThreadTickOutputValidationError(
+        `ThreadTickOutput 顶层字段 ${key} 不在白名单 assessment / confidence / actions / memoryDelta 中`,
+        "unknown_root_field",
+      );
+    }
   }
 }
 
@@ -69,6 +146,11 @@ function asPlainObject(value: unknown, field: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function normalizeTaskDraftTriggerSpec(raw: Record<string, unknown>): Record<string, unknown> {
+  const triggerSpec = normalizeTriggerSpec(raw.triggerSpec as Parameters<typeof normalizeTriggerSpec>[0]);
+  return triggerSpec ? { ...raw, triggerSpec } : raw;
+}
+
 function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
   const obj = asPlainObject(raw, "action");
   const kind = obj.kind;
@@ -87,7 +169,7 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
       // taskDraft 仅做最小校验（必填 title）；
       // 完整字段 sanitize 由下游派发逻辑调用 taskDraftSchema 处理。
       const taskDraft: TaskDraft = {
-        ...(taskDraftRaw as Record<string, unknown>),
+        ...normalizeTaskDraftTriggerSpec(taskDraftRaw),
         title,
       } as TaskDraft;
       return {
@@ -113,7 +195,7 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
         threadId,
         taskId,
         reason,
-        patch: patchRaw as Partial<TaskDraft>,
+        patch: normalizeTaskDraftTriggerSpec(patchRaw) as Partial<TaskDraft>,
       };
     }
     case "cancel_task": {
@@ -198,8 +280,14 @@ function parseAction(raw: unknown, expectedThreadId: string): ThreadTickAction {
  */
 export function parseThreadTickOutput(
   parsed: unknown,
-  expectedThreadId: string,
+  expectedThreadIdOrContext: string | ParseThreadTickOutputContext,
 ): ThreadTickOutput {
+  const context =
+    typeof expectedThreadIdOrContext === "string"
+      ? { expectedThreadId: expectedThreadIdOrContext }
+      : expectedThreadIdOrContext;
+  const { expectedThreadId } = context;
+
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ThreadTickOutputValidationError(
       "ThreadTickOutput 必须是对象",
@@ -225,6 +313,17 @@ export function parseThreadTickOutput(
   }
 
   const root = parsed as Record<string, unknown>;
+  assertNoUnknownRootFields(root);
+
+  const assessment = asString(root.assessment, "assessment");
+  if (assessment.length > ASSESSMENT_TEXT_LIMIT) {
+    throw new ThreadTickOutputValidationError(
+      `assessment 长度 ${assessment.length} 超过 ${ASSESSMENT_TEXT_LIMIT} 字上限`,
+      "assessment_too_long",
+    );
+  }
+  const confidence = asConfidence(root.confidence);
+
   const actionsRaw = root.actions;
   if (!Array.isArray(actionsRaw)) {
     throw new ThreadTickOutputValidationError(
@@ -238,8 +337,15 @@ export function parseThreadTickOutput(
       "actions_empty",
     );
   }
+  if (actionsRaw.length > MAX_ACTIONS_PER_TICK) {
+    throw new ThreadTickOutputValidationError(
+      `ThreadTickOutput.actions 最多 ${MAX_ACTIONS_PER_TICK} 个，实际 ${actionsRaw.length} 个`,
+      "too_many_actions",
+    );
+  }
 
   const actions = actionsRaw.map((raw) => parseAction(raw, expectedThreadId));
+  enforceRiskGuards(actions, assessment, confidence, context);
 
   // 计划 §3.3.4 第 3 条：仅当无结构性动作与 post_message 时才允许 silent
   const hasNonSilent = actions.some(
@@ -263,5 +369,84 @@ export function parseThreadTickOutput(
     memoryDelta = asPlainObject(root.memoryDelta, "memoryDelta");
   }
 
-  return memoryDelta ? { actions, memoryDelta } : { actions };
+  return memoryDelta ? { assessment, confidence, actions, memoryDelta } : { assessment, confidence, actions };
+}
+
+function enforceRiskGuards(
+  actions: ThreadTickAction[],
+  assessment: string,
+  confidence: ThreadTickConfidence,
+  context: ParseThreadTickOutputContext,
+) {
+  const dispatchActions = actions.filter((a): a is Extract<ThreadTickAction, { kind: "dispatch_task" }> => a.kind === "dispatch_task");
+  const cancelActions = actions.filter((a): a is Extract<ThreadTickAction, { kind: "cancel_task" }> => a.kind === "cancel_task");
+  if (dispatchActions.length > MAX_DISPATCH_ACTIONS_PER_TICK) {
+    throw new ThreadTickOutputValidationError(
+      `dispatch_task 最多 ${MAX_DISPATCH_ACTIONS_PER_TICK} 个，实际 ${dispatchActions.length} 个`,
+      "too_many_actions",
+    );
+  }
+  if (cancelActions.length > MAX_CANCEL_ACTIONS_PER_TICK) {
+    throw new ThreadTickOutputValidationError(
+      `cancel_task 最多 ${MAX_CANCEL_ACTIONS_PER_TICK} 个，实际 ${cancelActions.length} 个`,
+      "too_many_actions",
+    );
+  }
+
+  for (const action of actions) {
+    if (
+      confidence === "low" &&
+      (action.kind === "archive_thread" || action.kind === "cancel_task" || action.kind === "dispatch_task")
+    ) {
+      throw new ThreadTickOutputValidationError(
+        `confidence=low 时禁止 ${action.kind}，请改用 post_message 或 silent`,
+        "low_confidence_high_risk",
+      );
+    }
+
+    if (action.kind === "archive_thread") {
+      const terminationCondition = context.terminationCondition?.trim();
+      if (!terminationCondition) {
+        throw new ThreadTickOutputValidationError(
+          "archive_thread 需要当前 Thread 存在 terminationCondition",
+          "archive_without_termination_condition",
+        );
+      }
+      const evidenceText = `${assessment}\n${action.reason}`;
+      if (!containsMeaningfulOverlap(evidenceText, terminationCondition) || !hasArchiveEvidence(evidenceText)) {
+        throw new ThreadTickOutputValidationError(
+          "archive_thread.reason/assessment 必须引用 terminationCondition 且包含 taskId/instanceId/结果等证据",
+          "archive_missing_evidence",
+        );
+      }
+    }
+
+    if (action.kind === "cancel_task") {
+      const evidenceText = `${assessment}\n${action.reason}`;
+      if (!hasCancelEvidence(evidenceText)) {
+        throw new ThreadTickOutputValidationError(
+          "cancel_task.reason/assessment 必须说明关注点永久消失、已完成且无需继续，或被明确 taskId 替代",
+          "cancel_missing_evidence",
+        );
+      }
+    }
+
+    if (action.kind === "dispatch_task") {
+      const currentTasks = context.currentTasks ?? [];
+      const title = typeof action.taskDraft.title === "string" ? action.taskDraft.title : "";
+      const objective = typeof action.taskDraft.objective === "string" ? action.taskDraft.objective : "";
+      const hasDuplicate = currentTasks.some(
+        (task) =>
+          containsMeaningfulOverlap(task.title, title) ||
+          containsMeaningfulOverlap(task.description, objective) ||
+          containsMeaningfulOverlap(task.expectedOutcome, objective),
+      );
+      if (hasDuplicate) {
+        throw new ThreadTickOutputValidationError(
+          "dispatch_task 与当前 Thread 下既有 Task 的 title/objective 相近，请改用 update_task",
+          "duplicate_dispatch_task",
+        );
+      }
+    }
+  }
 }

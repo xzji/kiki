@@ -11,6 +11,8 @@
 import type { Goal, GoalWorkflowPhase } from "@/types/kiki";
 import type { Topic, TopicStatus } from "@/types/topic";
 
+import { DEFAULT_TOPIC_LOOP } from "@/types/topic";
+import { normalizeTriggerSpec } from "@/types/trigger";
 import { legacySubGoalToThread } from "./legacySubGoalToThread";
 
 export type LegacyGoalToTopicInput = {
@@ -30,10 +32,11 @@ function mapGoalPhaseToTopicStatus(phase: GoalWorkflowPhase | undefined): TopicS
 export function legacyGoalToTopic(input: LegacyGoalToTopicInput): Topic {
   const { goal } = input;
   const createdAt = input.createdAt ?? goal.createdAt ?? new Date().toISOString();
-  const updatedAt = createdAt;
+  const updatedAt = goal.topicLastTickAt ?? createdAt;
 
   const trimmedDeadline = typeof goal.deadline === "string" ? goal.deadline.trim() : "";
   const deadline = trimmedDeadline.length > 0 ? trimmedDeadline : undefined;
+  const loop = normalizeTriggerSpec(goal.topicLoop) ?? DEFAULT_TOPIC_LOOP;
 
   const threads = goal.subGoals.map((sub) =>
     legacySubGoalToThread({
@@ -50,12 +53,18 @@ export function legacyGoalToTopic(input: LegacyGoalToTopicInput): Topic {
     conversationId: goal.conversationId,
     title: goal.title,
     summary: goal.summary?.trim() ?? "",
+    loop,
+    phase: goal.topicPhase ?? "idle",
+    lastTickAt: goal.topicLastTickAt,
+    nextTickAt: goal.topicNextTickAt,
+    silentCount: goal.topicSilentCount ?? 0,
+    failureCount: goal.topicFailureCount ?? 0,
     deadline,
     completionCriteria: undefined,
     threads,
     status: mapGoalPhaseToTopicStatus(goal.workflow?.phase),
     createdAt,
     updatedAt,
-    revision: 0,
+    revision: goal.topicRevision ?? 0,
   };
 }

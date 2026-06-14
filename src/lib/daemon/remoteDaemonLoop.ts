@@ -11,6 +11,8 @@ import { enterUserContext, runWithUserContext } from "@/lib/server/context/userC
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
 import { setGoalTelemetryObserver } from "@/lib/server/goalTelemetry";
 import { getKikiDefaultSkillsStatus, installKikiDefaultSkills } from "@/lib/server/kikiSkills/installService";
+import { runGovernanceTickLocally } from "@/lib/server/governance/governanceTickLocalExecutor";
+import { isGovernanceTickCommand, type GovernanceTickMachineCommand } from "@/lib/server/governance/governanceTickProtocol";
 import { pickDirectoryWithOsascript } from "@/lib/server/runtime/selectWorkingDirectory";
 import { discoverLocalRuntimes, validateRuntimeEnvironment } from "@/lib/server/runtimeEnvValidation";
 import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
@@ -33,6 +35,7 @@ import {
 import { runWebSocketTransport } from "@/lib/daemon/transport/webSocketTransport";
 import type { DaemonOutboundTransport } from "@/lib/daemon/transport/types";
 import type { RuntimeEnvironmentCheckInput } from "@/types/runtime";
+import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
 const DEVICE_ID_FILE = "daemon-device-id";
 
@@ -159,6 +162,21 @@ async function executeRemoteJob(input: {
   });
 }
 
+export async function handleGovernanceTickDaemonCommand(input: {
+  command: GovernanceTickMachineCommand;
+  invoke: LlmInvoke;
+  sendResult: (result: MachineResult) => Promise<void>;
+  now?: Date;
+}) {
+  const result = await runGovernanceTickLocally({
+    command: input.command,
+    invoke: input.invoke,
+    now: input.now,
+  });
+  await input.sendResult(result);
+  return result;
+}
+
 export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   const base = normalizeBaseUrl(input.serverUrl);
   const fingerprint = osFingerprint();
@@ -172,6 +190,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
 
   let boundUserId: string | null = null;
   const runningJobs = new Set<string>();
+  const runningGovernanceJobs = new Set<string>();
   const requestIdToRunningJob = new Map<string, string>();
   const commandStartedAtByRequestId = new Map<string, number>();
   const commandStartedAtByJobId = new Map<string, number>();
@@ -273,6 +292,40 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       trace?.finish("failed", error instanceof Error ? error.message : String(error));
       throw error;
     }
+  }
+
+  function buildGovernanceLlmInvoke(command: GovernanceTickMachineCommand): LlmInvoke {
+    return async ({ prompt }) => {
+      if (!command.llm) {
+        throw new Error("governance tick command missing llm runtime payload");
+      }
+      const result = await runPromptOnMachine(
+        {
+          ...command.llm,
+          prompt,
+          traceContext: {
+            requestId: command.requestId,
+            scope: "governance_tick",
+            phase: command.targetKind,
+          },
+        },
+        "json",
+      );
+      let parsed: Record<string, unknown> | undefined;
+      try {
+        const value = JSON.parse(result.raw) as unknown;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          parsed = value as Record<string, unknown>;
+        }
+      } catch {
+        parsed = undefined;
+      }
+      return {
+        rawText: result.raw,
+        parsed,
+        meta: { exitCode: result.exitCode, elapsedMs: result.elapsedMs },
+      };
+    };
   }
 
   function bindUser(userId: string) {
@@ -517,6 +570,27 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       })();
       return;
     }
+    if (isGovernanceTickCommand(command)) {
+      if (runningGovernanceJobs.has(command.governanceJobId)) return;
+      runningGovernanceJobs.add(command.governanceJobId);
+      logDaemonEvent("info", "cmd", "governance tick start", {
+        requestId: command.requestId,
+        governanceJobId: command.governanceJobId,
+        targetKind: command.targetKind,
+      });
+      void (async () => {
+        try {
+          await handleGovernanceTickDaemonCommand({
+            command,
+            invoke: buildGovernanceLlmInvoke(command),
+            sendResult,
+          });
+        } finally {
+          runningGovernanceJobs.delete(command.governanceJobId);
+        }
+      })();
+      return;
+    }
     if (command.type === "execute") {
       // 异步执行，不阻塞 poll 循环（保持心跳与并发）。
       if (runningJobs.has(command.jobId)) return;
@@ -629,6 +703,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       callbacks,
       getHelloState: () => ({
         runningJobIds: Array.from(runningJobs),
+        runningGovernanceJobIds: Array.from(runningGovernanceJobs),
         activeStreamSessionIds: Array.from(activeStreamSessionIds),
       }),
       setOutboundTransport,
@@ -646,7 +721,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     daemonVersion,
     callbacks,
     shouldExitAfterHandoff: () => shouldExitAfterHandoff,
-    getPendingHandoffCount: () => runningJobs.size + activeStreamSessionIds.size,
+    getPendingHandoffCount: () => runningJobs.size + runningGovernanceJobs.size + activeStreamSessionIds.size,
   });
 
 }

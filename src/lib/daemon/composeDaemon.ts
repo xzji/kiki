@@ -45,8 +45,11 @@ import { describeSchedulingTimezone } from "@/lib/runtime/schedulingTimezone";
 import {
   NAMESPACE,
   logScheduling,
-  logTickSummary,
 } from "@/lib/server/observability/schedulingLog";
+import {
+  frameError as logLoopFrameError,
+  frameSummary as logLoopFrameSummary,
+} from "@/lib/server/observability/loopTickLog";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -160,20 +163,19 @@ export function composeDaemon() {
             failureReasons[key] = (failureReasons[key] ?? 0) + 1;
           }
         }
-        logTickSummary(NAMESPACE.thread.tick, {
+        logLoopFrameSummary({
+          kind: "thread",
           ticked: outcome.ticked.length,
-          extra: {
-            ok: okCount,
-            frameErrors: outcome.frameErrors.length,
-          },
+          ok: okCount,
+          frameErrors: outcome.frameErrors.length,
           skipReasons: Object.keys(failureReasons).length > 0 ? failureReasons : undefined,
         });
       },
       onError: (err) => {
-        logScheduling(
-          NAMESPACE.thread.tick,
-          `frame error ${err instanceof Error ? err.message : String(err)}`,
-        );
+        logLoopFrameError({
+          kind: "thread",
+          message: `frame error ${err instanceof Error ? err.message : String(err)}`,
+        });
       },
     },
   );

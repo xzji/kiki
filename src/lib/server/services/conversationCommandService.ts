@@ -17,6 +17,7 @@ import {
   getConversationRevision,
   insertConversation,
   listConversationMetas,
+  listConversationSummaries,
   updateConversationFields,
 } from "@/lib/server/repositories/conversationsRepository";
 import {
@@ -218,7 +219,20 @@ function commandConversationId(command: ConversationCommand) {
   return command.type === "create_conversation" ? command.conversation.id : command.conversationId;
 }
 
-export function readConversationState() {
+export function readConversationState(input?: { includeMessages?: boolean }) {
+  if (!input?.includeMessages) {
+    const conversations = listConversationSummaries();
+    return {
+      conversations,
+      latestEventId: getLatestConversationEventId() ?? 0,
+      meta: {
+        mode: "summary" as const,
+        conversationCount: conversations.length,
+        totalMessageCount: conversations.reduce((sum, conversation) => sum + conversation.messageCount, 0),
+        totalUnreadCount: conversations.reduce((sum, conversation) => sum + conversation.unreadCount, 0),
+      },
+    };
+  }
   const conversations = listConversationMetas().map((meta) => {
     const detail = getConversation(meta.id);
     return {
@@ -229,6 +243,15 @@ export function readConversationState() {
   return {
     conversations,
     latestEventId: getLatestConversationEventId() ?? 0,
+    meta: {
+      mode: "full" as const,
+      conversationCount: conversations.length,
+      totalMessageCount: conversations.reduce((sum, conversation) => sum + conversation.messages.length, 0),
+      totalUnreadCount: conversations.reduce(
+        (sum, conversation) => sum + conversation.messages.filter((message) => message.unread).length,
+        0,
+      ),
+    },
   };
 }
 

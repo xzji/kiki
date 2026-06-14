@@ -11,6 +11,7 @@ import {
   applyConversationCommand,
   ConversationCommandConflictError,
   ConversationCommandIdempotencyConflictError,
+  readConversationState,
 } from "@/lib/server/services/conversationCommandService";
 import {
   ensureConversationWorkspace,
@@ -171,6 +172,19 @@ export function runConversationCommandServiceSpecs() {
     paged.map((message) => message.id),
     ["msg-governance-confirm-1", "msg-spec-2"],
   );
+  const summaryState = readConversationState();
+  const summary = summaryState.conversations.find((conversation) => conversation.id === conversationId);
+  assert.equal(summaryState.meta.mode, "summary");
+  assert.equal(summary?.messagesLoaded, false);
+  assert.equal("messages" in (summary as object), false, "summary state 不应返回完整 messages 数组");
+  assert.equal(summary?.messageCount, 3);
+  assert.equal(summary?.lastMessage?.id, "msg-spec-2");
+
+  const fullState = readConversationState({ includeMessages: true });
+  const full = fullState.conversations.find((conversation) => conversation.id === conversationId);
+  assert.equal(fullState.meta.mode, "full");
+  assert.ok(full && "messages" in full);
+  assert.equal(full.messages.length, 3);
 
   const cascadeConversationId = "conv-command-cascade-spec";
   const goalId = "goal-command-cascade-spec";

@@ -120,6 +120,8 @@ export type ClaudeStreamOptions = {
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
   conversationId?: string;
+  assistantMessageId?: string;
+  assistantCreatedAt?: string;
   signal?: AbortSignal;
   onEvent: (event: RuntimeStreamEvent) => void;
   /** spawn 成功后回传子进程 pid，供上层（如 ProcessSupervisor）绑定 OS 进程做生命周期管理。 */

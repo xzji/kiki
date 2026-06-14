@@ -32,6 +32,10 @@ function makeTopic(): Topic {
     id: "topic-runner-1",
     title: "美股投资监控",
     summary: "持续追踪 NVDA",
+    loop: { kind: "weekly" },
+    phase: "idle",
+    silentCount: 0,
+    failureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-05-30T00:00:00.000Z",
@@ -70,15 +74,29 @@ function makeCtx(overrides: Partial<ThreadTickContext> = {}): ThreadTickContext 
   };
 }
 
+function makeOutput(
+  actions: ThreadTickOutput["actions"],
+  extra: Partial<ThreadTickOutput> = {},
+): ThreadTickOutput {
+  return {
+    assessment: "证据 task-1 显示本轮判断成立",
+    confidence: "high",
+    actions,
+    ...extra,
+  };
+}
+
 export async function runThreadRunnerSpecs() {
   // ---------- happy: post_message + memoryDelta 合并 ----------
   {
-    const output: ThreadTickOutput = {
-      actions: [
+    const output = makeOutput(
+      [
         { kind: "post_message", threadId: "thread-runner-1", text: "盘前简报", severity: "info" },
       ],
+      {
       memoryDelta: { lastDigest: "2026-06-01" },
-    };
+      },
+    );
     const result = await runThreadTick({
       ctx: makeCtx(),
       agentRunId: "ar-1",
@@ -101,7 +119,7 @@ export async function runThreadRunnerSpecs() {
       agentRunId: "ar-2",
       invoke: async () => ({
         rawText: "",
-        parsed: { actions: [{ kind: "silent", reason: "无信号" }] },
+        parsed: makeOutput([{ kind: "silent", reason: "无信号" }]) as unknown as Record<string, unknown>,
       }),
     });
     assert.equal(result.ok, true);
@@ -117,17 +135,20 @@ export async function runThreadRunnerSpecs() {
       agentRunId: "ar-3",
       invoke: async () => ({
         rawText: "",
-        parsed: {
-          actions: [
+        parsed: makeOutput([
             { kind: "post_message", threadId: "thread-runner-1", text: "x", severity: "info" },
             {
               kind: "dispatch_task",
               threadId: "thread-runner-1",
               reason: "深度分析",
-              taskDraft: { title: "复盘 NVDA" },
+              taskDraft: {
+                title: "复盘 NVDA",
+                objective: "提炼核心信号",
+                deliverable: "复盘摘要",
+                acceptanceCriteria: ["覆盖核心信号"],
+              },
             },
-          ],
-        },
+        ]) as unknown as Record<string, unknown>,
       }),
     });
     assert.equal(result.ok, true);
@@ -145,11 +166,13 @@ export async function runThreadRunnerSpecs() {
       agentRunId: "ar-archive",
       invoke: async () => ({
         rawText: "",
-        parsed: {
-          actions: [
-            { kind: "archive_thread", threadId: "thread-runner-1", reason: "已完成一次复盘" },
-          ],
-        },
+        parsed: makeOutput([
+          {
+            kind: "archive_thread",
+            threadId: "thread-runner-1",
+            reason: "terminationCondition=完成一次复盘；证据 task-1 / instanceId=inst-1 的结果已完成一次复盘",
+          },
+        ], { assessment: "完成一次复盘已有 task-1 / instanceId=inst-1 结果证据" }) as unknown as Record<string, unknown>,
       }),
     });
     assert.equal(result.ok, true);
@@ -221,7 +244,7 @@ export async function runThreadRunnerSpecs() {
 
   // ---------- rawText fallback：parsed 缺失 + 合法 JSON ----------
   {
-    const output = { actions: [{ kind: "silent", reason: "rawText path" }] };
+    const output = makeOutput([{ kind: "silent", reason: "rawText path" }]);
     const result = await runThreadTick({
       ctx: makeCtx(),
       agentRunId: "ar-7",
@@ -251,11 +274,46 @@ export async function runThreadRunnerSpecs() {
       agentRunId: "ar-9",
       invoke: async () => ({
         rawText: "",
-        parsed: { actions: [{ kind: "silent", reason: "ok" }] },
+        parsed: makeOutput([{ kind: "silent", reason: "ok" }]) as unknown as Record<string, unknown>,
       }),
     });
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
     assert.equal(result.patch.failureCount, 0);
+  }
+
+  // ---------- cadenceTuner：important 输出短期升档并记录 history ----------
+  {
+    const result = await runThreadTick({
+      ctx: makeCtx({ thread: makeThread({ loopInterval: "weekly" }) }),
+      agentRunId: "ar-cadence-important",
+      invoke: async () => ({
+        rawText: "",
+        parsed: makeOutput([
+          { kind: "post_message", threadId: "thread-runner-1", text: "重要异动", severity: "important" },
+        ]) as unknown as Record<string, unknown>,
+      }),
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.deepEqual(result.patch.loopInterval, { kind: "hourly" });
+    assert.ok(Array.isArray(result.patch.memory.cadenceHistory));
+    assert.equal((result.patch.memory.cadenceHistory as unknown[]).length, 1);
+  }
+
+  // ---------- cadenceTuner：连续 silent 降档 ----------
+  {
+    const result = await runThreadTick({
+      ctx: makeCtx({ thread: makeThread({ loopInterval: "hourly", silentCount: 3 }) }),
+      agentRunId: "ar-cadence-silent",
+      invoke: async () => ({
+        rawText: "",
+        parsed: makeOutput([{ kind: "silent", reason: "无信号" }]) as unknown as Record<string, unknown>,
+      }),
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.deepEqual(result.patch.loopInterval, { kind: "weekly" });
+    assert.equal(result.patch.silentCount, 4);
   }
 }

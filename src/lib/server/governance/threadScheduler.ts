@@ -14,7 +14,7 @@
  *    再缺失则视为首次触发立即 due。
  */
 
-import { parseThreadLoopInterval } from "@/lib/taskTriggerTime";
+import { computeThreadDueTickAt, isTriggerSpecInPhasedWindow, parseThreadLoopInterval } from "@/lib/taskTriggerTime";
 import { THREAD_FAILURE_PAUSE_THRESHOLD, type Thread } from "@/types/topic";
 
 export type DueThread = {
@@ -22,7 +22,7 @@ export type DueThread = {
   /** 该次调度计算出的预期触发时间（用于排序）；首次触发时与 now 相同。 */
   scheduledAt: Date;
   /** 该 thread 的诊断信息（worker 写入 agent_events 时使用）。 */
-  reason: "first_tick" | "event_triggered" | "interval_due" | "cron_passthrough";
+  reason: "first_tick" | "event_triggered" | "interval_due" | "cron_due";
 };
 
 /**
@@ -51,8 +51,8 @@ export function isThreadDue(
   // 同样状态机已在 ThreadRunner 内处理，此处再次防御以隔离脏数据。
   if (thread.failureCount >= THREAD_FAILURE_PAUSE_THRESHOLD) return null;
 
-  const parsed = parseThreadLoopInterval(thread.loopInterval);
   const explicitNext = parseDateSafe(thread.nextTickAt);
+  const parsed = parseThreadLoopInterval(thread.loopTrigger ?? thread.loopInterval);
 
   if (parsed.kind === "one_shot") {
     if (explicitNext && explicitNext.getTime() <= now.getTime()) {
@@ -65,38 +65,48 @@ export function isThreadDue(
     return null;
   }
 
-  if (parsed.kind === "cron") {
-    // 无 cron 解析器；交由 worker 调用端二次过滤
-    return { scheduledAt: new Date(now.getTime()), reason: "cron_passthrough" };
+  if (parsed.kind === "event") {
+    if (explicitNext && explicitNext.getTime() <= now.getTime()) {
+      return { scheduledAt: explicitNext, reason: "event_triggered" };
+    }
+    return null;
   }
 
-  // 固定间隔类型：优先信任 nextTickAt；缺失或异常时回落到 computeNextTickAt
+  // 统一调度入口：优先信任 nextTickAt；phased 类型在真正选中前再做窗口校验。
   if (explicitNext) {
     if (explicitNext.getTime() > now.getTime()) return null;
-    if (!thread.lastTickAt) return { scheduledAt: explicitNext, reason: "first_tick" };
+    if (!isTriggerSpecInPhasedWindow(thread.loopTrigger ?? thread.loopInterval, now)) return null;
     const last = parseDateSafe(thread.lastTickAt);
-    const expectedReviewAt = last ? last.getTime() + parsed.intervalMs : undefined;
-    const reason =
-      expectedReviewAt !== undefined && explicitNext.getTime() < expectedReviewAt
-        ? "event_triggered"
-        : "interval_due";
-    return { scheduledAt: explicitNext, reason };
+    const expectedReviewAt =
+      last &&
+      (parsed.kind === "realtime" ||
+        parsed.kind === "hourly" ||
+        parsed.kind === "daily" ||
+        parsed.kind === "weekly" ||
+        parsed.kind === "interval")
+        ? last.getTime() + parsed.intervalMs
+        : undefined;
+    return {
+      scheduledAt: explicitNext,
+      reason:
+        expectedReviewAt !== undefined && explicitNext.getTime() < expectedReviewAt
+          ? "event_triggered"
+          : thread.lastTickAt
+            ? "interval_due"
+            : "first_tick",
+    };
   }
-  // 既无 nextTickAt 也无 lastTickAt → 首次触发立即 due
-  if (!thread.lastTickAt) {
-    return { scheduledAt: new Date(now.getTime()), reason: "first_tick" };
-  }
-  // 有 lastTickAt：根据间隔自行判定（不复用 computeNextTickAt，因为它永远返回 > now）
-  const last = parseDateSafe(thread.lastTickAt);
-  if (!last) {
-    return { scheduledAt: new Date(now.getTime()), reason: "first_tick" };
-  }
-  const elapsed = now.getTime() - last.getTime();
-  if (elapsed < parsed.intervalMs) return null;
-  // 计算 last 之后第一个 ≤ now 的 tick 槽位
-  const slots = Math.floor(elapsed / parsed.intervalMs);
-  const scheduledAt = new Date(last.getTime() + slots * parsed.intervalMs);
-  return { scheduledAt, reason: "interval_due" };
+
+  const scheduledAt = computeThreadDueTickAt(
+    thread.loopTrigger ? { ...thread, loopInterval: thread.loopTrigger } : thread,
+    now,
+  );
+  if (!scheduledAt) return null;
+  if (!isTriggerSpecInPhasedWindow(thread.loopTrigger ?? thread.loopInterval, now)) return null;
+  return {
+    scheduledAt,
+    reason: parsed.kind === "cron" ? "cron_due" : thread.lastTickAt ? "interval_due" : "first_tick",
+  };
 }
 
 function parseDateSafe(value: string | undefined): Date | null {

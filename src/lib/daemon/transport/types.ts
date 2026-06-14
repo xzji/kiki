@@ -22,6 +22,7 @@ export type DaemonTransportCallbacks = {
 
 export type DaemonHelloState = {
   runningJobIds: string[];
+  runningGovernanceJobIds: string[];
   activeStreamSessionIds: string[];
 };
 

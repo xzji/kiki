@@ -1,3 +1,5 @@
+import { normalizeTriggerSpec, type TriggerSpec } from "@/types/trigger";
+
 export type TaskDraftUserInvolvementMode = "none" | "confirm" | "answer" | "collaborate";
 
 export type TaskDraft = {
@@ -8,6 +10,7 @@ export type TaskDraft = {
   acceptanceCriteria: string[];
   taskType?: "repeat" | "one_shot";
   triggerRule?: string;
+  triggerSpec?: TriggerSpec;
   cadence?: string;
   triggerCondition?: string;
   userInvolvement?: {
@@ -92,6 +95,7 @@ export function normalizeTaskDraft(value: unknown, fallbackIndex: number): { dra
     acceptanceCriteria: list(record.acceptanceCriteria),
     taskType: normalizeTaskType(record.taskType),
     triggerRule: text(record.triggerRule) || undefined,
+    triggerSpec: normalizeTriggerSpec(record.triggerSpec as Parameters<typeof normalizeTriggerSpec>[0]) ?? undefined,
     cadence: text(record.cadence) || undefined,
     triggerCondition: text(record.triggerCondition) || undefined,
     dependencyHints: list(record.dependencyHints),

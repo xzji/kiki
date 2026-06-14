@@ -1,6 +1,7 @@
 import type { TopicInitSagaResult } from "@/lib/server/goalPlanning/topicInitSaga";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
 import type { GoalAnalysis, GoalBreakdownDraft, TaskPriority } from "@/types/kiki";
+import { normalizeTriggerSpecWithWarnings, type TriggerSpec } from "@/types/trigger";
 
 type LooseRecord = Record<string, unknown>;
 
@@ -10,6 +11,56 @@ function asRecord(value: unknown): LooseRecord | null {
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function hasTriggerInput(value: unknown) {
+  if (value === null || value === undefined) return false;
+  return typeof value !== "string" || value.trim().length > 0;
+}
+
+function formatPlannerTriggerWarning(path: string, input: unknown) {
+  const raw = typeof input === "string" ? input : JSON.stringify(input);
+  return `planner warning: ${path} 包含非法 TriggerSpec，已记录并尝试走 legacy fallback。raw=${raw}`;
+}
+
+function readTriggerSpecCandidate(
+  value: unknown,
+  warnings: string[],
+  path: string,
+): TriggerSpec | undefined {
+  const result = normalizeTriggerSpecWithWarnings(value as Parameters<typeof normalizeTriggerSpecWithWarnings>[0], { path });
+  if (result.trigger) return result.trigger;
+  if (result.warnings.length > 0) warnings.push(formatPlannerTriggerWarning(path, value));
+  return undefined;
+}
+
+function readFirstTriggerSpec(
+  candidates: Array<{ value: unknown; path: string }>,
+  warnings: string[],
+) {
+  for (const candidate of candidates) {
+    if (!hasTriggerInput(candidate.value)) continue;
+    const trigger = readTriggerSpecCandidate(candidate.value, warnings, candidate.path);
+    if (trigger) return trigger;
+  }
+  return undefined;
+}
+
+function triggerSpecToRule(value: unknown) {
+  const trigger = normalizeTriggerSpecWithWarnings(value as Parameters<typeof normalizeTriggerSpecWithWarnings>[0]).trigger;
+  if (!trigger) return undefined;
+  switch (trigger.kind) {
+    case "cron":
+      return trigger.timezone ? `cron:${trigger.expr} tz=${trigger.timezone}` : `cron:${trigger.expr}`;
+    case "interval":
+      return `interval:${trigger.value}${trigger.unit}`;
+    case "phased":
+      return "phased";
+    case "event":
+      return `event:${trigger.sources.join(",")}`;
+    default:
+      return trigger.kind;
+  }
 }
 
 function readNumber(value: unknown) {
@@ -66,15 +117,23 @@ function normalizeDependencies(value: unknown) {
 function normalizeTask(
   value: unknown,
   index: number,
-  context: { subGoalId: string; specs?: Record<string, string> },
+  context: { subGoalId: string; specs?: Record<string, string>; warnings: string[] },
 ): GoalBreakdownDraft["subGoals"][number]["tasks"][number] {
   const record = asRecord(value) ?? {};
   const id = String(record.id ?? record.index ?? index + 1);
+  const triggerSpec = readFirstTriggerSpec(
+    [
+      { value: record.triggerSpec, path: `subGoals.${context.subGoalId}.tasks.${id}.triggerSpec` },
+      { value: record.trigger, path: `subGoals.${context.subGoalId}.tasks.${id}.trigger` },
+    ],
+    context.warnings,
+  );
   const title = readString(record.title) ?? `任务 ${index + 1}`;
   const description = readString(record.description) ?? readString(record.objective) ?? title;
   const expectedOutcome = readString(record.expectedOutcome) ?? readString(record.deliverable) ?? description;
   const triggerRule =
     readString(record.triggerRule) ??
+    triggerSpecToRule(triggerSpec) ??
     readString(record.cadence) ??
     (readString(record.triggerCondition) ? `满足条件：${readString(record.triggerCondition)}` : undefined) ??
     "手动触发";
@@ -90,6 +149,8 @@ function normalizeTask(
     expectedOutcome,
     taskType,
     triggerRule,
+    triggerSpec,
+    trigger: triggerSpec,
     executionKind: "generic_result",
     priority: normalizePriority(record.priority ?? record.priorityHint),
     taskSpec: specContent
@@ -111,6 +172,7 @@ function normalizeTask(
 function normalizeSubGoals(
   value: unknown,
   specs?: Record<string, string>,
+  warnings: string[] = [],
 ): GoalBreakdownDraft["subGoals"] {
   if (!Array.isArray(value)) return [];
   return value
@@ -125,12 +187,21 @@ function normalizeSubGoals(
       const description = readString(record.description) ?? readString(record.intent);
       const successCriteria = normalizeSuccessCriteria(record.successCriteria);
       const rawTasks = Array.isArray(record.tasks) ? record.tasks : [];
-      const tasks = rawTasks.map((task, taskIndex) => normalizeTask(task, taskIndex, { subGoalId: id, specs }));
+      const reviewTrigger = readFirstTriggerSpec(
+        [
+          { value: record.reviewInterval, path: `subGoals.${id}.reviewInterval` },
+          { value: record.reviewTrigger, path: `subGoals.${id}.reviewTrigger` },
+          { value: record.loopInterval, path: `subGoals.${id}.loopInterval` },
+        ],
+        warnings,
+      );
+      const tasks = rawTasks.map((task, taskIndex) => normalizeTask(task, taskIndex, { subGoalId: id, specs, warnings }));
       return {
         id,
         title,
         description,
         reviewInterval: readString(record.reviewInterval) ?? readString(record.loopInterval),
+        reviewTrigger,
         terminationCondition: readString(record.terminationCondition),
         why: readString(record.why),
         priority: normalizePriority(record.priority),
@@ -163,24 +234,37 @@ export function adaptTopicInitSagaToGoalDraft(input: {
     throw new Error("TopicInitSaga 缺少 Presenter 产物，无法生成规划草案");
   }
 
-  const subGoals = normalizeSubGoals(plan.subGoals ?? plan.threads, input.result.artifacts.specs);
+  const plannerWarnings: string[] = [];
+  const subGoals = normalizeSubGoals(plan.subGoals ?? plan.threads, input.result.artifacts.specs, plannerWarnings);
   if (subGoals.length === 0) {
     throw new Error("TopicInitSaga 未返回任何可落库的子目标/线程");
   }
 
   const criticNotes = readString(input.result.artifacts.critic?.notes);
   const goalAnalysis = normalizeGoalAnalysis(plan.goalAnalysis);
+  const topicLoop = readFirstTriggerSpec(
+    [
+      { value: plan.topicLoop, path: "topicLoop" },
+      { value: plan.loop, path: "loop" },
+    ],
+    plannerWarnings,
+  );
+  const reviewSummary = [
+    ...(criticNotes ? [criticNotes] : []),
+    ...plannerWarnings,
+  ];
   return {
     goalTitle: readString(presentation.goalTitle) ?? input.topicText,
     summary: readString(presentation.summary),
     deadline: readString(presentation.deadline),
+    topicLoop,
     goalAnalysis,
     collectedInfoSummary: undefined,
     assumptions: goalAnalysis?.assumptions,
     risks: readStringArray(plan.risks),
     reasoning: readString(plan.reasoning),
     executionOrder: readString(plan.executionOrder),
-    reviewSummary: criticNotes ? [criticNotes] : undefined,
+    reviewSummary: reviewSummary.length > 0 ? reviewSummary : undefined,
     notificationStrategy: readString(presentation.notificationStrategy),
     subGoals,
   };

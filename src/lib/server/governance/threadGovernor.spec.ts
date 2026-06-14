@@ -19,6 +19,7 @@ import { listAgentEvents } from "@/lib/server/repositories/agentRuntime/agentEve
 import { getGoalEvents } from "@/lib/server/repositories/goalEventLogRepository";
 import { appendInboxMessage } from "@/lib/server/repositories/inboxRepository";
 import { recordTickOutcome } from "@/lib/server/governance/threadGovernorCallbacks";
+import { enterUserContext } from "@/lib/server/context/userContext";
 import { THREAD_FAILURE_PAUSE_THRESHOLD, type Thread, type ThreadTickOutput, type Topic } from "@/types/topic";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
@@ -29,6 +30,10 @@ function makeTopic(id = "topic-w-1"): Topic {
     id,
     title: "x",
     summary: "y",
+    loop: { kind: "daily" },
+    phase: "idle",
+    silentCount: 0,
+    failureCount: 0,
     threads: [],
     status: "active",
     createdAt: NOW.toISOString(),
@@ -56,15 +61,27 @@ function makeThread(id: string, overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-const okOutput: ThreadTickOutput = {
-  actions: [{ kind: "post_message", threadId: "T-DUE", text: "hi", severity: "info" }],
-};
+function makeOutput(
+  actions: ThreadTickOutput["actions"],
+  extra: Partial<ThreadTickOutput> = {},
+): ThreadTickOutput {
+  return {
+    assessment: "治理判断证据充分",
+    confidence: "high",
+    actions,
+    ...extra,
+  };
+}
+
+const okOutput = makeOutput([{ kind: "post_message", threadId: "T-DUE", text: "hi", severity: "info" }]);
 
 function makeInvokeOk(output: ThreadTickOutput): LlmInvoke {
   return async () => ({ rawText: JSON.stringify(output), parsed: output as unknown as Record<string, unknown> });
 }
 
 export async function runThreadGovernorSpecs() {
+  enterUserContext("thread-governor-spec");
+
   // ---------- 仅 due thread 被 tick ----------
   {
     const callOrder: string[] = [];
@@ -78,9 +95,7 @@ export async function runThreadGovernorSpecs() {
     ];
     const input: ThreadLoopFrameInput = {
       now: NOW,
-      invoke: makeInvokeOk({
-        actions: [{ kind: "post_message", threadId: "T-DUE", text: "hi", severity: "info" }],
-      }),
+      invoke: makeInvokeOk(makeOutput([{ kind: "post_message", threadId: "T-DUE", text: "hi", severity: "info" }])),
       callbacks: {
         collectActiveThreads: async () => candidates,
         collectRecentTaskInstances: async () => [],
@@ -103,7 +118,7 @@ export async function runThreadGovernorSpecs() {
     const outcome = await runThreadLoopFrame(input);
     assert.equal(outcome.ticked.length, 1, "只有 T-DUE 被 tick");
     assert.equal(outcome.ticked[0]?.threadId, "T-DUE");
-    assert.equal(outcome.ticked[0]?.ok, true);
+    assert.equal(outcome.ticked[0]?.ok, true, outcome.ticked[0]?.failureReason);
     assert.equal(outcome.ticked[0]?.sentMessageCount, 1);
     assert.deepEqual(callOrder, ["prepare:T-DUE", "persist:T-DUE", "record:T-DUE"]);
     assert.equal(outcome.frameErrors.length, 0);
@@ -194,9 +209,7 @@ export async function runThreadGovernorSpecs() {
     ];
     const outcome = await runThreadLoopFrame({
       now: NOW,
-      invoke: makeInvokeOk({
-        actions: [{ kind: "silent", reason: "ok" }],
-      }),
+      invoke: makeInvokeOk(makeOutput([{ kind: "silent", reason: "ok" }])),
       callbacks: {
         collectActiveThreads: async () => candidates,
         collectRecentTaskInstances: async () => [],
@@ -225,8 +238,7 @@ export async function runThreadGovernorSpecs() {
     const thread = makeThread(`thread-smoke-${suffix}`, { topicId: topic.id });
     const agentRunId = `agent-run-smoke-${suffix}`;
     const inboxTraceId = `trace-smoke-${suffix}`;
-    const output: ThreadTickOutput = {
-      actions: [
+    const output = makeOutput([
         {
           kind: "post_message",
           threadId: thread.id,
@@ -244,8 +256,7 @@ export async function runThreadGovernorSpecs() {
             acceptanceCriteria: ["可读"],
           },
         },
-      ],
-    };
+      ]);
 
     const outcome = await runThreadLoopFrame({
       now: NOW,
@@ -284,16 +295,24 @@ export async function runThreadGovernorSpecs() {
     });
 
     assert.equal(outcome.ticked.length, 1);
-    assert.equal(outcome.ticked[0]?.ok, true);
+    assert.equal(outcome.ticked[0]?.ok, true, outcome.ticked[0]?.failureReason);
     assert.equal(outcome.ticked[0]?.dispatchedTaskCount, 1);
     assert.equal(outcome.ticked[0]?.sentMessageCount, 1);
 
     const agentEvents = listAgentEvents({ agentRunId });
-    assert.equal(agentEvents.length, 1);
-    assert.equal(agentEvents[0]?.type, "decision");
-    assert.equal(agentEvents[0]?.payload.kind, "thread.tick.completed");
-    assert.equal(agentEvents[0]?.payload.dispatchedTaskCount, 1);
-    assert.equal(agentEvents[0]?.payload.sentMessageCount, 1);
+    const agentEventKinds = agentEvents.map((event) => event.payload.kind);
+    assert.equal(agentEvents.length, 2);
+    assert.deepEqual(
+      agentEvents.map((event) => event.type),
+      ["decision", "decision"],
+    );
+    assert.ok(agentEventKinds.includes("loop.thread.tick.completed"));
+    assert.ok(agentEventKinds.includes("thread.tick.completed"));
+    const completedEvent = agentEvents.find((event) => event.payload.kind === "thread.tick.completed");
+    assert.equal(completedEvent?.payload.dispatchedTaskCount, 1);
+    assert.equal(completedEvent?.payload.sentMessageCount, 1);
+    assert.equal(completedEvent?.payload.assessment, output.assessment);
+    assert.equal(completedEvent?.payload.confidence, output.confidence);
 
     const inboxEvents = getGoalEvents({ goalId: topic.id, fromId: 0, limit: 500 }).filter((event) => {
       const payload = event.payload as { target?: unknown; notificationId?: unknown };
@@ -360,10 +379,13 @@ export async function runThreadGovernorSpecs() {
     const agentEvents = listAgentEvents({ agentRunId });
     assert.deepEqual(
       agentEvents.map((event) => event.type),
-      ["error", "thread_paused"],
+      ["error", "error", "thread_paused", "thread_paused"],
     );
-    assert.equal(agentEvents[0]?.payload.kind, "thread.tick.failed");
-    assert.equal(agentEvents[1]?.payload.kind, "thread.paused.failure_threshold");
+    const failedKinds = agentEvents.map((event) => event.payload.kind);
+    assert.ok(failedKinds.includes("loop.thread.tick.failed"));
+    assert.ok(failedKinds.includes("thread.tick.failed"));
+    assert.ok(failedKinds.includes("loop.thread.paused.failure_threshold"));
+    assert.ok(failedKinds.includes("thread.paused.failure_threshold"));
 
     const inboxEvents = getGoalEvents({ goalId: topic.id, fromId: 0, limit: 500 }).filter((event) => {
       const payload = event.payload as { target?: unknown; notificationId?: unknown };
@@ -399,9 +421,7 @@ export async function runThreadGovernorSpecs() {
 
     const outcome = await runThreadLoopFrame({
       now: NOW,
-      invoke: makeInvokeOk({
-        actions: [{ kind: "silent", reason: "restart continuation smoke" }],
-      }),
+      invoke: makeInvokeOk(makeOutput([{ kind: "silent", reason: "restart continuation smoke" }])),
       callbacks: {
         collectActiveThreads: async () => [
           { topic, thread: paused },

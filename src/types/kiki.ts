@@ -4,6 +4,7 @@ import type { TaskResult } from "@/types/taskResult";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ConversationCliProcess } from "@/types/runtime";
+import type { TriggerSpec } from "@/types/trigger";
 
 export type TaskInstanceStatus =
   | "pending"
@@ -387,6 +388,7 @@ export type Task = {
   expectedOutcome: string;
   taskType: "repeat" | "one_shot";
   triggerRule: string;
+  trigger?: TriggerSpec;
   deadline?: string;
   progress: number;
   instances: TaskInstance[];
@@ -419,6 +421,7 @@ export type SubGoal = {
   description?: string;
   /** Thread 治理 review 节拍；执行频率仍由 Task.triggerRule 决定。 */
   reviewInterval?: string;
+  reviewTrigger?: TriggerSpec;
   /** 板块/阶段终止条件；持续监控类可留空。 */
   terminationCondition?: string;
   why?: string;
@@ -440,6 +443,8 @@ export type SubGoal = {
 
 export type GoalKind = "collab" | "digest" | "chat_history";
 
+export type GoalTopicPhase = "idle" | "running" | "completed" | "failed" | "dispatch_partial_failure";
+
 export type ChatTurn = {
   id: string;
   role: "user" | "agent";
@@ -459,6 +464,13 @@ export type Goal = {
   progress: number;
   subGoals: SubGoal[];
   createdAt: string;
+  topicLoop?: TriggerSpec;
+  topicPhase?: GoalTopicPhase;
+  topicLastTickAt?: string;
+  topicNextTickAt?: string;
+  topicSilentCount?: number;
+  topicFailureCount?: number;
+  topicRevision?: number;
   kind?: GoalKind;
   summary?: string;
   chatTurns?: ChatTurn[];
@@ -625,6 +637,10 @@ export type Conversation = {
   runtimeSessions?: Record<string, string>;
   status?: "idle" | "streaming" | "error";
   messages: ConversationMessage[];
+  messagesLoaded?: boolean;
+  messageCount?: number;
+  unreadCount?: number;
+  lastMessage?: ConversationMessage;
   updatedAt: string;
   pinned?: boolean;
   /**
@@ -634,10 +650,18 @@ export type Conversation = {
   backgroundIssue?: ConversationBackgroundIssue;
 };
 
+export type ConversationSummary = Omit<Conversation, "messages"> & {
+  messagesLoaded: false;
+  messageCount: number;
+  unreadCount: number;
+  lastMessage?: ConversationMessage;
+};
+
 export type GoalBreakdownDraft = {
   goalTitle: string;
   summary?: string;
   deadline?: string;
+  topicLoop?: TriggerSpec;
   goalAnalysis?: GoalAnalysis;
   collectedInfoSummary?: CollectedInfoSummary;
   assumptions?: string[];
@@ -651,6 +675,7 @@ export type GoalBreakdownDraft = {
     title: string;
     description?: string;
     reviewInterval?: string;
+    reviewTrigger?: TriggerSpec;
     terminationCondition?: string;
     why?: string;
     priority?: TaskPriority;
@@ -664,6 +689,8 @@ export type GoalBreakdownDraft = {
       expectedOutcome: string;
       taskType: Task["taskType"];
       triggerRule: string;
+      triggerSpec?: TriggerSpec;
+      trigger?: TriggerSpec;
       executionKind: ExecutionKind;
       resultViewKind?: TaskResultViewKind;
       executionStrategy?: TaskExecutionStrategy;

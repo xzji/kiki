@@ -328,7 +328,7 @@ function ConversationListItem({
 }) {
   const router = useRouter();
   const unread = getConversationUnreadCount(conversation);
-  const latest = conversation.messages[conversation.messages.length - 1];
+  const latest = conversation.lastMessage ?? conversation.messages[conversation.messages.length - 1];
   const [menuOpen, setMenuOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(conversation.title);

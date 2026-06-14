@@ -21,7 +21,6 @@ import {
 import { appendInboxMessage } from "@/lib/server/repositories/inboxRepository";
 import { appendThreadMessage } from "@/lib/server/repositories/conversationMessagesRepository";
 import { createAgentRun } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
-import { appendAgentEvent } from "@/lib/server/repositories/agentRuntime/agentEventsRepository";
 import { dispatchTaskFromThread } from "@/lib/server/services/dispatchTaskFromThread";
 import {
   cancelTaskFromThread,
@@ -29,6 +28,10 @@ import {
 } from "@/lib/server/services/dispatchTaskFromThread";
 import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { goalsSnapshotThreadTaskView } from "@/lib/server/services/threadTaskView";
+import {
+  recordEntity as recordLoopEntity,
+  type LoopTickPhase,
+} from "@/lib/server/observability/loopTickLog";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type {
   CollectActiveThreadsCallback,
@@ -119,6 +122,7 @@ export const persistThreadPatch: PersistThreadPatchCallback = async ({ thread, r
     updateThread(
       thread.id,
       {
+        loopInterval: result.patch.loopInterval,
         status: result.patch.status,
         lastTickAt: result.patch.lastTickAt,
         nextTickAt: result.patch.nextTickAt,
@@ -138,7 +142,7 @@ export const persistThreadPatch: PersistThreadPatchCallback = async ({ thread, r
 };
 
 // ---------------------------------------------------------------------------
-// 5. recordTickOutcome — 写 thread.tick.completed / dispatch_partial_failure / failed
+// 5. recordTickOutcome — 写 loop.thread.tick.* + legacy thread.tick.* 双写
 // ---------------------------------------------------------------------------
 export const recordTickOutcome: RecordTickOutcomeCallback = async ({
   topic,
@@ -146,54 +150,51 @@ export const recordTickOutcome: RecordTickOutcomeCallback = async ({
   agentRunId,
   result,
   dispatch,
+  startedAt,
+  finishedAt,
+  durationMs,
 }) => {
-  // 决策结论以 inline payload 写入 agent_events；避免 ≤8KB 限制，仅记摘要。
-  if (result.ok) {
-    const partial = dispatch && dispatch.errors.length > 0;
-    appendAgentEvent({
-      agentRunId,
-      type: partial ? "error" : "decision",
-      payloadJson: JSON.stringify({
-        kind: partial ? "thread.tick.dispatch_partial_failure" : "thread.tick.completed",
-        dispatchedTaskCount: dispatch?.dispatchedTasks.length ?? 0,
-        updatedTaskCount: dispatch?.updatedTasks.length ?? 0,
-        cancelledTaskCount: dispatch?.cancelledTasks.length ?? 0,
-        sentMessageCount: dispatch?.sentMessages.length ?? 0,
-        silentCount: dispatch?.silentReasons.length ?? 0,
-        failureCount: result.patch.failureCount,
-      }),
+  let phase: LoopTickPhase;
+  if (!result.ok) phase = "failed";
+  else if (dispatch && dispatch.errors.length > 0) phase = "dispatch_partial_failure";
+  else phase = "completed";
+
+  recordLoopEntity({
+    kind: "thread",
+    entityId: thread.id,
+    parentId: topic.id,
+    agentRunId,
+    startedAt,
+    finishedAt,
+    durationMs,
+    ok: result.ok,
+    phase,
+    failureReason: result.ok
+      ? dispatch && dispatch.errors.length > 0
+        ? `dispatch_partial_failure(${dispatch.errors.length})`
+        : undefined
+      : result.error.kind,
+    errorKind: result.ok ? undefined : result.error.kind,
+    dispatchedTaskCount: dispatch?.dispatchedTasks.length ?? 0,
+    updatedTaskCount: dispatch?.updatedTasks.length ?? 0,
+    cancelledTaskCount: dispatch?.cancelledTasks.length ?? 0,
+    sentMessageCount: dispatch?.sentMessages.length ?? 0,
+    silentCount: dispatch?.silentReasons.length ?? 0,
+    assessment: result.ok ? result.output.assessment : undefined,
+    confidence: result.ok ? result.output.confidence : undefined,
+    pauseReason: !result.ok && result.pauseReason === "failure_threshold" ? "failure_threshold" : undefined,
+    failureCount: result.patch.failureCount,
+  });
+
+  if (!result.ok && result.pauseReason === "failure_threshold") {
+    appendInboxMessage({
+      topicId: topic.id,
+      threadId: thread.id,
+      text: `线程「${thread.title}」连续失败 ${result.patch.failureCount} 次，已自动暂停。`,
+      severity: "warning",
+      source: "thread_paused",
+      traceId: `thread-paused:${agentRunId}`,
     });
-  } else {
-    appendAgentEvent({
-      agentRunId,
-      type: "error",
-      payloadJson: JSON.stringify({
-        kind: "thread.tick.failed",
-        errorKind: result.error.kind,
-        failureCount: result.patch.failureCount,
-        pauseReason: result.pauseReason,
-      }),
-    });
-    if (result.pauseReason === "failure_threshold") {
-      appendAgentEvent({
-        agentRunId,
-        type: "thread_paused",
-        payloadJson: JSON.stringify({
-          kind: "thread.paused.failure_threshold",
-          topicId: topic.id,
-          threadId: thread.id,
-          failureCount: result.patch.failureCount,
-        }),
-      });
-      appendInboxMessage({
-        topicId: topic.id,
-        threadId: thread.id,
-        text: `线程「${thread.title}」连续失败 ${result.patch.failureCount} 次，已自动暂停。`,
-        severity: "warning",
-        source: "thread_paused",
-        traceId: `thread-paused:${agentRunId}`,
-      });
-    }
   }
 };
 

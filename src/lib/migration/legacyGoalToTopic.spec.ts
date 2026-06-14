@@ -114,6 +114,33 @@ export function runLegacyGoalToTopicSpecs() {
   assert.equal(topicNoDeadline.threads[0].id, "sg-1");
   assert.equal(topicNoDeadline.status, "active");
   assert.equal(topicNoDeadline.revision, 0);
+  assert.deepEqual(topicNoDeadline.loop, { kind: "daily" });
+  assert.equal(topicNoDeadline.phase, "idle");
+  assert.equal(topicNoDeadline.lastTickAt, undefined);
+  assert.equal(topicNoDeadline.nextTickAt, undefined);
+  assert.equal(topicNoDeadline.silentCount, 0);
+  assert.equal(topicNoDeadline.failureCount, 0);
+
+  const goalWithTopicLoop = makeGoal({
+    id: "g-topic-loop",
+    title: "Topic loop",
+    topicLoop: { kind: "cron", expr: "0 9 * * *", timezone: "Asia/Shanghai" },
+    topicPhase: "failed",
+    topicLastTickAt: "2026-06-01T01:00:00.000Z",
+    topicNextTickAt: "2026-06-02T01:00:00.000Z",
+    topicSilentCount: 2,
+    topicFailureCount: 3,
+    topicRevision: 8,
+  });
+  const topicWithLoop = legacyGoalToTopic({ goal: goalWithTopicLoop });
+  assert.deepEqual(topicWithLoop.loop, { kind: "cron", expr: "0 9 * * *", timezone: "Asia/Shanghai" });
+  assert.equal(topicWithLoop.phase, "failed");
+  assert.equal(topicWithLoop.lastTickAt, "2026-06-01T01:00:00.000Z");
+  assert.equal(topicWithLoop.nextTickAt, "2026-06-02T01:00:00.000Z");
+  assert.equal(topicWithLoop.updatedAt, "2026-06-01T01:00:00.000Z");
+  assert.equal(topicWithLoop.silentCount, 2);
+  assert.equal(topicWithLoop.failureCount, 3);
+  assert.equal(topicWithLoop.revision, 8);
 
   assert.equal(
     legacyGoalToTopic({ goal: makeGoal({ id: "g-plan", title: "待确认", workflow: makeWorkflow("presenting_plan") }) }).status,

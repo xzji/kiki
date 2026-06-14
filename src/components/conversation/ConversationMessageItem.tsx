@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
+import { InlineCliProcessTimeline } from "@/components/conversation/InlineCliProcessTimeline";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { ArtifactRenderer } from "@/components/execution/ArtifactRenderer";
 import { formatMessageTime } from "@/lib/date";
@@ -217,6 +218,10 @@ export function ConversationMessageItem({
           <div className="mt-2 max-w-3xl">
             <ArtifactRenderer refs={message.artifactRefs} hasInteractiveSurface />
           </div>
+        ) : null}
+
+        {(message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess?.events.length ? (
+          <InlineCliProcessTimeline process={message.cliProcess} />
         ) : null}
 
         {sagaRequestId && (message.status === "streaming" || saga) ? (

@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 16;
+export const KIKI_DB_SCHEMA_VERSION = 19;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -324,6 +324,81 @@ CREATE INDEX IF NOT EXISTS idx_task_notification_states_delivery
 
 CREATE INDEX IF NOT EXISTS idx_task_notification_states_goal
   ON task_notification_states(goal_id, task_id);
+
+CREATE TABLE IF NOT EXISTS governance_event_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  topic_id TEXT,
+  thread_id TEXT,
+  task_id TEXT,
+  instance_id TEXT,
+  payload_json TEXT NOT NULL,
+  idempotency_key TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_pending
+  ON governance_event_outbox(id);
+
+CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_thread
+  ON governance_event_outbox(thread_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_topic
+  ON governance_event_outbox(topic_id, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_event_outbox_idem
+  ON governance_event_outbox(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS governance_event_outbox_consumption (
+  event_id TEXT NOT NULL,
+  consumer TEXT NOT NULL,
+  consumed_at TEXT NOT NULL,
+  PRIMARY KEY (event_id, consumer)
+);
+
+CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_consumption_consumer
+  ON governance_event_outbox_consumption(consumer, consumed_at);
+
+CREATE TABLE IF NOT EXISTS governance_tick_jobs (
+  id TEXT PRIMARY KEY,
+  target_kind TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  thread_id TEXT,
+  user_id TEXT NOT NULL DEFAULT 'local-user',
+  status TEXT NOT NULL,
+  base_revision INTEGER NOT NULL,
+  request_id TEXT,
+  machine_id TEXT,
+  payload_json TEXT NOT NULL,
+  outcome_json TEXT,
+  lease_owner TEXT,
+  lease_token TEXT,
+  lease_expires_at TEXT,
+  available_at TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  idempotency_key TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  leased_at TEXT,
+  finished_at TEXT,
+  last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_governance_tick_jobs_status_available
+  ON governance_tick_jobs(status, available_at, lease_expires_at, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_governance_tick_jobs_topic
+  ON governance_tick_jobs(topic_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_governance_tick_jobs_thread
+  ON governance_tick_jobs(thread_id, status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_tick_jobs_idem
+  ON governance_tick_jobs(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 `;
 
 export const KIKI_DB_MIGRATIONS: Array<{
@@ -724,6 +799,89 @@ export const KIKI_DB_MIGRATIONS: Array<{
     version: 17,
     sql: `
       ALTER TABLE conversations ADD COLUMN runtime_sessions_json TEXT;
+    `,
+  },
+  {
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS governance_event_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        event_type TEXT NOT NULL,
+        source TEXT NOT NULL,
+        topic_id TEXT,
+        thread_id TEXT,
+        task_id TEXT,
+        instance_id TEXT,
+        payload_json TEXT NOT NULL,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_pending
+        ON governance_event_outbox(id);
+
+      CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_thread
+        ON governance_event_outbox(thread_id, id);
+
+      CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_topic
+        ON governance_event_outbox(topic_id, id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_event_outbox_idem
+        ON governance_event_outbox(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS governance_event_outbox_consumption (
+        event_id TEXT NOT NULL,
+        consumer TEXT NOT NULL,
+        consumed_at TEXT NOT NULL,
+        PRIMARY KEY (event_id, consumer)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_governance_event_outbox_consumption_consumer
+        ON governance_event_outbox_consumption(consumer, consumed_at);
+    `,
+  },
+  {
+    version: 19,
+    sql: `
+      CREATE TABLE IF NOT EXISTS governance_tick_jobs (
+        id TEXT PRIMARY KEY,
+        target_kind TEXT NOT NULL,
+        topic_id TEXT NOT NULL,
+        thread_id TEXT,
+        user_id TEXT NOT NULL DEFAULT 'local-user',
+        status TEXT NOT NULL,
+        base_revision INTEGER NOT NULL,
+        request_id TEXT,
+        machine_id TEXT,
+        payload_json TEXT NOT NULL,
+        outcome_json TEXT,
+        lease_owner TEXT,
+        lease_token TEXT,
+        lease_expires_at TEXT,
+        available_at TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        leased_at TEXT,
+        finished_at TEXT,
+        last_error TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_governance_tick_jobs_status_available
+        ON governance_tick_jobs(status, available_at, lease_expires_at, updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_governance_tick_jobs_topic
+        ON governance_tick_jobs(topic_id, status);
+
+      CREATE INDEX IF NOT EXISTS idx_governance_tick_jobs_thread
+        ON governance_tick_jobs(thread_id, status);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_tick_jobs_idem
+        ON governance_tick_jobs(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
     `,
   },
 ];

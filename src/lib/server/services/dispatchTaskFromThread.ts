@@ -146,6 +146,7 @@ function buildTaskCommandInput(draft: TaskDraft, taskSpec?: TaskSpec) {
     expectedOutcome: draft.deliverable || description || draft.title,
     taskType: timing.taskType,
     triggerRule: timing.triggerRule,
+    trigger: draft.triggerSpec,
     executionKind: normalizeExecutionKind(undefined),
     taskSpec,
   };

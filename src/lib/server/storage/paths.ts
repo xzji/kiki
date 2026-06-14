@@ -5,7 +5,8 @@ import path from "path";
 import { getCurrentUserId } from "@/lib/server/context/userContext";
 
 const DATA_DIR_ENV = "KIKI_DATA_DIR";
-const RUNTIME_HOME_DIR = path.join(os.homedir(), ".kiki", "runtime");
+const RUNTIME_HOME_ENV = "KIKI_RUNTIME_HOME";
+const DEFAULT_RUNTIME_HOME_DIR = path.join(os.homedir(), ".kiki", "runtime");
 
 function ensureDir(dirPath: string) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -61,7 +62,8 @@ export function getTelemetryFilePath() {
 }
 
 export function getRuntimeHomeDir() {
-  return ensureDir(RUNTIME_HOME_DIR);
+  const configured = process.env[RUNTIME_HOME_ENV]?.trim();
+  return ensureDir(configured ? path.resolve(configured) : DEFAULT_RUNTIME_HOME_DIR);
 }
 
 export function getRuntimeLogsDir() {

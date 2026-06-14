@@ -37,7 +37,7 @@ function writeEntry(entry: RecordEntry) {
   }
 }
 
-export function recordTickSummary(namespace: SchedulingNamespace, summary: TickSummary) {
+export function recordTickSummary(namespace: SchedulingNamespace | string, summary: TickSummary) {
   writeEntry({
     ts: new Date().toISOString(),
     namespace,
@@ -47,7 +47,7 @@ export function recordTickSummary(namespace: SchedulingNamespace, summary: TickS
 }
 
 export function recordTickEvent(
-  namespace: SchedulingNamespace,
+  namespace: SchedulingNamespace | string,
   event: string,
   payload: Record<string, unknown> = {},
 ) {

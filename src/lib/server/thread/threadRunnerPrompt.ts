@@ -3,7 +3,7 @@
  *
  * 设计要点：
  *  - 单 prompt 实现（决策 A4），不拆 4 次 LLM 调用。
- *  - 决策层 prompt：仅返回 `{ actions, memoryDelta? }` JSON；
+ *  - 决策层 prompt：仅返回 `{ assessment, confidence, actions, memoryDelta? }` JSON；
  *    展示层 fire-and-forget 由 ThreadRunner 在 post_message.text > 500 字时
  *    异步触发，与本文件无关。
  *  - 8 条必备约束写进 system instruction（必须以 substring 形式可被
@@ -25,6 +25,8 @@ export type ThreadRunnerDecisionPromptInput = {
   threadMemory: Record<string, unknown>;
   /** 上一轮 tick 的输出，用于让模型判断是否需要继续推进。 */
   lastTickOutput?: ThreadTickOutput;
+  /** 当前时刻；由 caller 注入，避免 prompt builder 内部读取 Date.now()。 */
+  now: Date;
 };
 
 const RECENT_INSTANCES_LIMIT = 12;
@@ -88,6 +90,9 @@ function summarizeMemory(memory: Record<string, unknown>): string {
 function summarizeLastTickOutput(output?: ThreadTickOutput): string {
   if (!output) return "（无）";
   const actionList = Array.isArray(output.actions) ? output.actions : [];
+  const assessment = output.assessment
+    ? `assessment(${output.confidence}: ${clip(output.assessment, 80)}); `
+    : "";
   const actions = actionList
     .map((a) => {
       switch (a.kind) {
@@ -106,7 +111,12 @@ function summarizeLastTickOutput(output?: ThreadTickOutput): string {
       }
     })
     .join("; ");
-  return clip(actions || "（无动作）", SUMMARY_TEXT_LIMIT);
+  return clip(`${assessment}${actions || "（无动作）"}`, SUMMARY_TEXT_LIMIT);
+}
+
+function formatContextTime(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "未知";
+  return `${date.toISOString()} (local=${date.toLocaleString("zh-CN", { hour12: false })})`;
 }
 
 /**
@@ -124,7 +134,7 @@ function summarizeLastTickOutput(output?: ThreadTickOutput): string {
  *  9. "failureReason" + "禁止猜测"
  */
 export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromptInput): string {
-  const { topic, thread, currentTasks = [], recentTaskInstances, threadMemory, lastTickOutput } = input;
+  const { topic, thread, currentTasks = [], recentTaskInstances, threadMemory, lastTickOutput, now } = input;
 
   const currentTaskList = currentTasks
     .slice(0, CURRENT_TASKS_LIMIT)
@@ -139,9 +149,10 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
   return [
     "你是 ThreadRunner，负责治理当前 Thread 板块下的 Task 集合。",
     "你不直接执行 Task；你只决定本板块应该有哪些 Task、是否要调整 Task 配置，以及是否发板块小结。",
+    "Task 是否 due、是否创建 instance、是否投递 Runtime 属于 TaskScheduling 层；你不能接管这些执行调度职责。",
     "",
     "# 必备约束（不可违反）",
-    "1. 决策/展示层拆分：仅返回 { actions, memoryDelta? } 单 JSON 对象，禁止 markdown 解释。",
+    "1. 决策/展示层拆分：仅返回 { assessment, confidence, actions, memoryDelta? } 单 JSON 对象，禁止 markdown 解释。",
     "2. 数据源仅来自 ① Thread memory ② 上次 tick 产出 ③ 当前 Task 列表 ④ 最近 7 天 Task instances，不接外部源。",
     "3. 输出 6 类动作可叠加：dispatch_task / update_task / cancel_task / archive_thread / post_message / silent；仅当无结构性动作与 post_message 时才允许 silent。",
     "4. 判断规则：能在本次 tick 一段话讲完的 → post_message；现有 Task 无法覆盖的新关注点 → dispatch_task；既有 Task 目标/频率/触发条件需变化 → update_task；关注点消失或已永久完成 → cancel_task；Thread 已满足 terminationCondition → archive_thread。",
@@ -150,11 +161,18 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
     `7. 所有 post_message / dispatch_task / update_task / cancel_task / archive_thread 必须填 threadId="${thread.id}"，只能治理当前 Thread，禁止跨 Thread。`,
     "8. 整体 payload ≤ 8KB 硬约束；超长请压缩或拆分到下一次 tick。",
     "9. 当 post_message / dispatch_task / update_task / cancel_task 引用失败或 error 的 Task instance 时，必须包含上下文中的 failureReason；如果 failureReason=失败原因未记录，只能如实说明“失败原因未记录”，禁止猜测外部数据源、配置、权限等原因。",
+    "10. assessment ≤120 字，必须给出 actions 的关键依据；actions 不能从 assessment 推出时必须删除。",
+    "11. confidence 只能为 high / medium / low：high=证据充分；medium=允许 dispatch/update/post_message，但 archive/cancel 必须有强证据；low=禁止 archive_thread/cancel_task/dispatch_task，只允许 post_message 或 silent。",
+    "12. 高风险动作硬约束：archive_thread 必须引用 terminationCondition 并列出 taskId/instanceId/结果证据；cancel_task 必须说明关注点永久消失、已完成无需继续或被明确 taskId 替代；dispatch_task 前必须确认 currentTasks 无相近 title/objective 的活跃 Task，否则改用 update_task。",
     "",
     "# 上下文",
+    `现在: ${formatContextTime(now)}`,
+    `上次 tick: ${thread.lastTickAt ?? "（无）"}`,
+    `下次 tick: ${thread.nextTickAt ?? "（无）"}`,
+    `Thread 创建: ${thread.createdAt}`,
     `Topic: ${clip(topic.title, 80)} (status=${topic.status})`,
     `Thread: ${clip(thread.title, 80)} (intent=${clip(thread.intent, 120)}, reviewInterval=${
-      typeof thread.loopInterval === "string" ? thread.loopInterval : `cron:${thread.loopInterval.expr}`
+      typeof thread.loopInterval === "string" ? thread.loopInterval : JSON.stringify(thread.loopInterval)
     }, terminationCondition=${clip(thread.terminationCondition ?? "（无）", 80)}, status=${thread.status})`,
     `Thread memory: ${summarizeMemory(threadMemory)}`,
     `上次 tick 产出: ${summarizeLastTickOutput(lastTickOutput)}`,
@@ -166,7 +184,7 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
     recentList,
     "",
     "# 输出格式",
-    '{ "actions": [...], "memoryDelta"?: {...} }',
+    '{ "assessment": "≤120字，说明关键依据", "confidence": "high|medium|low", "actions": [...], "memoryDelta"?: {...} }',
     "",
     "# action JSON 形状",
     `post_message: { "kind": "post_message", "threadId": "${thread.id}", "text": "≤500字", "severity": "info|warning|important" }`,

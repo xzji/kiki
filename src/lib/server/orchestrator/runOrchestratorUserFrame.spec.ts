@@ -9,6 +9,14 @@ import {
   upsertRuntimeEnvironmentsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
 import { runOrchestratorUserFrame } from "@/lib/server/orchestrator/runOrchestratorUserFrame";
+import {
+  listUsersForOrchestratorTick,
+  listUsersWithPendingWork,
+} from "@/lib/server/orchestrator/listUsersWithPendingWork";
+import { runWithUserContext } from "@/lib/server/context/userContext";
+import { getRegistryDatabase } from "@/lib/server/db/registryClient";
+import { appendGovernanceEvent } from "@/lib/server/repositories/governanceEventOutboxRepository";
+import { createGovernanceTickJob } from "@/lib/server/repositories/governanceTickJobsRepository";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { OrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import type { Goal } from "@/types/kiki";
@@ -95,6 +103,19 @@ function config(): OrchestratorConfig {
   };
 }
 
+function upsertActiveRegistryUser(userId: string) {
+  const now = new Date().toISOString();
+  getRegistryDatabase()
+    .prepare(
+      `
+        INSERT INTO users (id, email, password_hash, password_salt, display_name, status, created_at, updated_at)
+        VALUES (?, ?, 'hash', 'salt', ?, 'active', ?, ?)
+        ON CONFLICT(id) DO UPDATE SET status = 'active', updated_at = excluded.updated_at
+      `,
+    )
+    .run(userId, `${userId}@example.test`, userId, now, now);
+}
+
 export async function runOrchestratorUserFrameSpecs() {
   ensureIsolatedPlanningSpecDataDir();
   const previousMode = process.env.KIKI_ORCHESTRATOR_MODE;
@@ -129,6 +150,57 @@ export async function runOrchestratorUserFrameSpecs() {
     } else {
       process.env.KIKI_ORCHESTRATOR_MODE = previousMode;
     }
+  }
+
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    const governanceJobUserId = "candidate-governance-job-user";
+    const governanceEventUserId = "candidate-governance-event-user";
+    upsertActiveRegistryUser(governanceJobUserId);
+    upsertActiveRegistryUser(governanceEventUserId);
+
+    runWithUserContext(governanceJobUserId, () => {
+      createGovernanceTickJob({
+        targetKind: "thread",
+        topicId: "goal-candidate-governance-job",
+        threadId: "thread-candidate-governance-job",
+        baseRevision: 0,
+        payload: {
+          targetKind: "thread",
+          topicId: "goal-candidate-governance-job",
+          threadId: "thread-candidate-governance-job",
+          baseRevision: 0,
+          snapshot: {},
+        },
+        idempotencyKey: "candidate-governance-job",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        availableAt: "2026-06-12T00:00:00.000Z",
+      });
+    });
+    runWithUserContext(governanceEventUserId, () => {
+      appendGovernanceEvent({
+        eventType: "task_completed",
+        source: "task_completed",
+        topicId: "goal-candidate-governance-event",
+        threadId: "thread-candidate-governance-event",
+        idempotencyKey: "candidate-governance-event",
+      });
+    });
+
+    const candidates = listUsersForOrchestratorTick();
+    const pending = listUsersWithPendingWork();
+    const governanceJobCandidate = candidates.find((candidate) => candidate.userId === governanceJobUserId);
+    const governanceEventCandidate = candidates.find((candidate) => candidate.userId === governanceEventUserId);
+    assert.ok(governanceJobCandidate, "pending governance jobs make a user an orchestrator candidate");
+    assert.ok(governanceEventCandidate, "unconsumed governance outbox makes a user an orchestrator candidate");
+    assert.ok(
+      pending.some((candidate) => candidate.userId === governanceJobUserId),
+      "pending governance jobs count as pending work",
+    );
+    assert.ok(
+      pending.some((candidate) => candidate.userId === governanceEventUserId),
+      "unconsumed governance outbox counts as pending work",
+    );
   }
 
   console.log("runOrchestratorUserFrame specs passed");

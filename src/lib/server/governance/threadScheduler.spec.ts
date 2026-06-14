@@ -52,13 +52,21 @@ export function runThreadSchedulerSpecs() {
     );
   }
 
-  // ---------- cron 透传 ----------
+  // ---------- cron ----------
   {
     const verdict = isThreadDue(
-      makeThread({ loopInterval: { kind: "cron", expr: "0 8 * * *" } }),
+      makeThread({ loopInterval: { kind: "cron", expr: "0 8 * * *", timezone: "UTC" } }),
       NOW,
     );
-    assert.equal(verdict?.reason, "cron_passthrough");
+    assert.equal(verdict?.reason, "cron_due");
+  }
+
+  // ---------- event-only 无事件 nextTickAt 时不 due ----------
+  {
+    assert.equal(
+      isThreadDue(makeThread({ loopInterval: { kind: "event", sources: ["task_completed"] } }), NOW),
+      null,
+    );
   }
 
   // ---------- 显式 nextTickAt 在过去：due ----------
@@ -108,6 +116,74 @@ export function runThreadSchedulerSpecs() {
   {
     const verdict = isThreadDue(makeThread({ nextTickAt: "not-a-date", lastTickAt: undefined }), NOW);
     assert.equal(verdict?.reason, "first_tick", "损坏字符串应回落到 first_tick 路径");
+  }
+
+  // ---------- phased 美股窗口二次校验 ----------
+  {
+    const marketLoop = {
+      kind: "phased" as const,
+      timezone: "America/New_York",
+      phases: [
+        {
+          id: "market",
+          start: "09:30",
+          end: "16:00",
+          daysOfWeek: [1, 2, 3, 4, 5],
+          trigger: { kind: "interval" as const, everyMs: 900_000, value: 15, unit: "m" as const },
+        },
+      ],
+    };
+    const open = isThreadDue(
+      makeThread({
+        loopInterval: marketLoop,
+        lastTickAt: "2026-06-01T13:15:00.000Z",
+        nextTickAt: "2026-06-01T13:30:00.000Z",
+      }),
+      new Date("2026-06-01T13:30:00.000Z"),
+    );
+    assert.equal(open?.reason, "interval_due", "美东 09:30 窗口内应 due");
+    assert.equal(
+      isThreadDue(
+        makeThread({
+          loopInterval: marketLoop,
+          lastTickAt: "2026-06-01T07:45:00.000Z",
+          nextTickAt: "2026-06-01T08:00:00.000Z",
+        }),
+        new Date("2026-06-01T08:00:00.000Z"),
+      ),
+      null,
+      "美股凌晨窗口外不 due",
+    );
+    assert.equal(
+      isThreadDue(
+        makeThread({
+          loopInterval: marketLoop,
+          lastTickAt: "2026-06-06T13:15:00.000Z",
+          nextTickAt: "2026-06-06T13:30:00.000Z",
+        }),
+        new Date("2026-06-06T13:30:00.000Z"),
+      ),
+      null,
+      "周末不 due",
+    );
+  }
+
+  // ---------- composed 取最早可 due 分支 ----------
+  {
+    const verdict = isThreadDue(
+      makeThread({
+        loopInterval: {
+          kind: "composed",
+          triggers: [
+            { kind: "event", sources: ["task_completed"] },
+            { kind: "cron", expr: "0 8 * * *", timezone: "UTC" },
+          ],
+        },
+      }),
+      NOW,
+    );
+    assert.equal(verdict?.reason, "first_tick");
+    assert.equal(verdict?.scheduledAt.toISOString(), NOW.toISOString());
   }
 
   // ---------- selectDueThreads 排序 ----------

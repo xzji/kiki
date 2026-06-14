@@ -22,6 +22,7 @@ import {
   type MachineTunnelEnvelope,
 } from "@/lib/server/tunnel/machineTunnelProtocol";
 import { reconcileMachineTunnelHello } from "@/lib/server/scheduling/taskDispatcher";
+import { reconcileGovernanceTickMachineHello } from "@/lib/server/governance/governanceTickDispatcher";
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const INBOUND_WATCHDOG_MS = 70_000;
@@ -135,8 +136,13 @@ function handleEnvelope(connection: WsConnection, envelope: MachineTunnelEnvelop
       userId: connection.userId,
       runningJobIds: envelope.runningJobIds,
     });
+    reconcileGovernanceTickMachineHello({
+      machineId: connection.machineId,
+      userId: connection.userId,
+      runningGovernanceJobIds: envelope.runningGovernanceJobIds ?? [],
+    });
     appendRuntimeDaemonLog(
-      `machine ${connection.machineId} WS hello：daemon=${envelope.daemonVersion} running=${envelope.runningJobIds.length} streams=${envelope.activeStreamSessionIds.length}`,
+      `machine ${connection.machineId} WS hello：daemon=${envelope.daemonVersion} running=${envelope.runningJobIds.length} governanceRunning=${envelope.runningGovernanceJobIds?.length ?? 0} streams=${envelope.activeStreamSessionIds.length}`,
     );
     return;
   }

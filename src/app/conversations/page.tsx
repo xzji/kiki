@@ -29,7 +29,7 @@ export default function ConversationListPage() {
       ) : (
         <ul className="space-y-2">
           {sorted.map((conv) => {
-            const latest = conv.messages[conv.messages.length - 1];
+            const latest = conv.lastMessage ?? conv.messages[conv.messages.length - 1];
             return (
               <li key={conv.id}>
                 <Link

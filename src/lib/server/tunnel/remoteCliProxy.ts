@@ -7,8 +7,8 @@ import type {
 import { getCurrentUserId } from "@/lib/server/context/userContext";
 import { pickOnlineMachineIdForUser } from "@/lib/server/tunnel/remoteRuntimeProxy";
 import {
-  closeStreamSession,
   consumeStreamSession,
+  detachStreamConsumer,
   openStreamSession,
 } from "@/lib/server/tunnel/machineStreamHub";
 import { getTunnelHub } from "@/lib/server/tunnel/tunnelHub";
@@ -34,13 +34,17 @@ type PromptJsonProxyInput = {
 
 type PromptTextProxyInput = PromptJsonProxyInput;
 
-function resolveMachineId() {
+function resolveMachine() {
   const userId = getCurrentUserId();
   const machineId = pickOnlineMachineIdForUser(userId);
   if (!machineId) {
     throw new Error("请先连接本机电脑并保持在线，再使用本地 Runtime");
   }
-  return machineId;
+  return { machineId, userId };
+}
+
+function resolveMachineId() {
+  return resolveMachine().machineId;
 }
 
 export async function proxyRunPromptJson(input: PromptJsonProxyInput): Promise<ClaudePromptJsonResult> {
@@ -54,9 +58,16 @@ export async function proxyRunPromptText(input: PromptTextProxyInput): Promise<C
 }
 
 export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
-  const machineId = resolveMachineId();
+  const { machineId, userId } = resolveMachine();
   const sessionId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  openStreamSession(sessionId);
+  openStreamSession(sessionId, {
+    userId,
+    conversationId: options.conversationId,
+    assistantMessageId: options.assistantMessageId,
+    assistantCreatedAt: options.assistantCreatedAt,
+    runtimeKind: options.runtimeKind,
+    startedAt: new Date().toISOString(),
+  });
   try {
     getTunnelHub().sendStreamPrompt({
       machineId,
@@ -79,7 +90,7 @@ export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
     });
     await consumeStreamSession(sessionId, (event) => options.onEvent(event), options.signal);
   } finally {
-    closeStreamSession(sessionId);
+    detachStreamConsumer(sessionId);
   }
 }
 

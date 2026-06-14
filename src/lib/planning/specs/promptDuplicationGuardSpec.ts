@@ -185,6 +185,10 @@ export function runPromptDuplicationGuardSpecs() {
     id: "topic-runner-spec",
     title: "美股投资监控",
     summary: "持续追踪 NVDA / AMD 大盘热点",
+    loop: { kind: "weekly" },
+    phase: "idle",
+    silentCount: 0,
+    failureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-05-30T00:00:00.000Z",
@@ -210,6 +214,7 @@ export function runPromptDuplicationGuardSpecs() {
     thread: threadRunnerThread,
     recentTaskInstances: [],
     threadMemory: threadRunnerThread.memory,
+    now: new Date("2026-06-01T08:00:00.000Z"),
   });
 
   const REQUIRED_KEYWORDS: Array<{ key: string; rule: string }> = [
@@ -233,6 +238,9 @@ export function runPromptDuplicationGuardSpecs() {
     { key: "8KB", rule: "约束 8：payload ≤ 8KB" },
     { key: "failureReason", rule: "约束 9：失败实例必须透出 failureReason" },
     { key: "禁止猜测", rule: "约束 9：未知失败原因禁止猜测" },
+    { key: "assessment", rule: "约束 10：治理判断依据" },
+    { key: "confidence", rule: "约束 11：治理置信度" },
+    { key: "TaskScheduling", rule: "分层边界：ThreadRunner 不接管 Task 调度" },
   ];
 
   for (const { key, rule } of REQUIRED_KEYWORDS) {

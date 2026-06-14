@@ -20,6 +20,10 @@ export const NAMESPACE = {
     reconcileLease: "task.reconcile.lease",
     reconcileOwnership: "task.reconcile.ownership",
   },
+  /**
+   * @deprecated Thread tick observability 已迁到 loopTickLog（domain="loop"）。
+   * 仅保留导出避免外部测试断言断裂；新增代码不要直接使用。
+   */
   thread: {
     scheduler: "thread.scheduler",
     tick: "thread.tick",

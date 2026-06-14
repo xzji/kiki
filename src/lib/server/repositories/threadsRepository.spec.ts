@@ -15,8 +15,8 @@ import assert from "node:assert/strict";
 
 import { normalizeSubGoalId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
+import { listPendingGovernanceEvents } from "@/lib/server/repositories/governanceEventOutboxRepository";
 import { requestThreadGovernanceTick } from "@/lib/server/services/goalRuntimeService";
-import { isThreadDue } from "@/lib/server/governance/threadScheduler";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import {
   readTopicsSnapshotMeta,
@@ -57,6 +57,10 @@ function makeTopic(id: string, threads: Thread[], overrides: Partial<Topic> = {}
     id,
     title: id,
     summary: "",
+    loop: { kind: "weekly" },
+    phase: "idle",
+    silentCount: 0,
+    failureCount: 0,
     threads,
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -270,7 +274,7 @@ export async function runThreadsRepositorySpecs() {
   }
 
   // -----------------------------------------------------------------------
-  // 6. event bridge — completed task requests next Thread governance tick
+  // 6. event bridge — manual request writes durable governance outbox
   // -----------------------------------------------------------------------
   {
     const threadId = normalizeSubGoalId("thread-event");
@@ -286,9 +290,15 @@ export async function runThreadsRepositorySpecs() {
 
     assert.equal(requestThreadGovernanceTick(threadId, now), true);
     const updated = findThreadById(threadId);
-    assert.equal(updated?.nextTickAt, now.toISOString());
-    const verdict = updated ? isThreadDue(updated, now) : null;
-    assert.equal(verdict?.reason, "event_triggered");
+    assert.equal(updated?.nextTickAt, "2026-06-02T07:00:00.000Z", "request does not mutate thread directly");
+    const pending = listPendingGovernanceEvents({
+      consumer: "thread-event-bridge",
+      eventTypes: ["thread_governance_tick_requested"],
+      limit: 10,
+    });
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]?.threadId, threadId);
+    assert.equal(pending[0]?.createdAt, now.toISOString());
   }
 
   // -----------------------------------------------------------------------

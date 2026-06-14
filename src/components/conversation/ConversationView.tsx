@@ -13,6 +13,7 @@ import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
 import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { MemoryEditor } from "@/components/memory/MemoryEditor";
 import { streamClaudeChat } from "@/lib/api/claude";
+import { fetchConversationMessages } from "@/lib/api/conversation-commands";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { activateEnvironmentCommand } from "@/lib/api/runtime-environment-commands";
 import { generateTopicSagaPlan, TopicSagaPlanError } from "@/lib/api/topics";
@@ -292,6 +293,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const conversationsHydrated = useConversationStore((state) => state.conversationsHydrated);
   const appendMessage = useConversationStore((state) => state.appendMessage);
   const updateMessage = useConversationStore((state) => state.updateMessage);
+  const hydrateConversationMessages = useConversationStore((state) => state.hydrateConversationMessages);
   const markConversationRead = useConversationStore((state) => state.markConversationRead);
   const deleteMessage = useConversationStore((state) => state.deleteMessage);
   const setConversationRuntimeEnv = useConversationStore((state) => state.setConversationRuntimeEnv);
@@ -343,19 +345,60 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const firstUnreadMarkerRef = useRef<HTMLDivElement>(null);
   const initializedConversationRef = useRef<string | null>(null);
+  const messagesLoadingConversationIdRef = useRef<string | null>(null);
   const applyingGovernanceRef = useRef<Set<string>>(new Set());
   const [entryUnreadIds, setEntryUnreadIds] = useState<string[]>([]);
   const [showUnreadJump, setShowUnreadJump] = useState(false);
   const [hasLocalActiveStream, setHasLocalActiveStream] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesLoadError, setMessagesLoadError] = useState<{ conversationId: string; message: string } | null>(null);
   const resultMessageIdFromQuery = searchParams?.get("resultMessageId") ?? null;
   const refreshGoalsFromSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
     applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
   };
+  const activeConversationId = conversation?.id;
+  const activeMessagesLoaded = conversation?.messagesLoaded;
+
+  useEffect(() => {
+    if (!activeConversationId || activeMessagesLoaded === true) return;
+    if (messagesLoadError?.conversationId === activeConversationId) return;
+    if (messagesLoadingConversationIdRef.current === activeConversationId) return;
+    let cancelled = false;
+    const conversationId = activeConversationId;
+    messagesLoadingConversationIdRef.current = conversationId;
+    setMessagesLoading(true);
+    setMessagesLoadError(null);
+    fetchConversationMessages(conversationId, 0, 200)
+      .then((messages) => {
+        if (cancelled) return;
+        if (messagesLoadingConversationIdRef.current === conversationId) {
+          messagesLoadingConversationIdRef.current = null;
+        }
+        setMessagesLoading(false);
+        hydrateConversationMessages(conversationId, messages, { mode: "replace" });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (messagesLoadingConversationIdRef.current === conversationId) {
+          messagesLoadingConversationIdRef.current = null;
+        }
+        setMessagesLoading(false);
+        setMessagesLoadError({ conversationId, message: getErrorMessage(error, "读取会话消息失败") });
+      });
+    return () => {
+      cancelled = true;
+      if (messagesLoadingConversationIdRef.current === conversationId) {
+        messagesLoadingConversationIdRef.current = null;
+        setMessagesLoading(false);
+      }
+    };
+  }, [activeConversationId, activeMessagesLoaded, hydrateConversationMessages, messagesLoadError?.conversationId]);
 
   // 进入会话标记为已读
   useEffect(() => {
     if (!conversation) return;
+    if (conversation.messagesLoaded === false) return;
     if (initializedConversationRef.current === conversation.id) return;
     initializedConversationRef.current = conversation.id;
 
@@ -1931,41 +1974,14 @@ export function ConversationView({ conversationId }: { conversationId: string })
         title: string,
         text: string,
       ) => {
-        const eventId = `${assistantId}-${type}`;
-        updateAssistantCliProcess((process) => {
-          const existing = process.events.find((event) => event.id === eventId);
-          if (!existing) {
-            return {
-              ...process,
-              events: [
-                ...process.events,
-                {
-                  id: eventId,
-                  type,
-                  createdAt: new Date().toISOString(),
-                  title,
-                  content: text,
-                },
-              ],
-            };
-          }
-          return {
-            ...process,
-            events: process.events.map((event) =>
-              event.id === eventId
-                ? {
-                    ...event,
-                    content: `${event.content ?? ""}${text}`,
-                  }
-                : event,
-            ),
-          };
-        });
+        appendProcessEvent(type, { title, content: text });
       };
       await streamClaudeChat(
         {
           message: text,
           conversationId: conversation.id,
+          assistantMessageId: assistantId,
+          assistantCreatedAt,
           runtimeEnv: activeRuntimeEnv,
           source: "conversation",
           contextSnapshot: {
@@ -2254,7 +2270,26 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 </div>
               </div>
             ) : null}
-            {sortedMessages.length === 0 ? (
+            {messagesLoading && sortedMessages.length === 0 ? (
+              <div className="mt-20 flex items-center justify-center gap-2 text-[13px] text-[#8C9198]">
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                <span>加载会话消息中...</span>
+              </div>
+            ) : messagesLoadError?.conversationId === conversation.id && sortedMessages.length === 0 ? (
+              <div className="mt-20 max-w-md self-center rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-center text-[13px] leading-6 text-[#B42318]">
+                <div>{messagesLoadError.message}</div>
+                <button
+                  type="button"
+                  className="mt-2 font-medium underline"
+                  onClick={() => {
+                    if (!conversation) return;
+                    setMessagesLoadError(null);
+                  }}
+                >
+                  重试
+                </button>
+              </div>
+            ) : sortedMessages.length === 0 ? (
               <div className="mt-20 max-w-md self-center text-center text-[13px] text-[#8C9198]">
                 和 KiKi 聊聊你的目标或想法，输入 <span className="font-mono text-[#1F2328]">/goal</span>{" "}
                 可以进入目标规划模式。

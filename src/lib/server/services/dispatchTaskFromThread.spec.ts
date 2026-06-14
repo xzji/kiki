@@ -20,7 +20,7 @@ import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
 import type { DispatchTaskRequest } from "@/lib/server/governance/dispatchActions";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 
-import { dispatchTaskFromThread } from "./dispatchTaskFromThread";
+import { dispatchTaskFromThread, updateTaskFromThread } from "./dispatchTaskFromThread";
 
 // envelope 内 IDs 会被 normalize 为 opaque 形式 — 与 taskInstancesRepository.spec
 // 一样，先 derive 同一组稳定 ID，避免 seed 后失配。
@@ -139,7 +139,40 @@ export async function runDispatchTaskFromThreadSpecs() {
     );
   }
 
-  // 6. 传入 invoke 时生成 taskSpec；invoke 失败时不阻断创建。
+  // 6. triggerSpec 持久化为 Task.trigger，并可由 update_task 修改
+  {
+    const result = await dispatchTaskFromThread(
+      makeRequest({
+        taskDraft: makeDraft({
+          taskType: "repeat",
+          triggerSpec: { kind: "cron", expr: "*/15 * * * *", timezone: "America/New_York" },
+        }),
+      }),
+      { idempotencyKey: "dispatch-trigger-spec" },
+    );
+    let task = readGoalsSnapshot([])[0]?.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((candidate) => candidate.id === result.taskId);
+    assert.deepEqual(task?.trigger, { kind: "cron", expr: "*/15 * * * *", timezone: "America/New_York" });
+    assert.ok(task, "created triggerSpec task exists");
+    await updateTaskFromThread(
+      {
+        topicId: TOPIC_ID,
+        threadId: THREAD_ID,
+        taskId: result.taskId,
+        reason: "改为事件触发",
+        currentTask: task!,
+        patch: { triggerSpec: { kind: "event", sources: ["task_completed"] } },
+      },
+      { idempotencyKey: "dispatch-trigger-spec-update" },
+    );
+    task = readGoalsSnapshot([])[0]?.subGoals
+      .flatMap((subGoal) => subGoal.tasks)
+      .find((candidate) => candidate.id === result.taskId);
+    assert.deepEqual(task?.trigger, { kind: "event", sources: ["task_completed"] });
+  }
+
+  // 7. 传入 invoke 时生成 taskSpec；invoke 失败时不阻断创建。
   {
     const invoke: LlmInvoke = async () => ({
       rawText: "{}",

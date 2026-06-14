@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
+import { appendGovernanceEvent } from "@/lib/server/repositories/governanceEventOutboxRepository";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
 import { resumeBlockedTask } from "@/lib/server/taskExecution/resumeBlockedTask";
@@ -23,7 +24,7 @@ function findInstance(goals: Goal[], instanceId: string) {
     for (const subGoal of goal.subGoals) {
       for (const task of subGoal.tasks) {
         const instance = task.instances.find((entry) => entry.id === instanceId);
-        if (instance) return { goal, task, instance };
+        if (instance) return { goal, subGoal, task, instance };
       }
     }
   }
@@ -70,6 +71,21 @@ async function POSTHandler(
   if (!event) {
     return NextResponse.json({ reason: "用户响应事件写入失败" }, { status: 500 });
   }
+  appendGovernanceEvent({
+    eventType: "user_replied",
+    source: "user_reply",
+    topicId: located.goal.id,
+    threadId: located.subGoal.id,
+    taskId: located.task.id,
+    instanceId: located.instance.id,
+    idempotencyKey: createIdempotencyKey("governance.user_replied", event.eventId),
+    createdAt: event.createdAt,
+    payload: {
+      responseId,
+      responseSummary: body.responseSummary,
+      goalEventId: event.eventId,
+    },
+  });
   if (!job || !job.blocker) {
     const view = job ? buildTaskRunView({ taskInstanceId: located.instance.id, runtimeJob: job }) : null;
     return NextResponse.json({

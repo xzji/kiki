@@ -36,6 +36,12 @@ type InboxDeliveredPayload = {
   notificationId?: string;
 };
 
+export type InboxDeliveredEventsResult = {
+  items: InboxItem[];
+  deliveredEventScanCount: number;
+  goalCount: number;
+};
+
 function mapRow(row: InboxItemStateRow): InboxItemState {
   return {
     inboxItemId: row.inbox_item_id,
@@ -51,21 +57,30 @@ function buildTaskLink(goalId: string, taskId: string, instanceId: string) {
   return `/topics/${goalId}/tasks/${taskId}?view=exec&instanceId=${instanceId}`;
 }
 
-function findTaskInstance(goals: Goal[], input: { goalId: string; taskId?: string | null; instanceId?: string | null }) {
+type LocatedTaskInstance = {
+  goal: Goal;
+  task: Goal["subGoals"][number]["tasks"][number];
+  instance: Goal["subGoals"][number]["tasks"][number]["instances"][number];
+};
+
+function buildInstanceIndex(goals: Goal[]) {
+  const index = new Map<string, LocatedTaskInstance>();
   for (const goal of goals) {
-    if (goal.id !== input.goalId) continue;
     for (const subGoal of goal.subGoals) {
       for (const task of subGoal.tasks) {
-        if (input.taskId && task.id !== input.taskId) continue;
-        const instance = task.instances.find((entry) => entry.id === input.instanceId);
-        if (instance) return { goal, task, instance };
+        for (const instance of task.instances) {
+          index.set(instance.id, { goal, task, instance });
+        }
       }
     }
   }
-  return null;
+  return index;
 }
 
-function inboxItemFromDeliveredEvent(row: InboxDeliveredEventRow, goals: Goal[]): InboxItem | null {
+function inboxItemFromDeliveredEvent(
+  row: InboxDeliveredEventRow,
+  instancesById: Map<string, LocatedTaskInstance>,
+): InboxItem | null {
   let payload: InboxDeliveredPayload;
   try {
     payload = JSON.parse(row.payload_json) as InboxDeliveredPayload;
@@ -73,11 +88,8 @@ function inboxItemFromDeliveredEvent(row: InboxDeliveredEventRow, goals: Goal[])
     return null;
   }
   if (payload.target !== "inbox" || !row.task_id || !row.instance_id) return null;
-  const located = findTaskInstance(goals, {
-    goalId: row.goal_id,
-    taskId: row.task_id,
-    instanceId: row.instance_id,
-  });
+  const located = instancesById.get(row.instance_id);
+  if (located && (located.goal.id !== row.goal_id || located.task.id !== row.task_id)) return null;
   const notification = located?.instance.notification;
   if (!located || !notification?.shouldNotify) return null;
   const createdAt = notification.createdAt || located.instance.createdAt || row.created_at;
@@ -102,8 +114,9 @@ export function listInboxItemStates(): InboxItemState[] {
   return rows.map(mapRow);
 }
 
-export function listInboxItemsFromDeliveredEvents(): InboxItem[] {
+export function listInboxItemsFromDeliveredEventsWithStats(limit = 1000): InboxDeliveredEventsResult {
   const goals = readGoalsSnapshot([]);
+  const instancesById = buildInstanceIndex(goals);
   const rows = getDatabase()
     .prepare(
       `
@@ -111,18 +124,27 @@ export function listInboxItemsFromDeliveredEvents(): InboxItem[] {
         FROM goal_event_log
         WHERE kind = 'notification.delivered'
         ORDER BY id DESC
+        LIMIT ?
       `,
     )
-    .all() as InboxDeliveredEventRow[];
+    .all(limit) as InboxDeliveredEventRow[];
   const seen = new Set<string>();
   const items: InboxItem[] = [];
   for (const row of rows) {
-    const item = inboxItemFromDeliveredEvent(row, goals);
+    const item = inboxItemFromDeliveredEvent(row, instancesById);
     if (!item || seen.has(item.id)) continue;
     seen.add(item.id);
     items.push(item);
   }
-  return items.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  return {
+    items: items.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
+    deliveredEventScanCount: rows.length,
+    goalCount: goals.length,
+  };
+}
+
+export function listInboxItemsFromDeliveredEvents(limit = 1000): InboxItem[] {
+  return listInboxItemsFromDeliveredEventsWithStats(limit).items;
 }
 
 export function getInboxItemState(inboxItemId: string): InboxItemState | null {

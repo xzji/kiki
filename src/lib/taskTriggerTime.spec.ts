@@ -6,6 +6,7 @@ import {
   parseTaskTriggerRule,
   parseThreadLoopInterval,
 } from "@/lib/taskTriggerTime";
+import { normalizeTriggerSpec, normalizeTriggerSpecWithWarnings } from "@/types/trigger";
 import type { Task } from "@/types/kiki";
 import type { Thread } from "@/types/topic";
 
@@ -47,6 +48,51 @@ export function runTaskTriggerTimeSpecs() {
   assert.deepEqual(parseTaskTriggerRule("立即执行"), { kind: "immediate" });
   assert.equal(isTaskTriggerDue(oneShotTask("立即执行"), new Date("2026-05-30T03:00:00.000Z")), true);
 
+  // ---------- normalizeTriggerSpec ----------
+  assert.deepEqual(normalizeTriggerSpec("hourly"), { kind: "hourly" });
+  assert.deepEqual(normalizeTriggerSpec("daily"), { kind: "daily" });
+  assert.deepEqual(normalizeTriggerSpec("weekly"), { kind: "weekly" });
+  assert.deepEqual(normalizeTriggerSpec("monthly"), { kind: "monthly" });
+  assert.deepEqual(
+    normalizeTriggerSpec("cron:0 9 * * 1-5 tz=America/New_York"),
+    { kind: "cron", expr: "0 9 * * 1-5", timezone: "America/New_York" },
+  );
+  assert.deepEqual(
+    normalizeTriggerSpec("interval:15m"),
+    { kind: "interval", everyMs: 900_000, value: 15, unit: "m" },
+  );
+  assert.deepEqual(
+    normalizeTriggerSpec(
+      'phased:{"timezone":"America/New_York","phases":[{"id":"market","start":"09:30","end":"16:00","daysOfWeek":[1,2,3,4,5],"trigger":"interval:15m"}]}',
+    ),
+    {
+      kind: "phased",
+      timezone: "America/New_York",
+      phases: [
+        {
+          id: "market",
+          label: undefined,
+          start: "09:30",
+          end: "16:00",
+          timezone: undefined,
+          daysOfWeek: [1, 2, 3, 4, 5],
+          daysOfMonth: undefined,
+          months: undefined,
+          trigger: { kind: "interval", everyMs: 900_000, value: 15, unit: "m" },
+          metadata: undefined,
+        },
+      ],
+    },
+  );
+  assert.equal(normalizeTriggerSpec("phased:not-json"), null);
+  {
+    const result = normalizeTriggerSpecWithWarnings("phased:not-json", { path: "planner.tasks.1.triggerSpec" });
+    assert.equal(result.trigger, null);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0]?.code, "trigger_spec_invalid");
+    assert.equal(result.warnings[0]?.path, "planner.tasks.1.triggerSpec");
+  }
+
   // ---------- parseThreadLoopInterval ----------
   assert.deepEqual(parseThreadLoopInterval("realtime"), { kind: "realtime", intervalMs: 60_000 });
   assert.deepEqual(parseThreadLoopInterval("hourly"), { kind: "hourly", intervalMs: 3_600_000 });
@@ -56,6 +102,14 @@ export function runTaskTriggerTimeSpecs() {
   assert.deepEqual(
     parseThreadLoopInterval({ kind: "cron", expr: "  0 9 * * *  " }),
     { kind: "cron", expr: "0 9 * * *" },
+  );
+  assert.deepEqual(
+    parseThreadLoopInterval("interval:15m" as unknown as Parameters<typeof parseThreadLoopInterval>[0]),
+    { kind: "interval", intervalMs: 900_000 },
+  );
+  assert.deepEqual(
+    parseThreadLoopInterval({ kind: "monthly", daysOfMonth: [1] }),
+    { kind: "monthly", spec: { kind: "monthly", daysOfMonth: [1], time: undefined, timezone: undefined } },
   );
   // 脏化兜底：未来扩展或脏数据传入未知字面量 / 非 cron 对象 → one_shot
   assert.deepEqual(
@@ -68,11 +122,18 @@ export function runTaskTriggerTimeSpecs() {
   );
 
   // ---------- computeNextTickAt ----------
-  // one_shot / cron 永不调度
+  // one_shot / event-only 永不调度
   assert.equal(computeNextTickAt(buildThread({ loopInterval: "one_shot" }), new Date()), null);
   assert.equal(
-    computeNextTickAt(buildThread({ loopInterval: { kind: "cron", expr: "* * * * *" } }), new Date()),
+    computeNextTickAt(buildThread({ loopInterval: { kind: "event", sources: ["task_completed"] } }), new Date()),
     null,
+  );
+  assert.equal(
+    computeNextTickAt(
+      buildThread({ loopInterval: { kind: "cron", expr: "0 8 * * *", timezone: "UTC" } }),
+      new Date("2026-06-01T07:59:00.000Z"),
+    )?.toISOString(),
+    "2026-06-01T08:00:00.000Z",
   );
 
   // 缺失 lastTickAt → now（首次立即生效）
@@ -103,4 +164,67 @@ export function runTaskTriggerTimeSpecs() {
     nowFirst,
   );
   assert.equal(nextBroken?.toISOString(), nowFirst.toISOString());
+
+  // monthly
+  const nextMonthly = computeNextTickAt(
+    buildThread({ loopInterval: { kind: "monthly", daysOfMonth: [15], time: "09:00", timezone: "UTC" } }),
+    new Date("2026-06-01T10:00:00.000Z"),
+  );
+  assert.equal(nextMonthly?.toISOString(), "2026-06-15T09:00:00.000Z");
+
+  // phased 美股窗口：美东 09:30 对应夏令时 13:30Z，窗口内按 15 分钟推进
+  const marketLoop = {
+    kind: "phased" as const,
+    timezone: "America/New_York",
+    phases: [
+      {
+        id: "market",
+        start: "09:30",
+        end: "16:00",
+        daysOfWeek: [1, 2, 3, 4, 5],
+        trigger: { kind: "interval" as const, everyMs: 900_000, value: 15, unit: "m" as const },
+      },
+    ],
+  };
+  assert.equal(
+    computeNextTickAt(buildThread({ loopInterval: marketLoop }), new Date("2026-06-01T13:30:00.000Z"))?.toISOString(),
+    "2026-06-01T13:45:00.000Z",
+  );
+  assert.equal(
+    computeNextTickAt(buildThread({ loopInterval: marketLoop }), new Date("2026-06-01T08:00:00.000Z"))?.toISOString(),
+    "2026-06-01T13:30:00.000Z",
+  );
+
+  // composed：取最早的可计算触发时间，event-only 不参与时间计算
+  assert.equal(
+    computeNextTickAt(
+      buildThread({
+        loopInterval: {
+          kind: "composed",
+          triggers: [
+            { kind: "event", sources: ["task_completed"] },
+            { kind: "cron", expr: "0 8 * * *", timezone: "UTC" },
+          ],
+        },
+      }),
+      new Date("2026-06-01T07:59:00.000Z"),
+    )?.toISOString(),
+    "2026-06-01T08:00:00.000Z",
+  );
+
+  // Task.trigger 优先于 triggerRule
+  assert.equal(
+    isTaskTriggerDue(
+      { ...oneShotTask("立即执行"), trigger: { kind: "event", sources: ["task_completed"] } },
+      new Date("2026-06-01T08:00:00.000Z"),
+    ),
+    false,
+  );
+  assert.equal(
+    isTaskTriggerDue(
+      { ...oneShotTask("满足触发条件后执行：等待"), trigger: { kind: "cron", expr: "0 8 * * *", timezone: "UTC" } },
+      new Date("2026-06-01T08:00:00.000Z"),
+    ),
+    true,
+  );
 }

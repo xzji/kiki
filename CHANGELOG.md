@@ -8,6 +8,8 @@
 - 新增 machine tunnel WebSocket 优先通道：服务端在自定义 server 上挂载独立 `/api/machine-tunnel/ws` upgrade 端点，支持 header 鉴权、同机顶替、ping/pong 心跳、70s 入站看门狗与 close 即时离线回收；保留 HTTP 长轮询作为自动回退。
 - daemon `0.2.8` 默认优先建立 WS tunnel，连接成功后发送 `hello` 重同步握手，断线按 1s→2s→30s 退避重连，连续快速失败后自动降级到 HTTP 长轮询。
 - 新增邀请码多次使用能力：注册表增加 `max_uses`、`usage_count` 与 `invite_code_redemptions`，支持内置 `KIKIG00D` 多次兑换、显式批量创建邀请码，以及注册失败后的使用次数回滚。
+- 新增 topic 级 governance tick 链路：包含 topic/thread 调度器、governance tick job/outbox repository、event bridge、本地执行器与 machine tunnel 协议扩展，支持把治理帧分发到在线 daemon 执行并按 lease 回传结果。
+- 新增会话消息内联 CLI 时间线组件，可直接在消息气泡中查看运行状态、工具调用、子代理信息、prompt 输入与过程输出。
 
 ### Changed
 - tunnelHub 支持按 machineId 优先路由到 WS 连接，无 WS 连接时回落到既有长轮询队列；在线判定合并 WS 内存连接与 DB 心跳。
@@ -18,6 +20,9 @@
 - 将 daemon 主入口重构为 `composeDaemon` 分层装配：调度主循环、任务分发、lease/process 对账、thread governance 各自独立 runner，云端与本地可复用同一 runner 能力而不再耦合在单文件里。
 - governance / scheduling 目录边界收紧：通过 ESLint 限制两层互相直接 import，只允许经 services/types 公共契约跨层协作；同时将 thread task 读取收敛到 `threadTaskView` 只读 adapter。
 - 调度与治理链路补齐 observability：新增 scheduling/tick 结构化日志、tick recorder、时区描述与 orchestrator user frame 观测，便于排查 tick 漏跑、lease 回收和云端/本地执行分工。
+- 将治理模型从仅 thread loop 扩展到 topic + thread 双层：topic runner 负责主题级状态评估、节奏调优与 loop 调整，thread runner 输出协议同步升级，治理回执与任务 patch 合并逻辑相应更新。
+- 触发规则与时间计算模型重构为 `TriggerSpec`：统一支持 cron / 每日 / 每周 / 间隔 / 指定时间等表达，并显式纳入时区语义，减少 tick 调度对自然语言触发文案的脆弱解析。
+- 会话与收件箱状态接口、conversation store 与前端列表同步增强：消息/cliProcess 合并逻辑更稳，消息页支持直接展示内联过程时间线，侧边栏与会话页会消费新的过程聚合数据。
 
 ### Fixed
 - 修复 `message.updated` 乱序/重复回灌导致旧快照短暂覆盖新内容、词序错乱的问题；为每条消息增加 version 单调守卫，只应用更高版本快照。
@@ -26,6 +31,8 @@
 - 修复 WebSocket tunnel 在 `perMessageDeflate` 压缩开启时的兼容性风险，服务端与诊断链路统一关闭压缩。
 - 修复默认多次使用邀请码示例码中包含字母 `O` 导致与规则和肉眼识别不一致的问题，改为 `KIKIG00D`。
 - 修复调度 worker 仍依赖旧 `executionSupervisor` 的单体所有者问题，统一切换到 `runtime/processSupervisor`，避免本地子进程生命周期管理继续散落在 worker 层。
+- 修复远程 daemon 治理帧缺少 WS 补发与命令类型协商的问题，避免 topic/thread governance tick 在断线重连或 hello 对账后丢失。
+- 修复 conversation store 合并本地流式输出与回灌快照时的内容回退、CLI 过程丢失与控制提示残留问题。
 
 ## 2026-06-11
 

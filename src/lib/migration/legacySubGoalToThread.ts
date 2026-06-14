@@ -11,6 +11,7 @@
 
 import type { SubGoal } from "@/types/kiki";
 import type { Thread, ThreadLoopInterval, ThreadStatus } from "@/types/topic";
+import { normalizeTriggerSpec } from "@/types/trigger";
 
 export type LegacySubGoalToThreadInput = {
   subGoal: SubGoal;
@@ -31,6 +32,8 @@ function normalizeThreadLoopInterval(value: unknown): ThreadLoopInterval | undef
   ) {
     return value;
   }
+  const trigger = normalizeTriggerSpec(value as Parameters<typeof normalizeTriggerSpec>[0]);
+  if (trigger) return trigger;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
     if (record.kind === "cron" && typeof record.expr === "string" && record.expr.trim()) {
@@ -75,8 +78,10 @@ export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread
     intent,
     loopInterval:
       input.loopInterval ??
+      normalizeThreadLoopInterval(subGoal.reviewTrigger) ??
       normalizeThreadLoopInterval(subGoal.reviewInterval) ??
       inferDefaultReviewInterval(subGoal),
+    loopTrigger: normalizeTriggerSpec(subGoal.reviewTrigger) ?? undefined,
     terminationCondition: input.terminationCondition ?? subGoal.terminationCondition,
     status: normalizeThreadStatus(subGoal.threadStatus),
     lastTickAt: subGoal.lastTickAt,

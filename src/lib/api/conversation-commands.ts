@@ -2,7 +2,7 @@
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
-import type { Conversation, ConversationMessage, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
+import type { Conversation, ConversationMessage, ConversationSummary, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 
 export class ConversationCommandError extends Error {
   constructor(
@@ -66,12 +66,18 @@ export async function fetchConversationState() {
   const response = await fetch("/api/conversations/state", { cache: "no-store" });
   const data = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
-    conversations?: Conversation[];
+    conversations?: Array<Conversation | ConversationSummary>;
     latestEventId?: number;
+    meta?: {
+      mode?: "summary" | "full";
+      conversationCount?: number;
+      totalMessageCount?: number;
+      totalUnreadCount?: number;
+    };
     reason?: string;
   };
   if (!response.ok || !data.ok) throw new ConversationCommandError(response.status, data.reason || "读取会话状态失败");
-  return { conversations: data.conversations ?? [], latestEventId: data.latestEventId ?? 0 };
+  return { conversations: data.conversations ?? [], latestEventId: data.latestEventId ?? 0, meta: data.meta };
 }
 
 export async function fetchConversationMessages(conversationId: string, afterSeq = 0, limit = 200) {

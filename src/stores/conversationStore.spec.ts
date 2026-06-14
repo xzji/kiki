@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { useConversationStore } from "@/stores/conversationStore";
-import type { Conversation, ConversationMessage } from "@/types/kiki";
+import type { Conversation, ConversationMessage, ConversationSummary } from "@/types/kiki";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
 
 function createConversation(id: string): Conversation {
@@ -37,6 +37,9 @@ export async function runConversationStoreSpecs() {
   try {
     runOptimisticHydrationPreservesLocalNewConversationSpec();
     runOptimisticHydrationMergesRemoteConversationSpec();
+    runSummaryHydrationDoesNotClearLoadedMessagesSpec();
+    runSummaryHydrationKeepsLastMessageForListSpec();
+    runSummaryOnlyReadAndUnreadEventsSpec();
     runMessageUpdatedVersionGuardSpec();
     runDeleteMessageResetsRuntimeStateSpec();
     await runDeleteConversationWaitsForServerConfirmationSpec();
@@ -45,6 +48,18 @@ export async function runConversationStoreSpecs() {
     globalThis.fetch = originalFetch;
     useConversationStore.setState({ conversations: [], conversationsHydrated: false });
   }
+}
+
+function createTextMessage(id: string, content: string, unread = false): ConversationMessage {
+  return {
+    id,
+    kind: "text",
+    role: "user",
+    content,
+    createdAt: "2026-06-09T00:00:00.000Z",
+    status: "done",
+    unread,
+  };
 }
 
 function createStreamingTextMessage(id: string, content: string): ConversationMessage {
@@ -214,6 +229,101 @@ function runOptimisticHydrationMergesRemoteConversationSpec() {
   );
   assert.equal(conversations.length, 1, "后续远端快照包含同一 conv-new-* 时不应产生重复会话");
   assert.equal(conversations[0]?.title, remoteNew.title, "远端确认后的字段应合并更新本地乐观会话");
+}
+
+function runSummaryHydrationDoesNotClearLoadedMessagesSpec() {
+  const conversationId = "conv-summary-preserve-loaded";
+  const loaded = {
+    ...createConversation(conversationId),
+    messages: [createTextMessage("msg-loaded-1", "local loaded")],
+    messagesLoaded: true,
+    messageCount: 1,
+    unreadCount: 0,
+    lastMessage: createTextMessage("msg-loaded-1", "local loaded"),
+  };
+  const summary: ConversationSummary = {
+    id: conversationId,
+    title: "Summary title",
+    messagesLoaded: false,
+    messageCount: 99,
+    unreadCount: 3,
+    lastMessage: createTextMessage("msg-summary-last", "remote summary", true),
+    updatedAt: "2026-06-09T00:00:02.000Z",
+    status: "idle",
+  };
+
+  useConversationStore.setState({ conversations: [loaded], conversationsHydrated: true });
+  useConversationStore.getState().hydrateConversations([summary]);
+
+  const conversation = useConversationStore.getState().conversations.find((entry) => entry.id === conversationId);
+  assert.equal(conversation?.messagesLoaded, true, "summary hydrate 不应把已加载会话降级为未加载");
+  assert.equal(conversation?.messages.length, 1, "summary hydrate 不应清空本地已加载消息");
+  assert.equal(conversation?.messages[0]?.content, "local loaded");
+}
+
+function runSummaryHydrationKeepsLastMessageForListSpec() {
+  const conversationId = "conv-summary-list";
+  const lastMessage = createTextMessage("msg-summary-list-last", "latest summary", true);
+  const summary: ConversationSummary = {
+    id: conversationId,
+    title: "Summary only",
+    messagesLoaded: false,
+    messageCount: 12,
+    unreadCount: 2,
+    lastMessage,
+    updatedAt: "2026-06-09T00:00:00.000Z",
+    status: "idle",
+  };
+
+  useConversationStore.setState({ conversations: [], conversationsHydrated: false });
+  useConversationStore.getState().hydrateConversations([summary]);
+
+  const conversation = useConversationStore.getState().conversations.find((entry) => entry.id === conversationId);
+  assert.equal(conversation?.messagesLoaded, false);
+  assert.equal(conversation?.messages.length, 0, "summary-only 会话不应把 lastMessage 塞进 messages 冒充完整历史");
+  assert.equal(conversation?.messageCount, 12);
+  assert.equal(conversation?.unreadCount, 2);
+  assert.equal(conversation?.lastMessage?.content, "latest summary");
+}
+
+function runSummaryOnlyReadAndUnreadEventsSpec() {
+  const conversationId = "conv-summary-events";
+  const lastMessage = createTextMessage("msg-summary-events-last", "latest summary", true);
+  const summary: Conversation = {
+    ...createConversation(conversationId),
+    messages: [],
+    messagesLoaded: false,
+    messageCount: 5,
+    unreadCount: 2,
+    lastMessage,
+  };
+  useConversationStore.setState({ conversations: [summary], conversationsHydrated: true });
+
+  useConversationStore.getState().applyConversationEvent({
+    id: 1001,
+    eventId: "evt-summary-read",
+    conversationId,
+    kind: "conversation.read",
+    payload: { messageIds: [lastMessage.id], revision: 2 },
+    producedBy: "user",
+    createdAt: "2026-06-09T00:00:00.000Z",
+  });
+  let conversation = useConversationStore.getState().conversations.find((entry) => entry.id === conversationId);
+  assert.equal(conversation?.unreadCount, 0);
+  assert.equal(conversation?.lastMessage?.unread, false);
+
+  useConversationStore.getState().applyConversationEvent({
+    id: 1002,
+    eventId: "evt-summary-unread",
+    conversationId,
+    kind: "conversation.unread",
+    payload: { revision: 3 },
+    producedBy: "user",
+    createdAt: "2026-06-09T00:00:00.000Z",
+  });
+  conversation = useConversationStore.getState().conversations.find((entry) => entry.id === conversationId);
+  assert.equal(conversation?.unreadCount, 1);
+  assert.equal(conversation?.lastMessage?.unread, true);
 }
 
 async function runDeleteConversationWaitsForServerConfirmationSpec() {

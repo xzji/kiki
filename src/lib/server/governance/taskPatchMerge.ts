@@ -2,6 +2,7 @@ import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
 import { normalizeConcreteTriggerRule } from "@/lib/taskTriggerTime";
 import { normalizeExecutionKind } from "@/types/kiki";
 import type { ExecutionKind, Task, TaskExpectedResult, TaskSpec } from "@/types/kiki";
+import type { TriggerSpec } from "@/types/trigger";
 import { appendText, normalizeRequiredBlocks } from "./taskFieldRegistry";
 
 export type TaskCommandInputForMerge = {
@@ -11,6 +12,7 @@ export type TaskCommandInputForMerge = {
   expectedResult?: TaskExpectedResult;
   taskType: Task["taskType"];
   triggerRule: string;
+  trigger?: TriggerSpec;
   deadline?: string;
   executionKind: ExecutionKind;
   taskSpec?: TaskSpec;
@@ -100,6 +102,7 @@ export function mergeTaskPatch(task: Task, patch: TaskPatch): TaskCommandInputFo
     patch.acceptanceCriteria !== undefined ||
     patch.taskType !== undefined ||
     patch.triggerRule !== undefined ||
+    patch.triggerSpec !== undefined ||
     patch.cadence !== undefined ||
     patch.triggerCondition !== undefined;
   return {
@@ -109,6 +112,7 @@ export function mergeTaskPatch(task: Task, patch: TaskPatch): TaskCommandInputFo
     expectedResult: mergeExpectedResult(task, patch),
     taskType: timing.taskType,
     triggerRule: timing.triggerRule,
+    trigger: patch.triggerSpec ?? task.trigger,
     deadline: task.deadline,
     executionKind: normalizeExecutionKind(task.executionKind),
     taskSpec: task.taskSpec && touchesDefinition ? { ...task.taskSpec, stale: true } : task.taskSpec,

@@ -70,6 +70,9 @@ export type RecordTickOutcomeCallback = (input: {
   agentRunId: string;
   result: ThreadTickResult;
   dispatch?: DispatchThreadActionsResult;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
 }) => Promise<void>;
 
 export type ThreadLoopFrameInput = {
@@ -159,6 +162,8 @@ async function tickOneThread(
     ok: false,
   };
   outcome.ticked.push(ticked);
+  const tickStartedAtMs = Date.now();
+  const tickStartedAt = new Date(tickStartedAtMs).toISOString();
 
   // 3.1 准备 agent_run
   let agentRunId: string;
@@ -239,12 +244,17 @@ async function tickOneThread(
 
   // 3.6 记 outcome 事件
   try {
+    const tickFinishedAtMs = Date.now();
+    const tickFinishedAt = new Date(tickFinishedAtMs).toISOString();
     await input.callbacks.recordTickOutcome({
       topic,
       thread,
       agentRunId,
       result: tickResult,
       dispatch,
+      startedAt: tickStartedAt,
+      finishedAt: tickFinishedAt,
+      durationMs: Math.max(0, tickFinishedAtMs - tickStartedAtMs),
     });
   } catch (error) {
     // 事件写失败不影响整体；保留原 failureReason，附加事件失败说明

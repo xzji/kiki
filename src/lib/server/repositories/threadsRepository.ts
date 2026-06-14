@@ -18,6 +18,7 @@ import {
   readTopicsSnapshotMeta,
 } from "@/lib/server/runtime/stateSnapshot";
 import { writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
+import { normalizeTriggerSpec } from "@/types/trigger";
 import type { Goal, SubGoal } from "@/types/kiki";
 import type { Thread, ThreadStatus, Topic, TopicStatus } from "@/types/topic";
 
@@ -149,11 +150,17 @@ export function updateThread(
   }
 
   const updatedAt = nowIso();
+  const patchedLoopTrigger = patch.loopInterval !== undefined ? normalizeTriggerSpec(patch.loopInterval) ?? undefined : undefined;
+  const patchedReviewInterval =
+    patch.loopInterval !== undefined && typeof patch.loopInterval === "string"
+      ? patch.loopInterval
+      : subGoal.reviewInterval;
   const updatedSubGoal: SubGoal = {
     ...subGoal,
     title: patch.title ?? subGoal.title,
     description: patch.intent ?? subGoal.description,
-    reviewInterval: patch.loopInterval !== undefined ? (patch.loopInterval as SubGoal["reviewInterval"]) : subGoal.reviewInterval,
+    reviewInterval: patchedReviewInterval,
+    reviewTrigger: patch.loopInterval !== undefined ? patchedLoopTrigger : subGoal.reviewTrigger,
     terminationCondition: patch.terminationCondition ?? subGoal.terminationCondition,
     threadStatus: patch.status ?? subGoal.threadStatus,
     // lastTickAt / nextTickAt 用「键是否存在」区分「未提供」与「显式清空」：

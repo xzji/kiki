@@ -43,6 +43,7 @@ import {
 import { compileTaskDraftsToDraftTasks } from "@/lib/server/goalPlanning/taskCompiler";
 import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
 import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/types/kiki";
+import { normalizeTriggerSpecWithWarnings, type TriggerSpec } from "@/types/trigger";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -175,6 +176,42 @@ export type GoalPlanningCheckpointStatus = {
 
 const JSON_NO_TOOL_INSTRUCTION =
   "重要约束：禁止调用任何工具（Write/Edit/MultiEdit/Bash/WebSearch/WebFetch/Task 等），所有业务结果必须写在最终 JSON 回答里。";
+
+export function isLoopV2PlannerEnabled(env: NodeJS.ProcessEnv = process.env) {
+  return env.KIKI_LOOP_V2_PLANNER === "1" || env.KIKI_LOOP_V2_PLANNER === "true";
+}
+
+function loopV2PlannerInstructions() {
+  if (!isLoopV2PlannerEnabled()) return "";
+  return `
+
+## Loop v2 输出增强（KIKI_LOOP_V2_PLANNER）
+- 顶层必须输出 topicLoop，表示 Topic 元规划治理节拍；优先使用 structured TriggerSpec，例如 {"kind":"weekly"}、{"kind":"cron","expr":"0 9 * * 1","timezone":"Asia/Shanghai"}。
+- Thread.reviewInterval 允许继续使用旧词表，也允许输出 cron/phased TriggerSpec 对象；phased 适合市场窗口、工作日窗口等阶段性治理。
+- Task 必须在保留 triggerRule 的同时尽量输出 triggerSpec；triggerSpec 支持 cron、interval、phased、event、composed。
+- triggerRule 作为旧版自然语言兜底，不要省略；triggerSpec 是机器可调度字段。
+
+TriggerSpec 示例：
+- 每日 09:00：{"kind":"cron","expr":"0 9 * * *","timezone":"Asia/Shanghai"}
+- 每 15 分钟：{"kind":"interval","value":15,"unit":"m","everyMs":900000}
+- 美股交易窗口：{"kind":"phased","timezone":"America/New_York","phases":[{"id":"market","start":"09:30","end":"16:00","daysOfWeek":[1,2,3,4,5],"trigger":{"kind":"interval","value":15,"unit":"m","everyMs":900000}}]}
+- 任务完成事件：{"kind":"event","sources":["task_completed"]}`;
+}
+
+function loopV2PlannerSchemaFields() {
+  if (!isLoopV2PlannerEnabled()) {
+    return {
+      topLevel: "",
+      reviewInterval: `"reviewInterval": "one_shot|daily|weekly|hourly|realtime",`,
+      taskTriggerSpec: "",
+    };
+  }
+  return {
+    topLevel: `  "topicLoop": { "kind": "weekly" },\n`,
+    reviewInterval: `"reviewInterval": "one_shot|daily|weekly|hourly|realtime 或 TriggerSpec 对象（cron/phased/interval）",`,
+    taskTriggerSpec: `          "triggerSpec": { "kind": "cron", "expr": "0 9 * * *", "timezone": "Asia/Shanghai" },\n`,
+  };
+}
 
 type GoalStageProgressHandler = (progress: {
   phase: GoalWorkflowPhase;
@@ -464,6 +501,7 @@ export function buildDecomposePrompt(input: {
   userContext: Record<string, unknown>;
   config: EasterEggSettings;
 }) {
+  const loopV2 = loopV2PlannerSchemaFields();
   return `# Role
 你是一位通用规划编排器，负责把用户诉求拆成 Topic 下的 Thread 板块，并播下可运行的初始 Task 种子。
 你不能把用户诉求强行套进固定模式；必须基于诉求本身，用正交属性描述每个板块的治理节拍、终止条件和初始执行单元。
@@ -502,6 +540,7 @@ export function buildDecomposePrompt(input: {
 3. 持续关注/巡检类 Task 用 taskType="repeat"，并填写 cadence 或 triggerRule。
 4. 一次性分析/交付类 Task 用 taskType="one_shot"，triggerRule 可写 "立即触发" 或明确条件。
 5. 事件触发类需求降级为周期巡检 Task：用 repeat + 合适 cadence，并在 description/objective 里写清判断条件。
+${loopV2PlannerInstructions()}
 
 ## 边界处理
 - 避免过度拆解导致管理成本过高。
@@ -523,12 +562,12 @@ ${JSON.stringify(input.userContext, null, 2)}
     "successState": "成功状态：描述达成后的理想状态",
     "assumptions": ["假设1：隐含的前提条件", "假设2：..."]
   },
-  "subGoals": [
+${loopV2.topLevel}  "subGoals": [
     {
       "id": 1,
       "name": "Thread/板块名称（简洁有力）",
       "description": "本板块 intent：包含治理边界、关注对象和判断原则",
-      "reviewInterval": "one_shot|daily|weekly|hourly|realtime",
+      ${loopV2.reviewInterval}
       "terminationCondition": "本板块何时可结束；长期关注可为空字符串",
       "why": "必要性说明：为什么需要这个板块",
       "priority": "critical|high|medium|low",
@@ -546,7 +585,7 @@ ${JSON.stringify(input.userContext, null, 2)}
           "expectedOutcome": "完成后应沉淀的结果",
           "taskType": "repeat|one_shot",
           "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
-          "cadence": "可选：自然语言频率，例如 每天 09:00",
+${loopV2.taskTriggerSpec}          "cadence": "可选：自然语言频率，例如 每天 09:00",
           "triggerCondition": "可选：条件型任务的判断条件",
           "executionKind": "generic_result"
         }
@@ -566,6 +605,7 @@ export function buildDecompositionNormalizationPrompt(input: {
   rawOutput: string;
   config: EasterEggSettings;
 }) {
+  const loopV2 = loopV2PlannerSchemaFields();
   return `你是目标拆解 JSON 规范化助手。下面的“原始输出”可能是 Markdown、自然语言或不合法 JSON。
 
 你的任务：把原始输出转换为严格合法的 JSON 对象，并符合指定 schema。
@@ -579,6 +619,7 @@ export function buildDecompositionNormalizationPrompt(input: {
 6. successCriteria[].type 只能是 milestone、deliverable、condition。
 7. dependencies 必须是数字数组，引用前置子目标 id；无依赖则 []。
 8. 保留每个 Thread 的 reviewInterval、terminationCondition 和 tasks[]；tasks 可以为空数组，不要补占位任务。
+${loopV2PlannerInstructions()}
 
 目标信息：
 ${JSON.stringify({
@@ -594,12 +635,12 @@ ${JSON.stringify({
     "successState": "成功状态",
     "assumptions": ["假设1"]
   },
-  "subGoals": [
+${loopV2.topLevel}  "subGoals": [
     {
       "id": 1,
       "name": "Thread/板块名称",
       "description": "本板块 intent",
-      "reviewInterval": "one_shot|daily|weekly|hourly|realtime",
+      ${loopV2.reviewInterval}
       "terminationCondition": "终止条件；长期关注可为空字符串",
       "why": "必要性说明",
       "priority": "critical",
@@ -616,7 +657,7 @@ ${JSON.stringify({
           "expectedOutcome": "交付结果",
           "taskType": "repeat|one_shot",
           "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
-          "executionKind": "generic_result"
+${loopV2.taskTriggerSpec}          "executionKind": "generic_result"
         }
       ]
     }
@@ -1688,14 +1729,34 @@ function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
   if (!Array.isArray(value.subGoals) || value.subGoals.length === 0) {
     throw new Error("规划缺少 subGoals");
   }
+  const plannerWarnings: string[] = [];
+  const readTrigger = (input: unknown, path: string): TriggerSpec | undefined => {
+    if (input === null || input === undefined || (typeof input === "string" && !input.trim())) return undefined;
+    const result = normalizeTriggerSpecWithWarnings(input as Parameters<typeof normalizeTriggerSpecWithWarnings>[0], { path });
+    if (result.trigger) return result.trigger;
+    if (result.warnings.length > 0) {
+      plannerWarnings.push(`planner warning: ${path} 包含非法 TriggerSpec，已记录并尝试走 legacy fallback。`);
+    }
+    return undefined;
+  };
+  value.topicLoop = readTrigger(value.topicLoop, "topicLoop") ?? value.topicLoop;
   for (const subGoal of value.subGoals) {
     if (!subGoal.title || !Array.isArray(subGoal.tasks) || subGoal.tasks.length === 0) {
       throw new Error("规划中的子目标缺少 title 或 tasks");
     }
+    subGoal.reviewTrigger =
+      readTrigger(subGoal.reviewTrigger, `${subGoal.title}.reviewTrigger`) ??
+      readTrigger(subGoal.reviewInterval, `${subGoal.title}.reviewInterval`) ??
+      subGoal.reviewTrigger;
     for (const task of subGoal.tasks) {
       if (!task.title || !task.description || !task.expectedOutcome || !task.triggerRule) {
         throw new Error("规划中的任务字段不完整");
       }
+      task.triggerSpec =
+        readTrigger(task.triggerSpec, `${subGoal.title}.${task.title}.triggerSpec`) ??
+        readTrigger(task.trigger, `${subGoal.title}.${task.title}.trigger`) ??
+        task.triggerSpec;
+      task.trigger = task.triggerSpec ?? readTrigger(task.trigger, `${subGoal.title}.${task.title}.trigger`) ?? task.trigger;
       task.executionKind = normalizeExecutionKind(task.executionKind);
       task.resultViewKind = normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind);
       task.executionStrategy = task.executionStrategy ?? "agent_autonomous";
@@ -1705,6 +1766,9 @@ function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
         task.requiresConfirmation ?? (task.expectedResult?.type === "decision" || task.expectedResult?.type === "confirmation");
       task.collaboration = task.collaboration ?? inferDraftCollaboration(task);
     }
+  }
+  if (plannerWarnings.length > 0) {
+    value.reviewSummary = [...(value.reviewSummary ?? []), ...plannerWarnings];
   }
   return value;
 }

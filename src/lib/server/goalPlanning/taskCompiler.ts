@@ -87,6 +87,8 @@ export function compileTaskDraftsToDraftTasks(input: {
       expectedOutcome,
       taskType,
       triggerRule,
+      triggerSpec: draft.triggerSpec,
+      trigger: draft.triggerSpec,
       executionKind,
       resultViewKind: executionKind,
       executionStrategy: strategyFor(collaboration),

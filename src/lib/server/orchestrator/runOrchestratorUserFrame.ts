@@ -7,11 +7,25 @@ import { dispatchReadyTasksToMachines } from "@/lib/server/scheduling/taskDispat
 import { orchestratorConcurrencyBudget } from "@/lib/server/orchestrator/concurrencyBudget";
 import type { OrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { getDefaultRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
+import {
+  TaskEventBridge,
+  ThreadEventBridge,
+  TopicEventBridge,
+} from "@/lib/server/governance/eventBridge";
+import {
+  dispatchReadyGovernanceTickJobsToMachines,
+  enqueueDueGovernanceTickJobs,
+  registerGovernanceTickTunnelCallbacks,
+} from "@/lib/server/governance/governanceTickDispatcher";
 
 export type OrchestratorUserFrameResult = {
   userId: string;
   createdJobs: number;
   skipped: number;
+  governanceEventsProcessed: number;
+  governanceJobsCreated: number;
+  governanceJobsDispatched: number;
+  governanceSkippedOffline: boolean;
   dispatched: number;
   skippedOffline: boolean;
 };
@@ -28,9 +42,28 @@ export async function runOrchestratorUserFrame(input: {
       runtimeEnvironments.find((environment) => environment.type === "local") ??
       runtimeEnvironments[0] ??
       null;
-    const goals = readGoalsSnapshot([]);
     const schedulerConfig = getDefaultRuntimeDaemonConfig();
 
+    registerGovernanceTickTunnelCallbacks();
+    const governanceEventResults = [
+      new ThreadEventBridge().consumePending(),
+      new TopicEventBridge().consumePending(),
+      new TaskEventBridge().consumePending(),
+    ];
+    const governanceJobs = enqueueDueGovernanceTickJobs({ userId: input.userId });
+    const governanceDispatchResult = dispatchReadyGovernanceTickJobsToMachines({
+      leaseOwner: input.leaseOwner,
+      limit: input.config.maxConcurrentPerUser,
+      llm: runtimeEnv
+        ? {
+            runtimeEnv,
+            cwd: runtimeEnv.workingDirectory,
+            permissionMode: runtimeEnv.permissionMode,
+          }
+        : undefined,
+    });
+
+    const goals = readGoalsSnapshot([]);
     const schedulerResult = runGoalSchedulerEngine({
       goals,
       runtimeEnv,
@@ -55,6 +88,10 @@ export async function runOrchestratorUserFrame(input: {
       userId: input.userId,
       createdJobs: schedulerResult.createdJobs,
       skipped: schedulerResult.skipped,
+      governanceEventsProcessed: governanceEventResults.reduce((sum, result) => sum + result.processed, 0),
+      governanceJobsCreated: governanceJobs.length,
+      governanceJobsDispatched: governanceDispatchResult.processed,
+      governanceSkippedOffline: governanceDispatchResult.skippedOffline,
       dispatched,
       skippedOffline,
     };

@@ -173,8 +173,11 @@ export async function runWebSocketTransport(input: {
             "daemon_service",
             "run_prompt",
             "stream_prompt",
+            "topic_governance_tick",
+            "thread_governance_tick",
           ],
           runningJobIds: helloState.runningJobIds,
+          runningGovernanceJobIds: helloState.runningGovernanceJobIds,
           activeStreamSessionIds: helloState.activeStreamSessionIds,
         });
         bufferedOutbound.flushPending();

@@ -9,6 +9,10 @@ function makeTopic(): Topic {
     id: "topic-prompt-fail",
     title: "失败原因测试 Topic",
     summary: "测试 ThreadRunner prompt 失败原因透传",
+    loop: { kind: "weekly" },
+    phase: "idle",
+    silentCount: 0,
+    failureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-06-03T00:00:00.000Z",
@@ -79,6 +83,7 @@ function buildPrompt(input: { currentTasks?: Task[]; recentTaskInstances?: TaskI
     currentTasks: input.currentTasks,
     recentTaskInstances: input.recentTaskInstances ?? [],
     threadMemory: thread.memory,
+    now: new Date("2026-06-03T08:00:00.000Z"),
   });
 }
 
@@ -128,6 +133,22 @@ export function runThreadRunnerPromptSpecs() {
       prompt.includes("failureReason=失败原因未记录"),
       true,
       "无原因失败实例应显式标记失败原因未记录",
+    );
+  }
+
+  {
+    const prompt = buildPrompt({});
+    assert.equal(prompt.includes('"assessment"'), true, "prompt 应要求输出 assessment");
+    assert.equal(prompt.includes('"confidence"'), true, "prompt 应要求输出 confidence");
+    assert.equal(
+      prompt.includes("low=禁止 archive_thread/cancel_task/dispatch_task"),
+      true,
+      "prompt 应声明低置信禁止高风险动作",
+    );
+    assert.equal(
+      prompt.includes("TaskScheduling 层"),
+      true,
+      "prompt 应保留 ThreadGovernance / TaskScheduling 分层边界",
     );
   }
 }

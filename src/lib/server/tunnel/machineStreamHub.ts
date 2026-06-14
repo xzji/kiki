@@ -1,8 +1,21 @@
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
+import { runWithUserContext } from "@/lib/server/context/userContext";
+import { getConversationMessage } from "@/lib/server/repositories/conversationMessagesRepository";
+import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
+import type { ConversationMessage } from "@/types/kiki";
 
 type StreamWaiter = {
   resolve: (value: ClaudeStreamEvent | null) => void;
   timer: NodeJS.Timeout;
+};
+
+export type StreamSessionMetadata = {
+  userId: string;
+  conversationId?: string;
+  assistantMessageId?: string;
+  assistantCreatedAt?: string;
+  runtimeKind?: string;
+  startedAt: string;
 };
 
 type StreamSession = {
@@ -13,11 +26,16 @@ type StreamSession = {
   buffer: Map<number, ClaudeStreamEvent>;
   gapTimer: NodeJS.Timeout | null;
   gapTimerMode: "normal" | "doneOnly" | null;
+  cleanupTimer: NodeJS.Timeout | null;
+  metadata?: StreamSessionMetadata;
+  finalMessagePersisted: boolean;
 };
 
 const STREAM_STATE_KEY = Symbol.for("kiki.server.machineStream.state");
 const STREAM_GAP_TIMEOUT_MS = 800;
 const STREAM_DONE_GAP_TIMEOUT_MS = 3_000;
+const STREAM_SESSION_CLEANUP_MS = 5 * 60 * 1000;
+const STREAM_DETACHED_CLEANUP_MS = 60 * 60 * 1000;
 
 function getSessions() {
   const globalRef = globalThis as typeof globalThis & {
@@ -29,7 +47,7 @@ function getSessions() {
   return globalRef[STREAM_STATE_KEY];
 }
 
-export function openStreamSession(sessionId: string) {
+export function openStreamSession(sessionId: string, metadata?: StreamSessionMetadata) {
   getSessions().set(sessionId, {
     queue: [],
     waiters: [],
@@ -38,7 +56,24 @@ export function openStreamSession(sessionId: string) {
     buffer: new Map(),
     gapTimer: null,
     gapTimerMode: null,
+    cleanupTimer: null,
+    metadata,
+    finalMessagePersisted: false,
   });
+}
+
+function clearCleanupTimer(session: StreamSession) {
+  if (!session.cleanupTimer) return;
+  clearTimeout(session.cleanupTimer);
+  session.cleanupTimer = null;
+}
+
+function resolveAllWaiters(session: StreamSession, value: ClaudeStreamEvent | null) {
+  for (const waiter of session.waiters) {
+    clearTimeout(waiter.timer);
+    waiter.resolve(value);
+  }
+  session.waiters = [];
 }
 
 export function closeStreamSession(sessionId: string) {
@@ -46,14 +81,31 @@ export function closeStreamSession(sessionId: string) {
   const session = sessions.get(sessionId);
   if (!session) return;
   clearGapTimer(session);
+  clearCleanupTimer(session);
   session.done = true;
   session.buffer.clear();
-  for (const waiter of session.waiters) {
-    clearTimeout(waiter.timer);
-    waiter.resolve(null);
-  }
-  session.waiters = [];
+  resolveAllWaiters(session, null);
   sessions.delete(sessionId);
+}
+
+export function detachStreamConsumer(sessionId: string) {
+  const session = getSessions().get(sessionId);
+  if (!session) return;
+  resolveAllWaiters(session, null);
+  if (!session.done && !session.cleanupTimer) {
+    session.cleanupTimer = setTimeout(() => {
+      closeStreamSession(sessionId);
+    }, STREAM_DETACHED_CLEANUP_MS);
+    session.cleanupTimer.unref?.();
+  }
+}
+
+function scheduleStreamSessionCleanup(sessionId: string, session: StreamSession) {
+  if (session.cleanupTimer) return;
+  session.cleanupTimer = setTimeout(() => {
+    closeStreamSession(sessionId);
+  }, STREAM_SESSION_CLEANUP_MS);
+  session.cleanupTimer.unref?.();
 }
 
 function clearGapTimer(session: StreamSession) {
@@ -63,9 +115,155 @@ function clearGapTimer(session: StreamSession) {
   session.gapTimerMode = null;
 }
 
-function deliverInOrder(session: StreamSession, event: ClaudeStreamEvent) {
+function patchFinalMessage(message: ConversationMessage, content: string, status: "done" | "error", error?: string) {
+  if ((message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess) {
+    return {
+      content,
+      status,
+      cliProcess: {
+        ...message.cliProcess,
+        status: status === "done" ? "completed" : "error",
+        finishedAt: message.cliProcess.finishedAt ?? new Date().toISOString(),
+        output: status === "done" ? content : message.cliProcess.output,
+        error: status === "error" ? (error ?? message.cliProcess.error) : undefined,
+      },
+    } as Partial<ConversationMessage>;
+  }
+  return { content, status } as Partial<ConversationMessage>;
+}
+
+function isUserInterruptedMessage(message: ConversationMessage) {
+  return message.content.includes("已中断");
+}
+
+function persistFinalStreamEvent(session: StreamSession, event: ClaudeStreamEvent) {
+  const metadata = session.metadata;
+  if (!metadata?.conversationId || !metadata.assistantMessageId) return;
+  if (event.type !== "message" && event.type !== "error" && event.type !== "done") return;
+  if (session.finalMessagePersisted && event.type !== "error") return;
+
+  try {
+    runWithUserContext(metadata.userId, () => {
+      const current = getConversationMessage(metadata.conversationId!, metadata.assistantMessageId!);
+      if (current && isUserInterruptedMessage(current.message)) return;
+      if (event.type === "message") {
+        const patch = current
+          ? patchFinalMessage(current.message, event.content, "done")
+          : ({ content: event.content, status: "done" } satisfies Partial<ConversationMessage>);
+        if (current) {
+          applyConversationCommand({
+            command: {
+              type: "update_message",
+              conversationId: metadata.conversationId!,
+              messageId: metadata.assistantMessageId!,
+              patch,
+            },
+            idempotencyKey: `claude.stream.final.update:${metadata.conversationId}:${metadata.assistantMessageId}`,
+            producedBy: "system",
+          });
+        } else {
+          applyConversationCommand({
+            command: {
+              type: "append_message",
+              conversationId: metadata.conversationId!,
+              message: {
+                id: metadata.assistantMessageId!,
+                kind: "text",
+                role: "kiki",
+                content: event.content,
+                createdAt: metadata.assistantCreatedAt ?? new Date().toISOString(),
+                unread: true,
+                status: "done",
+                source: "kiki",
+              },
+            },
+            idempotencyKey: `claude.stream.final.append:${metadata.conversationId}:${metadata.assistantMessageId}`,
+            producedBy: "system",
+          });
+        }
+        applyConversationCommand({
+          command: { type: "set_status", conversationId: metadata.conversationId!, status: "idle" },
+          idempotencyKey: `claude.stream.final.status:${metadata.conversationId}:${metadata.assistantMessageId}:idle`,
+          producedBy: "system",
+        });
+        session.finalMessagePersisted = true;
+        return;
+      }
+
+      if (event.type === "error") {
+        const content = `（任务失败：${event.message}）`;
+        const patch = current
+          ? patchFinalMessage(current.message, current.message.content || content, "error", event.message)
+          : ({ content, status: "error" } satisfies Partial<ConversationMessage>);
+        if (current) {
+          applyConversationCommand({
+            command: {
+              type: "update_message",
+              conversationId: metadata.conversationId!,
+              messageId: metadata.assistantMessageId!,
+              patch,
+            },
+            idempotencyKey: `claude.stream.final.error:${metadata.conversationId}:${metadata.assistantMessageId}`,
+            producedBy: "system",
+          });
+        } else {
+          applyConversationCommand({
+            command: {
+              type: "append_message",
+              conversationId: metadata.conversationId!,
+              message: {
+                id: metadata.assistantMessageId!,
+                kind: "text",
+                role: "kiki",
+                content,
+                createdAt: metadata.assistantCreatedAt ?? new Date().toISOString(),
+                unread: true,
+                status: "error",
+                source: "kiki",
+              },
+            },
+            idempotencyKey: `claude.stream.final.error.append:${metadata.conversationId}:${metadata.assistantMessageId}`,
+            producedBy: "system",
+          });
+        }
+        applyConversationCommand({
+          command: { type: "set_status", conversationId: metadata.conversationId!, status: "error" },
+          idempotencyKey: `claude.stream.final.status:${metadata.conversationId}:${metadata.assistantMessageId}:error`,
+          producedBy: "system",
+        });
+        session.finalMessagePersisted = true;
+        return;
+      }
+
+      if (event.type === "done" && current?.message.status === "streaming") {
+        applyConversationCommand({
+          command: {
+            type: "update_message",
+            conversationId: metadata.conversationId!,
+            messageId: metadata.assistantMessageId!,
+              patch: patchFinalMessage(current.message, current.message.content, "done"),
+          },
+          idempotencyKey: `claude.stream.final.done:${metadata.conversationId}:${metadata.assistantMessageId}`,
+          producedBy: "system",
+        });
+        applyConversationCommand({
+          command: { type: "set_status", conversationId: metadata.conversationId!, status: "idle" },
+          idempotencyKey: `claude.stream.final.status:${metadata.conversationId}:${metadata.assistantMessageId}:done`,
+          producedBy: "system",
+        });
+      }
+    });
+  } catch (error) {
+    console.error("[machine-stream] persist final event failed", error);
+  }
+}
+
+function deliverInOrder(sessionId: string, session: StreamSession, event: ClaudeStreamEvent) {
+  if (!session.done) clearCleanupTimer(session);
+  persistFinalStreamEvent(session, event);
   if (event.type === "done") {
     session.done = true;
+    scheduleStreamSessionCleanup(sessionId, session);
   }
   if (session.waiters.length > 0) {
     const waiter = session.waiters.shift()!;
@@ -76,12 +274,12 @@ function deliverInOrder(session: StreamSession, event: ClaudeStreamEvent) {
   session.queue.push(event);
 }
 
-function flushBuffered(session: StreamSession) {
+function flushBuffered(sessionId: string, session: StreamSession) {
   for (;;) {
     const event = session.buffer.get(session.expectedSeq);
     if (!event) break;
     session.buffer.delete(session.expectedSeq);
-    deliverInOrder(session, event);
+    deliverInOrder(sessionId, session, event);
     session.expectedSeq += 1;
     if (session.done) {
       clearGapTimer(session);
@@ -91,7 +289,7 @@ function flushBuffered(session: StreamSession) {
   }
 }
 
-function armGapTimer(session: StreamSession) {
+function armGapTimer(sessionId: string, session: StreamSession) {
   if (session.done || session.gapTimer || session.buffer.size === 0) return;
   const nextSeq = Math.min(...Array.from(session.buffer.keys()));
   const nextEvent = session.buffer.get(nextSeq);
@@ -105,32 +303,41 @@ function armGapTimer(session: StreamSession) {
     if (Number.isFinite(nextBufferedSeq) && nextBufferedSeq > session.expectedSeq) {
       session.expectedSeq = nextBufferedSeq;
     }
-    flushBuffered(session);
+    flushBuffered(sessionId, session);
     if (!session.done && session.buffer.size > 0) {
-      armGapTimer(session);
+      armGapTimer(sessionId, session);
     }
   }, timeoutMs);
 }
 
 export function pushStreamChunk(sessionId: string, event: ClaudeStreamEvent, seq?: number) {
   const session = getSessions().get(sessionId);
-  if (!session || session.done) return;
+  if (!session || session.done) {
+    if (event.type === "message" || event.type === "error" || event.type === "done") {
+      console.warn("[machine-stream] chunk ignored without active session", {
+        sessionId,
+        eventType: event.type,
+        seq,
+      });
+    }
+    return;
+  }
   if (seq === undefined) {
-    deliverInOrder(session, event);
+    deliverInOrder(sessionId, session, event);
     return;
   }
   if (seq < session.expectedSeq) return;
   if (seq === session.expectedSeq) {
     clearGapTimer(session);
-    deliverInOrder(session, event);
+    deliverInOrder(sessionId, session, event);
     session.expectedSeq += 1;
     if (session.done) {
       session.buffer.clear();
       return;
     }
-    flushBuffered(session);
+    flushBuffered(sessionId, session);
     if (!session.done && session.buffer.size > 0) {
-      armGapTimer(session);
+      armGapTimer(sessionId, session);
     }
     return;
   }
@@ -138,7 +345,7 @@ export function pushStreamChunk(sessionId: string, event: ClaudeStreamEvent, seq
   if (session.gapTimerMode === "doneOnly" && event.type !== "done") {
     clearGapTimer(session);
   }
-  armGapTimer(session);
+  armGapTimer(sessionId, session);
 }
 
 function waitStreamEvent(sessionId: string, timeoutMs: number, signal?: AbortSignal) {
@@ -150,24 +357,34 @@ function waitStreamEvent(sessionId: string, timeoutMs: number, signal?: AbortSig
   if (session.done) return Promise.resolve(null);
 
   return new Promise<ClaudeStreamEvent | null>((resolve) => {
-    const onAbort = () => resolve(null);
+    const state: {
+      timer?: NodeJS.Timeout;
+      wrappedResolve?: (value: ClaudeStreamEvent | null) => void;
+    } = {};
+    const onAbort = () => {
+      session.waiters = session.waiters.filter((item) => item.resolve !== state.wrappedResolve);
+      if (state.timer) clearTimeout(state.timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(null);
+    };
     if (signal?.aborted) {
       resolve(null);
       return;
     }
     signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => {
-      session.waiters = session.waiters.filter((item) => item.resolve !== resolve);
+    state.timer = setTimeout(() => {
+      session.waiters = session.waiters.filter((item) => item.resolve !== state.wrappedResolve);
       signal?.removeEventListener("abort", onAbort);
       resolve(null);
     }, timeoutMs);
+    state.wrappedResolve = (value: ClaudeStreamEvent | null) => {
+      if (state.timer) clearTimeout(state.timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
     session.waiters.push({
-      resolve: (value) => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      timer,
+      resolve: state.wrappedResolve,
+      timer: state.timer,
     });
   });
 }

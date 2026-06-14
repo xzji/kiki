@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import { DEFAULT_EASTER_EGG_SETTINGS } from "@/lib/goalSystemConfig";
+import { buildDecomposePrompt } from "@/lib/server/goalPlanning";
 import { adaptTopicInitSagaToGoalDraft } from "./sagaDraftAdapter";
 import type { TopicInitSagaResult } from "./topicInitSaga";
 
@@ -62,6 +64,30 @@ function completedResult(overrides?: Partial<TopicInitSagaResult>): TopicInitSag
 }
 
 export function runSagaDraftAdapterSpecs() {
+  {
+    const previous = process.env.KIKI_LOOP_V2_PLANNER;
+    delete process.env.KIKI_LOOP_V2_PLANNER;
+    const legacyPrompt = buildDecomposePrompt({
+      goalTitle: "跟踪美股科技",
+      goalDescription: "关注交易窗口",
+      userContext: {},
+      config: { ...DEFAULT_EASTER_EGG_SETTINGS, minSubGoals: 1, maxSubGoals: 3 },
+    });
+    assert.ok(!legacyPrompt.includes('"topicLoop"'), "默认保持旧 planner 词表");
+    process.env.KIKI_LOOP_V2_PLANNER = "1";
+    const v2Prompt = buildDecomposePrompt({
+      goalTitle: "跟踪美股科技",
+      goalDescription: "关注交易窗口",
+      userContext: {},
+      config: { ...DEFAULT_EASTER_EGG_SETTINGS, minSubGoals: 1, maxSubGoals: 3 },
+    });
+    assert.ok(v2Prompt.includes('"topicLoop"'), "flag 开启后要求 topicLoop");
+    assert.ok(v2Prompt.includes('"triggerSpec"'), "flag 开启后要求 Task triggerSpec");
+    assert.ok(v2Prompt.includes("cron/phased"), "flag 开启后允许 cron/phased reviewInterval");
+    if (previous === undefined) delete process.env.KIKI_LOOP_V2_PLANNER;
+    else process.env.KIKI_LOOP_V2_PLANNER = previous;
+  }
+
   {
     const draft = adaptTopicInitSagaToGoalDraft({
       topicText: "跟踪美股科技",
@@ -133,5 +159,112 @@ export function runSagaDraftAdapterSpecs() {
 
     assert.equal(draft.subGoals[0]?.title, "修正后计划");
     assert.equal(draft.goalAnalysis?.coreIntent, "原始意图");
+  }
+
+  {
+    const draft = adaptTopicInitSagaToGoalDraft({
+      topicText: "跟踪美股科技",
+      result: completedResult({
+        artifacts: {
+          plan: {
+            topicLoop: { kind: "cron", expr: "0 9 * * 1", timezone: "Asia/Shanghai" },
+            subGoals: [
+              {
+                id: 1,
+                name: "美股交易窗口监控",
+                reviewInterval: {
+                  kind: "phased",
+                  timezone: "America/New_York",
+                  phases: [
+                    {
+                      id: "market",
+                      start: "09:30",
+                      end: "16:00",
+                      daysOfWeek: [1, 2, 3, 4, 5],
+                      trigger: { kind: "interval", value: 15, unit: "m", everyMs: 900000 },
+                    },
+                  ],
+                },
+                tasks: [
+                  {
+                    id: "1-1",
+                    title: "盘中异动巡检",
+                    description: "检查科技股异动",
+                    expectedOutcome: "异动摘要",
+                    taskType: "repeat",
+                    triggerSpec: { kind: "cron", expr: "*/15 9-16 * * 1-5", timezone: "America/New_York" },
+                  },
+                ],
+              },
+            ],
+          },
+          presentation: {
+            goalTitle: "科技板块跟踪",
+            summary: "持续关注板块变化",
+            notificationStrategy: "有异动即提醒",
+          },
+        },
+      }),
+    });
+    assert.deepEqual(draft.topicLoop, { kind: "cron", expr: "0 9 * * 1", timezone: "Asia/Shanghai" });
+    assert.equal(draft.subGoals[0]?.reviewTrigger?.kind, "phased");
+    assert.deepEqual(draft.subGoals[0]?.tasks[0]?.triggerSpec, {
+      kind: "cron",
+      expr: "*/15 9-16 * * 1-5",
+      timezone: "America/New_York",
+    });
+    assert.equal(draft.subGoals[0]?.tasks[0]?.triggerRule, "cron:*/15 9-16 * * 1-5 tz=America/New_York");
+  }
+
+  {
+    const draft = adaptTopicInitSagaToGoalDraft({
+      topicText: "跟踪美股科技",
+      result: completedResult({
+        artifacts: {
+          plan: {
+            topicLoop: "phased:not-json",
+            loop: "weekly",
+            subGoals: [
+              {
+                id: 1,
+                name: "兼容非法触发器",
+                reviewInterval: "phased:not-json",
+                loopInterval: "daily",
+                tasks: [
+                  {
+                    id: "1-1",
+                    title: "保留旧触发规则",
+                    description: "验证非法 triggerSpec 不会吞掉旧路径",
+                    expectedOutcome: "兼容路径正常",
+                    taskType: "repeat",
+                    triggerSpec: "phased:not-json",
+                    trigger: "interval:15m",
+                  },
+                ],
+              },
+            ],
+          },
+          presentation: {
+            goalTitle: "科技板块跟踪",
+            summary: "持续关注板块变化",
+            notificationStrategy: "有异动即提醒",
+          },
+        },
+      }),
+    });
+
+    assert.deepEqual(draft.topicLoop, { kind: "weekly" });
+    assert.deepEqual(draft.subGoals[0]?.reviewTrigger, { kind: "daily" });
+    assert.deepEqual(draft.subGoals[0]?.tasks[0]?.triggerSpec, {
+      kind: "interval",
+      everyMs: 900_000,
+      value: 15,
+      unit: "m",
+    });
+    assert.equal(draft.subGoals[0]?.tasks[0]?.triggerRule, "interval:15m");
+    assert.ok(
+      (draft.reviewSummary ?? []).filter((item) => item.includes("planner warning") && item.includes("非法 TriggerSpec")).length >= 3,
+      "非法 TriggerSpec 应记录 planner warning",
+    );
   }
 }

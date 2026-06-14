@@ -112,6 +112,8 @@ async function POSTHandler(request: NextRequest) {
           filePolicy: body.runtimeEnv.filePolicy,
           resumeSessionId: resumeSessionId,
           conversationId: body.conversationId,
+          assistantMessageId: body.assistantMessageId,
+          assistantCreatedAt: body.assistantCreatedAt,
           quotedMessage: body.quotedMessage,
           contextPack,
           workspacePolicy: body.workspaceMode || "conversation",

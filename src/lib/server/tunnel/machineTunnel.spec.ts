@@ -72,6 +72,9 @@ export async function runMachineTunnelSpecs() {
   assert.deepEqual(await takeMachineCommands(machineId, 1), []);
   unregisterMachineWsConnection(machineId, sender);
 
-  assert.equal(isMachineTunnelEnvelope({ kind: "hello", runningJobIds: [] }), true);
+  assert.equal(
+    isMachineTunnelEnvelope({ kind: "hello", runningJobIds: [], runningGovernanceJobIds: [] }),
+    true,
+  );
   assert.equal(isMachineTunnelEnvelope({ nope: true }), false);
 }

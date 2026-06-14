@@ -13,11 +13,17 @@
  */
 
 import { computeNextTickAt } from "@/lib/taskTriggerTime";
+import {
+  readCadenceHistoryFromMemory,
+  tuneLoopCadence,
+  writeCadenceHistoryToMemory,
+} from "@/lib/server/governance/cadenceTuner";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { Task, TaskInstance } from "@/types/kiki";
 import {
   THREAD_FAILURE_PAUSE_THRESHOLD,
   type Thread,
+  type ThreadLoopInterval,
   type ThreadStatus,
   type ThreadTickAction,
   type ThreadTickOutput,
@@ -56,6 +62,7 @@ export type ThreadTickContext = {
  */
 export type ThreadTickPatch = {
   status: ThreadStatus;
+  loopInterval?: ThreadLoopInterval;
   lastTickAt: string;
   nextTickAt?: string;
   memory: Record<string, unknown>;
@@ -114,6 +121,7 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
     recentTaskInstances: ctx.recentTaskInstances,
     threadMemory: ctx.thread.memory,
     lastTickOutput: ctx.lastTickOutput,
+    now: ctx.now,
   });
 
   // ---- 1. 调用 LLM ----
@@ -132,7 +140,11 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
   let output: ThreadTickOutput;
   try {
     if (raw.parsed) {
-      output = parseThreadTickOutput(raw.parsed, ctx.thread.id);
+      output = parseThreadTickOutput(raw.parsed, {
+        expectedThreadId: ctx.thread.id,
+        terminationCondition: ctx.thread.terminationCondition,
+        currentTasks: ctx.currentTasks,
+      });
     } else {
       // invoke 工厂没有 parsed 时，尝试 JSON.parse 一下兜底；失败则上报。
       let parsed: unknown;
@@ -147,7 +159,11 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
           ),
         });
       }
-      output = parseThreadTickOutput(parsed, ctx.thread.id);
+      output = parseThreadTickOutput(parsed, {
+        expectedThreadId: ctx.thread.id,
+        terminationCondition: ctx.thread.terminationCondition,
+        currentTasks: ctx.currentTasks,
+      });
     }
   } catch (error) {
     if (error instanceof ThreadTickOutputValidationError) {
@@ -162,16 +178,37 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
     output.actions.length > 0 && output.actions.every((a) => a.kind === "silent");
   const shouldArchive = output.actions.some((a) => a.kind === "archive_thread");
   const memoryAfter = mergeMemory(ctx.thread.memory, output.memoryDelta);
-  const nextTickAt = computeNextTickAtIso(ctx.thread, ctx.now);
+  const silentCount = isAllSilent ? ctx.thread.silentCount + 1 : 0;
+  const cadence = tuneLoopCadence({
+    entityKind: "thread",
+    currentLoop: ctx.thread.loopTrigger ?? ctx.thread.loopInterval,
+    deadline: ctx.topic.deadline,
+    silentCount,
+    hasImportantOutput: hasImportantOutput(output),
+    now: ctx.now,
+    history: readCadenceHistoryFromMemory(memoryAfter),
+  });
+  const memoryWithCadenceHistory = cadence.appendedHistory
+    ? writeCadenceHistoryToMemory(memoryAfter, cadence.history)
+    : memoryAfter;
+  const nextTickAt = computeNextTickAtIso(
+    {
+      ...ctx.thread,
+      loopInterval: cadence.loop,
+      lastTickAt,
+    },
+    ctx.now,
+  );
 
   return {
     ok: true,
     patch: {
       status: shouldArchive ? "archived" : ctx.thread.status,
+      ...(cadence.changed ? { loopInterval: cadence.loop } : {}),
       lastTickAt,
       nextTickAt: shouldArchive ? undefined : nextTickAt,
-      memory: memoryAfter,
-      silentCount: isAllSilent ? ctx.thread.silentCount + 1 : 0,
+      memory: memoryWithCadenceHistory,
+      silentCount,
       failureCount: 0, // 成功一次即重置
     },
     output,
@@ -190,17 +227,29 @@ function buildFailureResult(
   const failureCount = ctx.thread.failureCount + 1;
   const reachedThreshold = failureCount >= THREAD_FAILURE_PAUSE_THRESHOLD;
   const status: ThreadStatus = reachedThreshold ? "paused" : ctx.thread.status;
+  const cadence = tuneLoopCadence({
+    entityKind: "thread",
+    currentLoop: ctx.thread.loopTrigger ?? ctx.thread.loopInterval,
+    deadline: ctx.topic.deadline,
+    silentCount: ctx.thread.silentCount,
+    now: ctx.now,
+    history: readCadenceHistoryFromMemory(ctx.thread.memory),
+  });
+  const memoryWithCadenceHistory = cadence.appendedHistory
+    ? writeCadenceHistoryToMemory(ctx.thread.memory, cadence.history)
+    : ctx.thread.memory;
   const nextTickAt = reachedThreshold
     ? undefined // paused 后清空 nextTickAt，恢复时由调用方重新计算
-    : computeNextTickAtIso(ctx.thread, ctx.now);
+    : computeNextTickAtIso({ ...ctx.thread, loopInterval: cadence.loop, lastTickAt }, ctx.now);
 
   return {
     ok: false,
     patch: {
       status,
+      ...(!reachedThreshold && cadence.changed ? { loopInterval: cadence.loop } : {}),
       lastTickAt,
       nextTickAt,
-      memory: ctx.thread.memory, // 失败不写 memoryDelta
+      memory: memoryWithCadenceHistory, // 失败不写 memoryDelta，但允许 cadence history
       silentCount: ctx.thread.silentCount, // 失败不计 silent
       failureCount,
     },
@@ -220,6 +269,10 @@ function mergeMemory(
 function computeNextTickAtIso(thread: Thread, now: Date): string | undefined {
   const next = computeNextTickAt(thread, now);
   return next ? next.toISOString() : undefined;
+}
+
+function hasImportantOutput(output: ThreadTickOutput) {
+  return output.actions.some((action) => action.kind === "post_message" && action.severity === "important");
 }
 
 // ---------------------------------------------------------------------------

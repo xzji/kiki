@@ -136,6 +136,8 @@ export type ConversationCliProcess = {
 export type ClaudeChatRequest = {
   message: string;
   conversationId: string;
+  assistantMessageId?: string;
+  assistantCreatedAt?: string;
   runtimeEnv: RuntimeEnvironment;
   source: "assistant-sidebar" | "conversation";
   workspaceMode?: "conversation" | "task";

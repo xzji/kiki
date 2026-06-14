@@ -156,6 +156,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
     deadline: draft.deadline || "",
     progress: 0,
     createdAt,
+    topicLoop: draft.topicLoop,
     kind: "collab",
     summary: draft.summary,
     subGoals: draft.subGoals.map((subGoal) => ({
@@ -164,6 +165,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
       title: subGoal.title,
       description: subGoal.description,
       reviewInterval: subGoal.reviewInterval,
+      reviewTrigger: subGoal.reviewTrigger,
       terminationCondition: subGoal.terminationCondition,
       why: subGoal.why,
       priority: subGoal.priority,
@@ -180,6 +182,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
           expectedOutcome: taskItem.expectedOutcome,
           taskType: taskItem.taskType,
           triggerRule: taskItem.triggerRule,
+          trigger: taskItem.triggerSpec ?? taskItem.trigger,
           deadline: draft.deadline || "",
           progress: 0,
           instances: [],
