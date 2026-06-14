@@ -75,6 +75,9 @@ export type TaskExecutionContext = {
     blockers: ContextBlocker[];
     summary: string;
   };
+  resume?: {
+    hasResumeContext: boolean;
+  };
   dependencies: DependencyView[];
   inputs: {
     goal: Goal;

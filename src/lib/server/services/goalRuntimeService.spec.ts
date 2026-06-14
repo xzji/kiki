@@ -8,14 +8,22 @@ import {
 } from "@/lib/server/runtime/stateSnapshot";
 import { deriveOpaqueId } from "@/lib/opaqueIds";
 import { getGoalEventsSince } from "@/lib/server/repositories/goalEventLogRepository";
+import {
+  backfillTaskNotificationStatesFromGoals,
+  getTaskNotificationStateByInstanceId,
+  markTaskNotificationDeliveredState,
+} from "@/lib/server/repositories/taskNotificationStateRepository";
+import { upsertRuntimeJob } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { RuntimeJobRecord, RuntimeJobStatus } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
-import type { Goal } from "@/types/kiki";
+import type { Goal, TaskResultNotificationDecision } from "@/types/kiki";
+import type { GoalServerProgress } from "@/types/goalTelemetry";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
 import {
   mutateGoalsProjection,
   projectRuntimeJobStatusProjection,
+  updateGoalRuntimeJobExecution,
 } from "./goalRuntimeService";
 
 const GOAL_ID = deriveOpaqueId("goal", "goal-runtime-service-spec");
@@ -198,6 +206,79 @@ function getProjectionInstance() {
   return goal?.subGoals[0]?.tasks[0]?.instances[0];
 }
 
+function awaitingProgress(): GoalServerProgress {
+  return {
+    requestId: "request-goal-runtime-projection-spec",
+    scope: "goal_task_execute",
+    status: "completed",
+    phase: "executing",
+    message: "等待用户补充信息",
+    startedAt: "2026-06-03T00:00:00.000Z",
+    updatedAt: "2026-06-03T00:00:03.000Z",
+    goalId: PROJECTION_GOAL_ID,
+    taskId: PROJECTION_TASK_ID,
+    taskInstanceId: PROJECTION_INSTANCE_ID,
+    resultPayload: {
+      awaitingUser: true,
+      awaitingReason: "等待用户补充信息",
+      interactionRequirement: {
+        type: "answer",
+        timing: "during_execution",
+        reason: "等待用户补充信息",
+        suggestedActions: ["补充信息"],
+        shouldNotifyUser: true,
+      },
+      suggestedActions: ["补充信息"],
+    },
+  };
+}
+
+function resultReadyDecision(): TaskResultNotificationDecision {
+  return {
+    shouldNotify: true,
+    channel: "conversation",
+    notificationType: "result_ready",
+    priority: "normal",
+    reason: "任务完成并产出了值得查看的结果。",
+    title: "任务已完成",
+    snippet: "任务已完成。",
+    userMessage: "任务已完成，点击卡片查看结果。",
+    badge: null,
+    resultSummary: {
+      headline: "任务已完成",
+      keyPoints: ["已生成结果"],
+      nextActions: ["查看结果"],
+    },
+    detailPolicy: {
+      showTimelineByDefault: false,
+      showRawOutputBehindMore: true,
+      showArtifactsExpanded: true,
+    },
+    createdAt: "2026-06-03T00:00:04.000Z",
+  };
+}
+
+function completedProgress(): GoalServerProgress {
+  return {
+    requestId: "request-goal-runtime-projection-spec",
+    scope: "goal_task_execute",
+    status: "completed",
+    phase: "completed",
+    message: "任务执行完成",
+    startedAt: "2026-06-03T00:00:00.000Z",
+    updatedAt: "2026-06-03T00:00:04.000Z",
+    finishedAt: "2026-06-03T00:00:04.000Z",
+    goalId: PROJECTION_GOAL_ID,
+    taskId: PROJECTION_TASK_ID,
+    taskInstanceId: PROJECTION_INSTANCE_ID,
+    resultPayload: {
+      awaitingUser: false,
+      finalMessage: "任务已完成。",
+      notificationDecision: resultReadyDecision(),
+    },
+  };
+}
+
 export function runGoalRuntimeServiceSpecs() {
   ensureIsolatedPlanningSpecDataDir();
 
@@ -282,4 +363,39 @@ export function runGoalRuntimeServiceSpecs() {
   assert.notEqual(requeuedInstance?.awaitingUser, undefined);
   assert.notEqual(requeuedInstance?.blocker, undefined);
   assert.equal(requeuedInstance?.execution?.waitingReason, "等待用户补充信息");
+
+  const backfilled = backfillTaskNotificationStatesFromGoals(readGoalsSnapshot([]));
+  assert.equal(backfilled.changed, 1);
+  const backfilledNotification = getTaskNotificationStateByInstanceId(PROJECTION_INSTANCE_ID);
+  assert.equal(backfilledNotification?.notification.deliveryState, "pending");
+  assert.equal(backfilledNotification?.notification.notificationType, "answer_required");
+
+  const awaitingJob = projectionJob("running");
+  upsertRuntimeJob(awaitingJob);
+  updateGoalRuntimeJobExecution(awaitingJob.id, {
+    status: "awaiting_user",
+    progress: awaitingProgress(),
+    result: awaitingProgress().resultPayload,
+  });
+  const awaitingNotification = getTaskNotificationStateByInstanceId(PROJECTION_INSTANCE_ID);
+  assert.equal(awaitingNotification?.notification.deliveryState, "pending");
+  assert.equal(awaitingNotification?.notification.notificationType, "answer_required");
+  assert.equal(awaitingNotification?.notification.channel, "both");
+
+  markTaskNotificationDeliveredState({
+    instanceId: PROJECTION_INSTANCE_ID,
+    conversationMessageId: "msg-task-runtime-projection-n1",
+    notificationSequence: 1,
+  });
+  updateGoalRuntimeJobExecution(awaitingJob.id, {
+    status: "completed",
+    progress: completedProgress(),
+    result: completedProgress().resultPayload,
+    finishedAt: "2026-06-03T00:00:04.000Z",
+  });
+  const completedNotification = getTaskNotificationStateByInstanceId(PROJECTION_INSTANCE_ID);
+  assert.equal(completedNotification?.notification.deliveryState, "pending");
+  assert.equal(completedNotification?.notification.notificationType, "result_ready");
+  assert.equal(completedNotification?.notification.notificationSequence, 1);
+  assert.deepEqual(completedNotification?.notification.pushedConversationMessageIds, ["msg-task-runtime-projection-n1"]);
 }

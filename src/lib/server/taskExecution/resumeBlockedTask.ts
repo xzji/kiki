@@ -89,6 +89,39 @@ function mapToRecord(map: Map<string, string>) {
   return Object.fromEntries(map.entries());
 }
 
+// 从上一轮已持久化的提交里提取累计字段。resumeContext 仅携带最近一轮反馈，
+// 不累积历史；若不在此合并，多轮分字段回答或“直接点继续”会丢失此前字段，
+// 导致 readiness 重新判定为缺失并重复追问。
+function extractPriorSubmittedFields(basePayload: unknown): Record<string, string> {
+  if (!isRecord(basePayload)) return {};
+  const direct = isRecord(basePayload.interactionSubmission) ? basePayload.interactionSubmission.fields : undefined;
+  const nested =
+    isRecord(basePayload.structuredOutput) && isRecord(basePayload.structuredOutput.interactionSubmission)
+      ? basePayload.structuredOutput.interactionSubmission.fields
+      : undefined;
+  const out: Record<string, string> = {};
+  for (const source of [nested, direct]) {
+    if (!isRecord(source)) continue;
+    for (const [label, value] of Object.entries(source)) {
+      if (typeof value === "string" && value.trim()) out[label] = value;
+    }
+  }
+  return out;
+}
+
+// 从上一轮 job.payload.resumeContext 的「累计信息」行回收字段。runner 二次阻塞时会用
+// buildReadinessBlockedResult 覆写 job.result（其中不含 interactionSubmission），因此跨 runner
+// 再阻塞后只有 resumeContext 仍保留累计字段，需从中回收，避免多轮分字段回答时历史字段丢失。
+function extractPriorResumeContextFields(resumeContext: unknown): Record<string, string> {
+  if (typeof resumeContext !== "string" || !resumeContext) return {};
+  const out: Record<string, string> = {};
+  for (const line of resumeContext.split("\n")) {
+    const match = line.trim().match(/^-\s*([^：:]{1,40})[:：]\s*(.+)$/);
+    if (match?.[1] && match[2]?.trim()) out[match[1].trim()] = match[2].trim();
+  }
+  return out;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -331,11 +364,19 @@ function buildProgress(input: {
   } satisfies GoalServerProgress;
 }
 
-function buildResumeContext(input: { approved: boolean; feedback: string }) {
+function buildResumeContext(input: { approved: boolean; feedback: string; accumulatedFields?: Record<string, string> }) {
   const lines = [
     `用户对上一次阻塞点的决定：${input.approved ? "确认继续" : "拒绝当前方案/要求修改"}`,
     `用户反馈：${input.feedback}`,
   ];
+  const fieldEntries = Object.entries(input.accumulatedFields ?? {}).filter(([, value]) => value && value.trim());
+  if (fieldEntries.length) {
+    // 把迄今为止用户提供的所有字段一并带入，避免多轮分字段回答或“直接点继续”时丢失历史字段。
+    lines.push(
+      "用户已提供的累计信息（最新值优先）：",
+      ...fieldEntries.map(([label, value]) => `- ${label}：${value}`),
+    );
+  }
   if (input.approved) {
     lines.push(
       "用户已确认上一轮候选/草案，请不要再次要求用户确认同一内容。",
@@ -553,6 +594,16 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
   const feedback = body.feedback?.trim() || (body.approved ? "用户已确认，请继续执行。" : "用户未确认当前方案，请根据反馈修改后继续执行。");
   const feedbackFields = parseFeedbackFields(feedback);
   Object.entries(body.fields ?? {}).forEach(([label, value]) => feedbackFields.set(label, value));
+  // 先铺底历史已提交字段，再让本轮新值覆盖，使累计字段随每轮恢复持续生效，避免重复追问。
+  // 同时从上一轮 resumeContext 回收累计字段：runner 二次阻塞会清掉 job.result 中的提交字段，
+  // 只有 payload.resumeContext 跨轮保留，是多轮分字段回答时唯一可靠的累计来源。
+  const priorFields = {
+    ...extractPriorResumeContextFields(job.payload.resumeContext),
+    ...extractPriorSubmittedFields(basePayload),
+  };
+  Object.entries(priorFields).forEach(([label, value]) => {
+    if (!feedbackFields.has(label)) feedbackFields.set(label, value);
+  });
   const interactionSubmission = buildInteractionSubmission({
     blocker: job.blocker,
     body,
@@ -608,7 +659,11 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
   requeueBlockedGoalRuntimeJob({
     job,
     taskWorkspaceDir,
-    resumeContext: buildResumeContext({ approved: body.approved, feedback }),
+    resumeContext: buildResumeContext({
+      approved: body.approved,
+      feedback,
+      accumulatedFields: mapToRecord(feedbackFields),
+    }),
     progress: nextProgress,
     trajectory: nextTrajectory,
     result: resultPayload,

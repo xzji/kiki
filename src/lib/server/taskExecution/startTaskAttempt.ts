@@ -231,6 +231,7 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     goal: latestGoal,
     subGoal: latestSubGoal,
     task: latestTask,
+    resumeContext: input.resumeContext,
   });
 
   const createdNewInstance = !latestTask.instances.some((candidate) => candidate.id === instance.id);

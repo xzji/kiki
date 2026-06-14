@@ -103,6 +103,67 @@ export function runSagaDraftAdapterSpecs() {
 
   {
     const draft = adaptTopicInitSagaToGoalDraft({
+      topicText: "2026 年国庆蜜月规划与落地",
+      result: completedResult({
+        artifacts: {
+          plan: {
+            subGoals: [
+              {
+                id: 1,
+                name: "需求画像与目的地决策",
+                dependencies: [],
+                tasks: [
+                  {
+                    id: "1-1",
+                    title: "发起蜜月需求画像问卷",
+                    description: "收集偏好与限制",
+                    expectedOutcome: "需求画像摘要",
+                    taskType: "one_shot",
+                    triggerRule: "立即触发",
+                  },
+                  {
+                    id: "1-2",
+                    title: "产出候选目的地对比方案",
+                    description: "基于需求画像生成候选对比",
+                    expectedOutcome: "候选目的地对比表",
+                    taskType: "one_shot",
+                    triggerRule: "满足条件：需求画像已确认",
+                    dependencies: ["1-1"],
+                  },
+                ],
+              },
+              {
+                id: 2,
+                name: "机票与酒店预订",
+                dependencies: [1],
+                tasks: [
+                  {
+                    id: "2-1",
+                    title: "产出机票方案并完成出票",
+                    description: "基于目的地与日期处理机票",
+                    expectedOutcome: "出票确认",
+                    taskType: "one_shot",
+                    triggerRule: "满足条件：目的地与日期已锁定",
+                  },
+                ],
+              },
+            ],
+          },
+          presentation: {
+            goalTitle: "2026 年国庆蜜月规划与落地",
+            summary: "形成蜜月落地计划。",
+            notificationStrategy: "关键节点提醒。",
+          },
+        },
+      }),
+    });
+
+    assert.deepEqual(draft.subGoals[0]?.tasks[1]?.dependencies, ["1-1"]);
+    assert.deepEqual(draft.subGoals[1]?.tasks[0]?.dependencies, ["1-1", "1-2"]);
+  }
+
+  {
+    const draft = adaptTopicInitSagaToGoalDraft({
       topicText: "把想法落成可试用版本",
       result: completedResult({
         artifacts: {

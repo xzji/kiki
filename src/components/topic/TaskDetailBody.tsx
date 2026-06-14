@@ -247,6 +247,8 @@ export function TaskDetailBody({
     () => sortedInstances.filter((item) => isArchivedExecutionInstance(item)),
     [sortedInstances],
   );
+  const hasExecutionInstances =
+    pendingInstances.length > 0 || runningInstances.length > 0 || completedInstances.length > 0;
 
   useEffect(() => {
     setSectionOpen((prev) => ({
@@ -490,45 +492,49 @@ export function TaskDetailBody({
       </section>
 
       <div className="mt-8 space-y-8">
-        <InstanceSection
-          title={SECTION_COPY.pending.title}
-          description={SECTION_COPY.pending.description}
-          instances={pendingInstances}
-          task={task}
-          expandedInstanceId={expandedInstanceId}
-          onToggle={setExpandedInstanceId}
-          open={sectionOpen.pending}
-          onToggleOpen={() => {
-            if (pendingInstances.length === 0) return;
-            setSectionOpen((prev) => ({ ...prev, pending: !prev.pending }));
-          }}
-        />
-        <InstanceSection
-          title={SECTION_COPY.running.title}
-          description={SECTION_COPY.running.description}
-          instances={runningInstances}
-          task={task}
-          expandedInstanceId={expandedInstanceId}
-          onToggle={setExpandedInstanceId}
-          open={sectionOpen.running}
-          onToggleOpen={() => {
-            if (runningInstances.length === 0) return;
-            setSectionOpen((prev) => ({ ...prev, running: !prev.running }));
-          }}
-        />
-        <InstanceSection
-          title={SECTION_COPY.completed.title}
-          description={SECTION_COPY.completed.description}
-          instances={completedInstances}
-          task={task}
-          expandedInstanceId={expandedInstanceId}
-          onToggle={setExpandedInstanceId}
-          open={sectionOpen.completed}
-          onToggleOpen={() => {
-            if (completedInstances.length === 0) return;
-            setSectionOpen((prev) => ({ ...prev, completed: !prev.completed }));
-          }}
-        />
+        {pendingInstances.length > 0 ? (
+          <InstanceSection
+            title={SECTION_COPY.pending.title}
+            description={SECTION_COPY.pending.description}
+            instances={pendingInstances}
+            task={task}
+            expandedInstanceId={expandedInstanceId}
+            onToggle={setExpandedInstanceId}
+            open={sectionOpen.pending}
+            onToggleOpen={() => {
+              setSectionOpen((prev) => ({ ...prev, pending: !prev.pending }));
+            }}
+          />
+        ) : null}
+        {runningInstances.length > 0 ? (
+          <InstanceSection
+            title={SECTION_COPY.running.title}
+            description={SECTION_COPY.running.description}
+            instances={runningInstances}
+            task={task}
+            expandedInstanceId={expandedInstanceId}
+            onToggle={setExpandedInstanceId}
+            open={sectionOpen.running}
+            onToggleOpen={() => {
+              setSectionOpen((prev) => ({ ...prev, running: !prev.running }));
+            }}
+          />
+        ) : null}
+        {completedInstances.length > 0 ? (
+          <InstanceSection
+            title={SECTION_COPY.completed.title}
+            description={SECTION_COPY.completed.description}
+            instances={completedInstances}
+            task={task}
+            expandedInstanceId={expandedInstanceId}
+            onToggle={setExpandedInstanceId}
+            open={sectionOpen.completed}
+            onToggleOpen={() => {
+              setSectionOpen((prev) => ({ ...prev, completed: !prev.completed }));
+            }}
+          />
+        ) : null}
+        {!hasExecutionInstances ? <TaskExecutionEmptyState /> : null}
       </div>
 
       <TaskEditDrawer goalId={goal.id} task={task} open={editOpen} onClose={() => setEditOpen(false)} />
@@ -539,6 +545,15 @@ export function TaskDetailBody({
         subGoal={promptContext?.subGoal ?? null}
         task={task}
       />
+    </div>
+  );
+}
+
+function TaskExecutionEmptyState() {
+  return (
+    <div className="rounded-xl border border-dashed border-[#D0D7DE] bg-[#FAFAFB] px-4 py-8 text-center">
+      <div className="text-[14px] font-medium text-[#1F2328]">暂无任务执行记录</div>
+      <div className="mt-1 text-[12px] text-[#8C9198]">任务开始执行后，会在这里展示执行状态和结果。</div>
     </div>
   );
 }

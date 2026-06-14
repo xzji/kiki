@@ -255,6 +255,7 @@ function buildContext(input: {
   task: Task;
   instance?: TaskInstance;
   requestId?: string;
+  resumeContext?: string;
 }) {
   const budget = DEFAULT_TASK_EXECUTION_CONTEXT_BUDGET;
   const dependencies = buildDependencies({
@@ -293,6 +294,7 @@ function buildContext(input: {
     task: input.task,
     instance: input.instance,
     dependencyContextText,
+    resumeContext: input.resumeContext,
   });
   const userInputBlockers = contextBlockersFromReadiness(syncReadiness);
   const blockers = [...cycleBlockers, ...dependencyBlockers, ...subGoalDependencyBlockers, ...userInputBlockers];
@@ -306,6 +308,9 @@ function buildContext(input: {
       taskId: input.task.id,
       instanceId: input.instance?.id,
       requestId: input.requestId,
+    },
+    resume: {
+      hasResumeContext: Boolean(input.resumeContext),
     },
     readiness: {
       state,
@@ -330,6 +335,7 @@ export function resolveAdmitDecision(input: {
   goal: Goal;
   subGoal: SubGoal;
   task: Task;
+  resumeContext?: string;
 }) {
   return buildContext(input);
 }
@@ -341,6 +347,7 @@ export function resolveExecutionContext(input: {
   task: Task;
   instance: TaskInstance;
   requestId: string;
+  resumeContext?: string;
 }) {
   return materializeTaskExecutionContext(buildContext(input));
 }

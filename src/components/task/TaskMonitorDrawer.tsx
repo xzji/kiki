@@ -30,11 +30,7 @@ import { cn } from "@/lib/utils";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
-import {
-  TASK_MONITOR_MAX_WIDTH,
-  TASK_MONITOR_MIN_WIDTH,
-  useTaskMonitorStore,
-} from "@/stores/taskMonitorStore";
+import { useTaskMonitorStore } from "@/stores/taskMonitorStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
 const ASSISTANT_WIDTH = 400;
@@ -321,9 +317,6 @@ export function TaskMonitorDrawer() {
           ) : null}
         </div>
 
-        <div className="border-t border-[#E5E7EB] px-4 py-2 text-[11px] text-[#8C9198]">
-          可拖拽左边缘调整宽度（{TASK_MONITOR_MIN_WIDTH}-{TASK_MONITOR_MAX_WIDTH}px）
-        </div>
       </aside>
     </>
   );

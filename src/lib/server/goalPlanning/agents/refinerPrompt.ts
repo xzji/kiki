@@ -41,6 +41,8 @@ export function buildTopicPlanRefinerPrompt(input: BuildTopicPlanRefinerPromptIn
     "- 补齐过粗、重复、遗漏或不可执行的 Thread/Task。",
     "- 保持 Thread 数量克制，避免制造空洞任务。",
     "- Task 必须是真正执行单元，包含 title/description/expectedOutcome/taskType/triggerRule 等关键字段。",
+    "- 如果 Task 需要等待其他 Task 的产出，必须在 dependencies 中写被依赖任务的 id 或 title；不要只写在 triggerRule 文案里。",
+    "- 如果 triggerRule 包含“已确认/已锁定/已预订/已交付/已反馈/完成后”等前置语义，请同步补齐 dependencies。",
     "",
     "现在只输出修正后的 JSON 对象：",
   ].join("\n");

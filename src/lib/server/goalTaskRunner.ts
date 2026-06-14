@@ -2570,6 +2570,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
       task: input.task,
       instance: input.instance,
       requestId: input.requestId,
+      resumeContext: input.resumeContext,
     });
   const agentStrategy = selectAgentCollaborationStrategy({ task: input.task, isResumeRun });
   if (agentStrategy !== "single_agent") {
@@ -3059,6 +3060,7 @@ export async function runGoalTask(input: RunGoalTaskInput): Promise<GoalTaskOutc
     task: tracedInput.task,
     instance: tracedInput.instance,
     requestId: tracedInput.requestId,
+    resumeContext: tracedInput.resumeContext,
   });
   const enhancedInput: RunGoalTaskInput = { ...tracedInput, executionContext };
   const contextReadiness = readinessFromContext(executionContext);

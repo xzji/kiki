@@ -10,6 +10,7 @@ import {
   singleFieldOptions,
 } from "@/lib/server/informationRequest/compileFields";
 import { normalizeInteractionRequirement } from "@/lib/server/protocol/normalizeAwaitingInteraction";
+import { buildAwaitingUserNotificationDecision } from "@/lib/server/runtime/goalStateSnapshot";
 import type { TaskReadinessCheck } from "@/lib/server/taskReadinessPolicy";
 
 function nowIso() {
@@ -120,7 +121,7 @@ export function createPreExecutionAwaitingProgress(input: {
   trajectory?: ExecutionTrajectoryStep[];
 }): GoalServerProgress {
   const now = nowIso();
-  return {
+  const progress: GoalServerProgress = {
     requestId: input.requestId,
     scope: "goal_task_execute",
     status: "completed",
@@ -150,4 +151,14 @@ export function createPreExecutionAwaitingProgress(input: {
       trajectory: input.trajectory ?? [],
     },
   };
+  const notificationDecision = buildAwaitingUserNotificationDecision(progress);
+  return notificationDecision
+    ? {
+        ...progress,
+        resultPayload: {
+          ...(progress.resultPayload ?? {}),
+          notificationDecision,
+        },
+      }
+    : progress;
 }

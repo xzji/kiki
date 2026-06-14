@@ -1,6 +1,7 @@
 import { normalizeGoalId, normalizeInstanceId, normalizeTaskId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
 import {
+  normalizeAwaitingUserNotificationFromInstance,
   normalizeNotificationFromProgress,
   notificationContentHash,
 } from "@/lib/server/runtime/goalStateSnapshot";
@@ -206,22 +207,36 @@ export function markTaskNotificationDeliveredState(input: {
   });
 }
 
+export function ensureTaskNotificationStateFromInstance(input: {
+  goalId?: string;
+  taskId?: string;
+  instance: TaskInstance;
+}) {
+  const existing = getTaskNotificationStateByInstanceId(input.instance.id);
+  if (existing) return { record: existing, changed: false };
+  const notification = input.instance.notification ?? normalizeAwaitingUserNotificationFromInstance(input.instance);
+  if (!notification) return { record: null, changed: false };
+  const record = upsertTaskNotificationState({
+    goalId: input.goalId,
+    taskId: input.taskId,
+    instanceId: input.instance.id,
+    notification,
+  });
+  return { record, changed: Boolean(record) };
+}
+
 export function backfillTaskNotificationStatesFromGoals(goals: Goal[]) {
   let changed = 0;
   for (const goal of goals) {
     for (const subGoal of goal.subGoals) {
       for (const task of subGoal.tasks) {
         for (const instance of task.instances) {
-          if (!instance.notification) continue;
-          const existing = getTaskNotificationStateByInstanceId(instance.id);
-          if (existing) continue;
-          upsertTaskNotificationState({
+          const ensured = ensureTaskNotificationStateFromInstance({
             goalId: goal.id,
             taskId: task.id,
-            instanceId: instance.id,
-            notification: instance.notification,
+            instance,
           });
-          changed += 1;
+          if (ensured.changed) changed += 1;
         }
       }
     }

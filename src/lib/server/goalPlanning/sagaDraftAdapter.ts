@@ -1,4 +1,5 @@
 import type { TopicInitSagaResult } from "@/lib/server/goalPlanning/topicInitSaga";
+import { mergeCrossSubGoalTaskDependencies } from "@/lib/goalPlanning/taskCompiler";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
 import type { GoalAnalysis, GoalBreakdownDraft, GoalDeliveryContract, TaskPriority } from "@/types/kiki";
 import { normalizeTriggerSpecWithWarnings, type TriggerSpec } from "@/types/trigger";
@@ -153,6 +154,7 @@ function normalizeTask(
     readString(record.cadence) ??
     (readString(record.triggerCondition) ? `满足条件：${readString(record.triggerCondition)}` : undefined) ??
     "手动触发";
+  const dependencyHints = normalizeDependencies(record.dependencies);
   const taskType =
     record.taskType === "repeat" || readString(record.cadence) || readString(record.triggerCondition)
       ? "repeat"
@@ -169,6 +171,7 @@ function normalizeTask(
     trigger: triggerSpec,
     executionKind: "generic_result",
     priority: normalizePriority(record.priority ?? record.priorityHint),
+    planningDependencyHints: dependencyHints,
     taskSpec: specContent
       ? {
           content: specContent,
@@ -251,10 +254,12 @@ export function adaptTopicInitSagaToGoalDraft(input: {
   }
 
   const plannerWarnings: string[] = [];
-  const subGoals = normalizeSubGoals(plan.subGoals ?? plan.threads, input.result.artifacts.specs, plannerWarnings);
-  if (subGoals.length === 0) {
+  const normalizedSubGoals = normalizeSubGoals(plan.subGoals ?? plan.threads, input.result.artifacts.specs, plannerWarnings);
+  if (normalizedSubGoals.length === 0) {
     throw new Error("TopicInitSaga 未返回任何可落库的子目标/线程");
   }
+  const dependencyMerge = mergeCrossSubGoalTaskDependencies({ subGoals: normalizedSubGoals });
+  const subGoals = dependencyMerge.subGoals;
 
   const criticNotes = readString(input.result.artifacts.critic?.notes);
   const goalAnalysis = normalizeGoalAnalysis(plan.goalAnalysis);
@@ -269,6 +274,7 @@ export function adaptTopicInitSagaToGoalDraft(input: {
   const reviewSummary = [
     ...(criticNotes ? [criticNotes] : []),
     ...plannerWarnings,
+    ...dependencyMerge.warnings.map((warning) => `planner warning: task dependency merge ${warning.message}`),
   ];
   return {
     goalTitle: readString(presentation.goalTitle) ?? input.topicText,

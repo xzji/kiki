@@ -560,6 +560,8 @@ export function buildDecomposePrompt(input: {
 5. 事件触发类需求降级为周期巡检 Task：用 repeat + 合适 cadence，并在 description/objective 里写清判断条件。
 6. 如果某个 Thread 承担将准备产出转化为最终结果的责任，tasks 必须包含构建或验收类执行单元，不能只包含方案、选型、说明、骨架等准备产物。
 7. 整个 Topic 的所有初始 tasks 完成后，必须能证明 goalAnalysis.successState 与 deliveryContract 已满足。
+8. tasks[].dependencies 是真实执行依赖：如果某个任务必须等待同一 Thread 或上游 Thread 的任务产出，必须填写被依赖任务的 id 或 title；不要只把前置关系写进 triggerRule 文案。
+9. triggerRule 描述“什么时候尝试触发”，dependencies 描述“必须先完成哪些任务”；两者都需要时必须同时填写。
 ${loopV2PlannerInstructions()}
 
 ## 边界处理
@@ -612,6 +614,7 @@ ${loopV2.topLevel}  "subGoals": [
           "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
 ${loopV2.taskTriggerSpec}          "cadence": "可选：自然语言频率，例如 每天 09:00",
           "triggerCondition": "可选：条件型任务的判断条件",
+          "dependencies": ["可选：必须先完成的任务 id 或 title；无依赖则 []"],
           "executionKind": "generic_result"
         }
       ]
@@ -647,6 +650,7 @@ export function buildDecompositionNormalizationPrompt(input: {
 9. 保留每个 Thread 的 reviewInterval、terminationCondition 和 tasks[]；tasks 可以为空数组，不要补占位任务。
 10. goalAnalysis.deliveryContract 必须描述最终交付物、完成证据、以及不能单独算完成的中间产物；如果原始输出缺少，请基于目标信息补齐。
 11. tasks 应覆盖从当前状态到目标成功状态的最小主干闭环路径，不得把关键交付缺口留给后续。
+12. tasks[].dependencies 是真实执行依赖；如果 triggerRule 或任务语义包含“X 完成后/确认后/锁定后/交付后/反馈后”，必须把 X 对应任务的 id 或 title 写入 dependencies。
 ${loopV2PlannerInstructions()}
 
 目标信息：
@@ -690,7 +694,8 @@ ${loopV2.topLevel}  "subGoals": [
           "expectedOutcome": "交付结果",
           "taskType": "repeat|one_shot",
           "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
-${loopV2.taskTriggerSpec}          "executionKind": "generic_result"
+${loopV2.taskTriggerSpec}          "dependencies": ["可选：必须先完成的任务 id 或 title；无依赖则 []"],
+          "executionKind": "generic_result"
         }
       ]
     }

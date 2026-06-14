@@ -72,6 +72,7 @@ import { runRemoteDaemonLoopSpecs } from "../src/lib/daemon/remoteDaemonLoop.spe
 import { runTickRecorderSpecs } from "../src/lib/server/observability/tickRecorder.spec";
 import { runLoopTickLogSpecs } from "../src/lib/server/observability/loopTickLog.spec";
 import { runSpecWriterSpecs } from "../src/lib/server/taskExecution/runSpecWriter.spec";
+import { runContextResolverSpecs } from "../src/lib/server/taskExecution/contextResolver.spec";
 import { runConversationStoreSpecs } from "../src/stores/conversationStore.spec";
 import { runInstantConversationEntrySpecs } from "../src/components/layout/instantConversationEntry.spec";
 import { runMemorySpecs } from "../src/lib/server/memory/memory.spec";
@@ -132,6 +133,7 @@ runGovernanceTickProtocolSpecs();
 runDaemonRunnerSpecs();
 runTickRecorderSpecs();
 runLoopTickLogSpecs();
+runContextResolverSpecs();
 
 (async () => {
   await runAgentExecutorSpecs();

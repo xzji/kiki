@@ -13,10 +13,14 @@
 - planning review 与 compiler 继续收紧：review prompt 改为更保守的对齐评估，task compiler / goal planning 增加交付闭环审计、跨子目标依赖与失败恢复处理，降低“任务都相关但无法真正交付”的情况。
 - 调度器与执行上下文增强依赖就绪判断：scheduler 会同时检查任务依赖、板块依赖和 runtime job 占用，任务执行上下文会把上游 blocker、依赖 digest 与软等待原因暴露出来。
 - 设置页与会话页继续补强交互细节：`TaskMonitorDrawer`、`TopicPlanContent`、`ConversationView` 等组件适配了新的 planning / cli process 数据结构。
+- 任务依赖语义进一步硬化：decompose / normalize prompt 明确区分 `triggerRule` 与真实 `dependencies`，要求把“X 完成后再做”的前置关系落到结构化依赖上，而不是只写进自然语言触发文案。
+- blocked task 恢复链路增强为可累计多轮补充：恢复时会从历史 `interactionSubmission` 和 `resumeContext` 回收已提交字段，避免用户分多轮补充信息时重复丢字段、重复追问。
+- 任务通知投递改为更稳的 append-only 账本：conversation/inbox 派发、deliveryState 标记和事件日志写入保持同事务，normal `result_ready` 旧通知会自动迁移到 conversation 语义，避免重试或补投时覆盖历史卡片。
 
 ### Added
 - 新增账户资料与密码修改接口，以及对应的服务端鉴权/校验逻辑：昵称限制 30 字以内，密码要求至少 8 位且同时包含字母和数字，并校验当前密码与新旧密码重复场景。
 - 新增多组规划与调度规格测试：覆盖 `goalFactory`、task draft prompt、delivery closure audit、runtimeJobsRepository、task compiler 与 scheduler 相关边界。
+- 新增 blocked task / notification / scheduler 相关规格测试，覆盖 `contextResolver`、`goalSideEffects`、`goalRuntimeService`、`sagaDraftAdapter` 等多轮恢复与通知派发边界。
 
 ## 2026-06-12
 

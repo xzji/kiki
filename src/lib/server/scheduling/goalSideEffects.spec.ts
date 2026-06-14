@@ -66,6 +66,33 @@ function buildProgress(decision: TaskResultNotificationDecision): GoalServerProg
   };
 }
 
+function buildAwaitingProgress(overrides: Record<string, unknown> = {}): GoalServerProgress {
+  return {
+    requestId: "req-awaiting",
+    scope: "goal_task_execute",
+    status: "completed",
+    phase: "executing",
+    message: "等待用户补充信息",
+    startedAt: "2026-05-29T00:00:00.000Z",
+    updatedAt: "2026-05-29T00:00:00.000Z",
+    resultPayload: {
+      awaitingUser: true,
+      awaitingReason: "预算是用户偏好，Agent 不能自行假设。",
+      interactionRequirement: {
+        type: "provide_context",
+        timing: "before_execution",
+        reason: "预算是用户偏好，Agent 不能自行假设。",
+        question: "这次预算大概是什么范围？",
+        options: ["3000 元以内", "3000-8000 元", "不设明确上限"],
+        suggestedActions: ["3000 元以内", "3000-8000 元", "不设明确上限"],
+        shouldNotifyUser: true,
+      },
+      suggestedActions: ["3000 元以内", "3000-8000 元", "不设明确上限"],
+      ...overrides,
+    },
+  };
+}
+
 function buildGoals(notification?: TaskInstanceNotificationState): Goal[] {
   const instance = buildInstance(notification);
   return [
@@ -199,5 +226,91 @@ export function runGoalNotificationWorkerSpecs() {
     const instance = buildInstance(previousNotification);
     const normalized = normalizeNotificationFromProgress(buildProgress(decision), instance);
     assert.equal(normalized?.deliveryState, "delivered");
+  }
+
+  // case E: awaiting_user 无 notificationDecision → fallback 生成 pending 通知
+  {
+    const instance = buildInstance(undefined);
+    const normalized = normalizeNotificationFromProgress(buildAwaitingProgress(), instance);
+    assert.equal(normalized?.deliveryState, "pending");
+    assert.equal(normalized?.notificationType, "context_required");
+    assert.equal(normalized?.channel, "both");
+    assert.equal(normalized?.badge, "need_answer");
+    assert.equal(normalized?.priority, "high");
+    assert.match(normalized?.userMessage ?? "", /预算是用户偏好/);
+  }
+
+  // case F: awaiting_user 明确 shouldNotifyUser=false → 不创建通知
+  {
+    const instance = buildInstance(undefined);
+    const normalized = normalizeNotificationFromProgress(
+      buildAwaitingProgress({
+        interactionRequirement: {
+          type: "provide_context",
+          timing: "before_execution",
+          reason: "内部信息不足但不需要提醒",
+          shouldNotifyUser: false,
+        },
+      }),
+      instance,
+    );
+    assert.equal(normalized, undefined);
+  }
+
+  // case G: 旧 awaiting 通知已 delivered，后续 result_ready 内容变化 → 重新 pending
+  {
+    const awaiting = normalizeNotificationFromProgress(buildAwaitingProgress(), buildInstance(undefined))!;
+    const deliveredAwaiting: TaskInstanceNotificationState = {
+      ...awaiting,
+      deliveryState: "delivered",
+      conversationMessageId: "msg-task-inst-A-n1",
+      notificationSequence: 1,
+      pushedConversationMessageIds: ["msg-task-inst-A-n1"],
+      lastDeliveredHash: JSON.stringify({
+        snippet: awaiting.snippet,
+        userMessage: awaiting.userMessage,
+        notificationType: awaiting.notificationType,
+      }),
+    };
+    const resultReady = buildDecision({
+      notificationType: "result_ready",
+      title: "任务已完成",
+      snippet: "任务完成并产出了结果。",
+      userMessage: "任务已完成，点击卡片查看结果。",
+      resultSummary: {
+        headline: "任务已完成",
+        keyPoints: ["已生成结果"],
+        nextActions: ["查看结果"],
+      },
+    });
+    const normalized = normalizeNotificationFromProgress(buildProgress(resultReady), buildInstance(deliveredAwaiting));
+    assert.equal(normalized?.deliveryState, "pending");
+    assert.equal(normalized?.notificationSequence, 1);
+    assert.deepEqual(normalized?.pushedConversationMessageIds, ["msg-task-inst-A-n1"]);
+  }
+
+  // case H: 兼容旧回执仅把交互要求放在 contextBlocker 中
+  {
+    const instance = buildInstance(undefined);
+    const normalized = normalizeNotificationFromProgress(
+      buildAwaitingProgress({
+        awaitingReason: undefined,
+        interactionRequirement: undefined,
+        contextBlocker: {
+          interactionRequirement: {
+            type: "answer",
+            timing: "during_execution",
+            reason: "请补充必要信息",
+            question: "请选择预算范围",
+            suggestedActions: ["补充预算"],
+            shouldNotifyUser: true,
+          },
+        },
+      }),
+      instance,
+    );
+    assert.equal(normalized?.deliveryState, "pending");
+    assert.equal(normalized?.notificationType, "answer_required");
+    assert.match(normalized?.userMessage ?? "", /请补充必要信息/);
   }
 }

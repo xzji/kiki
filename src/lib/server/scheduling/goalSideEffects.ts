@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/server/db/client";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import {
   backfillTaskNotificationStatesFromGoals,
+  ensureTaskNotificationStateFromInstance,
   listPendingTaskNotificationStates,
   markTaskNotificationDeliveredState,
 } from "@/lib/server/repositories/taskNotificationStateRepository";
@@ -119,8 +120,8 @@ export function runGoalScheduleSynthesisWorker(goals: Goal[]) {
 }
 
 export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
-  backfillTaskNotificationStatesFromGoals(goals);
   const composedGoals = composeGoalsWithRuntimeJobs(goals);
+  backfillTaskNotificationStatesFromGoals(composedGoals);
   let delivered = 0;
   for (const record of listPendingTaskNotificationStates()) {
     const context = findTaskContext(composedGoals, {
@@ -257,20 +258,12 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
             });
           }
           if (instance.status === "awaiting_user" && ageMs >= DEFAULT_EASTER_EGG_SETTINGS.taskHeartbeatTimeoutMs) {
-            heartbeats += 1;
-            appendGoalEventOnce({
+            const ensured = ensureTaskNotificationStateFromInstance({
               goalId: goal.id,
               taskId: task.id,
-              instanceId: instance.id,
-              kind: "notification.delivered",
-              producedBy: "daemon",
-              idempotencyKey: `notification.delivered:heartbeat:${instance.id}`,
-              createdAt: now,
-              payload: {
-                target: "inbox",
-                notificationId: `inbox-heartbeat-${instance.id}`,
-              },
+              instance,
             });
+            if (ensured.changed) heartbeats += 1;
           }
         }
       }

@@ -118,6 +118,129 @@ function isNotificationDecision(value: unknown): value is TaskResultNotification
   );
 }
 
+function isInteractionRequirement(value: unknown): value is InteractionRequirement {
+  return Boolean(value && typeof value === "object" && "type" in value && "shouldNotifyUser" in value);
+}
+
+function interactionRequirementFromBlocker(value: unknown): InteractionRequirement | undefined {
+  if (!value || typeof value !== "object" || !("interactionRequirement" in value)) return undefined;
+  const interactionRequirement = (value as { interactionRequirement?: unknown }).interactionRequirement;
+  return isInteractionRequirement(interactionRequirement) ? interactionRequirement : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0) : [];
+}
+
+function awaitingNotificationType(
+  interactionRequirement: InteractionRequirement,
+): TaskResultNotificationDecision["notificationType"] {
+  if (interactionRequirement.type === "answer") return "answer_required";
+  if (interactionRequirement.type === "provide_context") return "context_required";
+  if (interactionRequirement.type === "confirm" || interactionRequirement.type === "perform_offline_action") {
+    return "action_required";
+  }
+  return "action_required";
+}
+
+function awaitingNotificationBadge(
+  interactionRequirement: InteractionRequirement,
+): TaskResultNotificationDecision["badge"] {
+  return interactionRequirement.type === "confirm" ? "need_confirm" : "need_answer";
+}
+
+function awaitingNotificationText(input: {
+  reason: string;
+  interactionRequirement: InteractionRequirement;
+}) {
+  const question = input.interactionRequirement.question?.trim();
+  return question || input.reason || "任务需要你补充信息后才能继续。";
+}
+
+export function buildAwaitingUserNotificationDecision(
+  progress: GoalServerProgress | null,
+): TaskResultNotificationDecision | null {
+  if (!progress?.resultPayload?.awaitingUser) return null;
+  const payloadInteractionRequirement = progress.resultPayload.interactionRequirement;
+  const interactionRequirement = isInteractionRequirement(payloadInteractionRequirement)
+    ? payloadInteractionRequirement
+    : interactionRequirementFromBlocker(progress.resultPayload.blocker) ??
+      interactionRequirementFromBlocker(progress.resultPayload.contextBlocker);
+  if (!interactionRequirement || interactionRequirement.shouldNotifyUser !== true) {
+    return null;
+  }
+  const reason =
+    (typeof progress.resultPayload.awaitingReason === "string" && progress.resultPayload.awaitingReason.trim()) ||
+    interactionRequirement.reason?.trim() ||
+    progress.summary?.trim() ||
+    progress.message?.trim() ||
+    "任务需要你补充信息后才能继续。";
+  const suggestedActions = stringArray(progress.resultPayload.suggestedActions).length
+    ? stringArray(progress.resultPayload.suggestedActions)
+    : stringArray(interactionRequirement.suggestedActions);
+  const text = awaitingNotificationText({ reason, interactionRequirement });
+  return {
+    shouldNotify: true,
+    channel: "both",
+    notificationType: awaitingNotificationType(interactionRequirement),
+    priority: "high",
+    reason,
+    title: "需要你补充信息",
+    snippet: text,
+    userMessage: `任务需要你补充信息后才能继续：${reason}`,
+    badge: awaitingNotificationBadge(interactionRequirement),
+    resultSummary: {
+      headline: text,
+      keyPoints: [reason],
+      nextActions: suggestedActions,
+    },
+    detailPolicy: {
+      showTimelineByDefault: false,
+      showRawOutputBehindMore: true,
+      showArtifactsExpanded: false,
+    },
+    createdAt: progress.updatedAt ?? nowIso(),
+  };
+}
+
+export function normalizeAwaitingUserNotificationFromInstance(
+  instance: TaskInstance,
+): TaskInstanceNotificationState | undefined {
+  if (instance.status !== "awaiting_user" && !instance.awaitingUser && !instance.blocker) return instance.notification;
+  const awaitingUser = instance.awaitingUser;
+  const interactionRequirement =
+    awaitingUser?.interactionRequirement ??
+    interactionRequirementFromBlocker(awaitingUser?.blocker) ??
+    interactionRequirementFromBlocker(instance.blocker);
+  if (!interactionRequirement) return instance.notification;
+  const reason =
+    awaitingUser?.reason ||
+    interactionRequirement.reason ||
+    instance.execution?.waitingReason ||
+    "任务需要你补充信息后才能继续。";
+  const progress: GoalServerProgress = {
+    requestId: instance.runner?.requestId ?? `awaiting-user-${instance.id}`,
+    scope: "goal_task_execute",
+    status: "completed",
+    phase: "reviewing",
+    message: reason,
+    startedAt: instance.execution?.startedAt ?? instance.createdAt,
+    updatedAt: instance.execution?.lastUpdatedAt ?? instance.createdAt,
+    finishedAt: instance.execution?.finishedAt,
+    taskId: instance.taskId,
+    taskInstanceId: instance.id,
+    summary: reason,
+    resultPayload: {
+      awaitingUser: true,
+      awaitingReason: reason,
+      interactionRequirement,
+      suggestedActions: awaitingUser?.suggestedActions ?? interactionRequirement.suggestedActions,
+      blocker: awaitingUser?.blocker ?? instance.blocker,
+    },
+  };
+  return normalizeNotificationFromProgress(progress, instance);
+}
+
 export function notificationContentHash(decision: TaskResultNotificationDecision) {
   // 内容指纹：仅在用户可见的语义字段变化时才视为「新一次通知」，
   // 避免单纯的 channel/shouldNotify 抖动错误重置已 delivered 状态。
@@ -134,8 +257,11 @@ export function normalizeNotificationFromProgress(
 ): TaskInstanceNotificationState | undefined {
   const interactionSubmission = progress?.resultPayload?.interactionSubmission;
   if (interactionSubmission && progress.resultPayload?.awaitingUser !== true) return undefined;
-  const rawDecision = progress?.resultPayload?.notificationDecision;
-  if (!isNotificationDecision(rawDecision)) return instance.notification;
+  const payloadDecision = progress?.resultPayload?.notificationDecision;
+  const rawDecision = isNotificationDecision(payloadDecision)
+    ? payloadDecision
+    : buildAwaitingUserNotificationDecision(progress);
+  if (!rawDecision) return instance.notification;
   const previous = instance.notification;
   const nextHash = notificationContentHash(rawDecision);
   // 当上一次 delivered 的内容与本轮决策不同（且明确写过 hash），
