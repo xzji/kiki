@@ -1,4 +1,6 @@
 import path from "path";
+import fs from "fs";
+import os from "os";
 import { spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 
@@ -99,6 +101,10 @@ export type ClaudeCliPayload = {
   message?: {
     content?: Array<{
       type?: string;
+      id?: string;
+      name?: string;
+      input?: unknown;
+      tool_use_id?: string;
       text?: string;
       thinking?: string;
     }>;
@@ -139,6 +145,16 @@ export type RuntimeStreamEvent =
   | { type: "delta"; text: string }
   | { type: "message"; content: string; fallbackContent?: string }
   | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
+  | {
+      type: "subagent_event";
+      agentId: string;
+      eventKind: "thinking" | "tool_call" | "tool_result" | "completed";
+      title: string;
+      summary?: string;
+      content?: string;
+      input?: unknown;
+      createdAt?: string;
+    }
   | { type: "file"; filename: string; mime: string; size: number; contentBase64: string; summary?: string }
   | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
@@ -711,6 +727,148 @@ function extractAssistantThinkingText(payload: ClaudeCliPayload) {
   return pieces?.join("\n") ?? "";
 }
 
+function encodeClaudeProjectPath(workingDirectory: string) {
+  const normalized = path.resolve(workingDirectory).replace(/\\/g, "/");
+  return normalized.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+type ClaudeMessageContentBlock = NonNullable<NonNullable<ClaudeCliPayload["message"]>["content"]>[number];
+
+function readSubagentContentText(content: ClaudeMessageContentBlock) {
+  const raw = content.text || content.thinking || "";
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function summarizeSubagentToolResult(text: string) {
+  const firstLine = text.split("\n").map((line) => line.trim()).find(Boolean);
+  return firstLine ? truncateMiddle(firstLine, 90) : "子代理收到工具结果";
+}
+
+function createSubagentEventFromLine(line: string): RuntimeStreamEvent | null {
+  let payload: ClaudeCliPayload & {
+    agentId?: string;
+    timestamp?: string;
+    isSidechain?: boolean;
+  };
+  try {
+    payload = JSON.parse(line) as typeof payload;
+  } catch {
+    return null;
+  }
+  const agentId = typeof payload.agentId === "string" && payload.agentId ? payload.agentId : null;
+  if (!agentId || payload.type !== "assistant" && payload.type !== "user") return null;
+  const content = payload.message?.content;
+  if (!Array.isArray(content) || content.length === 0) return null;
+
+  const first = content[0];
+  if (payload.type === "assistant") {
+    if (first.type === "thinking") {
+      const text = readSubagentContentText(first);
+      if (!text) return null;
+      return {
+        type: "subagent_event",
+        agentId,
+        eventKind: "thinking",
+        title: "子代理思考",
+        content: text,
+        createdAt: payload.timestamp,
+      };
+    }
+    if (first.type === "tool_use") {
+      const toolName = first.name || "Tool";
+      return {
+        type: "subagent_event",
+        agentId,
+        eventKind: "tool_call",
+        title: `子代理调用工具：${toolName}`,
+        summary: summarizeToolCall(toolName, first.input),
+        input: first.input,
+        createdAt: payload.timestamp,
+      };
+    }
+    if (first.type === "text" && payload.message && (payload.message as { stop_reason?: string }).stop_reason === "end_turn") {
+      const text = readSubagentContentText(first);
+      if (!text) return null;
+      return {
+        type: "subagent_event",
+        agentId,
+        eventKind: "completed",
+        title: "子代理完成",
+        summary: truncateMiddle(text.replace(/\s+/g, " "), 100),
+        content: text,
+        createdAt: payload.timestamp,
+      };
+    }
+  }
+
+  if (payload.type === "user" && first.type === "tool_result") {
+    const text = readSubagentContentText(first);
+    if (!text) return null;
+    return {
+      type: "subagent_event",
+      agentId,
+      eventKind: "tool_result",
+      title: "子代理收到工具结果",
+      summary: summarizeSubagentToolResult(text),
+      createdAt: payload.timestamp,
+    };
+  }
+  return null;
+}
+
+function createSubagentEventPoller(input: {
+  cwd: string;
+  getSessionId: () => string | undefined;
+  emitEvent: (event: RuntimeStreamEvent) => boolean;
+}) {
+  const processedLineCounts = new Map<string, number>();
+  const emittedKeys = new Set<string>();
+
+  const poll = () => {
+    const sessionId = input.getSessionId();
+    if (!sessionId) return;
+    const subagentsDir = path.join(os.homedir(), ".claude", "projects", encodeClaudeProjectPath(input.cwd), sessionId, "subagents");
+    if (!fs.existsSync(subagentsDir)) return;
+    let files: string[] = [];
+    try {
+      files = fs.readdirSync(subagentsDir)
+        .filter((name) => name.endsWith(".jsonl"))
+        .map((name) => path.join(subagentsDir, name));
+    } catch {
+      return;
+    }
+    for (const filePath of files) {
+      let lines: string[] = [];
+      try {
+        const raw = fs.readFileSync(filePath, "utf8");
+        lines = raw.trim() ? raw.trim().split("\n") : [];
+      } catch {
+        continue;
+      }
+      const start = processedLineCounts.get(filePath) ?? 0;
+      if (lines.length <= start) continue;
+      processedLineCounts.set(filePath, lines.length);
+      for (let index = start; index < lines.length; index += 1) {
+        const event = createSubagentEventFromLine(lines[index]);
+        if (!event || event.type !== "subagent_event") continue;
+        const key = `${filePath}:${index}:${event.eventKind}:${event.title}`;
+        if (emittedKeys.has(key)) continue;
+        emittedKeys.add(key);
+        if (!input.emitEvent(event)) return;
+      }
+    }
+  };
+
+  const timer = setInterval(poll, 1000);
+  timer.unref?.();
+  return {
+    poll,
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
 function summarizeToolCall(toolName: string, input: unknown) {
   const normalized = toolName.toLowerCase();
   const filePath = readStringField(input, ["file_path", "path", "target_file", "file", "cwd"]);
@@ -884,10 +1042,17 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       });
     };
 
+    const subagentPoller = createSubagentEventPoller({
+      cwd,
+      getSessionId: () => canonicalSessionId,
+      emitEvent,
+    });
+
     const abort = () => {
       if (terminalResultReceived) return;
       aborted = true;
       emittedFatalError = true;
+      subagentPoller.stop();
       killChildTree(child);
       trace?.finish("aborted", "Claude CLI 流式调用已中断");
       if (emitEvent({ type: "done" })) {
@@ -1063,6 +1228,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
 
     child.on("error", (error) => {
       emittedFatalError = true;
+      subagentPoller.stop();
       trace?.finish("failed", error.message || "Claude CLI 启动失败");
       if (!emitEvent({
         type: "error",
@@ -1077,6 +1243,8 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       options.signal?.removeEventListener("abort", abort);
       if (callbackError) return;
       if (aborted) return;
+      subagentPoller.poll();
+      subagentPoller.stop();
       if (stdoutBuffer.trim()) {
         consumeLine(stdoutBuffer.trim());
       }

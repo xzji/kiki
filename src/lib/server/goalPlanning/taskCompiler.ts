@@ -35,15 +35,17 @@ export function compileTaskDraftsToDraftTasks(input: {
   taskIdBatchSeed: string;
   subGoalDraftId: string;
   subGoalIndex: number;
+  taskIndexOffset?: number;
 }): { tasks: DraftTask[]; warnings: TaskCompileWarning[] } {
   const warnings: TaskCompileWarning[] = [];
   const idByHint = new Map<string, string>();
+  const taskIndexOffset = input.taskIndexOffset ?? 0;
   input.drafts.forEach((draft, index) => {
     const taskId = buildDraftTaskId({
       taskIdBatchSeed: input.taskIdBatchSeed,
       subGoalDraftId: input.subGoalDraftId,
       subGoalIndex: input.subGoalIndex,
-      taskIndex: index + 1,
+      taskIndex: taskIndexOffset + index + 1,
       sourceTaskId: `task-${draft.index ?? index + 1}`,
     });
     idByHint.set(String(draft.index ?? index + 1), taskId);
@@ -79,7 +81,7 @@ export function compileTaskDraftsToDraftTasks(input: {
         taskIdBatchSeed: input.taskIdBatchSeed,
         subGoalDraftId: input.subGoalDraftId,
         subGoalIndex: input.subGoalIndex,
-        taskIndex: index + 1,
+        taskIndex: taskIndexOffset + index + 1,
         sourceTaskId: `task-${draft.index ?? index + 1}`,
       }),
       title: draft.title,
@@ -101,6 +103,7 @@ export function compileTaskDraftsToDraftTasks(input: {
       autoRunDisabled: false,
       requiresConfirmation: collaboration.userInteractionType === "confirm" || expectedResult.type === "decision" || expectedResult.type === "confirmation",
       collaboration,
+      planningDependencyHints: draft.dependencyHints,
     };
     assertDraftTaskShape(task);
     return task;

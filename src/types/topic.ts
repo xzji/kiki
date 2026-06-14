@@ -12,6 +12,7 @@
  */
 
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
+import type { GoalDeliveryContract } from "@/types/kiki";
 import type { TriggerSpec } from "@/types/trigger";
 
 export type LegacyThreadLoopInterval =
@@ -78,6 +79,7 @@ export type Topic = {
   deadline?: string;
   /** 可选 — 仅当用户显式给出时填写。 */
   completionCriteria?: string;
+  deliveryContract?: GoalDeliveryContract;
   threads: Thread[];
   status: TopicStatus;
   createdAt: string;

@@ -44,6 +44,8 @@ export type RuntimeJobRecord = {
   taskInstanceId?: string;
   taskId?: string;
   goalId?: string;
+  topicId?: string;
+  threadId?: string;
   conversationId?: string;
   userId: string;
   kind: RuntimeJobKind;
@@ -72,6 +74,8 @@ type RuntimeJobRow = {
   task_instance_id: string | null;
   task_id: string | null;
   goal_id: string | null;
+  topic_id: string | null;
+  thread_id: string | null;
   conversation_id: string | null;
   user_id: string;
   kind: RuntimeJobKind;
@@ -143,6 +147,8 @@ function mapRow(row: RuntimeJobRow): RuntimeJobRecord {
     taskInstanceId: row.task_instance_id ? normalizeInstanceId(row.task_instance_id) : payload.instance.id,
     taskId: row.task_id ? normalizeTaskId(row.task_id) : payload.task.id,
     goalId: row.goal_id ? migrateGoalIds({ ...payload.goal, id: row.goal_id }).id : payload.goal.id,
+    topicId: row.topic_id ? normalizeGoalId(row.topic_id) : payload.goal.id,
+    threadId: row.thread_id ? normalizeSubGoalId(row.thread_id) : payload.subGoal.id,
     conversationId: row.conversation_id ?? undefined,
     userId: row.user_id,
     kind: row.kind,
@@ -182,18 +188,20 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
   db.prepare(
     `
       INSERT INTO runtime_jobs (
-        id, task_instance_id, task_id, goal_id, conversation_id, user_id, kind, status,
+        id, task_instance_id, task_id, goal_id, topic_id, thread_id, conversation_id, user_id, kind, status,
         request_id, runtime_env_id, runtime_transport, payload_json, progress_json, logs_json,
         trajectory_json, blocker_json, result_json, lease_owner, lease_expires_at, available_at, created_at, updated_at,
         started_at, finished_at, last_error
       ) VALUES (
-        @id, @task_instance_id, @task_id, @goal_id, @conversation_id, @user_id, @kind, @status,
+        @id, @task_instance_id, @task_id, @goal_id, @topic_id, @thread_id, @conversation_id, @user_id, @kind, @status,
         @request_id, @runtime_env_id, @runtime_transport, @payload_json, @progress_json, @logs_json,
         @trajectory_json, @blocker_json, @result_json, @lease_owner, @lease_expires_at, @available_at, @created_at, @updated_at,
         @started_at, @finished_at, @last_error
       )
       ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
+        topic_id = excluded.topic_id,
+        thread_id = excluded.thread_id,
         request_id = excluded.request_id,
         runtime_env_id = excluded.runtime_env_id,
         runtime_transport = excluded.runtime_transport,
@@ -216,6 +224,8 @@ export function upsertRuntimeJob(record: RuntimeJobRecord) {
     task_instance_id: record.taskInstanceId ?? null,
     task_id: record.taskId ?? null,
     goal_id: record.goalId ?? null,
+    topic_id: record.topicId ?? record.payload.goal.id,
+    thread_id: record.threadId ?? record.payload.subGoal.id,
     conversation_id: record.conversationId ?? null,
     user_id: record.userId,
     kind: record.kind,
@@ -253,6 +263,8 @@ function updateRuntimeJobMutableColumns(record: RuntimeJobRecord) {
     `
       UPDATE runtime_jobs SET
         status = @status,
+        topic_id = @topic_id,
+        thread_id = @thread_id,
         request_id = @request_id,
         runtime_env_id = @runtime_env_id,
         runtime_transport = @runtime_transport,
@@ -273,6 +285,8 @@ function updateRuntimeJobMutableColumns(record: RuntimeJobRecord) {
   ).run({
     id: record.id,
     status: record.status,
+    topic_id: record.topicId ?? record.payload.goal.id,
+    thread_id: record.threadId ?? record.payload.subGoal.id,
     request_id: record.requestId ?? null,
     runtime_env_id: record.runtimeEnvId ?? null,
     runtime_transport: record.runtimeTransport,
@@ -302,6 +316,8 @@ export function createQueuedRuntimeJobInternal(
     taskInstanceId: payload.instance.id,
     taskId: payload.task.id,
     goalId: payload.goal.id,
+    topicId: payload.goal.id,
+    threadId: payload.subGoal.id,
     conversationId: payload.goal.conversationId,
     userId: resolveCurrentUserId(),
     kind: "goal_task",

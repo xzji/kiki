@@ -1,4 +1,4 @@
-import type { TaskPriority } from "@/types/kiki";
+import type { GoalDeliveryContract, TaskPriority } from "@/types/kiki";
 import type { TaskDraft } from "./taskDraftSchema";
 
 export type DecompositionSubGoalContext = {
@@ -89,6 +89,9 @@ export function buildTaskDraftReviewDecisionPrompt(input: {
   subGoalTitle: string;
   goalDescription: string;
   drafts: TaskDraft[];
+  deliveryContract?: GoalDeliveryContract;
+  isFinalSubGoal?: boolean;
+  subGoalSuccessCriteria?: string[];
 }) {
   const draftsBrief = input.drafts.map((draft, index) => ({
     index: draft.index ?? index + 1,
@@ -101,6 +104,11 @@ export function buildTaskDraftReviewDecisionPrompt(input: {
 目标：${input.goalTitle}
 子目标：${input.subGoalTitle}
 目标描述：${input.goalDescription}
+目标交付契约：
+${JSON.stringify(input.deliveryContract ?? {}, null, 2)}
+当前子目标成功标准：
+${(input.subGoalSuccessCriteria ?? []).map((item) => `- ${item}`).join("\n") || "- 未提供"}
+是否最后一个子目标：${input.isFinalSubGoal ? "是" : "否"}
 
 TaskDraft（仅 title/objective/deliverable）：
 ${JSON.stringify(draftsBrief, null, 2)}
@@ -109,7 +117,11 @@ ${JSON.stringify(draftsBrief, null, 2)}
 1. 只能输出严格 JSON 对象。禁止 Markdown、代码块、reasoning、suggestions、explanation 字段。
 2. results 必须覆盖每个 TaskDraft，taskId 使用 TaskDraft 的 index 字符串。
 3. aligned: boolean；goalContribution / subGoalContribution: "critical" | "high" | "medium" | "low"。
-4. 输出限制：本次回复必须 ≤ 50 行、≤ 2000 字符；只输出 results 数组的极简 JSON。
+4. aligned 不只表示“相关”，还必须表示任务对当前子目标闭环有贡献。
+5. 如果一个任务只是准备工作，它可以 aligned=true；但如果整个任务集合缺少构建/验收任务，最后一个准备任务不能因为“相关”而被高估为 critical。
+6. 如果这是最后一个子目标，请同时判断这些任务是否能共同证明目标交付契约达成；明显缺少最终交付或验收时，将贡献度降级，并在低贡献任务上 aligned=false。
+7. 不得按领域关键词判断，只能按目标交付契约、子目标成功标准和任务交付物之间的逻辑关系判断。
+8. 输出限制：本次回复必须 ≤ 50 行、≤ 2000 字符；只输出 results 数组的极简 JSON。
 
 JSON schema：
 {

@@ -29,6 +29,25 @@ function mapGoalPhaseToTopicStatus(phase: GoalWorkflowPhase | undefined): TopicS
   return "collecting_info";
 }
 
+function readWorkflowDeliveryContract(goal: Goal) {
+  const value = goal.workflow?.collectedInfo?.deliveryContract;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const finalDeliverable = typeof record.finalDeliverable === "string" ? record.finalDeliverable.trim() : "";
+  const doneEvidence = Array.isArray(record.doneEvidence)
+    ? record.doneEvidence.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+    : [];
+  if (!finalDeliverable || doneEvidence.length === 0) return undefined;
+  const nonCompletionExamples = Array.isArray(record.nonCompletionExamples)
+    ? record.nonCompletionExamples.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+    : undefined;
+  return {
+    finalDeliverable,
+    doneEvidence,
+    nonCompletionExamples,
+  };
+}
+
 export function legacyGoalToTopic(input: LegacyGoalToTopicInput): Topic {
   const { goal } = input;
   const createdAt = input.createdAt ?? goal.createdAt ?? new Date().toISOString();
@@ -61,6 +80,7 @@ export function legacyGoalToTopic(input: LegacyGoalToTopicInput): Topic {
     failureCount: goal.topicFailureCount ?? 0,
     deadline,
     completionCriteria: undefined,
+    deliveryContract: goal.deliveryContract ?? readWorkflowDeliveryContract(goal),
     threads,
     status: mapGoalPhaseToTopicStatus(goal.workflow?.phase),
     createdAt,

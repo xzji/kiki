@@ -55,6 +55,11 @@ const statusDotClass: Record<TaskMonitorGroup, string> = {
   done: "bg-[#4F46E5]",
 };
 
+function rowBadgeClass(row: TaskMonitorRow) {
+  if (row.group === "done" && row.result === "fail") return "bg-[#FDECEC] text-[#B42318]";
+  return groupBadgeClass[row.group];
+}
+
 export function TaskMonitorDrawer() {
   const goals = useGoalStore(selectVisibleGoals);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
@@ -369,7 +374,9 @@ function TaskMonitorCard({
       )}
     >
       <div className="flex items-start gap-3">
-        <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", statusDotClass[row.group])} />
+        {row.group !== "done" ? (
+          <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", statusDotClass[row.group])} />
+        ) : null}
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] font-semibold text-[#1F2328]">{row.taskTitle}</div>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-[#8C9198]">
@@ -377,7 +384,7 @@ function TaskMonitorCard({
             <span>·</span>
             <span>{sourceChipLabel(row)}</span>
             <span>·</span>
-            <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", groupBadgeClass[row.group])}>
+            <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", rowBadgeClass(row))}>
               {row.statusLabel}
             </span>
           </div>

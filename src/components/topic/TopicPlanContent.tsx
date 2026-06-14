@@ -1,6 +1,6 @@
 "use client";
 
-import { Calendar, CircleDot, ListTodo, Plus } from "lucide-react";
+import { Calendar, CircleDot, ListTodo, Plus, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -23,6 +23,7 @@ import { useInboxStore } from "@/stores/inboxStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { Goal, GoalWorkflowPhase, Task, TaskExecutionPhase, TaskInstanceStatus } from "@/types/kiki";
 import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
+import type { TriggerIntervalUnit, TriggerSpec } from "@/types/trigger";
 
 type WorkflowTaskState = "in_progress" | "paused" | "awaiting_user" | "pending" | "error" | "completed";
 
@@ -373,6 +374,10 @@ export function TopicPlanContent({
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-[#6B7280]">
               <span className="inline-flex items-center gap-1.5">
+                <RotateCcw className="h-3.5 w-3.5" />
+                回顾周期：{topicLoopLabel(goal.topicLoop)}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
                 <CircleDot className="h-3.5 w-3.5" />
                 {displaySubGoals.length} 个线程
               </span>
@@ -546,6 +551,55 @@ function phaseLabel(phase: GoalWorkflowPhase) {
       return "主题工作流出错";
     default:
       return "待启动";
+  }
+}
+
+function topicLoopLabel(value?: TriggerSpec) {
+  if (!value) return "每天";
+  switch (value.kind) {
+    case "realtime":
+      return "实时";
+    case "hourly":
+      return "每小时";
+    case "daily":
+      return value.time ? `每天 ${value.time}` : "每天";
+    case "weekly":
+      return value.time ? `每周 ${value.time}` : "每周";
+    case "monthly":
+      return value.time ? `每月 ${value.time}` : "每月";
+    case "one_shot":
+      return "仅首次";
+    case "immediate":
+      return "立即";
+    case "interval":
+      return `每 ${value.value}${intervalUnitLabel(value.unit)}`;
+    case "cron":
+      return value.timezone ? `按固定时间（${value.timezone}）` : "按固定时间";
+    case "phased":
+      return "按指定时段";
+    case "event":
+      return "有新事件时";
+    case "composed":
+      return "组合规则";
+    default:
+      return "每天";
+  }
+}
+
+function intervalUnitLabel(unit: TriggerIntervalUnit) {
+  switch (unit) {
+    case "ms":
+      return "毫秒";
+    case "s":
+      return "秒";
+    case "m":
+      return "分钟";
+    case "h":
+      return "小时";
+    case "d":
+      return "天";
+    default:
+      return "";
   }
 }
 

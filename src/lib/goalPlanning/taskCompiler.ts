@@ -1,5 +1,6 @@
 import type {
   ExecutionKind,
+  GoalBreakdownDraft,
   TaskCollaborationRequirements,
   TaskExecutionMode,
   TaskExpectedResult,
@@ -8,7 +9,7 @@ import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
 
 export type TaskCompileWarning = {
   index: number;
-  code: "cadence_invalid" | "dependency_unresolved" | "shape_defaulted";
+  code: "cadence_invalid" | "dependency_unresolved" | "dependency_cycle" | "shape_defaulted";
   message: string;
 };
 
@@ -176,4 +177,167 @@ export function resolveDependencies(draft: TaskDraft, draftIds: Map<string, stri
     else unresolved.push(hint);
   }
   return { dependencies: Array.from(new Set(dependencies)), unresolved };
+}
+
+type DraftSubGoal = GoalBreakdownDraft["subGoals"][number];
+type DraftTask = DraftSubGoal["tasks"][number];
+
+function normalizedDependencyKey(value: string) {
+  return value.trim().replace(/^任务\s*\d+\s*[:：]\s*/, "").toLowerCase();
+}
+
+function addCandidate(index: Map<string, Set<string>>, key: string | undefined, taskId: string) {
+  if (!key?.trim()) return;
+  const normalized = normalizedDependencyKey(key);
+  if (!normalized) return;
+  const current = index.get(normalized) ?? new Set<string>();
+  current.add(taskId);
+  index.set(normalized, current);
+}
+
+function isBlockingOutputTask(task: DraftTask) {
+  return task.taskType === "one_shot" && task.executionMode !== "monitoring";
+}
+
+function hasPath(graph: Map<string, string[]>, from: string, to: string, seen = new Set<string>()): boolean {
+  if (from === to) return true;
+  if (seen.has(from)) return false;
+  seen.add(from);
+  return (graph.get(from) ?? []).some((next) => hasPath(graph, next, to, seen));
+}
+
+function wouldCreateCycle(graph: Map<string, string[]>, taskId: string, dependencyId: string) {
+  return taskId === dependencyId || hasPath(graph, dependencyId, taskId);
+}
+
+export function mergeCrossSubGoalTaskDependencies(input: {
+  subGoals: GoalBreakdownDraft["subGoals"];
+}): { subGoals: GoalBreakdownDraft["subGoals"]; warnings: TaskCompileWarning[] } {
+  const warnings: TaskCompileWarning[] = [];
+  const globalIndex = new Map<string, Set<string>>();
+  const localIndexes = new Map<string, Map<string, Set<string>>>();
+  const tasksById = new Map<string, DraftTask>();
+  const subGoalByTaskId = new Map<string, string>();
+  const subGoalIndexById = new Map<string, number>();
+
+  input.subGoals.forEach((subGoal, subGoalIndex) => {
+    subGoalIndexById.set(subGoal.id, subGoalIndex);
+    const localIndex = new Map<string, Set<string>>();
+    subGoal.tasks.forEach((task, taskIndex) => {
+      tasksById.set(task.id, task);
+      subGoalByTaskId.set(task.id, subGoal.id);
+      const numericSubGoalId = subGoal.id.match(/\d+$/)?.[0];
+      [
+        task.id,
+        task.title,
+        String(taskIndex + 1),
+        `task-${taskIndex + 1}`,
+        `${subGoalIndex + 1}-${taskIndex + 1}`,
+        numericSubGoalId ? `${numericSubGoalId}-${taskIndex + 1}` : undefined,
+      ].forEach((key) => {
+        addCandidate(globalIndex, key, task.id);
+        addCandidate(localIndex, key, task.id);
+      });
+    });
+    localIndexes.set(subGoal.id, localIndex);
+  });
+
+  const resolveHint = (hint: string, currentSubGoal: DraftSubGoal): { id?: string; ambiguous?: boolean } => {
+    const normalized = normalizedDependencyKey(hint);
+    if (!normalized) return {};
+
+    const local = localIndexes.get(currentSubGoal.id)?.get(normalized);
+    if (local?.size === 1) return { id: Array.from(local)[0] };
+
+    const upstreamIds = new Set(currentSubGoal.dependencies ?? []);
+    const upstreamCandidates = Array.from(globalIndex.get(normalized) ?? []).filter((taskId) => {
+      const subGoalId = subGoalByTaskId.get(taskId);
+      return Boolean(subGoalId && upstreamIds.has(subGoalId));
+    });
+    if (upstreamCandidates.length === 1) return { id: upstreamCandidates[0] };
+    if (upstreamCandidates.length > 1) return { ambiguous: true };
+
+    const global = globalIndex.get(normalized);
+    if (global?.size === 1) return { id: Array.from(global)[0] };
+    if (global && global.size > 1) return { ambiguous: true };
+    return {};
+  };
+
+  const graph = new Map<string, string[]>();
+  const nextSubGoals = input.subGoals.map((subGoal) => ({
+    ...subGoal,
+    tasks: subGoal.tasks.map((task) => ({ ...task })),
+  }));
+
+  const addDependency = (task: DraftTask, dependencyId: string, taskIndex: number, reason: string) => {
+    if (!tasksById.has(dependencyId)) {
+      if (reason === "explicit") {
+        warnings.push({
+          index: taskIndex + 1,
+          code: "dependency_unresolved",
+          message: `依赖无法解析：${dependencyId}`,
+        });
+      }
+      return;
+    }
+    if (wouldCreateCycle(graph, task.id, dependencyId)) {
+      warnings.push({
+        index: taskIndex + 1,
+        code: "dependency_cycle",
+        message: `依赖会形成循环，已跳过：${task.title} -> ${tasksById.get(dependencyId)?.title ?? dependencyId}`,
+      });
+      return;
+    }
+    const current = graph.get(task.id) ?? [];
+    if (!current.includes(dependencyId)) {
+      current.push(dependencyId);
+      graph.set(task.id, current);
+    }
+  };
+
+  nextSubGoals.forEach((subGoal) => {
+    subGoal.tasks.forEach((task, taskIndex) => {
+      for (const dependencyId of task.dependencies ?? []) {
+        addDependency(task, dependencyId, taskIndex, "explicit");
+      }
+      for (const hint of task.planningDependencyHints ?? []) {
+        const resolved = resolveHint(hint, subGoal);
+        if (resolved.id) {
+          addDependency(task, resolved.id, taskIndex, "explicit");
+        } else {
+          warnings.push({
+            index: taskIndex + 1,
+            code: "dependency_unresolved",
+            message: resolved.ambiguous ? `依赖引用不唯一：${hint}` : `依赖无法解析：${hint}`,
+          });
+        }
+      }
+    });
+  });
+
+  nextSubGoals.forEach((subGoal) => {
+    const dependencySubGoalIds = new Set(subGoal.dependencies ?? []);
+    if (dependencySubGoalIds.size === 0) return;
+    const upstreamKeyTasks = input.subGoals
+      .filter((candidate) => dependencySubGoalIds.has(candidate.id))
+      .flatMap((candidate) => candidate.tasks.filter(isBlockingOutputTask));
+    if (upstreamKeyTasks.length === 0) return;
+
+    subGoal.tasks.forEach((task, taskIndex) => {
+      const existingDependencySubGoals = new Set((graph.get(task.id) ?? []).map((dependencyId) => subGoalByTaskId.get(dependencyId)));
+      for (const upstreamTask of upstreamKeyTasks) {
+        const upstreamSubGoalId = subGoalByTaskId.get(upstreamTask.id);
+        if (!upstreamSubGoalId || existingDependencySubGoals.has(upstreamSubGoalId)) continue;
+        addDependency(task, upstreamTask.id, taskIndex, "derived");
+      }
+    });
+  });
+
+  for (const subGoal of nextSubGoals) {
+    for (const task of subGoal.tasks) {
+      task.dependencies = Array.from(new Set(graph.get(task.id) ?? []));
+    }
+  }
+  nextSubGoals.sort((a, b) => (subGoalIndexById.get(a.id) ?? 0) - (subGoalIndexById.get(b.id) ?? 0));
+  return { subGoals: nextSubGoals, warnings };
 }

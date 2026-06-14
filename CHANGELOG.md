@@ -9,9 +9,14 @@
 - 账户设置继续扩展为可编辑个人资料：新增昵称修改与密码修改表单，前端通过受保护的 `/api/auth/profile`、`/api/auth/password` 接口提交，成功后会同步刷新左下角用户菜单中的显示信息。
 - 会话内联 CLI 时间线改为更紧凑的展示：过滤 prompt/status/assistant_trace 噪音事件，统一中文 badge 与摘要文案，减少消息气泡中的过程噪声。
 - Claude 会话桥接与运行时上下文链路继续收口：resume session 仍由服务端按 runtimeKind 单点持久化，同时补齐 Pi/Claude transport、remote CLI proxy 与 workspace context pack 的对齐。
+- 任务规划链路继续强化交付导向：task draft prompt 显式要求准备任务、构建任务、验收任务组成最小闭环，并在最终子目标下对齐目标交付契约，避免只产出准备性待办。
+- planning review 与 compiler 继续收紧：review prompt 改为更保守的对齐评估，task compiler / goal planning 增加交付闭环审计、跨子目标依赖与失败恢复处理，降低“任务都相关但无法真正交付”的情况。
+- 调度器与执行上下文增强依赖就绪判断：scheduler 会同时检查任务依赖、板块依赖和 runtime job 占用，任务执行上下文会把上游 blocker、依赖 digest 与软等待原因暴露出来。
+- 设置页与会话页继续补强交互细节：`TaskMonitorDrawer`、`TopicPlanContent`、`ConversationView` 等组件适配了新的 planning / cli process 数据结构。
 
 ### Added
 - 新增账户资料与密码修改接口，以及对应的服务端鉴权/校验逻辑：昵称限制 30 字以内，密码要求至少 8 位且同时包含字母和数字，并校验当前密码与新旧密码重复场景。
+- 新增多组规划与调度规格测试：覆盖 `goalFactory`、task draft prompt、delivery closure audit、runtimeJobsRepository、task compiler 与 scheduler 相关边界。
 
 ## 2026-06-12
 

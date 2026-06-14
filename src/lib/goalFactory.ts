@@ -149,6 +149,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
   const createdAt = nowIso();
   const subGoalIdMap = new Map(draft.subGoals.map((subGoal) => [subGoal.id, createOpaqueId("sg")]));
   const { resolveTaskId } = buildTaskIdResolver(draft);
+  const deliveryContract = draft.deliveryContract ?? draft.goalAnalysis?.deliveryContract;
 
   return {
     id: goalId,
@@ -159,6 +160,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
     topicLoop: draft.topicLoop,
     kind: "collab",
     summary: draft.summary,
+    deliveryContract,
     subGoals: draft.subGoals.map((subGoal) => ({
       id: subGoalIdMap.get(subGoal.id) ?? createOpaqueId("sg"),
       goalId,

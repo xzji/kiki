@@ -151,10 +151,20 @@ export function runTaskDraftReviewSpecs() {
       subGoalTitle: "子目标",
       goalDescription: "描述",
       drafts: sampleDrafts,
+      deliveryContract: {
+        finalDeliverable: "可验收主交付物",
+        doneEvidence: ["完成证据"],
+        nonCompletionExamples: ["只有方案"],
+      },
+      isFinalSubGoal: true,
+      subGoalSuccessCriteria: ["形成闭环交付"],
     });
     assert.ok(prompt.includes("results"));
     assert.ok(prompt.includes("禁止"));
     assert.ok(prompt.includes("reasoning"));
+    assert.ok(prompt.includes("目标交付契约"));
+    assert.ok(prompt.includes("aligned 不只表示"));
+    assert.ok(prompt.includes("不得按领域关键词判断"));
     assert.ok(/≤\s*50\s*行/.test(prompt));
     assert.ok(/≤\s*2000\s*字符/.test(prompt));
   }

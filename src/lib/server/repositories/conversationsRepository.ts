@@ -298,6 +298,23 @@ function collectAgentRuntimeIds(ids: RelatedConversationIds) {
   }
 }
 
+function collectGovernanceOutboxEventIds(ids: RelatedConversationIds) {
+  const eventIds = new Set<string>();
+  for (const value of collectRowsBySet("governance_event_outbox", "topic_id", ids.topicIds, "event_id")) {
+    addDefined(eventIds, value);
+  }
+  for (const value of collectRowsBySet("governance_event_outbox", "thread_id", ids.threadIds, "event_id")) {
+    addDefined(eventIds, value);
+  }
+  for (const value of collectRowsBySet("governance_event_outbox", "task_id", ids.taskIds, "event_id")) {
+    addDefined(eventIds, value);
+  }
+  for (const value of collectRowsBySet("governance_event_outbox", "instance_id", ids.taskInstanceIds, "event_id")) {
+    addDefined(eventIds, value);
+  }
+  return eventIds;
+}
+
 function collectRelatedConversationIds(conversationId: string): RelatedConversationIds {
   const ids = createRelatedConversationIds();
   const row = getDatabase()
@@ -356,6 +373,7 @@ function deleteRelatedConversationData(conversationId: string) {
   const db = getDatabase();
   const ids = collectRelatedConversationIds(conversationId);
   removeConversationRuntimeSnapshots(conversationId, ids);
+  const governanceOutboxEventIds = collectGovernanceOutboxEventIds(ids);
   const inboxItemIds = new Set<string>();
   for (const value of collectRowsBySet("task_notification_states", "goal_id", ids.goalIds, "inbox_item_id")) {
     addDefined(inboxItemIds, value);
@@ -386,6 +404,11 @@ function deleteRelatedConversationData(conversationId: string) {
   deleteWhereIn("task_notification_states", "instance_id", ids.taskInstanceIds);
   deleteWhereIn("inbox_item_states", "goal_id", ids.goalIds);
   deleteWhereIn("inbox_item_states", "inbox_item_id", inboxItemIds);
+
+  deleteWhereIn("governance_event_outbox_consumption", "event_id", governanceOutboxEventIds);
+  deleteWhereIn("governance_event_outbox", "event_id", governanceOutboxEventIds);
+  deleteWhereIn("governance_tick_jobs", "topic_id", ids.topicIds);
+  deleteWhereIn("governance_tick_jobs", "thread_id", ids.threadIds);
 
   deleteWhereIn("agent_events", "agent_run_id", ids.agentRunIds);
   deleteWhereIn("agent_snapshots", "agent_run_id", ids.agentRunIds);

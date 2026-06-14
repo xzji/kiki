@@ -60,6 +60,10 @@ function isSubagentToolCall(event: CliProcessEvent) {
   return toolName === "task" || toolName === "agent";
 }
 
+function isSubagentEvent(event: CliProcessEvent) {
+  return event.type === "subagent_event";
+}
+
 function subagentInfo(event: CliProcessEvent) {
   const input = asRecord(event.input);
   const description = readFirstString(input, ["description", "task", "title", "name"]);
@@ -73,6 +77,7 @@ function subagentInfo(event: CliProcessEvent) {
 }
 
 function eventTitle(event: CliProcessEvent) {
+  if (isSubagentEvent(event)) return event.title || "子代理过程";
   if (isSubagentToolCall(event)) {
     return `调用子代理：${subagentInfo(event).description}`;
   }
@@ -87,6 +92,7 @@ function eventTitle(event: CliProcessEvent) {
 }
 
 function eventSummary(event: CliProcessEvent) {
+  if (isSubagentEvent(event)) return event.summary || "";
   if (isSubagentToolCall(event)) {
     const info = subagentInfo(event);
     return [info.agentType ? `类型：${info.agentType}` : "", event.summary || ""].filter(Boolean).join(" · ");
@@ -95,6 +101,13 @@ function eventSummary(event: CliProcessEvent) {
 }
 
 function eventBadge(event: CliProcessEvent) {
+  if (isSubagentEvent(event)) {
+    if (event.eventKind === "thinking") return "子思考";
+    if (event.eventKind === "tool_call") return "子工具";
+    if (event.eventKind === "tool_result") return "子结果";
+    if (event.eventKind === "completed") return "子完成";
+    return "子代理";
+  }
   if (isSubagentToolCall(event)) return "子代理";
   if (event.type === "thinking") return "思考";
   if (event.type === "tool_call") return "工具";
@@ -107,7 +120,7 @@ function eventBadge(event: CliProcessEvent) {
 function eventIcon(event: CliProcessEvent) {
   if (event.type === "error") return <AlertCircle className="h-3.5 w-3.5" />;
   if (event.type === "file_artifact") return <FileText className="h-3.5 w-3.5" />;
-  if (event.type === "tool_call") return <Terminal className="h-3.5 w-3.5" />;
+  if (event.type === "tool_call" || event.type === "subagent_event") return <Terminal className="h-3.5 w-3.5" />;
   return <Circle className="h-3.5 w-3.5" />;
 }
 
@@ -117,6 +130,7 @@ function shouldShowDetails(event: CliProcessEvent) {
 
 function detailText(event: CliProcessEvent) {
   if (event.type === "thinking") return "展开思考";
+  if (isSubagentEvent(event)) return "展开子代理过程";
   if (isSubagentToolCall(event)) return "展开子代理";
   if (event.type === "tool_call") return "展开参数";
   return "展开";
@@ -124,9 +138,13 @@ function detailText(event: CliProcessEvent) {
 
 function EventDetails({ event }: { event: CliProcessEvent }) {
   const isSubagent = isSubagentToolCall(event);
+  const isSubProcess = isSubagentEvent(event);
   const info = isSubagent ? subagentInfo(event) : null;
   return (
     <div className="ml-7 space-y-2 pb-2 pr-2">
+      {isSubProcess && event.agentId ? (
+        <div className="text-[11px] text-[#8C9198]">agentId: {event.agentId}</div>
+      ) : null}
       {isSubagent && info ? (
         <div className="space-y-1.5 text-[12px] leading-5 text-[#374151]">
           {info.agentType ? (
@@ -163,7 +181,7 @@ function EventDetails({ event }: { event: CliProcessEvent }) {
 function TimelineEventCard({ event }: { event: TimelineEvent }) {
   const hasDetails = shouldShowDetails(event);
   const summary = eventSummary(event);
-  const isThinking = event.type === "thinking";
+  const isThinking = event.type === "thinking" || (event.type === "subagent_event" && event.eventKind === "thinking");
   return (
     <details className={cn("group/timeline pl-3", !isThinking && "border-l border-[#E5E7EB]")}>
       <summary
@@ -205,7 +223,9 @@ function TimelineEventCard({ event }: { event: TimelineEvent }) {
 }
 
 function countSubagents(events: CliProcessEvent[]) {
-  return events.filter(isSubagentToolCall).length;
+  const started = events.filter(isSubagentToolCall).length;
+  const seen = new Set(events.filter(isSubagentEvent).map((event) => event.agentId).filter(Boolean));
+  return Math.max(started, seen.size);
 }
 
 export function InlineCliProcessTimeline({ process }: { process: ConversationCliProcess }) {

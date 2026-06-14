@@ -2059,6 +2059,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
               });
               return;
             }
+            if (event.type === "subagent_event") {
+              appendProcessEvent("subagent_event", {
+                title: event.title,
+                summary: event.summary,
+                content: event.content,
+                input: event.input,
+                agentId: event.agentId,
+                eventKind: event.eventKind,
+              });
+              return;
+            }
             if (event.type === "delta") {
               updateMessage(conversation.id, assistantId, (message) => ({
                 ...message,

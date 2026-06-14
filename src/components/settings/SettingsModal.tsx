@@ -192,6 +192,8 @@ function AccountPanel({
   const displayName = user?.displayName.trim() || "用户";
   const email = user?.email.trim() || "正在读取当前账号信息";
   const initial = displayName.charAt(0).toUpperCase() || "U";
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editingPassword, setEditingPassword] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState(displayName);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMessage, setProfileMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -228,6 +230,7 @@ function AccountPanel({
       }
       onUserChange?.(data.user);
       setDisplayNameDraft(data.user.displayName);
+      setEditingProfile(false);
       setProfileMessage({ type: "success", text: "昵称已更新" });
     } catch {
       setProfileMessage({ type: "error", text: "网络异常，昵称保存失败" });
@@ -252,6 +255,7 @@ function AccountPanel({
         return;
       }
       setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setEditingPassword(false);
       setPasswordMessage({ type: "success", text: "密码已更新" });
     } catch {
       setPasswordMessage({ type: "error", text: "网络异常，密码修改失败" });
@@ -279,85 +283,159 @@ function AccountPanel({
       <div className="grid w-full grid-cols-1 gap-4">
         <InfoField label="绑定邮箱" value={email} />
       </div>
-      <div className="grid w-full gap-4 lg:grid-cols-2">
-        <form className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5" onSubmit={handleProfileSubmit}>
-          <div className="text-[15px] font-medium text-[#111]">修改昵称</div>
-          <div className="mt-1 text-[12px] text-[#6B7280]">昵称会显示在左下角账号菜单和设置页中。</div>
-          <label htmlFor="account-display-name" className="mt-5 block text-[12px] text-[#6B7280]">
-            新昵称
-          </label>
-          <input
-            id="account-display-name"
-            value={displayNameDraft}
-            onChange={(event) => {
-              setDisplayNameDraft(event.target.value);
-              setProfileMessage(null);
-            }}
-            maxLength={30}
-            disabled={!user || savingProfile}
-            className="mt-2 h-10 w-full rounded-xl border border-[#D0D7DE] bg-white px-3 text-[14px] text-[#111] outline-none focus:border-[#5B3DBE] disabled:bg-[#F5F6F8] disabled:text-[#9CA3AF]"
-          />
-          <div className="mt-2 text-[12px] text-[#9CA3AF]">{displayNameDraft.trim().length}/30</div>
-          {profileMessage ? <StatusMessage type={profileMessage.type} text={profileMessage.text} /> : null}
-          <button
-            type="submit"
-            disabled={!user || savingProfile || !displayNameDraft.trim() || displayNameDraft.trim() === displayName}
-            className="mt-5 h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-[#242424] disabled:cursor-not-allowed disabled:bg-[#D1D5DB]"
-          >
-            {savingProfile ? "保存中..." : "保存昵称"}
-          </button>
-        </form>
-        <form className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5" onSubmit={handlePasswordSubmit}>
-          <div className="text-[15px] font-medium text-[#111]">修改密码</div>
-          <div className="mt-1 text-[12px] text-[#6B7280]">新密码至少 8 位，并且包含字母和数字。</div>
-          <PasswordInput
-            id="account-current-password"
-            label="当前密码"
-            value={passwordForm.currentPassword}
-            autoComplete="current-password"
-            disabled={!user || savingPassword}
-            onChange={(value) => {
-              setPasswordForm((prev) => ({ ...prev, currentPassword: value }));
-              setPasswordMessage(null);
-            }}
-          />
-          <PasswordInput
-            id="account-new-password"
-            label="新密码"
-            value={passwordForm.newPassword}
-            autoComplete="new-password"
-            disabled={!user || savingPassword}
-            onChange={(value) => {
-              setPasswordForm((prev) => ({ ...prev, newPassword: value }));
-              setPasswordMessage(null);
-            }}
-          />
-          <PasswordInput
-            id="account-confirm-password"
-            label="确认新密码"
-            value={passwordForm.confirmPassword}
-            autoComplete="new-password"
-            disabled={!user || savingPassword}
-            onChange={(value) => {
-              setPasswordForm((prev) => ({ ...prev, confirmPassword: value }));
-              setPasswordMessage(null);
-            }}
-          />
-          {passwordMessage ? <StatusMessage type={passwordMessage.type} text={passwordMessage.text} /> : null}
-          <button
-            type="submit"
-            disabled={
-              !user ||
-              savingPassword ||
-              !passwordForm.currentPassword ||
-              !passwordForm.newPassword ||
-              !passwordForm.confirmPassword
-            }
-            className="mt-5 h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-[#242424] disabled:cursor-not-allowed disabled:bg-[#D1D5DB]"
-          >
-            {savingPassword ? "修改中..." : "修改密码"}
-          </button>
-        </form>
+      <div className="space-y-4">
+        <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[12px] text-[#6B7280]">昵称</div>
+              <div className="mt-1 truncate text-[15px] text-[#111]">{displayName}</div>
+              {profileMessage && !editingProfile ? (
+                <StatusMessage type={profileMessage.type} text={profileMessage.text} />
+              ) : null}
+            </div>
+            <button
+              type="button"
+              disabled={!user || savingProfile}
+              onClick={() => {
+                setDisplayNameDraft(displayName);
+                setProfileMessage(null);
+                setEditingProfile((prev) => !prev);
+              }}
+              className="flex-none rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+            >
+              {editingProfile ? "收起" : "编辑"}
+            </button>
+          </div>
+          {editingProfile ? (
+            <form className="mt-5 border-t border-[#EEF1F4] pt-5" onSubmit={handleProfileSubmit}>
+              <label htmlFor="account-display-name" className="block text-[12px] text-[#6B7280]">
+                新昵称
+              </label>
+              <input
+                id="account-display-name"
+                value={displayNameDraft}
+                onChange={(event) => {
+                  setDisplayNameDraft(event.target.value);
+                  setProfileMessage(null);
+                }}
+                maxLength={30}
+                disabled={!user || savingProfile}
+                className="mt-2 h-10 w-full rounded-xl border border-[#D0D7DE] bg-white px-3 text-[14px] text-[#111] outline-none focus:border-[#5B3DBE] disabled:bg-[#F5F6F8] disabled:text-[#9CA3AF]"
+              />
+              <div className="mt-2 text-[12px] text-[#9CA3AF]">{displayNameDraft.trim().length}/30</div>
+              {profileMessage ? <StatusMessage type={profileMessage.type} text={profileMessage.text} /> : null}
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={!user || savingProfile || !displayNameDraft.trim() || displayNameDraft.trim() === displayName}
+                  className="h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-[#242424] disabled:cursor-not-allowed disabled:bg-[#D1D5DB]"
+                >
+                  {savingProfile ? "保存中..." : "保存"}
+                </button>
+                <button
+                  type="button"
+                  disabled={savingProfile}
+                  onClick={() => {
+                    setDisplayNameDraft(displayName);
+                    setProfileMessage(null);
+                    setEditingProfile(false);
+                  }}
+                  className="h-10 rounded-xl border border-[#D0D7DE] px-4 text-[13px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
+        <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[15px] font-medium text-[#111]">密码</div>
+              <div className="mt-1 text-[12px] text-[#6B7280]">需要时再修改登录密码。</div>
+              {passwordMessage && !editingPassword ? (
+                <StatusMessage type={passwordMessage.type} text={passwordMessage.text} />
+              ) : null}
+            </div>
+            <button
+              type="button"
+              disabled={!user || savingPassword}
+              onClick={() => {
+                setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                setPasswordMessage(null);
+                setEditingPassword((prev) => !prev);
+              }}
+              className="flex-none rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+            >
+              {editingPassword ? "收起" : "修改"}
+            </button>
+          </div>
+          {editingPassword ? (
+            <form className="mt-5 border-t border-[#EEF1F4] pt-1" onSubmit={handlePasswordSubmit}>
+              <PasswordInput
+                id="account-current-password"
+                label="当前密码"
+                value={passwordForm.currentPassword}
+                autoComplete="current-password"
+                disabled={!user || savingPassword}
+                onChange={(value) => {
+                  setPasswordForm((prev) => ({ ...prev, currentPassword: value }));
+                  setPasswordMessage(null);
+                }}
+              />
+              <PasswordInput
+                id="account-new-password"
+                label="新密码"
+                value={passwordForm.newPassword}
+                autoComplete="new-password"
+                disabled={!user || savingPassword}
+                onChange={(value) => {
+                  setPasswordForm((prev) => ({ ...prev, newPassword: value }));
+                  setPasswordMessage(null);
+                }}
+              />
+              <PasswordInput
+                id="account-confirm-password"
+                label="确认新密码"
+                value={passwordForm.confirmPassword}
+                autoComplete="new-password"
+                disabled={!user || savingPassword}
+                onChange={(value) => {
+                  setPasswordForm((prev) => ({ ...prev, confirmPassword: value }));
+                  setPasswordMessage(null);
+                }}
+              />
+              {passwordMessage ? <StatusMessage type={passwordMessage.type} text={passwordMessage.text} /> : null}
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={
+                    !user ||
+                    savingPassword ||
+                    !passwordForm.currentPassword ||
+                    !passwordForm.newPassword ||
+                    !passwordForm.confirmPassword
+                  }
+                  className="h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-[#242424] disabled:cursor-not-allowed disabled:bg-[#D1D5DB]"
+                >
+                  {savingPassword ? "修改中..." : "保存新密码"}
+                </button>
+                <button
+                  type="button"
+                  disabled={savingPassword}
+                  onClick={() => {
+                    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                    setPasswordMessage(null);
+                    setEditingPassword(false);
+                  }}
+                  className="h-10 rounded-xl border border-[#D0D7DE] px-4 text-[13px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
       </div>
     </div>
   );

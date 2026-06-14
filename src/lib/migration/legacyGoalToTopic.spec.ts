@@ -225,4 +225,17 @@ export function runLegacyGoalToTopicSpecs() {
   });
   const topicWithConv = legacyGoalToTopic({ goal: goalWithConv });
   assert.equal(topicWithConv.conversationId, "conv-1");
+
+  const goalWithContract = makeGoal({
+    id: "g-contract",
+    title: "可试用版本",
+    deliveryContract: {
+      finalDeliverable: "可试用版本",
+      doneEvidence: ["完成一次试用"],
+      nonCompletionExamples: ["只有方案"],
+    },
+  });
+  const topicWithContract = legacyGoalToTopic({ goal: goalWithContract });
+  assert.equal(topicWithContract.deliveryContract?.finalDeliverable, "可试用版本");
+  assert.deepEqual(topicWithContract.deliveryContract?.doneEvidence, ["完成一次试用"]);
 }

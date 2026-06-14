@@ -41,8 +41,9 @@ import {
   type TaskDraftReviewDecisionPayload,
 } from "@/lib/server/goalPlanning/taskDraftReview";
 import { compileTaskDraftsToDraftTasks } from "@/lib/server/goalPlanning/taskCompiler";
+import { mergeCrossSubGoalTaskDependencies } from "@/lib/goalPlanning/taskCompiler";
 import { normalizeExecutionKind, normalizeTaskResultViewKind } from "@/types/kiki";
-import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft } from "@/types/kiki";
+import type { CollectedInfoSummary, GoalAnalysis, GoalBreakdownDraft, GoalDeliveryContract } from "@/types/kiki";
 import { normalizeTriggerSpecWithWarnings, type TriggerSpec } from "@/types/trigger";
 import type { GoalTelemetryScope } from "@/types/goalTelemetry";
 import type { GoalWorkflowPhase } from "@/types/kiki";
@@ -81,6 +82,7 @@ type CollectedInfoSummaryPayload = CollectedInfoSummary;
 
 type DecompositionPayload = {
   goalAnalysis: GoalAnalysis;
+  deliveryContract?: GoalDeliveryContract;
   subGoals: Array<{
     id: number;
     name: string;
@@ -104,6 +106,16 @@ type PlanPresentationPayload = {
   summary: string;
   deadline?: string;
   notificationStrategy: string;
+};
+
+export type DeliveryClosureAuditPayload = {
+  verdict: "accept" | "needs_repair";
+  missingEvidence: string[];
+  insufficientThreads: Array<{
+    subGoalId: number;
+    reason: string;
+  }>;
+  repairInstruction?: string;
 };
 
 type DraftTask = GoalBreakdownDraft["subGoals"][number]["tasks"][number];
@@ -503,7 +515,7 @@ export function buildDecomposePrompt(input: {
 }) {
   const loopV2 = loopV2PlannerSchemaFields();
   return `# Role
-你是一位通用规划编排器，负责把用户诉求拆成 Topic 下的 Thread 板块，并播下可运行的初始 Task 种子。
+你是一位通用规划编排器，负责把用户诉求拆成 Topic 下的 Thread 板块，并生成可闭环交付的初始 Task 主干路径。
 你不能把用户诉求强行套进固定模式；必须基于诉求本身，用正交属性描述每个板块的治理节拍、终止条件和初始执行单元。
 
 # Context
@@ -511,7 +523,8 @@ export function buildDecomposePrompt(input: {
 - Thread = 需求的维度、阶段或板块，是组织上下文和治理 Task 集合的容器。
 - Thread 的 reviewInterval 只是低频治理 review 节拍，不是执行频率。
 - Task = 真正执行单元，必须自带 taskType 和 triggerRule/cadence/triggerCondition。
-- Task 集合不是一次性定死：Planner 只产初始种子，后续由 ThreadRunner tick 按运行结果增量增删改。
+- Task 集合应覆盖从当前状态到目标成功状态的最小主干闭环路径。
+- 后续 ThreadRunner tick 可以细化、调整、补救，但初始计划不得把关键交付缺口留给后续。
 
 # Instructions
 ## 重要输出约束
@@ -526,6 +539,9 @@ export function buildDecomposePrompt(input: {
 3. 有哪些隐含的假设和前提条件？
 4. 这个诉求需要一次性推进、阶段性推进，还是长期关注？
 5. 哪些维度/阶段/板块彼此 MECE，且每个板块下可以有不同频率的 Task？
+6. 用户最终要拿到什么交付物？
+7. 什么证据能证明目标完成？
+8. 哪些结果只是准备工作，不能单独算完成？
 
 ## Thread 拆解原则
 1. 板块 MECE：Thread 之间按维度/阶段/板块拆分，尽量互不重叠且覆盖核心意图。
@@ -533,13 +549,17 @@ export function buildDecomposePrompt(input: {
 3. 不按执行频率拆 Thread：同一 Thread 下允许 daily/hourly/one_shot 等不同频率 Task 并存。
 4. reviewInterval 只表示治理兜底 review 节拍：monitoring 通常 weekly，风险板块可 daily，阶段性目标可 one_shot。
 5. terminationCondition 描述板块什么时候可自然结束；长期关注可留空字符串。
+6. subGoals[].dependencies 不是展示字段：它表示下游板块启动前必须满足的上游关键产出。只有当当前板块确实需要等待前序板块的信息收集、概念确认、方案选择、设计决策或核心交付结果时才填写依赖。
+7. dependencies 只能引用上游子目标 id，不要引用后续板块；持续关注/repeat/monitoring 板块默认不是阶段推进 blocker，除非当前板块明确需要等待它产出的监控结论。
 
-## 种子 Task 原则
-1. 每个 Thread 输出 0~N 个初始种子 Task；种子只覆盖当前已确定要执行的事。
-2. 明确允许 tasks=[]：如果需要先观察/等待信息，后续由 tick 根据运行结果补 Task。
+## 初始 Task 主干原则
+1. 每个 Thread 的 tasks 不是随意待办清单，而是让该 Thread 可自然完成的最小闭环路径。
+2. 明确允许 tasks=[]：仅适用于真正需要等待外部事件或长期观察的 Thread；如果 Thread 承担一次性交付责任，不得为空。
 3. 持续关注/巡检类 Task 用 taskType="repeat"，并填写 cadence 或 triggerRule。
 4. 一次性分析/交付类 Task 用 taskType="one_shot"，triggerRule 可写 "立即触发" 或明确条件。
 5. 事件触发类需求降级为周期巡检 Task：用 repeat + 合适 cadence，并在 description/objective 里写清判断条件。
+6. 如果某个 Thread 承担将准备产出转化为最终结果的责任，tasks 必须包含构建或验收类执行单元，不能只包含方案、选型、说明、骨架等准备产物。
+7. 整个 Topic 的所有初始 tasks 完成后，必须能证明 goalAnalysis.successState 与 deliveryContract 已满足。
 ${loopV2PlannerInstructions()}
 
 ## 边界处理
@@ -560,7 +580,12 @@ ${JSON.stringify(input.userContext, null, 2)}
   "goalAnalysis": {
     "coreIntent": "核心意图：一句话概括目标的本质",
     "successState": "成功状态：描述达成后的理想状态",
-    "assumptions": ["假设1：隐含的前提条件", "假设2：..."]
+    "assumptions": ["假设1：隐含的前提条件", "假设2：..."],
+    "deliveryContract": {
+      "finalDeliverable": "用户最终要拿到的主交付物",
+      "doneEvidence": ["可证明目标完成的证据"],
+      "nonCompletionExamples": ["只是准备工作、不能单独算完成的产物"]
+    }
   },
 ${loopV2.topLevel}  "subGoals": [
     {
@@ -617,8 +642,11 @@ export function buildDecompositionNormalizationPrompt(input: {
 4. subGoals 表示 Thread 板块，数量建议 ${input.config.minSubGoals}-${Math.min(input.config.maxSubGoals, 5)} 个，最多 5 个。
 5. priority 只能是 critical、high、medium、low。
 6. successCriteria[].type 只能是 milestone、deliverable、condition。
-7. dependencies 必须是数字数组，引用前置子目标 id；无依赖则 []。
-8. 保留每个 Thread 的 reviewInterval、terminationCondition 和 tasks[]；tasks 可以为空数组，不要补占位任务。
+7. dependencies 必须是数字数组，引用前置子目标 id；无依赖则 []。dependencies 是真实执行依赖，表示下游板块启动前必须满足上游关键产出，不是展示字段。
+8. 只有当前板块确实需要等待前序板块的信息收集、概念确认、方案选择、设计决策或核心交付结果时才保留依赖；repeat/monitoring 板块默认不是阶段推进 blocker，除非被显式需要。
+9. 保留每个 Thread 的 reviewInterval、terminationCondition 和 tasks[]；tasks 可以为空数组，不要补占位任务。
+10. goalAnalysis.deliveryContract 必须描述最终交付物、完成证据、以及不能单独算完成的中间产物；如果原始输出缺少，请基于目标信息补齐。
+11. tasks 应覆盖从当前状态到目标成功状态的最小主干闭环路径，不得把关键交付缺口留给后续。
 ${loopV2PlannerInstructions()}
 
 目标信息：
@@ -633,7 +661,12 @@ ${JSON.stringify({
   "goalAnalysis": {
     "coreIntent": "核心意图",
     "successState": "成功状态",
-    "assumptions": ["假设1"]
+    "assumptions": ["假设1"],
+    "deliveryContract": {
+      "finalDeliverable": "用户最终要拿到的主交付物",
+      "doneEvidence": ["可证明目标完成的证据"],
+      "nonCompletionExamples": ["只是准备工作、不能单独算完成的产物"]
+    }
   },
 ${loopV2.topLevel}  "subGoals": [
     {
@@ -1136,6 +1169,10 @@ function validateDecomposition(value: unknown): DecompositionPayload {
     throw new Error("子目标拆解为空");
   }
 
+  const deliveryContract =
+    normalizeGoalDeliveryContract(goalAnalysis.deliveryContract) ??
+    normalizeGoalDeliveryContract(value.deliveryContract);
+
   return {
     goalAnalysis: {
       coreIntent:
@@ -1147,7 +1184,9 @@ function validateDecomposition(value: unknown): DecompositionPayload {
           ? goalAnalysis.successState.trim()
           : "达成用户期望的目标结果",
       assumptions: extractStringArray(goalAnalysis.assumptions),
+      deliveryContract,
     },
+    deliveryContract,
     subGoals: normalizedSubGoals,
     executionOrder:
       typeof value.executionOrder === "string" && value.executionOrder.trim()
@@ -1206,6 +1245,20 @@ function extractStringArray(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeGoalDeliveryContract(value: unknown): GoalDeliveryContract | undefined {
+  if (!isObject(value)) return undefined;
+  const finalDeliverable =
+    typeof value.finalDeliverable === "string" ? value.finalDeliverable.trim() : "";
+  const doneEvidence = extractStringArray(value.doneEvidence);
+  if (!finalDeliverable || doneEvidence.length === 0) return undefined;
+  const nonCompletionExamples = extractStringArray(value.nonCompletionExamples);
+  return {
+    finalDeliverable,
+    doneEvidence,
+    nonCompletionExamples: nonCompletionExamples.length > 0 ? nonCompletionExamples : undefined,
+  };
 }
 
 function inferDraftCollaboration(task: DraftTask): NonNullable<DraftTask["collaboration"]> {
@@ -1416,6 +1469,46 @@ async function repairSingleTaskDraftWithClaude(input: {
   }
 }
 
+function buildTaskDraftPromptDependencyContext(input: {
+  decomposition: DecompositionPayload;
+  completedSubGoals: DraftSubGoal[];
+  subGoalIndex: number;
+}) {
+  const currentSubGoal = input.decomposition.subGoals[input.subGoalIndex];
+  const dependencyIds = new Set(currentSubGoal?.dependencies ?? []);
+  const previousSubGoals = input.decomposition.subGoals.slice(0, input.subGoalIndex).map((subGoal) => ({
+    id: subGoal.id,
+    name: subGoal.name,
+    description: subGoal.description,
+    dependencies: subGoal.dependencies,
+    successCriteria: subGoal.successCriteria.map((criterion) => criterion.description),
+  }));
+  const currentSubGoalDependencies = input.decomposition.subGoals
+    .filter((subGoal) => dependencyIds.has(subGoal.id))
+    .map((subGoal) => ({
+      id: subGoal.id,
+      name: subGoal.name,
+      description: subGoal.description,
+      successCriteria: subGoal.successCriteria.map((criterion) => criterion.description),
+    }));
+  const previousKeyTasks = input.completedSubGoals.flatMap((subGoal) =>
+    subGoal.tasks
+      .filter((task) => task.taskType === "one_shot" && task.executionMode !== "monitoring")
+      .map((task) => ({
+        subGoalId: subGoal.id,
+        subGoalName: subGoal.title,
+        id: task.id,
+        title: task.title,
+        expectedOutcome: task.expectedOutcome,
+      })),
+  );
+  return {
+    previousSubGoals,
+    currentSubGoalDependencies,
+    previousKeyTasks,
+  };
+}
+
 async function generateTaskDraftBatchForSubGoalWithClaude(input: {
   goalTitle: string;
   goalDescription: string;
@@ -1423,6 +1516,28 @@ async function generateTaskDraftBatchForSubGoalWithClaude(input: {
   subGoalName: string;
   subGoalDescription: string;
   successCriteria: string[];
+  previousSubGoals?: Array<{
+    id: number;
+    name: string;
+    description: string;
+    dependencies: number[];
+    successCriteria: string[];
+  }>;
+  currentSubGoalDependencies?: Array<{
+    id: number;
+    name: string;
+    description: string;
+    successCriteria: string[];
+  }>;
+  previousKeyTasks?: Array<{
+    subGoalId: string;
+    subGoalName: string;
+    id: string;
+    title: string;
+    expectedOutcome: string;
+  }>;
+  deliveryContract?: GoalDeliveryContract;
+  isFinalSubGoal?: boolean;
   config: EasterEggSettings;
   runtimeEnv: RuntimeEnvironment;
   conversationId?: string;
@@ -1505,6 +1620,9 @@ async function reviewTaskDraftsWithClaude(input: {
   subGoalTitle: string;
   goalDescription: string;
   drafts: TaskDraft[];
+  deliveryContract?: GoalDeliveryContract;
+  isFinalSubGoal?: boolean;
+  subGoalSuccessCriteria?: string[];
   runtimeEnv: RuntimeEnvironment;
   conversationId?: string;
   signal?: AbortSignal;
@@ -1722,6 +1840,307 @@ async function buildPlanPresentationWithClaude(input: {
   });
 }
 
+export function buildDeliveryClosureAuditPrompt(input: {
+  goalText: string;
+  decomposition: DecompositionPayload;
+  subGoals: DraftSubGoal[];
+}) {
+  const contract = input.decomposition.goalAnalysis.deliveryContract ?? input.decomposition.deliveryContract;
+  const compactThreads = input.subGoals.map((subGoal, index) => ({
+    subGoalId: input.decomposition.subGoals[index]?.id ?? index + 1,
+    title: subGoal.title,
+    successCriteria: subGoal.successCriteria ?? [],
+    tasks: subGoal.tasks.map((task) => ({
+      title: task.title,
+      objective: task.description,
+      deliverable: task.expectedOutcome,
+      taskType: task.taskType,
+      triggerRule: task.triggerRule,
+      dependencies: task.dependencies ?? [],
+    })),
+  }));
+  return `你是目标规划的全局交付闭环审计器。只能输出严格 JSON 对象，不要输出 Markdown、解释或代码块。
+
+审计目标：判断这些任务全部完成后，是否有足够证据证明目标交付契约已达成。
+不要判断任务是否“相关”，要判断是否形成可验收闭环。
+如果计划只包含准备产物、方案、骨架、说明，但缺少把它们转成可验收结果的任务，必须 needs_repair。
+不得按领域关键词判断；只能按 finalDeliverable、doneEvidence、nonCompletionExamples 与任务交付物之间的逻辑关系判断。
+
+原始目标：${input.goalText}
+核心意图：${input.decomposition.goalAnalysis.coreIntent}
+成功状态：${input.decomposition.goalAnalysis.successState}
+目标交付契约：
+${JSON.stringify(contract ?? {}, null, 2)}
+
+线程与任务：
+${JSON.stringify(compactThreads, null, 2)}
+
+输出 JSON schema：
+{
+  "verdict": "accept|needs_repair",
+  "missingEvidence": ["缺少的完成证据"],
+  "insufficientThreads": [
+    { "subGoalId": 1, "reason": "该板块缺少构建或验收任务" }
+  ],
+  "repairInstruction": "如果需要修复，说明应该补什么任务；否则省略"
+}`;
+}
+
+export function validateDeliveryClosureAudit(value: unknown): DeliveryClosureAuditPayload {
+  if (!isObject(value)) {
+    throw new Error("交付闭环审计结果不是 JSON 对象");
+  }
+  const insufficientThreads = Array.isArray(value.insufficientThreads)
+    ? value.insufficientThreads.filter(isObject).map((item) => ({
+        subGoalId: typeof item.subGoalId === "number" ? item.subGoalId : 0,
+        reason: typeof item.reason === "string" ? item.reason.trim() : "",
+      })).filter((item) => item.subGoalId > 0 && item.reason)
+    : [];
+  const missingEvidence = extractStringArray(value.missingEvidence);
+  const verdict =
+    value.verdict === "accept" && missingEvidence.length === 0 && insufficientThreads.length === 0
+      ? "accept"
+      : "needs_repair";
+  return {
+    verdict,
+    missingEvidence,
+    insufficientThreads,
+    repairInstruction: typeof value.repairInstruction === "string" && value.repairInstruction.trim()
+      ? value.repairInstruction.trim()
+      : undefined,
+  };
+}
+
+async function auditDeliveryClosureWithClaude(input: {
+  goalText: string;
+  decomposition: DecompositionPayload;
+  subGoals: DraftSubGoal[];
+  runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
+  signal?: AbortSignal;
+  requestId?: string;
+}) {
+  const stdout = await runClaudeJson({
+    runtimeEnv: input.runtimeEnv,
+    prompt: buildDeliveryClosureAuditPrompt(input),
+    conversationId: input.conversationId,
+    signal: input.signal,
+    abortMessage: "交付闭环审计已中断",
+    failureMessage: "Claude CLI 交付闭环审计失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: "全局交付闭环审计",
+    },
+  });
+  return parseClaudeJson({
+    raw: stdout,
+    validator: validateDeliveryClosureAudit,
+    errorMessage: "Claude 交付闭环审计 JSON 解析失败",
+    runtimeEnv: input.runtimeEnv,
+    conversationId: input.conversationId,
+    signal: input.signal,
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: "全局交付闭环审计",
+    },
+  });
+}
+
+function buildDeliveryClosureRepairPrompt(input: {
+  goalText: string;
+  decomposition: DecompositionPayload;
+  targetSubGoal: DraftSubGoal;
+  audit: DeliveryClosureAuditPayload;
+}) {
+  const contract = input.decomposition.goalAnalysis.deliveryContract ?? input.decomposition.deliveryContract;
+  return `只能输出 Block 协议，不允许 JSON / Markdown / 解释文字。
+所有标签必须出现在行首，标签外不要输出任何文字。
+
+你正在修复目标规划的全局交付闭环缺口。请只为指定子目标追加 1-3 个任务。
+新增任务必须补齐构建或验收缺口，不要重复已有任务，不要输出泛泛建议。
+默认使用 one_shot；只有缺口本身确实是持续监测时才使用 cadence/repeat。
+
+原始目标：${input.goalText}
+目标交付契约：
+${JSON.stringify(contract ?? {}, null, 2)}
+
+目标子目标：
+${JSON.stringify({
+  title: input.targetSubGoal.title,
+  description: input.targetSubGoal.description,
+  successCriteria: input.targetSubGoal.successCriteria,
+  existingTasks: input.targetSubGoal.tasks.map((task) => ({
+    title: task.title,
+    objective: task.description,
+    deliverable: task.expectedOutcome,
+  })),
+}, null, 2)}
+
+审计缺口：
+${JSON.stringify(input.audit, null, 2)}
+
+输出格式：
+<task index="1">
+<title>
+任务标题
+</title>
+<objective>
+任务目标、执行边界和必要上下文
+</objective>
+<deliverable>
+完成后应沉淀的可验收结果
+</deliverable>
+<acceptance>
+- 验收标准 1
+- 验收标准 2
+</acceptance>
+<user-involvement mode="none" />
+<dependencies></dependencies>
+<priority>high</priority>
+<duration-minutes>90</duration-minutes>
+</task>`;
+}
+
+function selectDeliveryRepairTarget(input: {
+  decomposition: DecompositionPayload;
+  subGoals: DraftSubGoal[];
+  audit: DeliveryClosureAuditPayload;
+}) {
+  const preferred = input.audit.insufficientThreads[0]?.subGoalId;
+  const preferredIndex =
+    preferred === undefined
+      ? -1
+      : input.decomposition.subGoals.findIndex((subGoal) => subGoal.id === preferred);
+  if (preferredIndex >= 0 && input.subGoals[preferredIndex]) return preferredIndex;
+  return Math.max(0, input.subGoals.length - 1);
+}
+
+async function repairDeliveryClosureWithClaude(input: {
+  goalText: string;
+  decomposition: DecompositionPayload;
+  subGoals: DraftSubGoal[];
+  audit: DeliveryClosureAuditPayload;
+  taskIdBatchSeed: string;
+  runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
+  signal?: AbortSignal;
+  requestId?: string;
+}) {
+  const targetIndex = selectDeliveryRepairTarget(input);
+  const targetSubGoal = input.subGoals[targetIndex];
+  if (!targetSubGoal) return { subGoals: input.subGoals, warnings: ["交付闭环修复失败：未找到可修复的子目标。"] };
+  const stdout = await runClaudeText({
+    runtimeEnv: input.runtimeEnv,
+    prompt: buildDeliveryClosureRepairPrompt({
+      goalText: input.goalText,
+      decomposition: input.decomposition,
+      targetSubGoal,
+      audit: input.audit,
+    }),
+    conversationId: input.conversationId,
+    signal: input.signal,
+    abortMessage: "交付闭环修复已中断",
+    failureMessage: "Claude CLI 交付闭环修复失败",
+    context: {
+      requestId: input.requestId,
+      scope: "goal_plan",
+      phase: "reviewing_tasks",
+      stepLabel: `交付闭环修复：${targetSubGoal.title}`,
+    },
+  });
+  const batch = parseTaskDraftBatch(stdout);
+  if (batch.tasks.length === 0) {
+    throw new TaskDraftBatchEmptyError("交付闭环修复未生成可用任务", batch.droppedReasons ?? []);
+  }
+  const subGoalContext: DecompositionSubGoalContext = {
+    id: input.decomposition.subGoals[targetIndex]?.id ?? targetIndex + 1,
+    name: targetSubGoal.title,
+    description: targetSubGoal.description ?? targetSubGoal.title,
+    priority: targetSubGoal.priority,
+    criteria: targetSubGoal.successCriteria ?? [],
+  };
+  const compiled = compileTaskDraftsToDraftTasks({
+    drafts: batch.tasks,
+    subGoalContext,
+    taskIdBatchSeed: input.taskIdBatchSeed,
+    subGoalDraftId: targetSubGoal.id,
+    subGoalIndex: targetIndex + 1,
+    taskIndexOffset: targetSubGoal.tasks.length,
+  });
+  const nextSubGoals = input.subGoals.slice();
+  nextSubGoals[targetIndex] = {
+    ...targetSubGoal,
+    tasks: [...targetSubGoal.tasks, ...compiled.tasks],
+  };
+  return {
+    subGoals: nextSubGoals,
+    warnings: compiled.warnings.map((warning) => `交付闭环修复：${warning.message}`),
+    targetTitle: targetSubGoal.title,
+    addedTaskCount: compiled.tasks.length,
+  };
+}
+
+async function auditAndRepairDeliveryClosure(input: {
+  goalText: string;
+  decomposition: DecompositionPayload;
+  subGoals: DraftSubGoal[];
+  taskIdBatchSeed: string;
+  runtimeEnv: RuntimeEnvironment;
+  conversationId?: string;
+  signal?: AbortSignal;
+  requestId?: string;
+}) {
+  try {
+    const audit = await auditDeliveryClosureWithClaude(input);
+    if (audit.verdict === "accept") {
+      return { subGoals: input.subGoals, reviewSummary: ["全局交付闭环审计：已通过。"], reviewRisks: [] };
+    }
+
+    const repair = await repairDeliveryClosureWithClaude({ ...input, audit });
+    const repairedAudit = await auditDeliveryClosureWithClaude({ ...input, subGoals: repair.subGoals });
+    const baseSummary = [
+      `全局交付闭环审计：发现缺口并已追加 ${repair.addedTaskCount ?? 0} 个任务到「${repair.targetTitle ?? "目标板块"}」。`,
+      ...repair.warnings,
+    ];
+    if (repairedAudit.verdict === "accept") {
+      return { subGoals: repair.subGoals, reviewSummary: [...baseSummary, "全局交付闭环复审：已通过。"], reviewRisks: [] };
+    }
+    return {
+      subGoals: repair.subGoals,
+      reviewSummary: [...baseSummary, "全局交付闭环复审：仍存在缺口，已记录为规划风险。"],
+      reviewRisks: [
+        ...repairedAudit.missingEvidence.map((item) => `交付闭环缺口：${item}`),
+        ...repairedAudit.insufficientThreads.map((item) => `交付闭环缺口：子目标 ${item.subGoalId} ${item.reason}`),
+      ],
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : "未知错误";
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_plan",
+      level: "warn",
+      phase: "reviewing_tasks",
+      message: "全局交付闭环审计失败，已记录为规划风险并继续生成计划。",
+      details: message,
+    });
+    return {
+      subGoals: input.subGoals,
+      reviewSummary: ["全局交付闭环审计未完成，已记录为规划风险。"],
+      reviewRisks: [`全局交付闭环审计未完成：${message}`],
+    };
+  }
+}
+
 function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
   if (!value.goalTitle || typeof value.goalTitle !== "string") {
     throw new Error("规划缺少 goalTitle");
@@ -1739,6 +2158,11 @@ function validateGoalDraft(value: GoalBreakdownDraft): GoalBreakdownDraft {
     }
     return undefined;
   };
+  const deliveryContract = value.deliveryContract ?? value.goalAnalysis?.deliveryContract;
+  value.deliveryContract = deliveryContract;
+  if (value.goalAnalysis && deliveryContract && !value.goalAnalysis.deliveryContract) {
+    value.goalAnalysis = { ...value.goalAnalysis, deliveryContract };
+  }
   value.topicLoop = readTrigger(value.topicLoop, "topicLoop") ?? value.topicLoop;
   for (const subGoal of value.subGoals) {
     if (!subGoal.title || !Array.isArray(subGoal.tasks) || subGoal.tasks.length === 0) {
@@ -1950,6 +2374,13 @@ export async function generateGoalPlanWithClaude(input: {
             successCriteria: subGoal.successCriteria.map(
               (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
             ),
+            deliveryContract: decomposition.goalAnalysis.deliveryContract ?? decomposition.deliveryContract,
+            isFinalSubGoal: subGoalIndex === totalSubGoals - 1,
+            ...buildTaskDraftPromptDependencyContext({
+              decomposition,
+              completedSubGoals: subGoals,
+              subGoalIndex,
+            }),
             config,
             runtimeEnv: input.runtimeEnv,
             conversationId: input.conversationId,
@@ -2026,6 +2457,11 @@ export async function generateGoalPlanWithClaude(input: {
           subGoalTitle: subGoal.name,
           goalDescription: collectedInfoSummary.goalDetails || collectedInfoSummary.summary || input.goalText,
           drafts: generatedDrafts.tasks,
+          deliveryContract: decomposition.goalAnalysis.deliveryContract ?? decomposition.deliveryContract,
+          isFinalSubGoal: subGoalIndex === totalSubGoals - 1,
+          subGoalSuccessCriteria: subGoal.successCriteria.map(
+            (criterion: DecompositionPayload["subGoals"][number]["successCriteria"][number]) => criterion.description,
+          ),
           runtimeEnv: input.runtimeEnv,
           conversationId: input.conversationId,
           signal: input.signal,
@@ -2197,6 +2633,37 @@ export async function generateGoalPlanWithClaude(input: {
       writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
     }
 
+    const closureReview = await auditAndRepairDeliveryClosure({
+      goalText: input.goalText,
+      decomposition,
+      subGoals,
+      taskIdBatchSeed,
+      runtimeEnv: input.runtimeEnv,
+      conversationId: input.conversationId,
+      signal: input.signal,
+      requestId: input.requestId,
+    });
+    subGoals.splice(0, subGoals.length, ...closureReview.subGoals);
+    reviewSummary.push(...closureReview.reviewSummary);
+    reviewRisks.push(...closureReview.reviewRisks);
+    taskPlanningSummary.splice(
+      0,
+      taskPlanningSummary.length,
+      ...subGoals.map((subGoal) => ({
+        subGoalName: subGoal.title,
+        taskCount: subGoal.tasks.length,
+        uncoveredRisks: [],
+      })),
+    );
+    checkpoint = {
+      ...checkpoint,
+      completedSubGoals: subGoals,
+      taskPlanningSummary,
+      reviewSummary,
+      reviewRisks,
+    };
+    writeGoalPlanningCheckpoint(input.conversationId, checkpoint);
+
     input.onProgress?.({
       phase: "reviewing_tasks",
       message: "正在汇总规划结果...",
@@ -2240,19 +2707,29 @@ export async function generateGoalPlanWithClaude(input: {
       }),
     });
 
+    const dependencyMerge = mergeCrossSubGoalTaskDependencies({ subGoals });
+    const dependencyReviewSummary =
+      dependencyMerge.warnings.length > 0
+        ? [
+            `跨板块依赖归并记录 ${dependencyMerge.warnings.length} 个非阻断提示。`,
+            ...dependencyMerge.warnings.map((warning) => `跨板块依赖归并：${warning.message}`),
+          ]
+        : [];
+
     const draft = validateGoalDraft({
       goalTitle: presentation.goalTitle,
       summary: presentation.summary,
       deadline: presentation.deadline || normalizeDeadline(collectedInfoSummary.timeline || ""),
       goalAnalysis: decomposition.goalAnalysis,
+      deliveryContract: decomposition.goalAnalysis.deliveryContract ?? decomposition.deliveryContract,
       collectedInfoSummary,
       assumptions: dedupeStrings(decomposition.goalAnalysis.assumptions ?? []),
       risks: dedupeStrings([...decomposition.risks, ...reviewRisks]),
       reasoning: decomposition.reasoning,
       executionOrder: decomposition.executionOrder,
-      reviewSummary,
+      reviewSummary: [...reviewSummary, ...dependencyReviewSummary],
       notificationStrategy: presentation.notificationStrategy,
-      subGoals,
+      subGoals: dependencyMerge.subGoals,
     });
     checkpoint = {
       ...checkpoint,

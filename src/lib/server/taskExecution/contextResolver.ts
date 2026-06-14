@@ -15,6 +15,16 @@ import {
 } from "@/lib/server/taskExecution/types";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 
+type SubGoalDependencyReadiness = {
+  subGoalId: string;
+  title: string;
+  status: "ready" | "blocked" | "missing";
+  blockingTasks: Array<{
+    task: Task;
+    status: DependencyStatus;
+  }>;
+};
+
 function latestInstance(task: Task) {
   return task.instances[0];
 }
@@ -73,11 +83,89 @@ function cycleBlocker(cycle: string[]): ContextBlocker {
   };
 }
 
+function isBlockingOutputTask(task: Task) {
+  return task.taskType === "one_shot" && task.executionMode !== "monitoring";
+}
+
+function buildSubGoalDependencyReadiness(input: {
+  goal: Goal;
+  subGoal: SubGoal;
+}): SubGoalDependencyReadiness[] {
+  const subGoalMap = new Map(input.goal.subGoals.map((subGoal) => [subGoal.id, subGoal]));
+  return (input.subGoal.dependencies ?? []).map((subGoalId) => {
+    const upstream = subGoalMap.get(subGoalId);
+    if (!upstream) {
+      return {
+        subGoalId,
+        title: subGoalId,
+        status: "missing",
+        blockingTasks: [],
+      };
+    }
+    if (upstream.threadStatus === "archived") {
+      return {
+        subGoalId,
+        title: upstream.title,
+        status: "ready",
+        blockingTasks: [],
+      };
+    }
+    const keyOutputTasks = upstream.tasks.filter(isBlockingOutputTask);
+    const blockingTasks = keyOutputTasks
+      .map((task) => ({ task, status: dependencyStatus(task) }))
+      .filter((item) => item.status !== "completed");
+    return {
+      subGoalId,
+      title: upstream.title,
+      status: blockingTasks.length ? "blocked" : "ready",
+      blockingTasks,
+    };
+  });
+}
+
+function subGoalDependencyBlocker(
+  readiness: SubGoalDependencyReadiness,
+  directDependencyIds: Set<string>,
+): ContextBlocker | null {
+  if (readiness.status === "ready") return null;
+  if (readiness.status === "missing") {
+    return {
+      kind: "config",
+      severity: "block",
+      source: "system",
+      id: `subgoal-dep:${readiness.subGoalId}`,
+      label: `依赖板块：${readiness.title}`,
+      message: `依赖板块「${readiness.subGoalId}」不存在，请先修复板块依赖配置。`,
+      reason: "subGoal.dependencies 引用了当前目标中不存在的板块。",
+      suggestedActions: [{ kind: "free_text", label: "修复板块依赖配置" }],
+    };
+  }
+
+  const blockingTasks = readiness.blockingTasks.filter((item) => !directDependencyIds.has(item.task.id));
+  if (blockingTasks.length === 0) return null;
+
+  const titles = blockingTasks.map((item) => `「${item.task.title}」`).join("、");
+  const firstTask = blockingTasks[0]?.task;
+  return {
+    kind: "dependency",
+    severity: "soft_wait",
+    source: "system",
+    id: `subgoal-dep:${readiness.subGoalId}`,
+    label: `依赖板块：${readiness.title}`,
+    message: `依赖板块「${readiness.title}」尚未就绪，未完成关键任务：${titles}。建议先完成这些上游产出后再启动当前任务。`,
+    reason: `上游板块「${readiness.title}」的关键 one-shot 输出任务尚未完成。`,
+    suggestedActions: firstTask
+      ? [{ kind: "navigate_task", label: `先完成「${firstTask.title}」`, taskId: firstTask.id }]
+      : [{ kind: "free_text", label: "先完成上游关键产出" }],
+  };
+}
+
 function buildDependencies(input: {
   conversationId: string;
   goal: Goal;
   task: Task;
   budget: TaskExecutionContext["budget"];
+  includeDigests?: boolean;
 }) {
   const { taskMap } = buildTaskGraph(input.goal);
   return (input.task.dependencies ?? []).map((dependencyId): DependencyView => {
@@ -109,6 +197,9 @@ function buildDependencies(input: {
         },
       };
     }
+    if (input.includeDigests === false) {
+      return base;
+    }
     const instance = latestInstance(dependencyTask);
     return {
       ...base,
@@ -122,6 +213,39 @@ function buildDependencies(input: {
         : undefined,
     };
   });
+}
+
+export function resolveSchedulerDependencyReadiness(input: {
+  goal: Goal;
+  subGoal: SubGoal;
+  task: Task;
+  conversationId?: string;
+}) {
+  const dependencies = buildDependencies({
+    conversationId: input.conversationId ?? input.goal.conversationId ?? "",
+    goal: input.goal,
+    task: input.task,
+    budget: DEFAULT_TASK_EXECUTION_CONTEXT_BUDGET,
+    includeDigests: false,
+  });
+  const dependencyBlockers = dependencies.map(dependencyBlocker).filter((item): item is ContextBlocker => Boolean(item));
+  const directDependencyIds = new Set(input.task.dependencies ?? []);
+  const subGoalDependencyBlockers = buildSubGoalDependencyReadiness({
+    goal: input.goal,
+    subGoal: input.subGoal,
+  })
+    .map((readiness) => subGoalDependencyBlocker(readiness, directDependencyIds))
+    .filter((item): item is ContextBlocker => Boolean(item));
+  const cycle = detectCycleFromTask(input.goal, input.task.id);
+  const cycleBlockers = cycle ? [cycleBlocker(cycle)] : [];
+  const blockers = [...cycleBlockers, ...dependencyBlockers, ...subGoalDependencyBlockers];
+  return {
+    state: blockers.length ? "blocked" : "ready",
+    blockers,
+    summary: blockers.length
+      ? blockers.map((blocker) => blocker.message).join("；")
+      : "任务依赖已就绪。",
+  } satisfies TaskExecutionContext["readiness"];
 }
 
 function buildContext(input: {
@@ -140,6 +264,13 @@ function buildContext(input: {
     budget,
   });
   const dependencyBlockers = dependencies.map(dependencyBlocker).filter((item): item is ContextBlocker => Boolean(item));
+  const directDependencyIds = new Set(input.task.dependencies ?? []);
+  const subGoalDependencyBlockers = buildSubGoalDependencyReadiness({
+    goal: input.goal,
+    subGoal: input.subGoal,
+  })
+    .map((readiness) => subGoalDependencyBlocker(readiness, directDependencyIds))
+    .filter((item): item is ContextBlocker => Boolean(item));
   const cycle = detectCycleFromTask(input.goal, input.task.id);
   const cycleBlockers = cycle ? [cycleBlocker(cycle)] : [];
   const dependencyContextText = dependencies.length ? renderDependencySection({
@@ -164,7 +295,7 @@ function buildContext(input: {
     dependencyContextText,
   });
   const userInputBlockers = contextBlockersFromReadiness(syncReadiness);
-  const blockers = [...cycleBlockers, ...dependencyBlockers, ...userInputBlockers];
+  const blockers = [...cycleBlockers, ...dependencyBlockers, ...subGoalDependencyBlockers, ...userInputBlockers];
   const state = blockers.length ? "blocked" : "ready";
 
   return {

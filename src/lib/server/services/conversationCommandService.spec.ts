@@ -356,6 +356,64 @@ export function runConversationCommandServiceSpecs() {
   db.prepare(
     `INSERT INTO agent_snapshots (agent_run_id, last_event_seq, state_json, updated_at) VALUES (?, 1, '{}', ?)`,
   ).run(runtimeOnlyAgentRunId, now);
+  for (const [eventId, topic, thread, task, instance] of [
+    ["governance-outbox-topic-command-cascade-spec", goalId, null, null, null],
+    ["governance-outbox-thread-command-cascade-spec", null, threadId, null, null],
+    ["governance-outbox-task-command-cascade-spec", null, null, taskId, null],
+    ["governance-outbox-instance-command-cascade-spec", null, null, null, instanceId],
+  ] as const) {
+    db.prepare(
+      `
+        INSERT INTO governance_event_outbox (
+          event_id, event_type, source, topic_id, thread_id, task_id, instance_id,
+          payload_json, created_at
+        ) VALUES (?, 'test.event', 'spec', ?, ?, ?, ?, '{}', ?)
+      `,
+    ).run(eventId, topic, thread, task, instance, now);
+    db.prepare(
+      `
+        INSERT INTO governance_event_outbox_consumption (event_id, consumer, consumed_at)
+        VALUES (?, 'spec-consumer', ?)
+      `,
+    ).run(eventId, now);
+  }
+  db.prepare(
+    `
+      INSERT INTO governance_event_outbox (
+        event_id, event_type, source, topic_id, payload_json, created_at
+      ) VALUES ('governance-outbox-unrelated-command-cascade-spec', 'test.event', 'spec', 'topic-unrelated-command-cascade-spec', '{}', ?)
+    `,
+  ).run(now);
+  db.prepare(
+    `
+      INSERT INTO governance_event_outbox_consumption (event_id, consumer, consumed_at)
+      VALUES ('governance-outbox-unrelated-command-cascade-spec', 'spec-consumer', ?)
+    `,
+  ).run(now);
+  db.prepare(
+    `
+      INSERT INTO governance_tick_jobs (
+        id, target_kind, topic_id, thread_id, status, base_revision,
+        payload_json, available_at, created_at, updated_at
+      ) VALUES ('governance-tick-topic-command-cascade-spec', 'topic', ?, NULL, 'queued', 1, '{}', ?, ?, ?)
+    `,
+  ).run(goalId, now, now, now);
+  db.prepare(
+    `
+      INSERT INTO governance_tick_jobs (
+        id, target_kind, topic_id, thread_id, status, base_revision,
+        payload_json, available_at, created_at, updated_at
+      ) VALUES ('governance-tick-thread-command-cascade-spec', 'thread', ?, ?, 'queued', 1, '{}', ?, ?, ?)
+    `,
+  ).run(goalId, threadId, now, now, now);
+  db.prepare(
+    `
+      INSERT INTO governance_tick_jobs (
+        id, target_kind, topic_id, thread_id, status, base_revision,
+        payload_json, available_at, created_at, updated_at
+      ) VALUES ('governance-tick-unrelated-command-cascade-spec', 'topic', 'topic-unrelated-command-cascade-spec', NULL, 'queued', 1, '{}', ?, ?, ?)
+    `,
+  ).run(now, now, now);
 
   applyConversationCommand({
     command: { type: "delete_conversation", conversationId: cascadeConversationId },
@@ -392,6 +450,103 @@ export function runConversationCommandServiceSpecs() {
       .count;
     assert.equal(count, 0, `${table} should be deleted`);
   }
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM governance_event_outbox
+            WHERE event_id IN (
+              'governance-outbox-topic-command-cascade-spec',
+              'governance-outbox-thread-command-cascade-spec',
+              'governance-outbox-task-command-cascade-spec',
+              'governance-outbox-instance-command-cascade-spec'
+            )
+          `,
+        )
+        .get() as { count: number }
+    ).count,
+    0,
+    "governance_event_outbox linked to deleted conversation should be deleted",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM governance_event_outbox_consumption
+            WHERE event_id IN (
+              'governance-outbox-topic-command-cascade-spec',
+              'governance-outbox-thread-command-cascade-spec',
+              'governance-outbox-task-command-cascade-spec',
+              'governance-outbox-instance-command-cascade-spec'
+            )
+          `,
+        )
+        .get() as { count: number }
+    ).count,
+    0,
+    "governance_event_outbox_consumption linked to deleted conversation should be deleted",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM governance_tick_jobs
+            WHERE id IN (
+              'governance-tick-topic-command-cascade-spec',
+              'governance-tick-thread-command-cascade-spec'
+            )
+          `,
+        )
+        .get() as { count: number }
+    ).count,
+    0,
+    "governance_tick_jobs linked to deleted conversation should be deleted",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM governance_event_outbox
+            WHERE event_id = 'governance-outbox-unrelated-command-cascade-spec'
+          `,
+        )
+        .get() as { count: number }
+    ).count,
+    1,
+    "unrelated governance_event_outbox should stay",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM governance_event_outbox_consumption
+            WHERE event_id = 'governance-outbox-unrelated-command-cascade-spec'
+          `,
+        )
+        .get() as { count: number }
+    ).count,
+    1,
+    "unrelated governance_event_outbox_consumption should stay",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM governance_tick_jobs
+            WHERE id = 'governance-tick-unrelated-command-cascade-spec'
+          `,
+        )
+        .get() as { count: number }
+    ).count,
+    1,
+    "unrelated governance_tick_jobs should stay",
+  );
   const deleteEvents = db
     .prepare(
       `

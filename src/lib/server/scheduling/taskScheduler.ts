@@ -4,6 +4,7 @@ import {
   getRuntimeJobByTaskInstanceId,
   listOpenRuntimeJobsByTaskIds,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { resolveSchedulerDependencyReadiness } from "@/lib/server/taskExecution/contextResolver";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { isTaskTriggerDue } from "@/lib/taskTriggerTime";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
@@ -29,6 +30,11 @@ type ReadyTask = {
   priorityScore: number;
 };
 
+type ReadyTaskSelection = {
+  ready: ReadyTask[];
+  skipped: number;
+};
+
 function computePriorityScore(task: Task) {
   const priority = task.priority ?? "medium";
   const taskTypeScore = task.taskType === "one_shot" ? 30 : 10;
@@ -36,8 +42,9 @@ function computePriorityScore(task: Task) {
   return PRIORITY_WEIGHT[priority] + taskTypeScore + monitoringScore;
 }
 
-function getReadyTasks(goals: Goal[]) {
+function getReadyTasks(goals: Goal[]): ReadyTaskSelection {
   const ready: ReadyTask[] = [];
+  let skipped = 0;
   const now = new Date();
   const taskIds = goals.flatMap((goal) =>
     goal.subGoals.flatMap((subGoal) => subGoal.tasks.map((task) => task.id)),
@@ -60,6 +67,15 @@ function getReadyTasks(goals: Goal[]) {
         if (task.progress >= 100 && task.taskType === "one_shot") continue;
         if (openTaskIds.has(normalizeTaskId(task.id))) continue;
         if (!isTaskTriggerDue(task, now)) continue;
+        const dependencyReadiness = resolveSchedulerDependencyReadiness({
+          goal,
+          subGoal,
+          task,
+        });
+        if (dependencyReadiness.state !== "ready") {
+          skipped += 1;
+          continue;
+        }
         ready.push({
           goal,
           subGoalId: subGoal.id,
@@ -69,7 +85,10 @@ function getReadyTasks(goals: Goal[]) {
       }
     }
   }
-  return ready.sort((left, right) => right.priorityScore - left.priorityScore);
+  return {
+    ready: ready.sort((left, right) => right.priorityScore - left.priorityScore),
+    skipped,
+  };
 }
 
 export function runGoalSchedulerEngine(input: {
@@ -82,10 +101,12 @@ export function runGoalSchedulerEngine(input: {
   }
   const runtimeEnv = input.runtimeEnv;
 
-  const readyTasks = getReadyTasks(input.goals).slice(0, input.config.schedulerIntervalMs > 0 ? 50 : 0);
+  const schedulerLimit = input.config.schedulerIntervalMs > 0 ? 50 : 0;
+  const readyTaskSelection = schedulerLimit > 0 ? getReadyTasks(input.goals) : { ready: [], skipped: 0 };
+  const readyTasks = readyTaskSelection.ready.slice(0, schedulerLimit);
   const nowIso = new Date().toISOString();
   let createdJobs = 0;
-  let skipped = 0;
+  let skipped = readyTaskSelection.skipped;
 
   readyTasks.forEach((item) => {
     const instance = createGeneratedInstance(item.task, nowIso);

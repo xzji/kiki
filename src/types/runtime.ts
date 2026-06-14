@@ -108,13 +108,15 @@ export type CliPromptSection = {
 
 export type CliProcessEvent = {
   id: string;
-  type: "prompt" | "thinking" | "assistant_trace" | "tool_call" | "output" | "status" | "error" | "file_artifact";
+  type: "prompt" | "thinking" | "assistant_trace" | "tool_call" | "subagent_event" | "output" | "status" | "error" | "file_artifact";
   createdAt: string;
   title?: string;
   content?: string;
   toolName?: string;
   summary?: string;
   input?: unknown;
+  agentId?: string;
+  eventKind?: "thinking" | "tool_call" | "tool_result" | "completed";
 };
 
 export type CliProcessEventInput = Omit<CliProcessEvent, "id" | "createdAt"> & {
@@ -164,6 +166,16 @@ export type ClaudeStreamEvent =
   | { type: "delta"; text: string }
   | { type: "message"; content: string }
   | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
+  | {
+      type: "subagent_event";
+      agentId: string;
+      eventKind: "thinking" | "tool_call" | "tool_result" | "completed";
+      title: string;
+      summary?: string;
+      content?: string;
+      input?: unknown;
+      createdAt?: string;
+    }
   | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
   | { type: "error"; message: string }

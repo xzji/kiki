@@ -5,7 +5,7 @@ import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 
-function createTaskRequestId() {
+export function createTaskRequestId() {
   return `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -75,9 +75,10 @@ export async function startTaskRun(input: {
   task: Task;
   instance?: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
+  requestId?: string;
   signal?: AbortSignal;
 }) {
-  const requestId = createTaskRequestId();
+  const requestId = input.requestId ?? createTaskRequestId();
   const response = await fetch("/api/goals/tasks/execute", {
     method: "POST",
     headers: {

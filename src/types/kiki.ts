@@ -192,6 +192,13 @@ export type GoalAnalysis = {
   coreIntent: string;
   successState: string;
   assumptions?: string[];
+  deliveryContract?: GoalDeliveryContract;
+};
+
+export type GoalDeliveryContract = {
+  finalDeliverable: string;
+  doneEvidence: string[];
+  nonCompletionExamples?: string[];
 };
 
 export type CollectedInfoSummary = {
@@ -473,6 +480,7 @@ export type Goal = {
   topicRevision?: number;
   kind?: GoalKind;
   summary?: string;
+  deliveryContract?: GoalDeliveryContract;
   chatTurns?: ChatTurn[];
   conversationId?: string;
   workflow?: GoalWorkflow;
@@ -663,6 +671,7 @@ export type GoalBreakdownDraft = {
   deadline?: string;
   topicLoop?: TriggerSpec;
   goalAnalysis?: GoalAnalysis;
+  deliveryContract?: GoalDeliveryContract;
   collectedInfoSummary?: CollectedInfoSummary;
   assumptions?: string[];
   risks?: string[];
@@ -704,6 +713,7 @@ export type GoalBreakdownDraft = {
       requiresConfirmation?: boolean;
       collaboration?: TaskCollaborationRequirements;
       taskSpec?: TaskSpec;
+      planningDependencyHints?: string[];
     }[];
   }[];
 };

@@ -103,6 +103,35 @@ export function runSagaDraftAdapterSpecs() {
 
   {
     const draft = adaptTopicInitSagaToGoalDraft({
+      topicText: "把想法落成可试用版本",
+      result: completedResult({
+        artifacts: {
+          plan: {
+            goalAnalysis: {
+              coreIntent: "让别人能试用这个想法",
+              successState: "别人能试用并反馈",
+              deliveryContract: {
+                finalDeliverable: "可试用版本",
+                doneEvidence: ["完成一次试用", "反馈被记录"],
+                nonCompletionExamples: ["只有方案"],
+              },
+            },
+            subGoals: [{ id: 1, name: "原型落地" }],
+          },
+          presentation: {
+            goalTitle: "想法试用版",
+            summary: "形成可试用版本",
+            notificationStrategy: "完成后提醒试用",
+          },
+        },
+      }),
+    });
+    assert.equal(draft.deliveryContract?.finalDeliverable, "可试用版本");
+    assert.equal(draft.goalAnalysis?.deliveryContract?.doneEvidence[0], "完成一次试用");
+  }
+
+  {
+    const draft = adaptTopicInitSagaToGoalDraft({
       topicText: "跟踪美股科技",
       result: completedResult({
         artifacts: {

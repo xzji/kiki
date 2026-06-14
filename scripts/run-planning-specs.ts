@@ -22,6 +22,8 @@ import { runPiAdapterSpecs } from "../src/lib/server/runtime/adapters/piAdapter.
 import { runRuntimeRegistrySpecs } from "../src/lib/server/runtime/adapters/registry.spec";
 import { runContextPackBoundarySpecs } from "../src/lib/server/workspace/contextPack.spec";
 import { runJsonRepairAutoCloseSpecs } from "../src/lib/server/claude/jsonRepair.spec";
+import { runDeliveryClosureAuditSpecs } from "../src/lib/server/goalPlanning/deliveryClosureAudit.spec";
+import { runTaskDraftPromptSpecs } from "../src/lib/server/goalPlanning/taskDraftPrompt.spec";
 import { runTaskDraftReviewSpecs } from "../src/lib/server/goalPlanning/taskDraftReview.spec";
 import { runRefinerPromptSpecs } from "../src/lib/server/goalPlanning/agents/refinerPrompt.spec";
 import { runPayloadGuardSpecs } from "../src/lib/server/agentRuntime/payloadGuard.spec";
@@ -50,6 +52,7 @@ import { runThreadGovernorSpecs } from "../src/lib/server/governance/threadGover
 import { runThreadsRepositorySpecs } from "../src/lib/server/repositories/threadsRepository.spec";
 import { runTopicsRepositorySpecs } from "../src/lib/server/repositories/topicsRepository.spec";
 import { runTaskInstancesRepositorySpecs } from "../src/lib/server/repositories/taskInstancesRepository.spec";
+import { runRuntimeJobsRepositorySpecs } from "../src/lib/server/repositories/runtimeJobsRepository.spec";
 import { runGovernanceEventOutboxRepositorySpecs } from "../src/lib/server/repositories/governanceEventOutboxRepository.spec";
 import { runGovernanceTickJobsRepositorySpecs } from "../src/lib/server/repositories/governanceTickJobsRepository.spec";
 import { runInboxRepositorySpecs } from "../src/lib/server/repositories/inboxRepository.spec";
@@ -74,6 +77,7 @@ import { runInstantConversationEntrySpecs } from "../src/components/layout/insta
 import { runMemorySpecs } from "../src/lib/server/memory/memory.spec";
 import { runGovernanceEventBridgeSpecs } from "../src/lib/server/governance/eventBridge.spec";
 import { runGovernanceTickDispatcherSpecs } from "../src/lib/server/governance/governanceTickDispatcher.spec";
+import { runGoalFactorySpecs } from "../src/lib/goalFactory.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -94,6 +98,9 @@ runConversationCommandServiceSpecs();
 runRuntimeEventsAggregationSpecs();
 runStorageAdapterSpecs();
 runJsonRepairAutoCloseSpecs();
+runGoalFactorySpecs();
+runDeliveryClosureAuditSpecs();
+runTaskDraftPromptSpecs();
 runTaskDraftReviewSpecs();
 runRefinerPromptSpecs();
 runClaudeTransportSessionSpecs();
@@ -111,6 +118,7 @@ runInviteCodeServiceSpecs();
 runTaskPatchMergeSpecs();
 runCadenceTunerSpecs();
 runGoalRuntimeServiceSpecs();
+runRuntimeJobsRepositorySpecs();
 runGovernanceEventOutboxRepositorySpecs();
 runGovernanceTickJobsRepositorySpecs();
 runMachineServiceSpecs();

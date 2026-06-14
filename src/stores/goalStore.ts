@@ -548,6 +548,14 @@ export type PendingConversationGoalDeleteOverlay = {
   createdAt: string;
 };
 
+export type OptimisticTaskRunOverlay = {
+  id: string;
+  taskId: string;
+  instance: TaskInstance;
+  requestId: string;
+  createdAt: string;
+};
+
 function taskMatchesPendingUpdate(task: Task | undefined, pendingTask: Task) {
   if (!task) return false;
   return (
@@ -569,6 +577,54 @@ function workflowMatchesPendingOverlay(workflow: GoalWorkflow | undefined, pendi
   );
 }
 
+function isOpenInstanceStatus(status: TaskInstance["status"]) {
+  return status === "pending" || status === "in_progress" || status === "awaiting_user";
+}
+
+function shouldKeepOptimisticTaskRun(projectedTask: Task | undefined, overlay: OptimisticTaskRunOverlay) {
+  if (!projectedTask) return false;
+  const projectedInstance = projectedTask.instances.find((instance) => instance.id === overlay.instance.id);
+  if (projectedInstance) return projectedInstance.status === "pending";
+  return !projectedTask.instances.some((instance) => isOpenInstanceStatus(instance.status));
+}
+
+function applyOptimisticTaskRuns(goals: Goal[], overlays: OptimisticTaskRunOverlay[]) {
+  if (overlays.length === 0) return goals;
+  const overlaysByTaskId = new Map<string, OptimisticTaskRunOverlay[]>();
+  for (const overlay of overlays) {
+    const items = overlaysByTaskId.get(overlay.taskId) ?? [];
+    items.push(overlay);
+    overlaysByTaskId.set(overlay.taskId, items);
+  }
+
+  let changed = false;
+  const nextGoals = goals.map((goal) => {
+    let goalChanged = false;
+    const subGoals = goal.subGoals.map((subGoal) => {
+      let subGoalChanged = false;
+      const tasks = subGoal.tasks.map((task) => {
+        const taskOverlays = overlaysByTaskId.get(task.id);
+        if (!taskOverlays?.length) return task;
+        subGoalChanged = true;
+        goalChanged = true;
+        changed = true;
+        const overlayInstances = taskOverlays.map((overlay) => normalizeInstance(overlay.instance, task));
+        const overlayInstanceIds = new Set(overlayInstances.map((instance) => instance.id));
+        return {
+          ...task,
+          instances: [
+            ...overlayInstances,
+            ...task.instances.filter((instance) => !overlayInstanceIds.has(instance.id)),
+          ],
+        };
+      });
+      return subGoalChanged ? { ...subGoal, tasks } : subGoal;
+    });
+    return goalChanged ? { ...goal, subGoals } : goal;
+  });
+  return changed ? nextGoals : goals;
+}
+
 type GoalStore = {
   goals: Goal[];
   goalProjectionRevision: number;
@@ -578,6 +634,7 @@ type GoalStore = {
   pendingTaskDeletes: PendingTaskDeleteOverlay[];
   pendingGoalWorkflows: PendingGoalWorkflowOverlay[];
   pendingConversationGoalDeletes: PendingConversationGoalDeleteOverlay[];
+  optimisticTaskRuns: OptimisticTaskRunOverlay[];
   applyGoalsProjection: (goals: Goal[], revision?: number) => void;
   addPendingTaskCreate: (overlay: PendingTaskCreateOverlay) => void;
   removePendingTaskCreate: (id: string) => void;
@@ -591,6 +648,9 @@ type GoalStore = {
   removePendingGoalWorkflow: (id: string) => void;
   addPendingConversationGoalDelete: (overlay: PendingConversationGoalDeleteOverlay) => void;
   removePendingConversationGoalDelete: (id: string) => void;
+  addOptimisticTaskRun: (overlay: OptimisticTaskRunOverlay) => void;
+  removeOptimisticTaskRun: (id: string) => void;
+  removeOptimisticTaskRunByInstance: (instanceId: string) => void;
   applyInstanceStatusProjection: (taskId: string, instanceId: string, status: TaskInstance["status"]) => void;
   upsertTaskInstanceProjection: (taskId: string, instance: TaskInstance) => void;
   applyInstanceProgressProjection: (input: {
@@ -618,13 +678,19 @@ let visibleGoalsCache:
   | {
       goals: Goal[];
       pending: PendingConversationGoalDeleteOverlay[];
+      optimisticTaskRuns: OptimisticTaskRunOverlay[];
       result: Goal[];
     }
   | null = null;
 
-export function selectVisibleGoals(state: Pick<GoalStore, "goals" | "pendingConversationGoalDeletes">) {
-  const { goals, pendingConversationGoalDeletes: pending } = state;
-  if (visibleGoalsCache && visibleGoalsCache.goals === goals && visibleGoalsCache.pending === pending) {
+export function selectVisibleGoals(state: Pick<GoalStore, "goals" | "pendingConversationGoalDeletes" | "optimisticTaskRuns">) {
+  const { goals, pendingConversationGoalDeletes: pending, optimisticTaskRuns } = state;
+  if (
+    visibleGoalsCache &&
+    visibleGoalsCache.goals === goals &&
+    visibleGoalsCache.pending === pending &&
+    visibleGoalsCache.optimisticTaskRuns === optimisticTaskRuns
+  ) {
     return visibleGoalsCache.result;
   }
   let result: Goal[];
@@ -637,7 +703,8 @@ export function selectVisibleGoals(state: Pick<GoalStore, "goals" | "pendingConv
     );
     result = filtered.length === goals.length ? goals : filtered;
   }
-  visibleGoalsCache = { goals, pending, result };
+  result = applyOptimisticTaskRuns(result, optimisticTaskRuns);
+  visibleGoalsCache = { goals, pending, optimisticTaskRuns, result };
   return result;
 }
 
@@ -650,6 +717,7 @@ export const useGoalStore = create<GoalStore>()((set) => ({
       pendingTaskDeletes: [],
       pendingGoalWorkflows: [],
       pendingConversationGoalDeletes: [],
+      optimisticTaskRuns: [],
       applyGoalsProjection: (goals, revision) => {
         const normalizedGoals = goals.map((goal) => normalizeGoal(goal));
         const projectedSubGoalIds = new Set(normalizedGoals.flatMap((goal) => goal.subGoals.map((subGoal) => subGoal.id)));
@@ -676,6 +744,9 @@ export const useGoalStore = create<GoalStore>()((set) => ({
           ),
           pendingConversationGoalDeletes: state.pendingConversationGoalDeletes.filter((item) =>
             projectedConversationIds.has(item.conversationId),
+          ),
+          optimisticTaskRuns: state.optimisticTaskRuns.filter((overlay) =>
+            shouldKeepOptimisticTaskRun(projectedTasks.get(overlay.taskId), overlay),
           ),
         }));
       },
@@ -757,6 +828,24 @@ export const useGoalStore = create<GoalStore>()((set) => ({
           pendingConversationGoalDeletes: state.pendingConversationGoalDeletes.filter((item) => item.id !== id),
         }));
       },
+      addOptimisticTaskRun: (overlay) => {
+        set((state) => ({
+          optimisticTaskRuns: [
+            ...state.optimisticTaskRuns.filter((item) => item.id !== overlay.id && item.instance.id !== overlay.instance.id),
+            overlay,
+          ],
+        }));
+      },
+      removeOptimisticTaskRun: (id) => {
+        set((state) => ({
+          optimisticTaskRuns: state.optimisticTaskRuns.filter((item) => item.id !== id),
+        }));
+      },
+      removeOptimisticTaskRunByInstance: (instanceId) => {
+        set((state) => ({
+          optimisticTaskRuns: state.optimisticTaskRuns.filter((item) => item.instance.id !== instanceId),
+        }));
+      },
       applyInstanceStatusProjection: (taskId, instanceId, status) => {
         set((state) => ({
           goals: updateTaskInGoals(state.goals, taskId, (task) => ({
@@ -797,6 +886,10 @@ export const useGoalStore = create<GoalStore>()((set) => ({
                 : instance,
             ),
           })),
+          optimisticTaskRuns:
+            status === "pending"
+              ? state.optimisticTaskRuns
+              : state.optimisticTaskRuns.filter((item) => item.instance.id !== instanceId),
         }));
       },
       upsertTaskInstanceProjection: (taskId, instance) => {
@@ -812,6 +905,9 @@ export const useGoalStore = create<GoalStore>()((set) => ({
       },
       applyInstanceProgressProjection: ({ taskId, instanceId, progress, logs, trajectory }) => {
         set((state) => ({
+          optimisticTaskRuns: progress
+            ? state.optimisticTaskRuns.filter((item) => item.instance.id !== instanceId)
+            : state.optimisticTaskRuns,
           goals: updateTaskInGoals(state.goals, taskId, (task) => {
             const progressTrajectory = Array.isArray(progress?.resultPayload?.trajectory)
               ? (progress.resultPayload.trajectory as ExecutionTrajectoryStep[])

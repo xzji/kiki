@@ -2,9 +2,11 @@
 
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { cancelGoalInstance } from "@/lib/api/goal-commands";
-import { startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import { createTaskRequestId, startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
+import { createOpaqueId } from "@/lib/opaqueIds";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
+import type { RuntimeEnvironment } from "@/types/runtime";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
 type TaskExecutionAction = "start" | "pause" | "resume" | "rerun";
@@ -43,35 +45,52 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
 
   const current = location;
   const targetInstance = resolveTargetInstance(current.task, action, options?.instanceId) ?? undefined;
+  if (action === "resume" && !targetInstance) {
+    throw new Error("未找到可继续执行的任务实例。");
+  }
+
+  const requestId = createTaskRequestId();
+  const optimisticRun = createOptimisticTaskRun({
+    task: current.task,
+    action,
+    requestId,
+    runtimeEnv,
+    targetInstance,
+  });
+  const goalStore = useGoalStore.getState();
+  goalStore.addOptimisticTaskRun(optimisticRun.overlay);
 
   try {
     const run = await startTaskRun({
       goal: current.goal,
       subGoal: current.subGoal,
       task: current.task,
-      instance: targetInstance,
+      instance: optimisticRun.serverInstance,
       runtimeEnv,
+      requestId,
     });
     if (run.goals) {
       useGoalStore.getState().applyGoalsProjection(run.goals, run.revision);
     }
-    await syncGoalsFromRuntimeSnapshot();
 
     if (run.outcome === "awaiting_user") {
+      useGoalStore.getState().removeOptimisticTaskRun(optimisticRun.overlay.id);
       return;
     }
 
-    if (run.outcome === "already_running" && !run.requestId) {
+    if (run.outcome === "already_running" || run.taskInstanceId !== optimisticRun.serverInstance.id) {
+      useGoalStore.getState().removeOptimisticTaskRun(optimisticRun.overlay.id);
       await syncGoalsFromRuntimeSnapshot();
-      return;
+      if (!run.requestId) return;
     }
 
-    const requestId = run.requestId;
-    if (!requestId) {
+    const confirmedRequestId = run.requestId;
+    if (!confirmedRequestId) {
       throw new Error("任务执行启动失败：缺少 requestId");
     }
+    scheduleOptimisticRunReconcile(optimisticRun.overlay.id);
     void waitForTaskRunCompletion({
-      requestId,
+      requestId: confirmedRequestId,
       taskInstanceId: run.taskInstanceId,
       onProgress: (payload) => {
         void payload;
@@ -85,6 +104,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
         console.error("手动执行任务失败", error);
       });
   } catch (error) {
+    useGoalStore.getState().removeOptimisticTaskRun(optimisticRun.overlay.id);
     const errorMessage = error instanceof Error ? error.message : "任务执行失败";
     if (error instanceof TaskRunApiError && error.status >= 400 && error.status < 500) {
       if (targetInstance) {
@@ -120,6 +140,131 @@ function resolveTargetInstance(task: Task, action: TaskExecutionAction, instance
   const sorted = [...task.instances].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   if (action === "resume") return sorted.find((instance) => instance.status === "paused") ?? null;
   return null;
+}
+
+function createOptimisticTaskRun(input: {
+  task: Task;
+  action: Exclude<TaskExecutionAction, "pause">;
+  requestId: string;
+  runtimeEnv: RuntimeEnvironment;
+  targetInstance?: TaskInstance;
+}) {
+  const createdAt = new Date().toISOString();
+  const baseInstance =
+    input.action === "resume" && input.targetInstance
+      ? input.targetInstance
+      : createPendingManualInstance(input.task, createdAt, input.requestId, input.runtimeEnv.id);
+  const optimisticInstance = toOptimisticRunningInstance(
+    baseInstance,
+    input.task,
+    createdAt,
+    input.requestId,
+    input.runtimeEnv.id,
+  );
+  return {
+    serverInstance: baseInstance,
+    overlay: {
+      id: `optimistic-run-${baseInstance.id}`,
+      taskId: input.task.id,
+      instance: optimisticInstance,
+      requestId: input.requestId,
+      createdAt,
+    },
+  };
+}
+
+function createPendingManualInstance(
+  task: Task,
+  createdAt: string,
+  requestId: string,
+  runtimeEnvId?: string,
+): TaskInstance {
+  const date = new Date(createdAt);
+  const dateLabel = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const title = task.title.replace(/^任务\d+：/, "");
+  return {
+    id: createOpaqueId("inst"),
+    taskId: task.id,
+    dateLabel,
+    status: "pending",
+    intro: `用户手动发起执行“${title}”。`,
+    payload: { kind: "generic_result", summary: "" },
+    createdAt,
+    runner: {
+      requestId,
+      runtimeEnvId,
+      attemptCount: 0,
+      lastAttemptAt: createdAt,
+    },
+    execution: {
+      phase: "queued",
+      status: "pending",
+      lastUpdatedAt: createdAt,
+    },
+    timeline: buildManualRunTimeline(task.id, createdAt, "pending"),
+  };
+}
+
+function toOptimisticRunningInstance(
+  instance: TaskInstance,
+  task: Task,
+  startedAt: string,
+  requestId: string,
+  runtimeEnvId?: string,
+): TaskInstance {
+  return {
+    ...instance,
+    status: "in_progress",
+    intro: `用户手动发起执行“${task.title.replace(/^任务\d+：/, "")}”。`,
+    runner: {
+      ...instance.runner,
+      requestId,
+      runtimeEnvId,
+      attemptCount: instance.runner?.attemptCount ?? 0,
+      lastAttemptAt: startedAt,
+    },
+    execution: {
+      ...instance.execution,
+      phase: "running",
+      status: "in_progress",
+      startedAt: instance.execution?.startedAt ?? startedAt,
+      finishedAt: undefined,
+      lastUpdatedAt: startedAt,
+    },
+    awaitingUser: undefined,
+    blocker: undefined,
+    timeline: buildManualRunTimeline(task.id, startedAt, "running"),
+  };
+}
+
+function buildManualRunTimeline(taskId: string, startedAt: string, status: "pending" | "running") {
+  return [
+    {
+      id: `${taskId}-manual-started-${startedAt}`,
+      title: "已发起执行",
+      type: "phase" as const,
+      status: "completed" as const,
+      detail: "已收到执行请求，正在交给 Agent 处理。",
+      startedAt,
+      finishedAt: startedAt,
+    },
+    {
+      id: `${taskId}-manual-running-${startedAt}`,
+      title: "Agent 正在执行",
+      type: "phase" as const,
+      status,
+      detail: status === "running" ? "任务已进入执行中状态。" : "任务已进入队列，等待 Agent 接手。",
+      startedAt,
+    },
+  ];
+}
+
+function scheduleOptimisticRunReconcile(overlayId: string) {
+  window.setTimeout(() => {
+    const stillPending = useGoalStore.getState().optimisticTaskRuns.some((item) => item.id === overlayId);
+    if (!stillPending) return;
+    void syncGoalsFromRuntimeSnapshot();
+  }, 4000);
 }
 
 async function syncGoalsFromRuntimeSnapshot() {

@@ -15,6 +15,7 @@ function parseEventType(raw: string): ClaudeStreamEvent["type"] | null {
     case "delta":
     case "message":
     case "tool_call":
+    case "subagent_event":
     case "file_artifact":
     case "permission_request":
     case "error":

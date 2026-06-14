@@ -1,6 +1,6 @@
 import type { TopicInitSagaResult } from "@/lib/server/goalPlanning/topicInitSaga";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
-import type { GoalAnalysis, GoalBreakdownDraft, TaskPriority } from "@/types/kiki";
+import type { GoalAnalysis, GoalBreakdownDraft, GoalDeliveryContract, TaskPriority } from "@/types/kiki";
 import { normalizeTriggerSpecWithWarnings, type TriggerSpec } from "@/types/trigger";
 
 type LooseRecord = Record<string, unknown>;
@@ -85,11 +85,27 @@ function normalizeGoalAnalysis(value: unknown): GoalAnalysis | undefined {
   const coreIntent = readString(record.coreIntent);
   const successState = readString(record.successState);
   const assumptions = readStringArray(record.assumptions);
-  if (!coreIntent && !successState && assumptions.length === 0) return undefined;
+  const deliveryContract = normalizeGoalDeliveryContract(record.deliveryContract);
+  if (!coreIntent && !successState && assumptions.length === 0 && !deliveryContract) return undefined;
   return {
     coreIntent: coreIntent ?? "明确主题核心意图",
     successState: successState ?? "形成可持续推进的执行状态",
     assumptions,
+    deliveryContract,
+  };
+}
+
+function normalizeGoalDeliveryContract(value: unknown): GoalDeliveryContract | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const finalDeliverable = readString(record.finalDeliverable);
+  const doneEvidence = readStringArray(record.doneEvidence);
+  if (!finalDeliverable || doneEvidence.length === 0) return undefined;
+  const nonCompletionExamples = readStringArray(record.nonCompletionExamples);
+  return {
+    finalDeliverable,
+    doneEvidence,
+    nonCompletionExamples: nonCompletionExamples.length > 0 ? nonCompletionExamples : undefined,
   };
 }
 
@@ -242,6 +258,7 @@ export function adaptTopicInitSagaToGoalDraft(input: {
 
   const criticNotes = readString(input.result.artifacts.critic?.notes);
   const goalAnalysis = normalizeGoalAnalysis(plan.goalAnalysis);
+  const deliveryContract = goalAnalysis?.deliveryContract ?? normalizeGoalDeliveryContract(plan.deliveryContract);
   const topicLoop = readFirstTriggerSpec(
     [
       { value: plan.topicLoop, path: "topicLoop" },
@@ -258,7 +275,16 @@ export function adaptTopicInitSagaToGoalDraft(input: {
     summary: readString(presentation.summary),
     deadline: readString(presentation.deadline),
     topicLoop,
-    goalAnalysis,
+    goalAnalysis: goalAnalysis
+      ? { ...goalAnalysis, deliveryContract }
+      : deliveryContract
+        ? {
+            coreIntent: "明确主题核心意图",
+            successState: "形成可持续推进的执行状态",
+            deliveryContract,
+          }
+        : undefined,
+    deliveryContract,
     collectedInfoSummary: undefined,
     assumptions: goalAnalysis?.assumptions,
     risks: readStringArray(plan.risks),

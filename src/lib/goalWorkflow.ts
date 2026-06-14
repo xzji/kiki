@@ -196,12 +196,14 @@ export async function commitGoalDraftToStores(input: {
   const goalStore = useGoalStore.getState();
   const base = buildGoalFromDraft(input.draft);
   const now = new Date().toISOString();
+  const deliveryContract = input.draft.deliveryContract ?? input.draft.goalAnalysis?.deliveryContract;
   const workflow: GoalWorkflow = {
     phase: "presenting_plan",
     planDecision: "pending",
     collectedInfo: {
       collectedInfoSummary: input.draft.collectedInfoSummary,
       goalAnalysis: input.draft.goalAnalysis,
+      deliveryContract,
       executionOrder: input.draft.executionOrder,
       reviewSummary: input.draft.reviewSummary,
     },
@@ -217,6 +219,7 @@ export async function commitGoalDraftToStores(input: {
     title: input.draft.goalTitle,
     summary: input.draft.summary,
     deadline: input.draft.deadline || base.deadline,
+    deliveryContract,
     conversationId: input.conversationId,
     workflow,
   };
@@ -264,6 +267,7 @@ export async function replaceGoalDraftInStores(input: {
   const goalStore = useGoalStore.getState();
   const base = buildGoalFromDraft(input.draft);
   const now = new Date().toISOString();
+  const deliveryContract = input.draft.deliveryContract ?? input.draft.goalAnalysis?.deliveryContract;
   const previousCollectedInfo = input.goal.workflow?.collectedInfo ?? {};
   const revisionHistory = [
     {
@@ -279,6 +283,7 @@ export async function replaceGoalDraftInStores(input: {
     collectedInfo: {
       collectedInfoSummary: input.draft.collectedInfoSummary,
       goalAnalysis: input.draft.goalAnalysis,
+      deliveryContract,
       executionOrder: input.draft.executionOrder,
       reviewSummary: input.draft.reviewSummary,
       revisionFeedback: input.revisionFeedback,
@@ -298,6 +303,7 @@ export async function replaceGoalDraftInStores(input: {
     title: input.draft.goalTitle,
     summary: input.draft.summary,
     deadline: input.draft.deadline || base.deadline,
+    deliveryContract,
     createdAt: input.goal.createdAt,
     conversationId: input.goal.conversationId,
     kind: input.goal.kind,
