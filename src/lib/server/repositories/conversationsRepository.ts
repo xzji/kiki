@@ -1,4 +1,5 @@
 import { migrateConversationIds } from "@/lib/opaqueIds";
+import { compareConversations } from "@/lib/conversationOrdering";
 import { resolveCurrentUserId } from "@/lib/server/context/resolveUserId";
 import { getDatabase } from "@/lib/server/db/client";
 import {
@@ -436,6 +437,7 @@ export function mapConversationRow(row: ConversationRow, messages: Conversation[
     runtimeSessions: resolveRuntimeSessions(row),
     status: row.status ?? "idle",
     messages,
+    createdAt: row.created_at,
     updatedAt: row.updated_at,
     pinned: Boolean(row.pinned),
   } satisfies Conversation);
@@ -452,6 +454,7 @@ type ConversationMessageSummaryRow = {
   message_count: number;
   unread_count: number | null;
   last_seq: number | null;
+  last_message_at: string | null;
 };
 
 type ConversationLastMessageRow = Parameters<typeof mapConversationMessageRow>[0] & {
@@ -483,11 +486,12 @@ export function listConversationMetas() {
         FROM conversations c
         LEFT JOIN conversation_messages m ON m.conversation_id = c.id
         GROUP BY c.id
-        ORDER BY c.pinned DESC, c.updated_at DESC
+        ORDER BY c.pinned DESC, c.created_at DESC
       `,
     )
     .all() as Array<ConversationRow & { message_count: number; last_message_at: string | null }>;
-  return rows.map(mapConversationMetaRow);
+  // DB 侧仅做粗排，最终顺序由共享比较器统一裁定（含 lastMessageAt 维度，SQL 不易表达）。
+  return rows.map(mapConversationMetaRow).sort(compareConversations);
 }
 
 export function listConversationSummaries(): ConversationSummary[] {
@@ -497,7 +501,7 @@ export function listConversationSummaries(): ConversationSummary[] {
       `
         SELECT *
         FROM conversations
-        ORDER BY pinned DESC, updated_at DESC
+        ORDER BY pinned DESC, created_at DESC
       `,
     )
     .all() as ConversationRow[];
@@ -511,7 +515,8 @@ export function listConversationSummaries(): ConversationSummary[] {
           conversation_id,
           COUNT(*) AS message_count,
           SUM(CASE WHEN unread = 1 THEN 1 ELSE 0 END) AS unread_count,
-          MAX(seq) AS last_seq
+            MAX(seq) AS last_seq,
+            MAX(created_at) AS last_message_at
         FROM conversation_messages
         GROUP BY conversation_id
       `,
@@ -542,16 +547,18 @@ export function listConversationSummaries(): ConversationSummary[] {
   return conversationRows.map((row) => {
     const conversation = mapConversationRow(row);
     const stats = statsByConversationId.get(row.id);
+    const lastMessage = lastMessageByConversationId.get(row.id);
     const summary: ConversationSummary = {
       ...conversation,
       messagesLoaded: false,
       messageCount: stats?.message_count ?? 0,
       unreadCount: stats?.unread_count ?? 0,
-      lastMessage: lastMessageByConversationId.get(row.id),
+      lastMessage,
+      lastMessageAt: stats?.last_message_at ?? lastMessage?.createdAt,
     };
     delete (summary as Partial<Conversation>).messages;
     return summary;
-  });
+  }).sort(compareConversations);
 }
 
 export function getConversationRevision(conversationId: string) {
@@ -607,7 +614,7 @@ export function insertConversation(conversation: Conversation) {
       goal_info_collection_json: normalized.goalInfoCollection ? JSON.stringify(normalized.goalInfoCollection) : null,
       planning_run_state_json: normalized.planningRunState ? JSON.stringify(normalized.planningRunState) : null,
       revision: 1,
-      created_at: normalized.updatedAt || now,
+      created_at: normalized.createdAt || normalized.updatedAt || now,
       updated_at: normalized.updatedAt || now,
       user_id: resolveCurrentUserId(),
     });

@@ -562,6 +562,7 @@ export function buildDecomposePrompt(input: {
 7. 整个 Topic 的所有初始 tasks 完成后，必须能证明 goalAnalysis.successState 与 deliveryContract 已满足。
 8. tasks[].dependencies 是真实执行依赖：如果某个任务必须等待同一 Thread 或上游 Thread 的任务产出，必须填写被依赖任务的 id 或 title；不要只把前置关系写进 triggerRule 文案。
 9. triggerRule 描述“什么时候尝试触发”，dependencies 描述“必须先完成哪些任务”；两者都需要时必须同时填写。
+10. tasks[].requiredUserInputs（可选）：仅列出任务执行前必须由用户提供、且 Agent 无法自行检索或推断的关键信息（如出发城市、出行日期、预算、护照信息、个人偏好）。Agent 能自行搜索或推断的信息不要列。无需用户输入时省略该字段或写 []。可用 satisfiedHint 描述“何种内容算已满足”，便于后续判定是否还需追问。
 ${loopV2PlannerInstructions()}
 
 ## 边界处理
@@ -615,7 +616,8 @@ ${loopV2.topLevel}  "subGoals": [
 ${loopV2.taskTriggerSpec}          "cadence": "可选：自然语言频率，例如 每天 09:00",
           "triggerCondition": "可选：条件型任务的判断条件",
           "dependencies": ["可选：必须先完成的任务 id 或 title；无依赖则 []"],
-          "executionKind": "generic_result"
+          "executionKind": "generic_result",
+          "requiredUserInputs": [{ "id": "英文短标识", "label": "中文字段名", "question": "向用户提问的话术", "options": ["可选项1", "可选项2"], "satisfiedHint": "可选：何种内容算已满足" }]
         }
       ]
     }
@@ -651,6 +653,7 @@ export function buildDecompositionNormalizationPrompt(input: {
 10. goalAnalysis.deliveryContract 必须描述最终交付物、完成证据、以及不能单独算完成的中间产物；如果原始输出缺少，请基于目标信息补齐。
 11. tasks 应覆盖从当前状态到目标成功状态的最小主干闭环路径，不得把关键交付缺口留给后续。
 12. tasks[].dependencies 是真实执行依赖；如果 triggerRule 或任务语义包含“X 完成后/确认后/锁定后/交付后/反馈后”，必须把 X 对应任务的 id 或 title 写入 dependencies。
+13. 保留原始输出中的 tasks[].requiredUserInputs；它表示任务执行前必须由用户提供、Agent 无法自行检索的关键信息。如果原始输出没有该信息，不要凭空捏造，省略即可。
 ${loopV2PlannerInstructions()}
 
 目标信息：
@@ -695,7 +698,8 @@ ${loopV2.topLevel}  "subGoals": [
           "taskType": "repeat|one_shot",
           "triggerRule": "立即触发|每天 09:00|每周一|每小时|满足条件：...",
 ${loopV2.taskTriggerSpec}          "dependencies": ["可选：必须先完成的任务 id 或 title；无依赖则 []"],
-          "executionKind": "generic_result"
+          "executionKind": "generic_result",
+          "requiredUserInputs": [{ "id": "英文短标识", "label": "中文字段名", "question": "向用户提问的话术", "options": ["可选项1", "可选项2"], "satisfiedHint": "可选：何种内容算已满足" }]
         }
       ]
     }

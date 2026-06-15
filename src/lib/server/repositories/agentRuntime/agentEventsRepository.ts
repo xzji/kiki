@@ -124,3 +124,88 @@ export function getLastAgentEvent(agentRunId: string): AgentEvent | null {
     .get(agentRunId) as AgentEventRow | undefined;
   return row ? mapRow(row) : null;
 }
+
+export type GovernanceTickEntry = {
+  id: string;
+  occurredAt: string;
+  kind: string;
+  phase: "completed" | "failed" | "dispatch_partial_failure" | "paused" | "unknown";
+  dispatchedTaskCount: number;
+  updatedTaskCount: number;
+  cancelledTaskCount: number;
+  sentMessageCount: number;
+  silentCount: number;
+  failureCount?: number;
+  failureReason?: string;
+  errorKind?: string;
+  assessment?: string;
+  confidence?: number | string;
+  paused: boolean;
+};
+
+type GovernanceTickEntryRow = AgentEventRow & {
+  payload_kind: string | null;
+};
+
+function governancePhase(kind: string): GovernanceTickEntry["phase"] {
+  if (kind.endsWith(".tick.completed")) return "completed";
+  if (kind.endsWith(".tick.failed")) return "failed";
+  if (kind.endsWith(".tick.dispatch_partial_failure")) return "dispatch_partial_failure";
+  if (kind.endsWith(".paused.failure_threshold")) return "paused";
+  return "unknown";
+}
+
+function numberField(payload: Record<string, unknown>, field: string) {
+  const value = payload[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function listGovernanceTicksByEntity(input: {
+  kind: "thread" | "topic";
+  entityId: string;
+  limit?: number;
+}): GovernanceTickEntry[] {
+  const limit = Math.min(Math.max(input.limit ?? 30, 1), 100);
+  const ownerColumn = input.kind === "thread" ? "r.thread_id" : "r.topic_id";
+  const kindPrefix = `loop.${input.kind}.`;
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT e.*, json_extract(e.payload, '$.kind') AS payload_kind
+        FROM agent_events e
+        JOIN agent_runs r ON e.agent_run_id = r.id
+        WHERE ${ownerColumn} = ?
+          AND json_extract(e.payload, '$.kind') LIKE ?
+        ORDER BY e.created_at DESC, e.seq DESC
+        LIMIT ?
+      `,
+    )
+    .all(input.entityId, `${kindPrefix}%`, limit) as GovernanceTickEntryRow[];
+
+  return rows
+    .map((row) => {
+      const event = mapRow(row);
+      const kind = typeof event.payload.kind === "string" ? event.payload.kind : row.payload_kind ?? "";
+      return {
+        id: event.id,
+        occurredAt: event.createdAt,
+        kind,
+        phase: governancePhase(kind),
+        dispatchedTaskCount: numberField(event.payload, "dispatchedTaskCount"),
+        updatedTaskCount: numberField(event.payload, "updatedTaskCount"),
+        cancelledTaskCount: numberField(event.payload, "cancelledTaskCount"),
+        sentMessageCount: numberField(event.payload, "sentMessageCount"),
+        silentCount: numberField(event.payload, "silentCount"),
+        failureCount: typeof event.payload.failureCount === "number" ? event.payload.failureCount : undefined,
+        failureReason: typeof event.payload.failureReason === "string" ? event.payload.failureReason : undefined,
+        errorKind: typeof event.payload.errorKind === "string" ? event.payload.errorKind : undefined,
+        assessment: typeof event.payload.assessment === "string" ? event.payload.assessment : undefined,
+        confidence:
+          typeof event.payload.confidence === "number" || typeof event.payload.confidence === "string"
+            ? event.payload.confidence
+            : undefined,
+        paused: kind.endsWith(".paused.failure_threshold"),
+      };
+    })
+    .filter((entry) => entry.phase !== "unknown");
+}

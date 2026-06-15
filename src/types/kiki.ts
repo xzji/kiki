@@ -68,6 +68,21 @@ export type MissingFieldQuestion = {
   source: "user" | "agent" | "system";
 };
 
+/**
+ * 规划期产出、固化到任务上的「执行前必须由用户提供的字段」清单。
+ * 执行期 readiness 检查优先读取此清单生成追问，替代硬编码正则枚举。
+ */
+export type TaskRequiredUserInput = {
+  id: string;
+  label: string;
+  question: string;
+  description?: string;
+  options?: string[];
+  inputPlaceholder?: string;
+  inputKind?: "text" | "image" | "file" | "image_or_text";
+  satisfiedHint?: string;
+};
+
 export type InteractionRequirement = {
   type:
     | "none"
@@ -412,6 +427,8 @@ export type Task = {
   requiresConfirmation?: boolean;
   collaboration?: TaskCollaborationRequirements;
   taskSpec?: TaskSpec;
+  /** 规划期产出：执行前必须由用户补充的字段清单，readiness 优先据此追问。 */
+  requiredUserInputs?: TaskRequiredUserInput[];
 };
 
 export type ThreadGovernanceStatus = "active" | "paused" | "archived";
@@ -649,6 +666,11 @@ export type Conversation = {
   messageCount?: number;
   unreadCount?: number;
   lastMessage?: ConversationMessage;
+  /** 会话创建时间，作为列表排序的稳定兜底键（空会话场景）。 */
+  createdAt: string;
+  /** 最后一条消息时间，列表排序的主键之一；无消息时为 undefined。 */
+  lastMessageAt?: string;
+  /** 会话记录更新时间（rename/置顶/workspace 等元数据变更）。不参与列表排序。 */
   updatedAt: string;
   pinned?: boolean;
   /**
@@ -714,6 +736,7 @@ export type GoalBreakdownDraft = {
       collaboration?: TaskCollaborationRequirements;
       taskSpec?: TaskSpec;
       planningDependencyHints?: string[];
+      requiredUserInputs?: TaskRequiredUserInput[];
     }[];
   }[];
 };

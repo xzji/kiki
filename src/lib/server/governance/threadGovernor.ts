@@ -24,6 +24,7 @@ import type {
   UpdateTaskCallback,
 } from "./dispatchActions";
 import { selectDueThreads, type DueThread } from "./threadScheduler";
+import { pushGovernanceChangeNotification } from "@/lib/server/governance/governanceChangeNotifications";
 import { runThreadTick, type ThreadTickResult } from "@/lib/server/thread/threadRunner";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { Task, TaskInstance } from "@/types/kiki";
@@ -226,6 +227,7 @@ async function tickOneThread(
   }
 
   // 3.5 写回 thread patch
+  let persisted = false;
   try {
     const persist = await input.callbacks.persistThreadPatch({
       topic,
@@ -237,9 +239,25 @@ async function tickOneThread(
       ticked.failureReason = "persist_conflict";
     } else if (!persist.ok) {
       ticked.failureReason = "persist_failed";
+    } else {
+      persisted = true;
     }
   } catch (error) {
     ticked.failureReason = `persist_threw: ${stringifyErr(error)}`;
+  }
+
+  if (persisted) {
+    try {
+      pushGovernanceChangeNotification({
+        topicId: topic.id,
+        threadId: thread.id,
+        dispatch,
+        paused: tickResult.pauseReason === "failure_threshold",
+        traceId: `governor:${agentRunId}`,
+      });
+    } catch (error) {
+      console.warn("[governance] push governor change notification failed", error);
+    }
   }
 
   // 3.6 记 outcome 事件

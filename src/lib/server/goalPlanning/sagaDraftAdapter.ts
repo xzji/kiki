@@ -1,5 +1,6 @@
 import type { TopicInitSagaResult } from "@/lib/server/goalPlanning/topicInitSaga";
 import { mergeCrossSubGoalTaskDependencies } from "@/lib/goalPlanning/taskCompiler";
+import { normalizeRequiredUserInputs } from "@/lib/server/informationRequest/compileFields";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
 import type { GoalAnalysis, GoalBreakdownDraft, GoalDeliveryContract, TaskPriority } from "@/types/kiki";
 import { normalizeTriggerSpecWithWarnings, type TriggerSpec } from "@/types/trigger";
@@ -172,6 +173,7 @@ function normalizeTask(
     executionKind: "generic_result",
     priority: normalizePriority(record.priority ?? record.priorityHint),
     planningDependencyHints: dependencyHints,
+    requiredUserInputs: normalizeRequiredUserInputs(record.requiredUserInputs),
     taskSpec: specContent
       ? {
           content: specContent,

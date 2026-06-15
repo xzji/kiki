@@ -1,5 +1,6 @@
 import { normalizeGoalId } from "@/lib/opaqueIds";
 import { getDatabase } from "@/lib/server/db/client";
+import { appendConversationEventOnce } from "@/lib/server/repositories/conversationEventLogRepository";
 import type { ConversationMessage } from "@/types/kiki";
 import type { ThreadTickPostMessageSeverity } from "@/types/topic";
 
@@ -350,38 +351,72 @@ export type AppendThreadMessageResult = {
   conversationId: string;
 };
 
-export function appendThreadMessage(input: AppendThreadMessageInput): AppendThreadMessageResult {
-  if (!input.topicId) throw new Error("appendThreadMessage: topicId required");
-  if (!input.threadId) throw new Error("appendThreadMessage: threadId required");
-  const text = input.text?.trim();
-  if (!text) throw new Error("appendThreadMessage: text required");
+export type AppendGovernanceConversationMessageInput = {
+  topicId: string;
+  threadId?: string;
+  text: string;
+  traceId?: string;
+  now?: () => Date;
+  messageIdPrefix?: string;
+};
 
-  const nowFn = input.now ?? (() => new Date());
-  const traceId = input.traceId ?? nowFn().toISOString();
-  const conversationMessageId = `msg-thread-${input.threadId}-${traceId}`;
+function resolveConversationIdForTopic(topicId: string) {
   const db = getDatabase();
 
   // conversations.goal_id 由 migrateConversationIds normalize 成 goal-opq-* 形式；
   // 此处必须用 normalize 后的 ID 查询，否则原始 topicId 永远查不到。
-  const normalizedTopicId = normalizeGoalId(input.topicId);
+  const normalizedTopicId = normalizeGoalId(topicId);
   const convRow = db
     .prepare(`SELECT id FROM conversations WHERE goal_id = ? ORDER BY updated_at DESC LIMIT 1`)
     .get(normalizedTopicId) as { id: string } | undefined;
   if (!convRow) {
-    throw new Error(`appendThreadMessage: no conversation linked to topic ${input.topicId}`);
+    throw new Error(`appendGovernanceConversationMessage: no conversation linked to topic ${topicId}`);
   }
-  const conversationId = convRow.id;
+  return convRow.id;
+}
+
+function appendGovernanceMessageEventOnce(input: {
+  conversationId: string;
+  message: ConversationMessage;
+  createdAt?: string;
+}) {
+  appendConversationEventOnce({
+    conversationId: input.conversationId,
+    kind: "message.appended",
+    payload: { message: input.message },
+    producedBy: "worker",
+    idempotencyKey: `governance-message.appended:${input.conversationId}:${input.message.id}`,
+    createdAt: input.createdAt,
+  });
+}
+
+export function appendGovernanceConversationMessage(
+  input: AppendGovernanceConversationMessageInput,
+): AppendThreadMessageResult {
+  if (!input.topicId) throw new Error("appendGovernanceConversationMessage: topicId required");
+  const text = input.text?.trim();
+  if (!text) throw new Error("appendGovernanceConversationMessage: text required");
+
+  const nowFn = input.now ?? (() => new Date());
+  const traceId = input.traceId ?? nowFn().toISOString();
+  const anchor = input.threadId ?? input.topicId;
+  const prefix = input.messageIdPrefix ?? (input.threadId ? "msg-thread" : "msg-topic");
+  const conversationMessageId = `${prefix}-${anchor}-${traceId}`;
+  const conversationId = resolveConversationIdForTopic(input.topicId);
+  const db = getDatabase();
 
   // 幂等：同 messageId 直接返回
   const existing = db
     .prepare(`SELECT id FROM conversation_messages WHERE conversation_id = ? AND id = ? LIMIT 1`)
     .get(conversationId, conversationMessageId) as { id: string } | undefined;
   if (existing) {
+    const current = getConversationMessage(conversationId, existing.id);
+    if (current) appendGovernanceMessageEventOnce({ conversationId, message: current.message });
     return { conversationMessageId: existing.id, conversationId };
   }
 
   const createdAt = nowFn().toISOString();
-  insertConversationMessage(conversationId, {
+  const inserted = insertConversationMessage(conversationId, {
     id: conversationMessageId,
     kind: "text",
     role: "kiki",
@@ -392,5 +427,20 @@ export function appendThreadMessage(input: AppendThreadMessageInput): AppendThre
     source: "system",
   });
 
+  appendGovernanceMessageEventOnce({
+    conversationId,
+    message: inserted.message,
+    createdAt,
+  });
+
   return { conversationMessageId, conversationId };
+}
+
+export function appendThreadMessage(input: AppendThreadMessageInput): AppendThreadMessageResult {
+  if (!input.threadId) throw new Error("appendThreadMessage: threadId required");
+  return appendGovernanceConversationMessage({
+    ...input,
+    threadId: input.threadId,
+    messageIdPrefix: "msg-thread",
+  });
 }

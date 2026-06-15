@@ -48,6 +48,16 @@ export function runTaskTriggerTimeSpecs() {
   assert.deepEqual(parseTaskTriggerRule("立即执行"), { kind: "immediate" });
   assert.equal(isTaskTriggerDue(oneShotTask("立即执行"), new Date("2026-05-30T03:00:00.000Z")), true);
 
+  // 依赖驱动的自然语言触发（解析为 unsupported/condition）：尚无实例的 one_shot 应放行，
+  // 把触发时机交给调度器的依赖就绪判定，而非被时间门永久拦死。
+  assert.deepEqual(parseTaskTriggerRule("1-1 完成后立即触发"), { kind: "unsupported" });
+  assert.equal(isTaskTriggerDue(oneShotTask("1-1 完成后立即触发"), new Date("2026-05-30T03:00:00.000Z")), true);
+  assert.equal(isTaskTriggerDue(oneShotTask("目的地确认后立即触发"), new Date("2026-05-30T03:00:00.000Z")), true);
+  // 但已有实例（已执行过）的 one_shot 不应再次触发。
+  const ranOnce = oneShotTask("1-1 完成后立即触发");
+  ranOnce.instances = [{ id: "inst-x", taskId: ranOnce.id, status: "completed", createdAt: "2026-05-30T01:00:00.000Z" } as never];
+  assert.equal(isTaskTriggerDue(ranOnce, new Date("2026-05-30T03:00:00.000Z")), false);
+
   // ---------- normalizeTriggerSpec ----------
   assert.deepEqual(normalizeTriggerSpec("hourly"), { kind: "hourly" });
   assert.deepEqual(normalizeTriggerSpec("daily"), { kind: "daily" });

@@ -67,6 +67,7 @@ export function TaskMonitorDrawer() {
   const collapsedSections = useTaskMonitorStore((state) => state.collapsedSections);
   const toggleSection = useTaskMonitorStore((state) => state.toggleSection);
   const activeTaskId = useTaskDrawerStore((state) => state.activeTaskId);
+  const activeInstanceId = useTaskDrawerStore((state) => state.activeInstanceId);
   const openTaskDrawer = useTaskDrawerStore((state) => state.open);
   const closeTaskDrawer = useTaskDrawerStore((state) => state.close);
   const maxConcurrentTasks = useEasterEggSettingsStore((state) => state.settings.maxConcurrentTasks);
@@ -293,13 +294,13 @@ export function TaskMonitorDrawer() {
                       <TaskMonitorCard
                         key={row.rowKey}
                         row={row}
-                        active={row.kind === "task" && activeTaskId === row.taskId}
+                        active={row.kind === "task" && activeInstanceId === row.instanceId}
                         maxConcurrentTasks={maxConcurrentTasks}
                         runningCount={taskRunningCount}
                         pendingAction={pendingAction}
                         onOpen={
                           row.kind === "task" && row.taskId
-                            ? () => openTaskDrawer(row.goalId, row.taskId as string)
+                            ? () => openTaskDrawer(row.goalId, row.taskId as string, row.instanceId)
                             : undefined
                         }
                         onAction={runAction}

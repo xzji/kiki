@@ -124,6 +124,48 @@ export async function fetchRuntimeActivity(): Promise<RuntimeActivityPayload> {
   return (await response.json()) as RuntimeActivityPayload;
 }
 
+export type GovernanceTickEntry = {
+  id: string;
+  occurredAt: string;
+  kind: string;
+  phase: "completed" | "failed" | "dispatch_partial_failure" | "paused" | "unknown";
+  dispatchedTaskCount: number;
+  updatedTaskCount: number;
+  cancelledTaskCount: number;
+  sentMessageCount: number;
+  silentCount: number;
+  failureCount?: number;
+  failureReason?: string;
+  errorKind?: string;
+  assessment?: string;
+  confidence?: number | string;
+  paused: boolean;
+};
+
+export type GovernanceHistoryPayload = {
+  ok: boolean;
+  entries: GovernanceTickEntry[];
+  reason?: string;
+};
+
+export async function fetchGovernanceHistory(input: {
+  kind: "thread" | "topic";
+  entityId: string;
+  limit?: number;
+}): Promise<GovernanceHistoryPayload> {
+  const params = new URLSearchParams({
+    kind: input.kind,
+    entityId: input.entityId,
+  });
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  const response = await fetch(`/api/runtime/governance-history?${params.toString()}`, { cache: "no-store" });
+  const payload = (await response.json()) as GovernanceHistoryPayload;
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.reason || "治理历史获取失败");
+  }
+  return payload;
+}
+
 export async function fetchRuntimeDaemonStatus(): Promise<RuntimeDaemonStatusPayload> {
   const response = await fetch("/api/runtime/daemon/status", { cache: "no-store" });
   if (!response.ok) {

@@ -1,4 +1,6 @@
 import { normalizeTriggerSpec, type TriggerSpec } from "@/types/trigger";
+import { normalizeRequiredUserInputs } from "@/lib/server/informationRequest/compileFields";
+import type { TaskRequiredUserInput } from "@/types/kiki";
 
 export type TaskDraftUserInvolvementMode = "none" | "confirm" | "answer" | "collaborate";
 
@@ -22,6 +24,7 @@ export type TaskDraft = {
   priorityHint?: "critical" | "high" | "medium" | "low";
   estimatedMinutes?: number;
   notes?: string;
+  requiredUserInputs?: TaskRequiredUserInput[];
 };
 
 export type TaskDraftDropReason = {
@@ -104,6 +107,7 @@ export function normalizeTaskDraft(value: unknown, fallbackIndex: number): { dra
       ? Math.max(1, Math.round(record.estimatedMinutes))
       : undefined,
     notes: text(record.notes) || undefined,
+    requiredUserInputs: normalizeRequiredUserInputs(record.requiredUserInputs),
   };
   const involvement = record.userInvolvement && typeof record.userInvolvement === "object"
     ? (record.userInvolvement as Record<string, unknown>)

@@ -67,6 +67,13 @@ ${JSON.stringify(input.deliveryContract ?? {}, null, 2)}
 priority 只能是 critical/high/medium/low。
 user-involvement mode 只能是 none/confirm/answer/collaborate。
 
+必填用户输入规则（<required-inputs>，可选字段）：
+- 仅列出「任务执行前必须由用户提供、且 Agent 无法自行检索或推断」的关键信息（如出发城市、出行日期、预算、护照信息、个人偏好等）。
+- 不要列出 Agent 可以自行搜索、计算或从已有上下文得到的信息。
+- 如果用户上下文中已经提供了某字段，仍可列出，并在 satisfied 中描述「何种内容算已满足」，便于后续判定是否还需追问。
+- 如果任务无需任何用户额外输入，请省略整个 <required-inputs> 块。
+- 每行一个字段，形如：\`- id: 英文短标识 | label: 中文字段名 | question: 向用户提问的话术 | options: 选项1,选项2 | satisfied: 何种内容算已满足\`；其中 options 与 satisfied 可选。
+
 交付闭环规则：
 - 任务不是随意待办清单，而是让当前子目标可自然完成的最小闭环路径。
 - 准备任务：沉淀信息、方案、设计、选型、素材、脚本等。
@@ -110,6 +117,9 @@ user-involvement mode 只能是 none/confirm/answer/collaborate。
 <dependencies></dependencies>
 <priority>high</priority>
 <duration-minutes>90</duration-minutes>
+<required-inputs>
+- id: target_candidates | label: 候选人名单 | question: 请提供当前在面试流程中的候选人名单 | satisfied: 出现至少一名候选人姓名或编号
+</required-inputs>
 </task>
 
 错误示例：

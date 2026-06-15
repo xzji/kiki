@@ -63,6 +63,8 @@ export function buildConversationsFromGoals(goals: Goal[]): Conversation[] {
       title: goal.title,
       goalId: goal.id,
       messages,
+      createdAt: goal.createdAt,
+      lastMessageAt: latest?.createdAt,
       updatedAt,
     };
   });

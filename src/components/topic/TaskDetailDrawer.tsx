@@ -6,14 +6,14 @@ import { useEffect, useRef } from "react";
 
 import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
-import { topicTaskDetailPath } from "@/lib/routes";
+import { appendRouteQuery, topicTaskDetailPath } from "@/lib/routes";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
 export function TaskDetailDrawer() {
-  const { activeGoalId, activeTaskId, close } = useTaskDrawerStore();
+  const { activeGoalId, activeTaskId, activeInstanceId, close } = useTaskDrawerStore();
   const goals = useGoalStore(selectVisibleGoals);
   const assistantOpen = useAssistantStore((state) => state.isOpen);
   const openAssistant = useAssistantStore((state) => state.open);
@@ -77,7 +77,9 @@ export function TaskDetailDrawer() {
             <ChevronsRight className="h-4 w-4" />
           </button>
           <Link
-            href={topicTaskDetailPath(goal.id, task.id)}
+            href={appendRouteQuery(topicTaskDetailPath(goal.id, task.id), {
+              instanceId: activeInstanceId ?? undefined,
+            })}
             aria-label="展开为全屏"
             onClick={close}
             className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
@@ -88,7 +90,12 @@ export function TaskDetailDrawer() {
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
-        <TaskDetailBody goal={goal} task={task} onDeleted={close} />
+        <TaskDetailBody
+          goal={goal}
+          task={task}
+          initiallyExpandedInstanceId={activeInstanceId}
+          onDeleted={close}
+        />
       </div>
 
       {!assistantOpen ? (

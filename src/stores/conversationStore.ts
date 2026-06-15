@@ -22,6 +22,7 @@ import {
   updateConversationMessageCommand,
 } from "@/lib/api/conversation-commands";
 import { migrateConversationIds, normalizeGoalId } from "@/lib/opaqueIds";
+import { compareConversations } from "@/lib/conversationOrdering";
 import type { ConversationEventRecord } from "@/types/conversationEventLog";
 import type { Conversation, ConversationMessage, ConversationSummary, GoalInfoCollection, GoalPlanningRunState } from "@/types/kiki";
 import type { CliProcessEvent, CliPromptSection, ConversationCliProcess } from "@/types/runtime";
@@ -133,13 +134,15 @@ function normalizeConversationForStore(
   if (incomingSummaryOnly) {
     const localMessages = local?.messages ?? [];
     const localDerived = localMessages.length > 0 ? deriveConversationMessageSummary(localMessages) : null;
+    const lastMessage = localDerived?.lastMessage ?? conversation.lastMessage;
     return {
       ...normalized,
       messages: localMessages,
       messagesLoaded: local?.messagesLoaded === true ? true : false,
       messageCount: localDerived?.messageCount ?? conversation.messageCount,
       unreadCount: localDerived?.unreadCount ?? conversation.unreadCount,
-      lastMessage: localDerived?.lastMessage ?? conversation.lastMessage,
+      lastMessage,
+      lastMessageAt: lastMessage?.createdAt ?? normalized.lastMessageAt,
     };
   }
   const merged = local ? mergeConversationPreservingCliProcess(local, normalized) : normalized;
@@ -150,6 +153,7 @@ function normalizeConversationForStore(
     messageCount: derived.messageCount,
     unreadCount: derived.unreadCount,
     lastMessage: derived.lastMessage,
+    lastMessageAt: derived.lastMessage?.createdAt ?? normalized.lastMessageAt,
   };
 }
 
@@ -160,6 +164,7 @@ function refreshConversationSummary(conversation: Conversation): Conversation {
     messageCount: derived.messageCount,
     unreadCount: derived.unreadCount,
     lastMessage: derived.lastMessage,
+    lastMessageAt: derived.lastMessage?.createdAt ?? conversation.lastMessageAt,
   };
 }
 
@@ -278,7 +283,7 @@ function mergeConversationsById(...groups: Conversation[][]) {
       if (!merged.has(conversation.id)) merged.set(conversation.id, conversation);
     }
   }
-  return Array.from(merged.values()).sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+  return Array.from(merged.values()).sort(compareConversations);
 }
 
 function isLocalOptimisticConversation(conversation: Conversation) {
@@ -502,11 +507,11 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
         return {
           ...conversation,
           messages,
-          updatedAt: payload.message.createdAt,
           messageCount: (conversation.messageCount ?? conversation.messages.length) + (exists ? 0 : 1),
           unreadCount: (conversation.unreadCount ?? deriveConversationMessageSummary(conversation.messages).unreadCount) +
             (!exists && payload.message.unread ? 1 : 0),
           lastMessage: payload.message,
+          lastMessageAt: payload.message.createdAt,
         };
       }
       case "message.updated": {
@@ -545,6 +550,9 @@ function applyConversationEventToList(conversations: Conversation[], event: Conv
               (removed?.unread ? 1 : 0),
           ),
           lastMessage: deletedLastMessage ? derived.lastMessage : conversation.lastMessage,
+          lastMessageAt: deletedLastMessage
+            ? derived.lastMessage?.createdAt
+            : conversation.lastMessageAt,
         };
       }
       case "message.read":
@@ -608,7 +616,15 @@ export const useConversationStore = create<ConversationStore>()(
         });
       },
       applyConversationEvent: (event) => {
+        const payload = event.payload as ConversationEventLoosePayload;
+        const current = get().conversations.find((conversation) => conversation.id === event.conversationId);
+        const shouldResyncDeletedSummaryLastMessage =
+          event.kind === "message.deleted" &&
+          Boolean(payload.messageId) &&
+          current?.messagesLoaded === false &&
+          current.lastMessage?.id === payload.messageId;
         set({ conversations: applyConversationEventToList(get().conversations, event) });
+        if (shouldResyncDeletedSummaryLastMessage) void resyncConversations();
       },
       setConversationBackgroundIssue: (conversationId, issue) => {
         set({
@@ -626,6 +642,7 @@ export const useConversationStore = create<ConversationStore>()(
           messagesLoaded: true,
           messageCount: 0,
           unreadCount: 0,
+          createdAt: now,
           updatedAt: now,
           status: "idle",
         };
@@ -648,7 +665,6 @@ export const useConversationStore = create<ConversationStore>()(
                   ...item,
                   messages: [...item.messages, message],
                   messagesLoaded: item.messagesLoaded ?? true,
-                  updatedAt: message.createdAt,
                 })
               : item,
           ),
@@ -666,7 +682,7 @@ export const useConversationStore = create<ConversationStore>()(
               ? refreshConversationSummary({
                   ...item,
                   messages: item.messages.map((message) =>
-                    message.id === messageId ? updater(message) : message,
+                    message.id === messageId && nextMessage ? nextMessage : message,
                   ),
                 })
               : item,
@@ -746,11 +762,9 @@ export const useConversationStore = create<ConversationStore>()(
           conversations: get().conversations.map((item) => {
             if (item.id !== conversationId) return item;
             const nextMessages = item.messages.filter((msg) => msg.id !== messageId);
-            const latest = nextMessages[nextMessages.length - 1];
             return refreshConversationSummary({
               ...item,
               messages: nextMessages,
-              updatedAt: latest?.createdAt ?? item.updatedAt,
             });
           }),
         });

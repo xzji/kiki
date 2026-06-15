@@ -179,6 +179,67 @@ export function runConversationCommandServiceSpecs() {
   assert.equal("messages" in (summary as object), false, "summary state 不应返回完整 messages 数组");
   assert.equal(summary?.messageCount, 3);
   assert.equal(summary?.lastMessage?.id, "msg-spec-2");
+  assert.equal(summary?.lastMessageAt, summary?.lastMessage?.createdAt);
+
+  const orderNewerConversationId = "conv-command-order-newer";
+  const orderOlderConversationId = "conv-command-order-older";
+  applyConversationCommand({
+    command: {
+      type: "create_conversation",
+      conversation: {
+        id: orderNewerConversationId,
+        title: "排序：消息时间更新",
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+      },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.order.create.newer", orderNewerConversationId),
+  });
+  applyConversationCommand({
+    command: {
+      type: "create_conversation",
+      conversation: {
+        id: orderOlderConversationId,
+        title: "排序：元数据更新",
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T05:00:00.000Z",
+      },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.order.create.older", orderOlderConversationId),
+  });
+  applyConversationCommand({
+    command: {
+      type: "append_message",
+      conversationId: orderNewerConversationId,
+      message: { ...textMessage("msg-order-newer-1", "newer"), createdAt: "2026-06-09T04:00:00.000Z" },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.order.newer.1", orderNewerConversationId),
+  });
+  applyConversationCommand({
+    command: {
+      type: "append_message",
+      conversationId: orderNewerConversationId,
+      message: { ...textMessage("msg-order-newer-2", "older seq"), createdAt: "2026-06-09T01:00:00.000Z" },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.order.newer.2", orderNewerConversationId),
+  });
+  applyConversationCommand({
+    command: {
+      type: "append_message",
+      conversationId: orderOlderConversationId,
+      message: { ...textMessage("msg-order-older-1", "older"), createdAt: "2026-06-09T02:00:00.000Z" },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.order.older.1", orderOlderConversationId),
+  });
+  const orderedState = readConversationState();
+  const orderedIds = orderedState.conversations
+    .filter((conversation) => conversation.id === orderNewerConversationId || conversation.id === orderOlderConversationId)
+    .map((conversation) => conversation.id);
+  assert.deepEqual(
+    orderedIds,
+    [orderNewerConversationId, orderOlderConversationId],
+    "summary 排序应使用 MAX(created_at) 作为 lastMessageAt，而不是最后 seq 消息时间或 updatedAt",
+  );
 
   const fullState = readConversationState({ includeMessages: true });
   const full = fullState.conversations.find((conversation) => conversation.id === conversationId);

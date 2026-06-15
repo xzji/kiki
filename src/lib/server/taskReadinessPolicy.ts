@@ -1,4 +1,4 @@
-import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
+import type { Goal, SubGoal, Task, TaskInstance, TaskRequiredUserInput } from "@/types/kiki";
 
 export type TaskReadinessInfoStatus = "available" | "missing_user" | "agent_retrievable" | "not_required";
 
@@ -95,7 +95,97 @@ export function finalizeReadiness(items: TaskReadinessInfoItem[]): TaskReadiness
   };
 }
 
+/**
+ * 判定规划期固化的某个 requiredUserInput 字段是否已在任务上下文/用户反馈中得到满足。
+ * - 已知字段（出发城市/出行日期/预算）复用专用启发式判据；
+ * - 其它未知字段使用通用启发式：仅当出现「字段名: 值」或用户反馈明确提及时才判为已满足，
+ *   否则保持 missing_user 交给语义 judge 二次裁决。
+ */
+function matchesKnownField(field: TaskRequiredUserInput, keywords: { en: string[]; zh: string[] }): boolean {
+  const id = field.id.toLowerCase();
+  // 英文按词边界拆分，避免子串误命中（如 "target_candidates" 含 "date"）。
+  const idTokens = id.split(/[^a-z0-9]+/).filter(Boolean);
+  if (idTokens.some((token) => keywords.en.includes(token))) return true;
+  // 中文关键词对 id 与 label 做包含匹配。
+  const haystack = `${id}${field.label}`;
+  return keywords.zh.some((keyword) => haystack.includes(keyword));
+}
+
+function isRequiredInputSatisfied(
+  input: TaskReadinessInput,
+  field: TaskRequiredUserInput,
+  text: string,
+): boolean {
+  if (matchesKnownField(field, { en: ["departure"], zh: ["出发", "出发城市", "出发地"] })) {
+    return hasExplicitDepartureCity(input, text);
+  }
+  if (matchesKnownField(field, { en: ["date", "dates", "travel_dates"], zh: ["日期", "出行时间", "行程时间"] })) {
+    return hasDateValue(text);
+  }
+  if (matchesKnownField(field, { en: ["budget", "price"], zh: ["预算", "费用"] })) {
+    return hasBudgetValue(input, text);
+  }
+
+  const feedback = extractUserFeedback(input);
+  const label = field.label.trim();
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // 跨字段共享同一段 feedback，仅按字段自身 label 判定；不再用通用 options token（如「北京/海岛」）匹配，
+  // 避免甲字段的答案误命中乙字段。无法据 label 判定的，保持 missing 交语义 judge 二次裁决。
+  if (feedback && label.length >= 2 && escapedLabel) {
+    if (new RegExp(`${escapedLabel}\\s*[：:]\\s*\\S+`).test(feedback)) return true;
+    if (feedback.includes(label)) return true;
+  }
+  if (escapedLabel && new RegExp(`${escapedLabel}[：:]\\s*\\S+`).test(text)) return true;
+  return false;
+}
+
+function extractFieldValue(field: TaskRequiredUserInput, feedback: string, singleField: boolean): string | undefined {
+  if (!feedback) return undefined;
+  const escapedLabel = field.label.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (escapedLabel) {
+    const match = feedback.match(new RegExp(`${escapedLabel}\\s*[：:]\\s*(\\S[^|\\n]*)`));
+    if (match?.[1]) return match[1].trim();
+  }
+  // 仅有单个字段时，整段反馈可无歧义地归属该字段；多字段时不臆测归属。
+  return singleField ? feedback : undefined;
+}
+
+function buildReadinessFromRequiredInputs(
+  input: TaskReadinessInput,
+  fields: TaskRequiredUserInput[],
+): TaskReadinessCheck {
+  const text = taskExecutionText(input);
+  const userFeedback = extractUserFeedback(input);
+  const items: TaskReadinessInfoItem[] = [];
+  const uniqueFields = fields.filter((field, index) => fields.findIndex((f) => f.id === field.id) === index);
+  for (const field of uniqueFields) {
+    const available = isRequiredInputSatisfied(input, field, text);
+    items.push({
+      id: field.id,
+      label: field.label,
+      description: field.description || field.satisfiedHint || `执行前需要用户提供「${field.label}」。`,
+      source: "user",
+      status: available ? "available" : "missing_user",
+      reason: available
+        ? "已在任务上下文或用户反馈中找到该信息。"
+        : field.satisfiedHint
+          ? `这是用户个人信息，Agent 不能自行猜测。满足判据：${field.satisfiedHint}`
+          : "这是用户个人信息，Agent 不能自行猜测或默认选择。",
+      value: available ? extractFieldValue(field, userFeedback, uniqueFields.length === 1) : undefined,
+      optionQuestion: field.question,
+      options: field.options,
+      inputPlaceholder: field.inputPlaceholder,
+      inputKind: field.inputKind,
+    });
+  }
+  return finalizeReadiness(items);
+}
+
 export function buildTaskReadinessCheck(input: TaskReadinessInput): TaskReadinessCheck {
+  // 优先使用规划期固化的字段清单（新任务）；缺失时回退到执行期正则枚举（旧任务）。
+  if (input.task.requiredUserInputs?.length) {
+    return buildReadinessFromRequiredInputs(input, input.task.requiredUserInputs);
+  }
   const text = taskExecutionText(input);
   const items: TaskReadinessInfoItem[] = [];
   const addItem = (item: TaskReadinessInfoItem) => {

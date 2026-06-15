@@ -84,6 +84,7 @@ export function runSagaDraftAdapterSpecs() {
     assert.ok(v2Prompt.includes('"topicLoop"'), "flag 开启后要求 topicLoop");
     assert.ok(v2Prompt.includes('"triggerSpec"'), "flag 开启后要求 Task triggerSpec");
     assert.ok(v2Prompt.includes("cron/phased"), "flag 开启后允许 cron/phased reviewInterval");
+    assert.ok(legacyPrompt.includes('"requiredUserInputs"'), "decompose prompt 暴露 requiredUserInputs schema");
     if (previous === undefined) delete process.env.KIKI_LOOP_V2_PLANNER;
     else process.env.KIKI_LOOP_V2_PLANNER = previous;
   }
@@ -160,6 +161,50 @@ export function runSagaDraftAdapterSpecs() {
 
     assert.deepEqual(draft.subGoals[0]?.tasks[1]?.dependencies, ["1-1"]);
     assert.deepEqual(draft.subGoals[1]?.tasks[0]?.dependencies, ["1-1", "1-2"]);
+  }
+
+  {
+    // saga JSON 路径透传 requiredUserInputs
+    const draft = adaptTopicInitSagaToGoalDraft({
+      topicText: "蜜月偏好与预算澄清",
+      result: completedResult({
+        artifacts: {
+          plan: {
+            subGoals: [
+              {
+                id: 1,
+                name: "需求澄清",
+                dependencies: [],
+                tasks: [
+                  {
+                    id: "1-1",
+                    title: "澄清蜜月偏好与预算",
+                    description: "收集出发城市、日期、预算与偏好",
+                    expectedOutcome: "需求摘要",
+                    taskType: "one_shot",
+                    triggerRule: "立即触发",
+                    requiredUserInputs: [
+                      { id: "departure_city", label: "出发城市", question: "你从哪出发？", options: ["北京", "上海"] },
+                      { id: "budget", label: "预算", question: "预算多少？", satisfiedHint: "出现明确金额或不设上限" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          presentation: {
+            goalTitle: "蜜月偏好与预算澄清",
+            summary: "澄清需求。",
+            notificationStrategy: "完成后提醒。",
+          },
+        },
+      }),
+    });
+    const inputs = draft.subGoals[0]?.tasks[0]?.requiredUserInputs;
+    assert.equal(inputs?.length, 2);
+    assert.equal(inputs?.[0]?.id, "departure_city");
+    assert.deepEqual(inputs?.[0]?.options, ["北京", "上海"]);
+    assert.equal(inputs?.[1]?.satisfiedHint, "出现明确金额或不设上限");
   }
 
   {

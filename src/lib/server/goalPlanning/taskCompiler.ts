@@ -104,6 +104,7 @@ export function compileTaskDraftsToDraftTasks(input: {
       requiresConfirmation: collaboration.userInteractionType === "confirm" || expectedResult.type === "decision" || expectedResult.type === "confirmation",
       collaboration,
       planningDependencyHints: draft.dependencyHints,
+      requiredUserInputs: draft.requiredUserInputs,
     };
     assertDraftTaskShape(task);
     return task;

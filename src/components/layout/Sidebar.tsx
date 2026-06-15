@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureConversationWorkspaceApi } from "@/lib/api/conversationWorkspace";
 import { isImeCompositionKeyEvent } from "@/lib/browser/ime";
+import { compareConversations } from "@/lib/conversationOrdering";
 import { cn } from "@/lib/utils";
 import { useConversationStore, getConversationUnreadCount } from "@/stores/conversationStore";
 import { useInboxStore } from "@/stores/inboxStore";
@@ -51,12 +52,7 @@ export function Sidebar() {
   );
 
   const sortedConversations = useMemo(
-    () =>
-      [...conversations].sort(
-        (a, b) =>
-          Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
-          +new Date(b.updatedAt) - +new Date(a.updatedAt),
-      ),
+    () => [...conversations].sort(compareConversations),
     [conversations],
   );
 

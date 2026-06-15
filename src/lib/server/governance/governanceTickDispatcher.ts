@@ -1,5 +1,6 @@
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { getCurrentUserId } from "@/lib/server/context/userContext";
+import { pushGovernanceChangeNotification } from "@/lib/server/governance/governanceChangeNotifications";
 import { dispatchThreadActions, type DispatchThreadActionsResult } from "@/lib/server/governance/dispatchActions";
 import {
   commandTypeForGovernanceTarget,
@@ -12,6 +13,8 @@ import {
 } from "@/lib/server/governance/governanceTickProtocol";
 import { isTopicDue } from "@/lib/server/governance/topicScheduler";
 import { isThreadDue, selectDueThreads } from "@/lib/server/governance/threadScheduler";
+import { recordEntity as recordLoopEntity, type LoopTickPhase } from "@/lib/server/observability/loopTickLog";
+import { createAgentRun, updateAgentRun } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import { appendThreadMessage } from "@/lib/server/repositories/conversationMessagesRepository";
 import {
   acquireGovernanceTickJobLease,
@@ -288,6 +291,90 @@ function currentRevisionForOutcome(outcome: GovernanceTickOutcome) {
   return findTopicById(outcome.topicId)?.revision;
 }
 
+function durationMs(startedAt: string | undefined, finishedAt: string) {
+  const started = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const finished = Date.parse(finishedAt);
+  if (Number.isNaN(started) || Number.isNaN(finished)) return 0;
+  return Math.max(0, finished - started);
+}
+
+function recordDispatcherTickHistory(input: {
+  job: GovernanceTickJobRecord;
+  outcome: GovernanceTickOutcome;
+  dispatch?: DispatchThreadActionsResult;
+  finishedAt: string;
+}) {
+  const startedAt = input.job.leasedAt ?? input.job.createdAt;
+  const run = createAgentRun({
+    id: input.job.id,
+    topicId: input.outcome.topicId,
+    threadId: input.outcome.targetKind === "thread" ? input.outcome.threadId : undefined,
+    role: input.outcome.targetKind === "thread" ? "thread_runner" : "topic_runner",
+    status: "completed",
+    idempotencyKey: `governance-tick-run:${input.job.id}`,
+    startedAt,
+  });
+
+  let phase: LoopTickPhase = "completed";
+  let ok = true;
+  let failureReason: string | undefined;
+  let errorKind: string | undefined;
+  let assessment: string | undefined;
+  let confidence: string | undefined;
+  let pauseReason: "failure_threshold" | undefined;
+  let silentCount = 0;
+  let failureCount: number | undefined;
+
+  if (input.outcome.targetKind === "thread") {
+    const { result } = input.outcome;
+    ok = result.ok;
+    phase = !result.ok ? "failed" : input.dispatch && input.dispatch.errors.length > 0 ? "dispatch_partial_failure" : "completed";
+    failureReason = result.ok
+      ? input.dispatch && input.dispatch.errors.length > 0
+        ? `dispatch_partial_failure(${input.dispatch.errors.length})`
+        : undefined
+      : result.error.kind;
+    errorKind = result.ok ? undefined : result.error.kind;
+    assessment = result.ok ? result.output.assessment : undefined;
+    confidence = result.ok ? result.output.confidence : undefined;
+    pauseReason = result.pauseReason === "failure_threshold" ? "failure_threshold" : undefined;
+    silentCount = input.dispatch?.silentReasons.length ?? 0;
+    failureCount = result.patch.failureCount;
+  } else {
+    ok = input.outcome.ok;
+    phase = input.outcome.ok ? "completed" : "failed";
+    failureReason = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
+    errorKind = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
+    silentCount = input.outcome.patch.silentCount ?? 0;
+    failureCount = input.outcome.patch.failureCount;
+  }
+
+  recordLoopEntity({
+    kind: input.outcome.targetKind,
+    entityId: input.outcome.targetKind === "thread" ? input.outcome.threadId : input.outcome.topicId,
+    parentId: input.outcome.targetKind === "thread" ? input.outcome.topicId : undefined,
+    agentRunId: run.id,
+    startedAt,
+    finishedAt: input.finishedAt,
+    durationMs: durationMs(startedAt, input.finishedAt),
+    ok,
+    phase,
+    failureReason,
+    errorKind,
+    dispatchedTaskCount: input.dispatch?.dispatchedTasks.length ?? 0,
+    updatedTaskCount: input.dispatch?.updatedTasks.length ?? 0,
+    cancelledTaskCount: input.dispatch?.cancelledTasks.length ?? 0,
+    sentMessageCount: input.dispatch?.sentMessages.length ?? 0,
+    silentCount,
+    assessment,
+    confidence,
+    pauseReason,
+    failureCount,
+  });
+
+  updateAgentRun({ id: run.id, status: ok ? "completed" : "failed", finishedAt: input.finishedAt });
+}
+
 function buildActionKey(jobId: string, kind: string, ordinal: number) {
   return createIdempotencyKey("governance_tick_action", jobId, kind, String(ordinal));
 }
@@ -384,7 +471,6 @@ async function applyThreadOutcome(input: {
 function applyTopicOutcome(input: {
   outcome: GovernanceTickTopicOutcome;
 }) {
-  if (!input.outcome.ok) return { ok: false as const, reason: input.outcome.error ?? "topic_tick_failed" };
   try {
     updateTopic(input.outcome.topicId, input.outcome.patch, input.outcome.baseRevision);
   } catch (error) {
@@ -467,14 +553,39 @@ export async function persistGovernanceTickOutcome(input: {
     return { ok: false, job, reason: applied.reason, dispatch: applied.dispatch };
   }
 
+  const finishedAt = nowIso(input.now);
   const completed = completeGovernanceTickJob({
     jobId: job.id,
     leaseOwner: input.leaseOwner,
     leaseToken: input.leaseToken,
     outcome: input.outcome as unknown as Record<string, unknown>,
-    finishedAt: nowIso(input.now),
+    finishedAt,
   });
   if (!completed) return { ok: false, job: getGovernanceTickJob(job.id), reason: "complete_failed", dispatch: applied.dispatch };
+  try {
+    recordDispatcherTickHistory({ job: completed, outcome: input.outcome, dispatch: applied.dispatch, finishedAt });
+  } catch (error) {
+    console.warn("[governance] record dispatcher tick history failed", error);
+  }
+  try {
+    if (input.outcome.targetKind === "thread") {
+      pushGovernanceChangeNotification({
+        topicId: input.outcome.topicId,
+        threadId: input.outcome.threadId,
+        dispatch: applied.dispatch,
+        paused: input.outcome.result.pauseReason === "failure_threshold",
+        traceId: `dispatcher:${job.id}`,
+      });
+    } else if (!input.outcome.ok || input.outcome.patch.phase === "failed") {
+      pushGovernanceChangeNotification({
+        topicId: input.outcome.topicId,
+        topicFailureReason: input.outcome.error ?? (input.outcome.patch.phase === "failed" ? "主题治理进入失败状态" : undefined),
+        traceId: `dispatcher:${job.id}`,
+      });
+    }
+  } catch (error) {
+    console.warn("[governance] push dispatcher change notification failed", error);
+  }
   return { ok: true, job: completed, dispatch: applied.dispatch };
 }
 

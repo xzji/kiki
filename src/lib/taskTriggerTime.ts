@@ -462,7 +462,12 @@ export function isTaskTriggerDue(task: Task, now: Date) {
   const parsed = parseTaskTriggerRule(task.triggerRule, now);
   if (task.taskType === "one_shot") {
     if (task.instances.length > 0) return false;
-    if (parsed.kind === "condition" || parsed.kind === "unsupported" || parsed.kind === "interval") return false;
+    // interval 对 one_shot 无意义，直接不触发。
+    if (parsed.kind === "interval") return false;
+    // condition / unsupported 多为依赖驱动的自然语言触发（如「X 完成后立即触发」），
+    // 无法解析为具体时间。对尚无实例的 one_shot，触发时机应交由调度器的依赖就绪判定
+    // （resolveSchedulerDependencyReadiness）把关，而非在此被时间门永久拦死。
+    if (parsed.kind === "condition" || parsed.kind === "unsupported") return true;
     if (parsed.kind === "datetime") return now.getTime() >= parsed.at.getTime();
     if (parsed.kind === "time" || parsed.kind === "daily") {
       const due = new Date(now);

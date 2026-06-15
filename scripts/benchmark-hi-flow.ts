@@ -154,10 +154,12 @@ export async function runHiFlowOnce(
   if (verbose) console.log(`[setup] 使用 Runtime cli=${runtimeEnv.cliPath}`);
 
   const conversationId = `conv-bench-${Date.now()}`;
+  const now = new Date().toISOString();
   const conversation: Conversation = {
     id: conversationId,
     title: "bench",
-    updatedAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
     status: "idle",
     messages: [],
   };

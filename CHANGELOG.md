@@ -16,11 +16,17 @@
 - 任务依赖语义进一步硬化：decompose / normalize prompt 明确区分 `triggerRule` 与真实 `dependencies`，要求把“X 完成后再做”的前置关系落到结构化依赖上，而不是只写进自然语言触发文案。
 - blocked task 恢复链路增强为可累计多轮补充：恢复时会从历史 `interactionSubmission` 和 `resumeContext` 回收已提交字段，避免用户分多轮补充信息时重复丢字段、重复追问。
 - 任务通知投递改为更稳的 append-only 账本：conversation/inbox 派发、deliveryState 标记和事件日志写入保持同事务，normal `result_ready` 旧通知会自动迁移到 conversation 语义，避免重试或补投时覆盖历史卡片。
+- 会话列表排序收敛到 `conversationOrdering` 单一比较器，前端 store、侧边栏和服务端 repository 统一按置顶、最后消息时间、创建时间与 id 稳定排序。
+- 任务就绪判定继续收紧：规划期 `requiredUserInputs` 会优先驱动 readiness，未知字段只接受字段名显式提交或单字段反馈，避免 options 子串跨字段误命中。
+- 治理回顾 UI 增加历史弹层：Topic / Thread 页面可查看最近治理 tick、失败次数、静默次数和派发/更新/取消动作摘要。
+- 将 `@kiki_agent/daemon` 版本提升到 `0.2.17`，配合本轮 runtime daemon API 与治理历史能力更新。
 
 ### Added
 - 新增账户资料与密码修改接口，以及对应的服务端鉴权/校验逻辑：昵称限制 30 字以内，密码要求至少 8 位且同时包含字母和数字，并校验当前密码与新旧密码重复场景。
 - 新增多组规划与调度规格测试：覆盖 `goalFactory`、task draft prompt、delivery closure audit、runtimeJobsRepository、task compiler 与 scheduler 相关边界。
 - 新增 blocked task / notification / scheduler 相关规格测试，覆盖 `contextResolver`、`goalSideEffects`、`goalRuntimeService`、`sagaDraftAdapter` 等多轮恢复与通知派发边界。
+- 新增治理历史 API `/api/runtime/governance-history`，从 agent runtime events 中按 topic/thread 查询治理 tick 记录。
+- 新增 `EVALUATION_PLAN.md`，沉淀 KiKi 的节点级评测方案、黄金集/回放集/LLM-as-judge 分层路线与反馈闭环设计。
 
 ## 2026-06-12
 

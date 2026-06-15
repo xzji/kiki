@@ -1,4 +1,5 @@
 import { type TaskDraft, type TaskDraftBatch, type TaskDraftDropReason } from "./taskDraftSchema";
+import { normalizeRequiredUserInputs } from "@/lib/server/informationRequest/compileFields";
 
 const TASK_OPEN_RE = /^\s*<task(?:\s+index=["']?(\d+)["']?)?\s*>\s*$/i;
 const TASK_CLOSE_RE = /^\s*<\/task>\s*$/i;
@@ -66,6 +67,34 @@ function listFromText(value: string) {
 
 function first(fields: Record<string, string[]>, name: string) {
   return decodeCdata((fields[name]?.[0] ?? "").trim());
+}
+
+/**
+ * 解析 <required-inputs> 字段文本，每行形如：
+ * `- id: departure_city | label: 出发城市 | question: 你从哪出发？ | options: 北京,上海 | satisfied: 出现明确城市`
+ * 返回原始对象数组，交由 normalizeRequiredUserInputs 做最终归一化。
+ */
+function parseRequiredInputsText(value: string): Array<Record<string, unknown>> {
+  const result: Array<Record<string, unknown>> = [];
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.replace(/^\s*[-*]\s*/, "").trim();
+    if (!line) continue;
+    const record: Record<string, unknown> = {};
+    for (const segment of line.split("|")) {
+      const sepIndex = segment.search(/[:：]/);
+      if (sepIndex < 0) continue;
+      const key = segment.slice(0, sepIndex).trim().toLowerCase();
+      const val = segment.slice(sepIndex + 1).trim();
+      if (!key || !val) continue;
+      if (key === "options") {
+        record.options = val.split(/[,，、]/).map((item) => item.trim()).filter(Boolean);
+      } else {
+        record[key] = val;
+      }
+    }
+    if (Object.keys(record).length > 0) result.push(record);
+  }
+  return result;
 }
 
 function parseTaskBlock(raw: string, fallbackIndex: number): ParsedTask {
@@ -159,6 +188,7 @@ function toDraft(parsed: ParsedTask): { draft?: TaskDraft; reason?: TaskDraftDro
     priorityHint: priority === "critical" || priority === "high" || priority === "medium" || priority === "low" ? priority : undefined,
     estimatedMinutes: /^\d+$/.test(minutesText) ? Number(minutesText) : undefined,
     notes: first(parsed.fields, "notes") || undefined,
+    requiredUserInputs: normalizeRequiredUserInputs(parseRequiredInputsText(first(parsed.fields, "required-inputs"))),
     userInvolvement: {
       mode:
         involvementAttrs.mode === "none" || involvementAttrs.mode === "confirm" || involvementAttrs.mode === "answer" || involvementAttrs.mode === "collaborate"

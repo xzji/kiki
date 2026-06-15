@@ -1,5 +1,5 @@
 import type { TaskReadinessCheck, TaskReadinessInfoItem } from "@/lib/server/taskReadinessPolicy";
-import type { InteractionRequirement, MissingFieldQuestion } from "@/types/kiki";
+import type { InteractionRequirement, MissingFieldQuestion, TaskRequiredUserInput } from "@/types/kiki";
 
 function uniqueStrings(values: string[]) {
   const seen = new Set<string>();
@@ -31,6 +31,46 @@ function normalizeInputKind(value: unknown): MissingFieldQuestion["inputKind"] {
 function normalizeOptionsForInputKind(value: unknown, inputKind: MissingFieldQuestion["inputKind"]) {
   if (inputKind === "image" || inputKind === "file") return [];
   return normalizeOptions(value);
+}
+
+function readTrimmed(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+/**
+ * 把规划期 LLM 产出的原始字段清单（可能来自 Block 解析或 JSON）归一化为 TaskRequiredUserInput[]。
+ * 缺少 id/label/question 的条目会被丢弃；options 去重并裁剪到 3 个。
+ */
+export function normalizeRequiredUserInputs(value: unknown): TaskRequiredUserInput[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result: TaskRequiredUserInput[] = [];
+  const seenIds = new Set<string>();
+  value.forEach((raw, index) => {
+    if (!raw || typeof raw !== "object") return;
+    const item = raw as Record<string, unknown>;
+    const label = readTrimmed(item.label);
+    const question = readTrimmed(item.question) || (label ? `请补充：${label}` : "");
+    let id = readTrimmed(item.id);
+    if (!id && label) {
+      id = label.toLowerCase().replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
+    }
+    if (!id) id = `field_${index + 1}`;
+    if (!label) return;
+    if (seenIds.has(id)) return;
+    seenIds.add(id);
+    const inputKind = normalizeInputKind(item.inputKind ?? item.input_kind);
+    result.push({
+      id,
+      label,
+      question,
+      description: readTrimmed(item.description) || undefined,
+      options: normalizeOptionsForInputKind(item.options, inputKind),
+      inputPlaceholder: readTrimmed(item.inputPlaceholder ?? item.input_placeholder) || undefined,
+      inputKind,
+      satisfiedHint: readTrimmed(item.satisfiedHint ?? item.satisfied ?? item.satisfied_hint) || undefined,
+    });
+  });
+  return result.length ? result : undefined;
 }
 
 function normalizeDisplayText(value: string) {

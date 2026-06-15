@@ -178,10 +178,12 @@ function applyWaitingReasonToSteps(steps: TaskExecutionStep[], waitingReason: st
 export function TaskDetailBody({
   goal,
   task: canonicalTask,
+  initiallyExpandedInstanceId,
   onDeleted,
 }: {
   goal: Goal;
   task: Task;
+  initiallyExpandedInstanceId?: string | null;
   onDeleted?: () => void;
 }) {
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
@@ -249,6 +251,8 @@ export function TaskDetailBody({
   );
   const hasExecutionInstances =
     pendingInstances.length > 0 || runningInstances.length > 0 || completedInstances.length > 0;
+  const hasInitiallyExpandedInstance =
+    Boolean(initiallyExpandedInstanceId) && task.instances.some((item) => item.id === initiallyExpandedInstanceId);
 
   useEffect(() => {
     setSectionOpen((prev) => ({
@@ -271,6 +275,17 @@ export function TaskDetailBody({
       setExpandedInstanceId(null);
     }
   }, [expandedInstanceId, task.instances]);
+
+  useEffect(() => {
+    if (!initiallyExpandedInstanceId || !hasInitiallyExpandedInstance) return;
+    const instance = task.instances.find((item) => item.id === initiallyExpandedInstanceId);
+    if (!instance) return;
+    setExpandedInstanceId(initiallyExpandedInstanceId);
+    setSectionOpen((prev) => ({
+      ...prev,
+      [sectionKeyForInstance(instance)]: true,
+    }));
+  }, [hasInitiallyExpandedInstance, initiallyExpandedInstanceId, task.instances]);
 
   useEffect(() => {
     if (runningInstances.length === 0) return;
@@ -634,6 +649,12 @@ function isArchivedExecutionInstance(instance: TaskInstance) {
   return (instance.status === "completed" && !instance.awaitingUser) || instance.status === "error";
 }
 
+function sectionKeyForInstance(instance: TaskInstance): SectionKey {
+  if (instance.status === "pending" || instance.status === "paused") return "pending";
+  if (instance.status === "in_progress" || instance.status === "awaiting_user" || instance.awaitingUser) return "running";
+  return "completed";
+}
+
 function formatDeliverablePresentation(task: Task) {
   const expectedResult = task.expectedResult;
   const presentation = expectedResult?.presentation;
@@ -670,15 +691,14 @@ function InstanceCard({
   const agentRunPlan = getAgentRunPlan(instance);
   const hasFinalResult = instance.status === "completed" || instance.status === "error";
   const canRetry = instance.status === "error";
-  const showInlineDetails = hasFinalResult;
-  const showOuterToggle = canExpand && !showInlineDetails;
-  const detailOpen = expanded || showInlineDetails;
+  const showOuterToggle = canExpand;
+  const detailOpen = expanded;
   const [resultOpen, setResultOpen] = useState(hasFinalResult);
-  const [processOpen, setProcessOpen] = useState(!hasFinalResult);
+  const [processOpen, setProcessOpen] = useState(false);
 
   useEffect(() => {
     setResultOpen(hasFinalResult);
-    setProcessOpen(!hasFinalResult);
+    setProcessOpen(false);
   }, [hasFinalResult, instance.id]);
 
   return (
@@ -686,7 +706,7 @@ function InstanceCard({
       <button
         type="button"
         onClick={showOuterToggle ? onToggle : undefined}
-        disabled={!canExpand && !showInlineDetails}
+        disabled={!canExpand}
         className={cn("w-full px-4 py-4 text-left", showOuterToggle && "transition-colors hover:bg-[#FCFCFD]")}
       >
         <div className="flex flex-wrap items-start justify-between gap-3">

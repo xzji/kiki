@@ -31,11 +31,16 @@ function DrawerTaskIdSyncer() {
   const searchParams = useSearchParams();
   const openTaskDrawer = useTaskDrawerStore((state) => state.open);
   const drawerTaskId = searchParams?.get("drawerTaskId") ?? null;
+  const drawerInstanceId = searchParams?.get("drawerInstanceId") ?? null;
   useEffect(() => {
     const match = pathname.match(/^\/(?:topics|goals)\/([^/]+)$/);
     if (!match || !drawerTaskId) return;
-    openTaskDrawer(decodeURIComponent(match[1]), drawerTaskId);
-  }, [drawerTaskId, openTaskDrawer, pathname]);
+    openTaskDrawer(
+      decodeURIComponent(match[1]),
+      decodeURIComponent(drawerTaskId),
+      drawerInstanceId ? decodeURIComponent(drawerInstanceId) : null,
+    );
+  }, [drawerInstanceId, drawerTaskId, openTaskDrawer, pathname]);
   return null;
 }
 

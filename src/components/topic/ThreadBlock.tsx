@@ -3,6 +3,12 @@
 import { ChevronDown, ChevronUp, Plus } from "lucide-react";
 import { useState } from "react";
 
+import {
+  ReviewCyclePopover,
+  reviewIntervalLabel,
+  threadGovernanceStatusLabel,
+  threadGovernanceTone,
+} from "@/components/topic/ReviewCyclePopover";
 import { TaskCreateDrawer } from "@/components/topic/TaskCreateDrawer";
 import { TaskRow } from "@/components/topic/TaskRow";
 import type { Goal, Task } from "@/types/kiki";
@@ -94,7 +100,17 @@ export function ThreadBlock({
             <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
               <div className="flex flex-wrap gap-2">
                 {subGoal.reviewInterval?.trim() ? (
-                  <DetailBadge label={`回顾周期：${reviewIntervalLabel(subGoal.reviewInterval)}`} />
+                  <ReviewCyclePopover
+                    kind="thread"
+                    entityId={subGoal.id}
+                    label={reviewIntervalLabel(subGoal.reviewInterval)}
+                    phaseLabel={threadGovernanceStatusLabel(subGoal)}
+                    phaseTone={threadGovernanceTone(subGoal)}
+                    lastTickAt={subGoal.lastTickAt}
+                    nextTickAt={subGoal.nextTickAt}
+                    silentCount={subGoal.silentCount}
+                    failureCount={subGoal.failureCount}
+                  />
                 ) : null}
                 {subGoal.priority ? <DetailBadge label={`优先级：${priorityLabel(subGoal.priority)}`} /> : null}
                 {typeof subGoal.estimatedDurationMinutes === "number" ? (
@@ -178,25 +194,6 @@ function priorityLabel(priority: Goal["subGoals"][number]["priority"]) {
       return "低";
     default:
       return "未设置";
-  }
-}
-
-function reviewIntervalLabel(value: string) {
-  const normalized = value.trim();
-  switch (normalized) {
-    case "realtime":
-      return "实时（每分钟检查）";
-    case "hourly":
-      return "每小时";
-    case "daily":
-      return "每天";
-    case "weekly":
-      return "每周";
-    case "one_shot":
-      return "仅首次治理";
-    default:
-      if (normalized.startsWith("cron:")) return `Cron：${normalized.slice("cron:".length).trim()}`;
-      return normalized;
   }
 }
 

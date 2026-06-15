@@ -6,8 +6,11 @@ export function topicTaskDetailPath(topicId: string, taskId: string) {
   return `${topicDetailPath(topicId)}/tasks/${encodeURIComponent(taskId)}`;
 }
 
-export function topicTaskDrawerReturnPath(topicId: string, taskId: string) {
-  return `${topicDetailPath(topicId)}?drawerTaskId=${encodeURIComponent(taskId)}`;
+export function topicTaskDrawerReturnPath(topicId: string, taskId: string, instanceId?: string | null) {
+  return appendRouteQuery(topicDetailPath(topicId), {
+    drawerTaskId: encodeURIComponent(taskId),
+    drawerInstanceId: instanceId ?? undefined,
+  });
 }
 
 export type RouteSearchParams = Record<string, string | string[] | undefined>;

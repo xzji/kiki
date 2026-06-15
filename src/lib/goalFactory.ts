@@ -216,6 +216,7 @@ export function buildGoalFromDraft(draft: GoalBreakdownDraft): Goal {
             taskItem.collaboration ??
             collaborationFor(executionKind, taskItem.description, taskItem.expectedOutcome),
           taskSpec: taskItem.taskSpec,
+          requiredUserInputs: taskItem.requiredUserInputs,
         } satisfies Task;
       }),
     })),

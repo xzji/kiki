@@ -10,6 +10,7 @@ import {
   expireGovernanceTickJobLeases,
   getGovernanceTickJob,
 } from "@/lib/server/repositories/governanceTickJobsRepository";
+import { listGovernanceTicksByEntity } from "@/lib/server/repositories/agentRuntime/agentEventsRepository";
 import {
   registerMachineWsConnection,
   unregisterMachineWsConnection,
@@ -165,6 +166,23 @@ function createThreadJob(baseRevision = 0) {
   });
 }
 
+function createTopicJob(baseRevision = 0) {
+  return createGovernanceTickJob({
+    targetKind: "topic",
+    topicId: TOPIC_ID,
+    userId: "spec-test-user",
+    baseRevision,
+    payload: {
+      targetKind: "topic",
+      topicId: TOPIC_ID,
+      baseRevision,
+      snapshot: {},
+    },
+    idempotencyKey: `governance-tick-dispatcher-topic-${baseRevision}-${Date.now()}-${Math.random()}`,
+    createdAt: "2026-06-01T00:00:00.000Z",
+  });
+}
+
 function makeOutcome(jobId: string, result = makeThreadResult()): GovernanceTickOutcome {
   return {
     governanceJobId: jobId,
@@ -174,6 +192,24 @@ function makeOutcome(jobId: string, result = makeThreadResult()): GovernanceTick
     baseRevision: 0,
     result,
     currentTasks: [],
+  };
+}
+
+function makeFailedTopicOutcome(jobId: string): GovernanceTickOutcome {
+  return {
+    governanceJobId: jobId,
+    targetKind: "topic",
+    topicId: TOPIC_ID,
+    baseRevision: 0,
+    ok: false,
+    error: "validation_error",
+    patch: {
+      phase: "failed",
+      lastTickAt: "2026-06-01T00:30:00.000Z",
+      nextTickAt: "2026-06-02T00:30:00.000Z",
+      silentCount: 0,
+      failureCount: 1,
+    },
   };
 }
 
@@ -407,6 +443,7 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(lease?.id, job.id);
 
     const outcome = makeOutcome(job.id);
+    const beforeHistoryCount = listGovernanceTicksByEntity({ kind: "thread", entityId: THREAD_ID }).length;
     const first = await persistGovernanceTickOutcome({
       leaseOwner: "outcome-worker",
       leaseToken: lease!.leaseToken!,
@@ -416,6 +453,10 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(first.ok, true);
     assert.equal(first.job?.status, "completed");
     assert.equal(findThreadById(THREAD_ID)?.revision, 1);
+    const history = listGovernanceTicksByEntity({ kind: "thread", entityId: THREAD_ID });
+    assert.equal(history.length, beforeHistoryCount + 1, "dispatcher path writes one loop tick history event");
+    assert.equal(history[0]?.phase, "completed");
+    assert.equal(history[0]?.silentCount, 1);
 
     const duplicate = await persistGovernanceTickOutcome({
       leaseOwner: "outcome-worker",
@@ -426,6 +467,11 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(duplicate.ok, true);
     assert.equal(duplicate.duplicate, true);
     assert.equal(findThreadById(THREAD_ID)?.revision, 1, "duplicate outcome does not persist again");
+    assert.equal(
+      listGovernanceTicksByEntity({ kind: "thread", entityId: THREAD_ID }).length,
+      beforeHistoryCount + 1,
+      "duplicate outcome does not append tick history again",
+    );
   }
 
   // 3. stale revision 拒绝并把 job 标记 failed。
@@ -454,7 +500,35 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(getGovernanceTickJob(job.id)?.lastError, "stale_revision");
   }
 
-  // 4. partial failure 后 lease 过期重试，action-level idempotencyKey 防止重复写 task。
+  // 4. topic tick 失败也要持久化 patch 并写治理历史，供回顾周期弹窗展示。
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    seedGoal({});
+    const job = createTopicJob(0);
+    const lease = acquireGovernanceTickJobLease({
+      leaseOwner: "topic-failed-worker",
+      leaseDurationMs: 10_000,
+      now: new Date("2026-06-01T00:30:00.000Z"),
+      targetKind: "topic",
+    });
+    assert.equal(lease?.id, job.id);
+
+    const persisted = await persistGovernanceTickOutcome({
+      leaseOwner: "topic-failed-worker",
+      leaseToken: lease!.leaseToken!,
+      outcome: makeFailedTopicOutcome(job.id),
+      now: new Date("2026-06-01T00:30:01.000Z"),
+    });
+    assert.equal(persisted.ok, true);
+    assert.equal(persisted.job?.status, "completed");
+    assert.equal(findTopicById(TOPIC_ID)?.phase, "failed");
+    assert.equal(findTopicById(TOPIC_ID)?.failureCount, 1);
+    const history = listGovernanceTicksByEntity({ kind: "topic", entityId: TOPIC_ID });
+    assert.equal(history[0]?.phase, "failed");
+    assert.equal(history[0]?.failureCount, 1);
+  }
+
+  // 5. partial failure 后 lease 过期重试，action-level idempotencyKey 防止重复写 task。
   {
     ensureIsolatedPlanningSpecDataDir();
     seedGoal({});

@@ -1,12 +1,17 @@
 "use client";
 
-import { Calendar, CircleDot, ListTodo, Plus, RotateCcw } from "lucide-react";
+import { Calendar, CircleDot, ListTodo, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { ChatHistoryView } from "@/components/topic/ChatHistoryView";
 import { DigestTopicView } from "@/components/topic/DigestTopicView";
+import {
+  ReviewCyclePopover,
+  topicGovernancePhaseLabel,
+  topicGovernanceTone,
+} from "@/components/topic/ReviewCyclePopover";
 import { ThreadBlock } from "@/components/topic/ThreadBlock";
 import { ThreadCreateDrawer } from "@/components/topic/ThreadCreateDrawer";
 import { confirmGoalPlanCommand } from "@/lib/api/goal-commands";
@@ -21,7 +26,13 @@ import { topicDetailPath, topicTaskDetailPath } from "@/lib/routes";
 import { useGoalStore } from "@/stores/goalStore";
 import { useInboxStore } from "@/stores/inboxStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
-import type { Goal, GoalWorkflowPhase, Task, TaskExecutionPhase, TaskInstanceStatus } from "@/types/kiki";
+import type {
+  Goal,
+  GoalWorkflowPhase,
+  Task,
+  TaskExecutionPhase,
+  TaskInstanceStatus,
+} from "@/types/kiki";
 import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
 import type { TriggerIntervalUnit, TriggerSpec } from "@/types/trigger";
 
@@ -231,7 +242,10 @@ export function TopicPlanContent({
   });
   const pendingGoalWorkflow = pendingGoalWorkflows.find((item) => item.goalId === goal.id);
   const displayWorkflow = pendingGoalWorkflow?.workflow ?? goal.workflow;
-  const displayGoal = { ...goal, workflow: displayWorkflow, subGoals: displaySubGoals };
+  const displayGoal = useMemo(
+    () => ({ ...goal, workflow: displayWorkflow, subGoals: displaySubGoals }),
+    [displaySubGoals, displayWorkflow, goal],
+  );
 
   const unreadByTask = useMemo(() => {
     return inboxItems.reduce<Record<string, number>>((acc, item) => {
@@ -366,17 +380,24 @@ export function TopicPlanContent({
 
   return (
     <div className="max-w-[920px] pb-12">
-      <section className="mb-8 rounded-[20px] border border-[#E5E7EB] bg-white p-6">
+      <section className="mb-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 flex-1">
             <h1 className="text-[28px] font-semibold tracking-[-0.02em] text-[#1F2328]">
               {goal.title}
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-[#6B7280]">
-              <span className="inline-flex items-center gap-1.5">
-                <RotateCcw className="h-3.5 w-3.5" />
-                回顾周期：{topicLoopLabel(goal.topicLoop)}
-              </span>
+              <ReviewCyclePopover
+                kind="topic"
+                entityId={goal.id}
+                label={topicLoopLabel(goal.topicLoop)}
+                phaseLabel={topicGovernancePhaseLabel(goal.topicPhase)}
+                phaseTone={topicGovernanceTone(goal.topicPhase)}
+                lastTickAt={goal.topicLastTickAt}
+                nextTickAt={goal.topicNextTickAt}
+                silentCount={goal.topicSilentCount}
+                failureCount={goal.topicFailureCount}
+              />
               <span className="inline-flex items-center gap-1.5">
                 <CircleDot className="h-3.5 w-3.5" />
                 {displaySubGoals.length} 个线程

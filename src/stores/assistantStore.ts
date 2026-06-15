@@ -99,12 +99,16 @@ function toConversationMessage(message: AssistantMessage): ConversationMessage {
 
 function buildSidebarConversationSnapshot(messages: AssistantMessage[]): Conversation {
   const latest = messages[messages.length - 1];
+  const now = new Date().toISOString();
+  const latestCreatedAt = latest?.createdAt;
   return {
     id: ASSISTANT_SIDEBAR_CONVERSATION_ID,
     title: "KiKi 侧边栏助手",
     status: "streaming",
     messages: messages.map(toConversationMessage),
-    updatedAt: latest?.createdAt ?? new Date().toISOString(),
+    createdAt: messages[0]?.createdAt ?? latestCreatedAt ?? now,
+    lastMessageAt: latestCreatedAt,
+    updatedAt: latestCreatedAt ?? now,
   };
 }
 

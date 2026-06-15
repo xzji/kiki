@@ -16,6 +16,7 @@ export type AgentRunRole =
   | "refiner"
   | "presenter"
   | "thread_runner"
+  | "topic_runner"
   | "goal_task"
   | "spec_writer";
 

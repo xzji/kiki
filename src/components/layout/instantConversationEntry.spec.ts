@@ -8,6 +8,7 @@ function createConversation(id: string): Conversation {
     id,
     title: "新会话",
     messages: [],
+    createdAt: "2026-06-09T00:00:00.000Z",
     updatedAt: "2026-06-09T00:00:00.000Z",
     status: "idle",
   };

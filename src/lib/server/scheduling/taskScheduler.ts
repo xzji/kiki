@@ -4,6 +4,7 @@ import {
   getRuntimeJobByTaskInstanceId,
   listOpenRuntimeJobsByTaskIds,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { resolveSchedulerDependencyReadiness } from "@/lib/server/taskExecution/contextResolver";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { isTaskTriggerDue } from "@/lib/taskTriggerTime";
@@ -101,8 +102,13 @@ export function runGoalSchedulerEngine(input: {
   }
   const runtimeEnv = input.runtimeEnv;
 
+  // 调度判定必须以 runtime_jobs 为权威：raw 快照里的实例状态可能滞后（例如任务已
+  // completed 但快照仍是 pending），会导致下游依赖被误判为未完成而永久卡住。这里与
+  // UI / governance 同口径，先把 job 状态合并回 goals 再做就绪与依赖判定。
+  const goals = composeGoalsWithRuntimeJobs(input.goals);
+
   const schedulerLimit = input.config.schedulerIntervalMs > 0 ? 50 : 0;
-  const readyTaskSelection = schedulerLimit > 0 ? getReadyTasks(input.goals) : { ready: [], skipped: 0 };
+  const readyTaskSelection = schedulerLimit > 0 ? getReadyTasks(goals) : { ready: [], skipped: 0 };
   const readyTasks = readyTaskSelection.ready.slice(0, schedulerLimit);
   const nowIso = new Date().toISOString();
   let createdJobs = 0;

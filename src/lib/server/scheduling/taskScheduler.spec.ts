@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 
+import { deriveOpaqueId, normalizeTaskId } from "@/lib/opaqueIds";
+import {
+  listOpenRuntimeJobsByTaskIds,
+  upsertRuntimeJob,
+} from "@/lib/server/repositories/runtimeJobsRepository";
+import type { RuntimeJobRecord } from "@/lib/server/repositories/runtimeJobsRepository";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
 import { runGoalSchedulerEngine } from "@/lib/server/scheduling/taskScheduler";
 import { resolveAdmitDecision } from "@/lib/server/taskExecution/contextResolver";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
-import type { Goal, Task } from "@/types/kiki";
+import type { Goal, Task, TaskInstance } from "@/types/kiki";
 import { DEFAULT_RUNTIME_FILE_POLICY, type RuntimeEnvironment } from "@/types/runtime";
 
 function runtimeEnv(): RuntimeEnvironment {
@@ -216,6 +222,101 @@ function goalWithMonitoringOnlyUpstream(): Goal {
   };
 }
 
+// 回归：上游任务的 runtime_job 已 completed，但 goals 快照里的实例仍停留在 pending
+// （job→snapshot 投影滞后）。调度器必须以 runtime_jobs 为权威（compose）判依赖，
+// 否则下游会被永久误判为「等待上游」而卡死。
+const DESYNC_GOAL_ID = deriveOpaqueId("goal", "goal-scheduler-desync-spec");
+const DESYNC_UPSTREAM_TASK_ID = deriveOpaqueId("task", "task-desync-upstream-spec");
+const DESYNC_UPSTREAM_INSTANCE_ID = deriveOpaqueId("inst", "inst-desync-upstream-spec");
+const DESYNC_DOWNSTREAM_TASK_ID = deriveOpaqueId("task", "task-desync-downstream-spec");
+
+function desyncUpstreamInstance(): TaskInstance {
+  const now = "2026-05-30T00:00:00.000Z";
+  return {
+    id: DESYNC_UPSTREAM_INSTANCE_ID,
+    taskId: DESYNC_UPSTREAM_TASK_ID,
+    dateLabel: "05-30",
+    status: "pending",
+    intro: "等待执行",
+    payload: { kind: "generic_result", summary: "等待执行" },
+    createdAt: now,
+    execution: { phase: "queued", status: "pending", lastUpdatedAt: now },
+  };
+}
+
+function goalWithDesyncedUpstream(): Goal {
+  const now = "2026-05-30T00:00:00.000Z";
+  return {
+    id: DESYNC_GOAL_ID,
+    title: "投影滞后目标",
+    deadline: "2026-05-30T00:00:00.000Z",
+    progress: 0,
+    createdAt: now,
+    conversationId: "conversation-scheduler-desync-spec",
+    workflow: {
+      phase: "executing",
+      planDecision: "confirmed",
+      startedAt: now,
+      updatedAt: now,
+    },
+    subGoals: [
+      {
+        id: "sub-desync-upstream-spec",
+        goalId: DESYNC_GOAL_ID,
+        title: "上游板块",
+        tasks: [
+          oneShotTask(DESYNC_UPSTREAM_TASK_ID, "sub-desync-upstream-spec", "上游产出", {
+            instances: [desyncUpstreamInstance()],
+          }),
+        ],
+      },
+      {
+        id: "sub-desync-downstream-spec",
+        goalId: DESYNC_GOAL_ID,
+        title: "下游板块",
+        dependencies: ["sub-desync-upstream-spec"],
+        tasks: [oneShotTask(DESYNC_DOWNSTREAM_TASK_ID, "sub-desync-downstream-spec", "下游执行")],
+      },
+    ],
+  };
+}
+
+function seedCompletedUpstreamJob(goal: Goal): void {
+  const now = "2026-05-30T00:01:00.000Z";
+  const upstreamSubGoal = goal.subGoals[0]!;
+  const upstreamTask = upstreamSubGoal.tasks[0]!;
+  const upstreamInstance = upstreamTask.instances[0]!;
+  const job: RuntimeJobRecord = {
+    id: `job-${DESYNC_UPSTREAM_INSTANCE_ID}`,
+    taskInstanceId: DESYNC_UPSTREAM_INSTANCE_ID,
+    taskId: DESYNC_UPSTREAM_TASK_ID,
+    goalId: DESYNC_GOAL_ID,
+    conversationId: goal.conversationId,
+    userId: "user-scheduler-desync-spec",
+    kind: "goal_task",
+    status: "completed",
+    requestId: "req-scheduler-desync-spec",
+    runtimeTransport: "cloud_control_plane",
+    payload: {
+      goal,
+      subGoal: upstreamSubGoal,
+      task: upstreamTask,
+      instance: upstreamInstance,
+      runtimeEnv: runtimeEnv(),
+    },
+    progress: null,
+    logs: [],
+    trajectory: [],
+    blocker: null,
+    result: { finalMessage: "上游已完成" },
+    createdAt: now,
+    updatedAt: now,
+    startedAt: now,
+    finishedAt: now,
+  };
+  upsertRuntimeJob(job);
+}
+
 function schedulerConfig(): RuntimeDaemonConfig {
   return {
     deviceId: "device-scheduler-spec",
@@ -296,4 +397,19 @@ export function runGoalSchedulerEngineSpecs() {
   });
   assert.equal(monitoringResult.createdJobs, 2);
   assert.equal(monitoringResult.skipped, 0);
+
+  // 回归：上游 job=completed 但快照实例=pending 时，调度器应放行下游。
+  const desyncGoal = goalWithDesyncedUpstream();
+  seedCompletedUpstreamJob(desyncGoal);
+  const desyncResult = runGoalSchedulerEngine({
+    goals: [desyncGoal],
+    runtimeEnv: runtimeEnv(),
+    config: schedulerConfig(),
+  });
+  // 上游已有 instance 不再重跑，下游应被入队。
+  assert.equal(desyncResult.createdJobs, 1);
+  const downstreamOpenJobs = listOpenRuntimeJobsByTaskIds([DESYNC_DOWNSTREAM_TASK_ID]).filter(
+    (job) => job.taskId && normalizeTaskId(job.taskId) === normalizeTaskId(DESYNC_DOWNSTREAM_TASK_ID),
+  );
+  assert.equal(downstreamOpenJobs.length, 1, "downstream task should be queued once upstream job completed");
 }

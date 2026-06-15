@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, ChevronDown, Circle, FileText, Terminal } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { CliProcessEvent, ConversationCliProcess } from "@/types/runtime";
@@ -101,39 +101,11 @@ function eventSummary(event: CliProcessEvent) {
 }
 
 function eventBadge(event: CliProcessEvent) {
-  if (isSubagentEvent(event)) {
-    if (event.eventKind === "thinking") return "子思考";
-    if (event.eventKind === "tool_call") return "子工具";
-    if (event.eventKind === "tool_result") return "子结果";
-    if (event.eventKind === "completed") return "子完成";
-    return "子代理";
-  }
-  if (isSubagentToolCall(event)) return "子代理";
-  if (event.type === "thinking") return "思考";
-  if (event.type === "tool_call") return "工具";
-  if (event.type === "error") return "错误";
-  if (event.type === "file_artifact") return "附件";
-  if (event.type === "output") return "输出";
-  return event.type;
-}
-
-function eventIcon(event: CliProcessEvent) {
-  if (event.type === "error") return <AlertCircle className="h-3.5 w-3.5" />;
-  if (event.type === "file_artifact") return <FileText className="h-3.5 w-3.5" />;
-  if (event.type === "tool_call" || event.type === "subagent_event") return <Terminal className="h-3.5 w-3.5" />;
-  return <Circle className="h-3.5 w-3.5" />;
+  return event.type === "error" ? "失败" : null;
 }
 
 function shouldShowDetails(event: CliProcessEvent) {
   return Boolean(event.content || event.input !== undefined || isSubagentToolCall(event));
-}
-
-function detailText(event: CliProcessEvent) {
-  if (event.type === "thinking") return "展开思考";
-  if (isSubagentEvent(event)) return "展开子代理过程";
-  if (isSubagentToolCall(event)) return "展开子代理";
-  if (event.type === "tool_call") return "展开参数";
-  return "展开";
 }
 
 function EventDetails({ event }: { event: CliProcessEvent }) {
@@ -141,7 +113,7 @@ function EventDetails({ event }: { event: CliProcessEvent }) {
   const isSubProcess = isSubagentEvent(event);
   const info = isSubagent ? subagentInfo(event) : null;
   return (
-    <div className="ml-7 space-y-2 pb-2 pr-2">
+    <div className="ml-3.5 space-y-2 pb-2 pr-2">
       {isSubProcess && event.agentId ? (
         <div className="text-[11px] text-[#8C9198]">agentId: {event.agentId}</div>
       ) : null}
@@ -182,6 +154,7 @@ function TimelineEventCard({ event }: { event: TimelineEvent }) {
   const hasDetails = shouldShowDetails(event);
   const summary = eventSummary(event);
   const isThinking = event.type === "thinking" || (event.type === "subagent_event" && event.eventKind === "thinking");
+  const badge = eventBadge(event);
   return (
     <details className={cn("group/timeline pl-3", !isThinking && "border-l border-[#E5E7EB]")}>
       <summary
@@ -190,28 +163,19 @@ function TimelineEventCard({ event }: { event: TimelineEvent }) {
           isThinking ? "py-1 text-[#6B7280]" : "py-1.5",
         )}
       >
-        <span
-          className={cn(
-            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center",
-            isThinking ? "text-[#8C9198]" : event.type === "error" ? "text-[#B42318]" : "text-[#8C9198]",
-          )}
-        >
-          {eventIcon(event)}
-        </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className={cn("truncate text-[12px]", isThinking ? "font-medium text-[#6B7280]" : "font-semibold text-[#1F2328]")}>
               {eventTitle(event)}
             </span>
-            <span className="shrink-0 rounded bg-[#F6F8FA] px-1.5 py-0.5 text-[10px] text-[#6B7280]">
-              {eventBadge(event)}
-            </span>
-            <span className="shrink-0 text-[10px] text-[#8C9198]">{formatTime(event.createdAt)}</span>
-            {hasDetails ? (
-              <span className="shrink-0 text-[10px] text-[#8C9198] group-open/timeline:hidden">{detailText(event)}</span>
+            {badge ? (
+              <span className="shrink-0 rounded bg-[#FFEBE9] px-1.5 py-0.5 text-[10px] font-medium text-[#B42318]">
+                {badge}
+              </span>
             ) : null}
+            <span className="shrink-0 text-[10px] text-[#8C9198]">{formatTime(event.createdAt)}</span>
           </span>
-          {summary && !isThinking ? <span className="mt-1 block truncate text-[12px] text-[#4B5563]">{summary}</span> : null}
+          {summary && !isThinking && !hasDetails ? <span className="mt-1 block truncate text-[12px] text-[#4B5563]">{summary}</span> : null}
         </span>
         {hasDetails ? (
           <ChevronDown className="mt-1 h-3.5 w-3.5 shrink-0 text-[#8C9198] transition group-open/timeline:rotate-180" />

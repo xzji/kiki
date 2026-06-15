@@ -328,6 +328,7 @@ export function applyConversationCommand(input: {
         id,
         title,
         messages: [],
+        createdAt: command.conversation.createdAt ?? command.conversation.updatedAt ?? now,
         updatedAt: command.conversation.updatedAt ?? now,
         status: command.conversation.status ?? "idle",
         goalId: command.conversation.goalId,

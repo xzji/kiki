@@ -48,6 +48,13 @@ function countMessages(conversationId: string): number {
   return row.n;
 }
 
+function countMessageAppendedEvents(conversationId: string): number {
+  const row = getDatabase()
+    .prepare(`SELECT COUNT(*) AS n FROM conversation_event_log WHERE conversation_id = ? AND kind = 'message.appended'`)
+    .get(conversationId) as { n: number };
+  return row.n;
+}
+
 function makeCliProcess(runId: string) {
   return {
     runId,
@@ -94,6 +101,7 @@ export async function runAppendThreadMessageSpecs() {
     assert.equal(msgs[0]?.role, "kiki");
     assert.equal(msgs[0]?.content, "hello world");
     assert.equal(msgs[0]?.unread, true);
+    assert.equal(countMessageAppendedEvents("conv-1"), 1, "appendThreadMessage must emit realtime event");
   }
 
   // 2. 幂等
@@ -118,6 +126,32 @@ export async function runAppendThreadMessageSpecs() {
     assert.equal(r1.conversationMessageId, r2.conversationMessageId, "重入返回同一 ID");
     const after = countMessages("conv-2");
     assert.equal(after, before, "幂等：消息数不变");
+    assert.equal(countMessageAppendedEvents("conv-2"), 1, "幂等：message.appended 事件不重复");
+  }
+
+  // 2b. 消息已存在但事件缺失时，重入应补发 message.appended 事件
+  {
+    seedConversation("conv-2b", "topic-2b");
+    const traceId = "2026-06-01T01:30:00.000Z";
+    appendThreadMessage({
+      topicId: "topic-2b",
+      threadId: "thread-2b",
+      text: "heal event",
+      severity: "info",
+      traceId,
+    });
+    getDatabase()
+      .prepare(`DELETE FROM conversation_event_log WHERE conversation_id = ? AND kind = 'message.appended'`)
+      .run("conv-2b");
+    assert.equal(countMessageAppendedEvents("conv-2b"), 0);
+    appendThreadMessage({
+      topicId: "topic-2b",
+      threadId: "thread-2b",
+      text: "heal event",
+      severity: "info",
+      traceId,
+    });
+    assert.equal(countMessageAppendedEvents("conv-2b"), 1, "existing message retry heals missing realtime event");
   }
 
   // 3. 输入校验

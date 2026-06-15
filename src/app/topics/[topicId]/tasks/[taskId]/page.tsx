@@ -110,13 +110,18 @@ export default function TaskDetailPage({
         <button
           type="button"
           aria-label="收起为右侧边栏"
-          onClick={() => router.push(topicTaskDrawerReturnPath(goal.id, task.id))}
+          onClick={() => router.push(topicTaskDrawerReturnPath(goal.id, task.id, searchParams?.instanceId))}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
         >
           <Minimize2 className="h-4 w-4" />
         </button>
       </div>
-      <TaskDetailBody goal={goal} task={task} onDeleted={() => router.replace(topicDetailPath(goal.id))} />
+      <TaskDetailBody
+        goal={goal}
+        task={task}
+        initiallyExpandedInstanceId={searchParams?.instanceId}
+        onDeleted={() => router.replace(topicDetailPath(goal.id))}
+      />
     </div>
   );
 }
