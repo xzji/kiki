@@ -28,6 +28,12 @@ function statusText(status: ConversationCliProcess["status"]) {
   return "运行中";
 }
 
+function isSubagentToolCall(event: CliProcessEvent) {
+  if (event.type !== "tool_call") return false;
+  const toolName = event.toolName?.toLowerCase() ?? "";
+  return toolName === "task" || toolName === "agent";
+}
+
 function currentConversationId(pathname: string | null) {
   if (!pathname) return null;
   const match = pathname.match(/^\/conversations\/([^/?#]+)/);
@@ -157,7 +163,8 @@ export function ConversationProcessSidebar() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const thinkingEvents = process?.events.filter((event) => event.type === "thinking") ?? [];
   const traceEvents = process?.events.filter((event) => event.type === "assistant_trace") ?? [];
-  const toolEvents = process?.events.filter((event) => event.type === "tool_call") ?? [];
+  const toolEvents = process?.events.filter((event) => event.type === "tool_call" && !isSubagentToolCall(event)) ?? [];
+  const subagentEvents = process?.events.filter((event) => isSubagentToolCall(event) || event.type === "subagent_event") ?? [];
   const statusEvents = process?.events.filter(
     (event) => event.type === "status" || event.type === "error" || event.type === "file_artifact" || event.type === "prompt",
   ) ?? [];
@@ -266,6 +273,14 @@ export function ConversationProcessSidebar() {
                 <div className="space-y-2">{toolEvents.map((event) => <EventCard key={event.id} event={event} />)}</div>
               ) : (
                 <div className="text-[12px] text-[#8C9198]">暂无工具调用。</div>
+              )}
+            </Section>
+
+            <Section title="Subagents" count={subagentEvents.length}>
+              {subagentEvents.length ? (
+                <div className="space-y-2">{subagentEvents.map((event) => <EventCard key={event.id} event={event} />)}</div>
+              ) : (
+                <div className="text-[12px] text-[#8C9198]">暂无子代理事件。</div>
               )}
             </Section>
 

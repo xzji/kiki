@@ -67,6 +67,37 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readTrimmedString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function readFirstTrimmedString(record: Record<string, unknown> | null, keys: string[]) {
+  if (!record) return "";
+  for (const key of keys) {
+    const value = readTrimmedString(record[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function isSubagentToolName(toolName: string) {
+  const normalized = toolName.trim().toLowerCase();
+  return normalized === "task" || normalized === "agent";
+}
+
+function readSubagentCallInfo(input: unknown) {
+  const record = asPlainRecord(input);
+  return {
+    description: readFirstTrimmedString(record, ["description", "task", "title", "name"]),
+    agentType: readFirstTrimmedString(record, ["subagent_type", "agentType", "agent_type"]),
+    prompt: readFirstTrimmedString(record, ["prompt", "query", "message"]),
+  };
+}
+
 function createCliProcess(runId: string, startedAt: string): ConversationCliProcess {
   return {
     runId,
@@ -2160,11 +2191,17 @@ export function ConversationView({ conversationId }: { conversationId: string })
               return;
             }
             if (event.type === "tool_call") {
+              const isSubagentTool = isSubagentToolName(event.toolName);
+              const subagentInfo = isSubagentTool ? readSubagentCallInfo(event.input) : null;
               appendProcessEvent("tool_call", {
                 title: event.toolName,
                 toolName: event.toolName,
                 summary: event.summary,
                 input: event.input,
+                subagentCallId: event.toolCallId,
+                subagentDescription: subagentInfo?.description || undefined,
+                subagentType: subagentInfo?.agentType || undefined,
+                subagentPrompt: subagentInfo?.prompt || undefined,
               });
               return;
             }
@@ -2176,6 +2213,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 input: event.input,
                 agentId: event.agentId,
                 eventKind: event.eventKind,
+                subagentCallId: event.subagentCallId,
+                subagentDescription: event.subagentDescription,
+                subagentType: event.subagentType,
               });
               return;
             }

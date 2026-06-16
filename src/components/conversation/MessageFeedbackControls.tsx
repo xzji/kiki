@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Share2, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { Check, Copy, Loader2, Share2, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -112,6 +112,7 @@ export function MessageFeedbackControls({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [selectedReasons, setSelectedReasons] = useState<MessageFeedbackReasonCode[]>(
     feedback?.rating === "bad" ? feedback.reasonCodes : [],
@@ -177,20 +178,26 @@ export function MessageFeedbackControls({
   };
 
   const shareMessage = async () => {
+    if (sharing) return;
     if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
       throw new Error("当前浏览器不支持复制图片到剪贴板");
     }
-    const blob = await createShareImageBlob({
-      question: question ?? "",
-      answer: content,
-    });
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        [blob.type]: blob,
-      }),
-    ]);
-    markTransient(setShared);
-    showToast("生成分享了图片，已保存到剪贴板");
+    setSharing(true);
+    try {
+      const blob = await createShareImageBlob({
+        question: question ?? "",
+        answer: content,
+      });
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [blob.type]: blob,
+        }),
+      ]);
+      markTransient(setShared);
+      showToast("生成分享了图片，已保存到剪贴板");
+    } finally {
+      setSharing(false);
+    }
   };
 
   return (
@@ -249,22 +256,29 @@ export function MessageFeedbackControls({
         </button>
         <button
           type="button"
-          aria-label="分享"
-          title="分享"
+          aria-label={sharing ? "正在生成分享图片" : "分享"}
+          title={sharing ? "正在生成分享图片" : "分享"}
+          disabled={sharing}
           onClick={() => {
             void shareMessage().catch((err) => {
               showToast(err instanceof Error ? err.message : "生成分享图片失败");
             });
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[#F5F6F8] hover:text-[#1F2328]"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[#F5F6F8] hover:text-[#1F2328] disabled:opacity-70"
         >
-          {shared ? <Check className="h-3.5 w-3.5 text-[#1A7F37]" /> : <Share2 className="h-3.5 w-3.5" />}
+          {sharing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : shared ? (
+            <Check className="h-3.5 w-3.5 text-[#1A7F37]" />
+          ) : (
+            <Share2 className="h-3.5 w-3.5" />
+          )}
         </button>
       </div>
 
-      {toast ? (
+      {sharing || toast ? (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[#111827] px-4 py-2 text-[13px] text-white shadow-lg">
-          {toast}
+          {sharing ? "正在生成分享图片..." : toast}
         </div>
       ) : null}
 

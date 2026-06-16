@@ -167,7 +167,7 @@ export type RuntimeStreamEvent =
   | { type: "assistant_trace"; text: string }
   | { type: "delta"; text: string }
   | { type: "message"; content: string; fallbackContent?: string }
-  | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
+  | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number; toolCallId?: string }
   | {
       type: "subagent_event";
       agentId: string;
@@ -177,6 +177,9 @@ export type RuntimeStreamEvent =
       content?: string;
       input?: unknown;
       createdAt?: string;
+      subagentCallId?: string;
+      subagentDescription?: string;
+      subagentType?: string;
     }
   | { type: "file"; filename: string; mime: string; size: number; contentBase64: string; summary?: string }
   | { type: "file_artifact"; ref: ArtifactRef }
@@ -497,9 +500,17 @@ export async function runPromptText(input: ClaudePromptInput): Promise<ClaudePro
 }
 
 type ToolUseBlockState = {
+  id?: string;
   name: string;
   rawInput?: unknown;
   partialJson: string;
+};
+
+type SubagentCallBinding = {
+  subagentCallId: string;
+  subagentDescription?: string;
+  subagentType?: string;
+  subagentPrompt?: string;
 };
 
 function mapPermissionMode(permissionMode: RuntimePermissionMode) {
@@ -714,6 +725,24 @@ function readStringField(input: unknown, keys: string[]) {
   return undefined;
 }
 
+function isSubagentToolName(toolName: string) {
+  const normalized = toolName.trim().toLowerCase();
+  return normalized === "task" || normalized === "agent";
+}
+
+function readSubagentCallBinding(toolName: string, input: unknown, fallbackId: string): SubagentCallBinding | null {
+  if (!isSubagentToolName(toolName)) return null;
+  const description = readStringField(input, ["description", "task", "title", "name"]);
+  const prompt = readStringField(input, ["prompt", "query", "message"]);
+  const subagentType = readStringField(input, ["subagent_type", "agentType", "agent_type"]);
+  return {
+    subagentCallId: fallbackId,
+    subagentDescription: description || (prompt ? truncateMiddle(prompt, 80) : undefined),
+    subagentType,
+    subagentPrompt: prompt,
+  };
+}
+
 function parseToolInput(rawInput: unknown, partialJson: string) {
   const hasRawInput =
     rawInput !== undefined &&
@@ -861,6 +890,7 @@ function createSubagentEventPoller(input: {
   cwd: string;
   getSessionId: () => string | undefined;
   emitEvent: (event: RuntimeStreamEvent) => boolean;
+  resolveSubagentBinding?: (agentId: string) => SubagentCallBinding | null;
 }) {
   const processedLineCounts = new Map<string, number>();
   const emittedKeys = new Set<string>();
@@ -895,7 +925,16 @@ function createSubagentEventPoller(input: {
         const key = `${filePath}:${index}:${event.eventKind}:${event.title}`;
         if (emittedKeys.has(key)) continue;
         emittedKeys.add(key);
-        if (!input.emitEvent(event)) return;
+        const binding = input.resolveSubagentBinding?.(event.agentId) ?? null;
+        const enrichedEvent = binding
+          ? {
+              ...event,
+              subagentCallId: binding.subagentCallId,
+              subagentDescription: binding.subagentDescription,
+              subagentType: binding.subagentType,
+            }
+          : event;
+        if (!input.emitEvent(enrichedEvent)) return;
       }
     }
   };
@@ -940,7 +979,7 @@ function summarizeToolCall(toolName: string, input: unknown) {
   if (normalized.includes("runcommand") || normalized.includes("bash")) {
     return query ? `执行命令：${truncateMiddle(query, 72)}` : "执行终端命令";
   }
-  if (normalized === "task") {
+  if (isSubagentToolName(toolName)) {
     return query ? `调用子代理：${truncateMiddle(query, 60)}` : "调用子代理";
   }
 
@@ -1123,6 +1162,8 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
     const pendingFilePaths = new Set<string>();
     const activeToolPermissionRequestIds = new Set<string>();
+    const pendingSubagentCalls: SubagentCallBinding[] = [];
+    const subagentBindingsByAgentId = new Map<string, SubagentCallBinding>();
 
     const resolveOnce = () => {
       if (settled) return;
@@ -1134,6 +1175,15 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       if (settled) return;
       settled = true;
       reject(error);
+    };
+
+    const resolveSubagentBinding = (agentId: string) => {
+      const existing = subagentBindingsByAgentId.get(agentId);
+      if (existing) return existing;
+      const next = pendingSubagentCalls.shift();
+      if (!next) return null;
+      subagentBindingsByAgentId.set(agentId, next);
+      return next;
     };
 
     const cancelActiveToolPermissionRequests = () => {
@@ -1327,6 +1377,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       cwd,
       getSessionId: () => canonicalSessionId,
       emitEvent,
+      resolveSubagentBinding,
     });
 
     const abort = () => {
@@ -1406,6 +1457,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
         const eventIndex = typeof payload.event?.index === "number" ? payload.event.index : -1;
         if (eventType === "content_block_start" && payload.event?.content_block?.type === "tool_use" && eventIndex >= 0) {
           toolUseBlocks.set(eventIndex, {
+            id: payload.event.content_block.id,
             name: payload.event.content_block.name || "Tool",
             rawInput: payload.event.content_block.input,
             partialJson: "",
@@ -1431,12 +1483,16 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
           const currentTool = toolUseBlocks.get(eventIndex);
           if (currentTool) {
             const parsedInput = parseToolInput(currentTool.rawInput, currentTool.partialJson);
+            const toolCallId = currentTool.id || `tool-${eventIndex}-${Date.now()}`;
+            const subagentBinding = readSubagentCallBinding(currentTool.name, parsedInput, toolCallId);
+            if (subagentBinding) pendingSubagentCalls.push(subagentBinding);
             if (!emitEvent({
               type: "tool_call",
               toolName: currentTool.name,
               summary: summarizeToolCall(currentTool.name, parsedInput),
               input: parsedInput,
               index: eventIndex,
+              toolCallId,
             })) return;
             const filePath = isWritableFileTool(currentTool.name)
               ? collectWritableFilePath(parsedInput)

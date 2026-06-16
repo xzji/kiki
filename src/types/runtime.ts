@@ -130,6 +130,10 @@ export type CliProcessEvent = {
   input?: unknown;
   agentId?: string;
   eventKind?: "thinking" | "tool_call" | "tool_result" | "completed";
+  subagentCallId?: string;
+  subagentDescription?: string;
+  subagentType?: string;
+  subagentPrompt?: string;
 };
 
 export type CliProcessEventInput = Omit<CliProcessEvent, "id" | "createdAt"> & {
@@ -178,7 +182,7 @@ export type ClaudeStreamEvent =
   | { type: "assistant_trace"; text: string }
   | { type: "delta"; text: string }
   | { type: "message"; content: string }
-  | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number }
+  | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number; toolCallId?: string }
   | {
       type: "subagent_event";
       agentId: string;
@@ -188,6 +192,9 @@ export type ClaudeStreamEvent =
       content?: string;
       input?: unknown;
       createdAt?: string;
+      subagentCallId?: string;
+      subagentDescription?: string;
+      subagentType?: string;
     }
   | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
