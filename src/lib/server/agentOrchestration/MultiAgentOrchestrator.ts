@@ -3,6 +3,7 @@ import { appendGuardedEvent } from "@/lib/server/agentRuntime/agentExecutor";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
+import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
 import type {
   AgentHandoff,
   AgentReviewDecision,
@@ -10,6 +11,7 @@ import type {
   AgentRoleRun,
   AgentRunPlan,
 } from "@/types/agentOrchestration";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -22,6 +24,40 @@ import { rolesForStrategy, selectAgentCollaborationStrategy, type AgentStrategyI
 type AppendTrajectory = (
   step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string },
 ) => ExecutionTrajectoryStep[];
+
+function createRoleToolPermissionBlocker(input: MultiAgentOrchestratorInput, request: {
+  requestId: string;
+  runtimeEnvId: string;
+  toolName: string;
+  suggestedRule: string;
+}): ExecutionBlocker {
+  const now = new Date().toISOString();
+  return {
+    kind: "tool_permission",
+    executionId: input.requestId,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    blockedStepIndex: Math.max((input.initialTrajectory?.length ?? 1) - 1, 0),
+    resumeToken: request.requestId,
+    interactionRequirement: {
+      type: "confirm",
+      timing: "during_execution",
+      reason: `Claude 请求使用工具 ${request.toolName}，需要用户授权后继续执行。`,
+      question: `是否允许工具 ${request.toolName} 运行？`,
+      suggestedActions: ["本次允许", "本会话内始终允许", "始终允许并写入 Runtime 策略", "拒绝"],
+      shouldNotifyUser: true,
+    },
+    resumeStrategy: "rerun_with_feedback",
+    status: "waiting",
+    createdAt: now,
+    toolPermission: {
+      requestId: request.requestId,
+      runtimeEnvId: request.runtimeEnvId,
+      toolName: request.toolName,
+      suggestedRule: request.suggestedRule,
+    },
+  };
+}
 
 export type MultiAgentOrchestratorInput = AgentStrategyInput & {
   requestId: string;
@@ -86,7 +122,7 @@ function parseJsonObject(rawOutput: string) {
   }
 }
 
-function appendRoleEvent(input: MultiAgentOrchestratorInput, type: "llm.request" | "llm.response" | "tool_call" | "decision" | "error", payload: Record<string, unknown>) {
+function appendRoleEvent(input: MultiAgentOrchestratorInput, type: "llm.request" | "llm.response" | "tool_call" | "decision" | "error" | "awaiting_user" | "log", payload: Record<string, unknown>) {
   if (!input.agentRunId) return;
   appendGuardedEvent({
     agentRunId: input.agentRunId,
@@ -172,8 +208,13 @@ async function runRole(input: MultiAgentOrchestratorInput & {
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: rolePermission(input.role, input.runtimeEnv),
       runtimeKind: input.runtimeEnv.runtimeKind,
+      runtimeEnvId: input.runtimeEnv.id,
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
+      conversationId: input.goal.conversationId,
+      taskInstanceId: input.instance.id,
+      taskId: input.task.id,
+      agentRunId: input.agentRunId,
       resumeSessionId: undefined,
       signal: input.signal,
       onSpawn: input.onSpawn,
@@ -197,6 +238,41 @@ async function runRole(input: MultiAgentOrchestratorInput & {
               summary: event.summary,
             },
             agentRole: input.role,
+          });
+        }
+        if (event.type === "tool_permission_request") {
+          updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
+            status: "awaiting_user",
+            blocker: createRoleToolPermissionBlocker(input, event),
+          });
+          appendRoleEvent(input, "awaiting_user", {
+            role: input.role,
+            kind: "tool_permission.requested",
+            requestId: event.requestId,
+            runtimeEnvId: event.runtimeEnvId,
+            toolName: event.toolName,
+            suggestedRule: event.suggestedRule,
+          });
+          input.appendTrajectory({
+            type: "system",
+            status: "running",
+            title: `等待工具授权：${event.toolName}`,
+            thought: `多角色 ${input.role} 需要用户授权工具规则 ${event.suggestedRule}。`,
+            agentRole: input.role,
+          });
+        }
+        if (event.type === "tool_permission_resolved") {
+          updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
+            status: "running",
+            blocker: null,
+          });
+          appendRoleEvent(input, "log", {
+            role: input.role,
+            kind: "tool_permission.resolved",
+            requestId: event.requestId,
+            decision: event.decision,
+            scope: event.scope,
+            rule: event.rule,
           });
         }
         if (event.type === "error") {

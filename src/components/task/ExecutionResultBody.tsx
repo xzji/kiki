@@ -221,27 +221,31 @@ export function ExecutionResultBody(props: {
   );
   const timelineBlock = (
     <section>
-      <div className="mb-4">
-        <div className="text-[15px] font-bold text-[#1F2328]">执行过程</div>
-        <div className="mt-0.5 text-[12px] text-[#8C9198]">
-          {agentRunPlan?.mode === "role_collaboration"
-            ? `${agentRunPlan.strategy} · 多 Agent 协同`
-            : "single_agent · KiKi"}
-        </div>
-      </div>
-      <TaskExecutionTimeline
-        steps={applyWaitingReasonToSteps(
-          trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
-          instance.execution?.waitingReason,
-        )}
-        agentRunPlan={agentRunPlan}
-        interactionTurn={interactionTurn}
-        userSubmissionText={userSubmissionText}
-        interactionTime={interactionTime}
-      />
+      <details className="group/process">
+        <summary className="mb-4 flex cursor-pointer list-none items-center justify-between gap-3 marker:hidden select-none [&::-webkit-details-marker]:hidden">
+          <div>
+            <div className="text-[15px] font-bold text-[#1F2328]">执行过程</div>
+            <div className="mt-0.5 text-[12px] text-[#8C9198]">
+              {agentRunPlan?.mode === "role_collaboration"
+                ? `${agentRunPlan.strategy} · 多 Agent 协同`
+                : "single_agent · KiKi"}
+            </div>
+          </div>
+          <span className="inline-block h-[8px] w-[8px] -rotate-45 border-r-2 border-b-2 border-[#8C9198] transition group-open/process:rotate-45" />
+        </summary>
+        <TaskExecutionTimeline
+          steps={applyWaitingReasonToSteps(
+            trajectoryToTimeline(instance.trajectory) ?? instance.timeline ?? [],
+            instance.execution?.waitingReason,
+          )}
+          agentRunPlan={agentRunPlan}
+          interactionTurn={interactionTurn}
+          userSubmissionText={userSubmissionText}
+          interactionTime={interactionTime}
+        />
+      </details>
     </section>
   );
-  const resultFirst = instance.status === "completed" || instance.status === "awaiting_user" || optionalFeedbackResult;
 
   return (
     <div className="space-y-6">
@@ -318,8 +322,8 @@ export function ExecutionResultBody(props: {
           {instance.execution?.lastUpdatedAt ? `最近更新：${new Date(instance.execution.lastUpdatedAt).toLocaleString("zh-CN")}` : "等待调度器同步执行状态"}
         </div>
       </div>
-      {resultFirst ? resultBlock : timelineBlock}
-      {resultFirst ? timelineBlock : resultBlock}
+      {timelineBlock}
+      {resultBlock}
     </div>
   );
 }

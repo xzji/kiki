@@ -19,6 +19,7 @@ import type {
   RuntimeFilePolicy,
   RuntimePermissionMode,
 } from "@/types/runtime";
+import type { ToolPermissionDecision } from "@/lib/server/toolPermission/types";
 import type { KikiSkillsInstallPayload, KikiSkillsStatusPayload } from "@/lib/kikiSkills/types";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
@@ -64,7 +65,13 @@ export type RemoteStreamPromptPayload = {
   cliPath: string;
   permissionMode: RuntimePermissionMode;
   runtimeKind?: LocalRuntimeKind;
+  runtimeEnvId?: string;
   conversationId?: string;
+  taskInstanceId?: string;
+  taskId?: string;
+  agentRunId?: string;
+  assistantMessageId?: string;
+  assistantCreatedAt?: string;
   resumeSessionId?: string;
   contextPack?: string;
   collectFileArtifacts?: boolean;
@@ -98,6 +105,7 @@ export type MachineCommand =
   | { type: "run_prompt_json"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "run_prompt_text"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "stream_prompt"; sessionId: string; payload: RemoteStreamPromptPayload }
+  | { type: "tool_permission_decision"; sessionId: string; decision: ToolPermissionDecision }
   | { type: "cancel"; requestId: string; jobId: string };
 
 /** goal task 执行终态：本机执行完后回传，云端据此落 completed/failed/awaiting_user */
@@ -670,6 +678,13 @@ export function getTunnelHub() {
         type: "stream_prompt",
         sessionId: input.sessionId,
         payload: input.payload,
+      });
+    },
+    sendToolPermissionDecision(input: { machineId: string; sessionId: string; decision: ToolPermissionDecision }) {
+      enqueueCommand(input.machineId, {
+        type: "tool_permission_decision",
+        sessionId: input.sessionId,
+        decision: input.decision,
       });
     },
   };

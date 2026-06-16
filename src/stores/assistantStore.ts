@@ -12,6 +12,8 @@ import type { ArtifactRef } from "@/types/artifact";
 import type { Conversation, ConversationMessage, GoalInfoCollection } from "@/types/kiki";
 import { SUPPORTED_RUNTIME_KINDS, type ClaudeStreamEvent, type RuntimeEnvironment } from "@/types/runtime";
 
+type ToolPermissionRequestEvent = Extract<ClaudeStreamEvent, { type: "tool_permission_request" }>;
+
 export type AssistantMessage = {
   id: string;
   role: "user" | "kiki";
@@ -34,6 +36,7 @@ type AssistantState = {
   error: string | null;
   runtimeSnapshot: RuntimeEnvironment | null;
   permissionRequest: string | null;
+  pendingToolPermissionRequest: ToolPermissionRequestEvent | null;
   abortController: AbortController | null;
   goalInfoCollection: (GoalInfoCollection & { conversationId: string }) | null;
   hydrate: () => void;
@@ -41,6 +44,7 @@ type AssistantState = {
   close: () => void;
   toggle: () => void;
   clearError: () => void;
+  clearToolPermissionRequest: () => void;
   stop: () => void;
   send: (
     content: string,
@@ -120,6 +124,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   error: null,
   runtimeSnapshot: null,
   permissionRequest: null,
+  pendingToolPermissionRequest: null,
   abortController: null,
   goalInfoCollection: null,
   hydrate: () => {
@@ -140,7 +145,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     writePersistedOpen(next);
   },
   clearError: () => {
-    set({ error: null, permissionRequest: null });
+    set({ error: null, permissionRequest: null, pendingToolPermissionRequest: null });
+  },
+  clearToolPermissionRequest: () => {
+    set({ pendingToolPermissionRequest: null });
   },
   stop: () => {
     get().abortController?.abort();
@@ -148,6 +156,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       isSending: false,
       abortController: null,
       permissionRequest: null,
+      pendingToolPermissionRequest: null,
       messages: get().messages.map((message) =>
         message.status === "streaming"
           ? {
@@ -187,6 +196,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
         abortController: controller,
         error: null,
         permissionRequest: null,
+        pendingToolPermissionRequest: null,
       });
 
       try {
@@ -426,6 +436,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       error: null,
       runtimeSnapshot: runtimeEnv,
       permissionRequest: null,
+      pendingToolPermissionRequest: null,
     });
 
     const handleEvent = (event: ClaudeStreamEvent) => {
@@ -464,6 +475,14 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
       if (event.type === "permission_request") {
         set({ permissionRequest: event.reason });
+        return;
+      }
+      if (event.type === "tool_permission_request") {
+        set({ pendingToolPermissionRequest: event });
+        return;
+      }
+      if (event.type === "tool_permission_resolved") {
+        set({ pendingToolPermissionRequest: null });
         return;
       }
       if (event.type === "error") {

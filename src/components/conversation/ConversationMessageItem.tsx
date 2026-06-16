@@ -6,8 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { InlineCliProcessTimeline } from "@/components/conversation/InlineCliProcessTimeline";
+import { MessageFeedbackControls } from "@/components/conversation/MessageFeedbackControls";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { ArtifactRenderer } from "@/components/execution/ArtifactRenderer";
+import { ToolPermissionRequestDialog } from "@/components/runtime/ToolPermissionRequestDialog";
 import { formatMessageTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
@@ -19,6 +21,31 @@ import type {
   Task,
   TaskExpectedResult,
 } from "@/types/kiki";
+import type { ClaudeStreamEvent } from "@/types/runtime";
+import type {
+  MessageFeedbackRating,
+  MessageFeedbackReasonCode,
+  MessageFeedbackRecord,
+} from "@/types/messageFeedback";
+
+type ToolPermissionRequestEvent = Extract<ClaudeStreamEvent, { type: "tool_permission_request" }>;
+
+function getToolPermissionRequestFromEvent(input: unknown): ToolPermissionRequestEvent | null {
+  if (!input || typeof input !== "object") return null;
+  const candidate = (input as { toolPermissionRequest?: unknown }).toolPermissionRequest;
+  if (!candidate || typeof candidate !== "object") return null;
+  const request = candidate as Partial<ToolPermissionRequestEvent>;
+  if (
+    request.type !== "tool_permission_request" ||
+    typeof request.requestId !== "string" ||
+    typeof request.runtimeEnvId !== "string" ||
+    typeof request.toolName !== "string" ||
+    typeof request.suggestedRule !== "string"
+  ) {
+    return null;
+  }
+  return request as ToolPermissionRequestEvent;
+}
 
 /**
  * 单条对话消息。
@@ -34,6 +61,9 @@ export function ConversationMessageItem({
   onOpenTaskInfo,
   onOpenGoalPlan,
   onTaskOptionalFeedback,
+  feedback,
+  shareQuestion,
+  onSubmitFeedback,
   onGovernanceConfirm,
   onGovernanceCancel,
   onDelete,
@@ -46,6 +76,18 @@ export function ConversationMessageItem({
   onTaskOptionalFeedback?: (
     message: ConversationMessage,
     feedback: string,
+  ) => Promise<void> | void;
+  feedback?: MessageFeedbackRecord | null;
+  shareQuestion?: string;
+  onSubmitFeedback?: (
+    message: ConversationMessage,
+    input:
+      | {
+          rating: MessageFeedbackRating;
+          reasonCodes?: MessageFeedbackReasonCode[];
+          comment?: string;
+        }
+      | null,
   ) => Promise<void> | void;
   onGovernanceConfirm?: (message: ConversationMessage) => Promise<void> | void;
   onGovernanceCancel?: (message: ConversationMessage) => void;
@@ -105,6 +147,12 @@ export function ConversationMessageItem({
   }, [goals, message]);
 
   const timeLabel = formatMessageTime(message.createdAt);
+  const toolPermissionRequests =
+    message.kind === "text" || message.kind === "goal_plan_card"
+      ? (message.cliProcess?.events
+          .map((event) => getToolPermissionRequestFromEvent(event.input))
+          .filter((request): request is ToolPermissionRequestEvent => Boolean(request)) ?? [])
+      : [];
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -157,7 +205,7 @@ export function ConversationMessageItem({
                 content={message.quotedMessage.content}
               />
             ) : null}
-            <div className="rounded-2xl rounded-br-sm bg-[#111] px-4 py-2.5 text-sm leading-6 text-white">
+            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[#111] px-4 py-2.5 text-sm leading-6 text-white">
               {message.content}
             </div>
           </div>
@@ -171,6 +219,16 @@ export function ConversationMessageItem({
 
   const isKikiLoading =
     message.status === "streaming" && message.content.trim().length === 0;
+  const canShowMessageFeedback =
+    message.kind === "text" &&
+    message.status !== "streaming" &&
+    message.status !== "error" &&
+    message.content.trim().length > 0 &&
+    Boolean(onSubmitFeedback);
+  const cliProcess =
+    (message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess?.events.length
+      ? message.cliProcess
+      : null;
 
   return (
     <div className="group relative flex items-start gap-3">
@@ -207,6 +265,22 @@ export function ConversationMessageItem({
             ) : null}
           </div>
         </div>
+
+        {cliProcess ? <InlineCliProcessTimeline process={cliProcess} /> : null}
+
+        {toolPermissionRequests.length > 0 ? (
+          <div className="mb-3 grid max-w-3xl gap-2">
+            {toolPermissionRequests.map((request) => (
+              <ToolPermissionRequestDialog
+                key={request.requestId}
+                request={request}
+                variant="inline"
+                onResolved={() => undefined}
+              />
+            ))}
+          </div>
+        ) : null}
+
         <div className="max-w-3xl">
           {isKikiLoading ? (
             <LoadingDots />
@@ -220,8 +294,14 @@ export function ConversationMessageItem({
           </div>
         ) : null}
 
-        {(message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess?.events.length ? (
-          <InlineCliProcessTimeline process={message.cliProcess} />
+        {canShowMessageFeedback ? (
+          <MessageFeedbackControls
+            feedback={feedback}
+            content={message.content}
+            question={shareQuestion}
+            onSubmit={(input) => onSubmitFeedback?.(message, input)}
+            onClear={() => onSubmitFeedback?.(message, null)}
+          />
         ) : null}
 
         {sagaRequestId && (message.status === "streaming" || saga) ? (
@@ -1140,6 +1220,8 @@ function MessageMenu({
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const openTaskInfoAction = canOpenTaskInfo ? onOpenTaskInfo : undefined;
+
   return (
     <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328] shadow-sm">
       <button
@@ -1152,22 +1234,18 @@ function MessageMenu({
       >
         引用
       </button>
-      <button
-        type="button"
-        disabled={!canOpenTaskInfo}
-        onClick={() => {
-          if (!canOpenTaskInfo || !onOpenTaskInfo) return;
-          onOpenTaskInfo();
-          onClose();
-        }}
-        className={cn(
-          "block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]",
-          !canOpenTaskInfo &&
-            "cursor-not-allowed text-[#B0B6BE] hover:bg-white",
-        )}
-      >
-        查看任务信息
-      </button>
+      {openTaskInfoAction ? (
+        <button
+          type="button"
+          onClick={() => {
+            openTaskInfoAction();
+            onClose();
+          }}
+          className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+        >
+          查看任务信息
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => {

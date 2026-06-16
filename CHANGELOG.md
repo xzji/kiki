@@ -20,6 +20,10 @@
 - 任务就绪判定继续收紧：规划期 `requiredUserInputs` 会优先驱动 readiness，未知字段只接受字段名显式提交或单字段反馈，避免 options 子串跨字段误命中。
 - 治理回顾 UI 增加历史弹层：Topic / Thread 页面可查看最近治理 tick、失败次数、静默次数和派发/更新/取消动作摘要。
 - 将 `@kiki_agent/daemon` 版本提升到 `0.2.17`，配合本轮 runtime daemon API 与治理历史能力更新。
+- 会话消息体验继续增强：Kiki 回复支持好评/差评、差评原因与备注提交，消息反馈会持久化到 `message_feedbacks` 表，并可在会话重新加载后恢复。
+- 消息操作区新增复制与分享能力：支持将问答渲染成分享卡片图片并复制到剪贴板，新增 `html-to-image` 作为导出依赖。
+- Runtime 工具权限从静态规则扩展为交互式确认：高风险工具调用可生成授权请求，用户可选择单次、会话或 Runtime 级授权，也可拒绝并触发任务恢复或替代路径。
+- 任务执行链路透传工具权限状态：Claude / Pi / remote daemon / tunnel 会携带工具权限请求、授权结果和审计事件，前端 Runtime 设置页增加工具规则管理入口。
 
 ### Added
 - 新增账户资料与密码修改接口，以及对应的服务端鉴权/校验逻辑：昵称限制 30 字以内，密码要求至少 8 位且同时包含字母和数字，并校验当前密码与新旧密码重复场景。
@@ -27,6 +31,7 @@
 - 新增 blocked task / notification / scheduler 相关规格测试，覆盖 `contextResolver`、`goalSideEffects`、`goalRuntimeService`、`sagaDraftAdapter` 等多轮恢复与通知派发边界。
 - 新增治理历史 API `/api/runtime/governance-history`，从 agent runtime events 中按 topic/thread 查询治理 tick 记录。
 - 新增 `EVALUATION_PLAN.md`，沉淀 KiKi 的节点级评测方案、黄金集/回放集/LLM-as-judge 分层路线与反馈闭环设计。
+- 新增消息反馈 API `/api/message-feedback`、工具权限决策 API `/api/tool-permissions/[requestId]/respond`、`MessageFeedbackControls` 和 `ToolPermissionRequestDialog`。
 
 ## 2026-06-12
 

@@ -19,11 +19,20 @@ import { normalizeWorkingDirectory, resolveCliPath } from "@/lib/server/runtimeP
 import { createClaudeTrace } from "@/lib/server/claude/traceStore";
 import {
   describeRuntimeToolPolicy,
+  RUNTIME_MANAGED_TOOLS,
   resolveRuntimeToolPolicy,
   type ToolChannelPolicy,
 } from "@/lib/runtime/toolPolicy";
 import type { ArtifactRef } from "@/types/artifact";
 import { diffWorkspaceFiles, emitRuntimeFileEvents, snapshotWorkspaceFiles } from "@/lib/server/runtime/fileArtifactEmit";
+import { matchToolPermission, suggestToolPermissionRule } from "@/lib/server/toolPermission/matchToolPermission";
+import { getSessionToolPermissionRules, getToolPermissionSessionKey } from "@/lib/server/toolPermission/sessionToolPermissionStore";
+import { appendToolPermissionAuditLog } from "@/lib/server/toolPermission/toolPermissionAuditLog";
+import {
+  detachToolPermissionRequest,
+  createToolPermissionRequest,
+  waitForToolPermissionDecision,
+} from "@/lib/server/toolPermission/toolPermissionBroker";
 
 /**
  * 强制回收 Claude CLI 子进程及其衍生的整个进程组。
@@ -73,6 +82,16 @@ export function killChildTree(child: ChildProcess) {
 export type ClaudeCliPayload = {
   type?: string;
   subtype?: string;
+  request_id?: string;
+  request?: {
+    subtype?: string;
+    tool_name?: string;
+    display_name?: string;
+    input?: unknown;
+    description?: string;
+    permission_suggestions?: unknown;
+    tool_use_id?: string;
+  };
   status?: string;
   session_id?: string;
   result?: string;
@@ -125,7 +144,11 @@ export type ClaudeStreamOptions = {
   quotedMessage?: QuotedConversationMessageContext | null;
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
+  runtimeEnvId?: string;
   conversationId?: string;
+  taskInstanceId?: string;
+  taskId?: string;
+  agentRunId?: string;
   assistantMessageId?: string;
   assistantCreatedAt?: string;
   collectFileArtifacts?: boolean;
@@ -158,6 +181,24 @@ export type RuntimeStreamEvent =
   | { type: "file"; filename: string; mime: string; size: number; contentBase64: string; summary?: string }
   | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
+  | {
+      type: "tool_permission_request";
+      requestId: string;
+      runtimeEnvId: string;
+      toolName: string;
+      suggestedRule: string;
+      toolInput?: unknown;
+      conversationId?: string;
+      taskInstanceId?: string;
+      runId?: string;
+    }
+  | {
+      type: "tool_permission_resolved";
+      requestId: string;
+      decision: "allow" | "deny";
+      scope: "once" | "conversation" | "runtime" | "deny";
+      rule?: string;
+    }
   | { type: "error"; message: string }
   | { type: "done" };
 
@@ -906,6 +947,69 @@ function summarizeToolCall(toolName: string, input: unknown) {
   return query ? `调用 ${toolName}：${truncateMiddle(query, 60)}` : `调用 ${toolName}`;
 }
 
+type ClaudeControlResponse =
+  | {
+      type: "control_response";
+      response: {
+        subtype: "success";
+        request_id: string;
+        response: {
+          behavior: "allow";
+          updatedInput?: unknown;
+        };
+      };
+    }
+  | {
+      type: "control_response";
+      response: {
+        subtype: "success";
+        request_id: string;
+        response: {
+          behavior: "deny";
+          message: string;
+        };
+      };
+    };
+
+function writeClaudeStreamJson(child: ChildProcess, payload: unknown) {
+  const stdin = child.stdin;
+  if (!stdin || !stdin.writable || stdin.destroyed) return false;
+  stdin.write(`${JSON.stringify(payload)}\n`);
+  return true;
+}
+
+function buildAllowedOnlyToolArgs(policy: { allowedTools: string[] }) {
+  return buildToolArgs({ allowedTools: policy.allowedTools, disallowedTools: [] });
+}
+
+function createAllowControlResponse(requestId: string, updatedInput: unknown): ClaudeControlResponse {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "success",
+      request_id: requestId,
+      response: {
+        behavior: "allow",
+        updatedInput,
+      },
+    },
+  };
+}
+
+function createDenyControlResponse(requestId: string, message: string): ClaudeControlResponse {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "success",
+      request_id: requestId,
+      response: {
+        behavior: "deny",
+        message,
+      },
+    },
+  };
+}
+
 export async function streamPrompt(options: ClaudeStreamOptions) {
   if (shouldProxyCliToMachine()) {
     const { proxyStreamPrompt } = await import("@/lib/server/tunnel/remoteCliProxy");
@@ -945,9 +1049,13 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
   const args = [
     "-p",
     "--verbose",
+    "--input-format",
+    "stream-json",
     "--output-format",
     "stream-json",
     "--include-partial-messages",
+    "--permission-prompt-tool",
+    "stdio",
     "--permission-mode",
     mapPermissionMode(options.permissionMode),
   ];
@@ -957,9 +1065,9 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
   if (systemPrompt.trim()) {
     args.push("--append-system-prompt", systemPrompt);
   }
-  // Claude CLI 的 --allowedTools 在 Commander.js 中被定义为 variadic（<tools...>），
-  // 使用逗号分隔形式，并通过 stdin 传 prompt，规避参数吞食问题。
-  args.push(...buildToolArgs(resolvedToolPolicy));
+  // 只下发 allowedTools：未命中的工具要让 CLI 触发 can_use_tool control_request。
+  // 如果放进 disallowedTools，CLI 会直接隐藏工具，无法走运行时授权弹窗。
+  args.push(...buildAllowedOnlyToolArgs(resolvedToolPolicy));
   const trace = createClaudeTrace({
     cwd,
     cliPath,
@@ -985,9 +1093,23 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       options.onSpawn?.(child.pid);
     }
 
-    // 通过 stdin 传入 prompt，彻底规避 --allowedTools 的 variadic 参数吞食问题。
-    child.stdin.write(promptInput);
-    child.stdin.end();
+    writeClaudeStreamJson(child, {
+      type: "control_request",
+      request_id: "initialize_1",
+      request: {
+        subtype: "initialize",
+        hooks: {},
+      },
+    });
+    // stream-json 输入仍运行在 -p/--print 非交互模式下；stdin 必须保持打开，
+    // 以便收到 can_use_tool 后在同一 JSONL 通道回写 control_response。
+    writeClaudeStreamJson(child, {
+      type: "user",
+      message: {
+        role: "user",
+        content: promptInput,
+      },
+    });
 
     let stdoutBuffer = "";
     let stderrBuffer = "";
@@ -1000,6 +1122,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     let canonicalSessionId = options.resumeSessionId;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
     const pendingFilePaths = new Set<string>();
+    const activeToolPermissionRequestIds = new Set<string>();
 
     const resolveOnce = () => {
       if (settled) return;
@@ -1013,6 +1136,13 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       reject(error);
     };
 
+    const cancelActiveToolPermissionRequests = () => {
+      for (const requestId of Array.from(activeToolPermissionRequestIds)) {
+        detachToolPermissionRequest(requestId, "local_process_lost");
+      }
+      activeToolPermissionRequestIds.clear();
+    };
+
     const emitEvent = (event: RuntimeStreamEvent) => {
       if (callbackError) return false;
       try {
@@ -1024,6 +1154,157 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
         killChildTree(child);
         rejectOnce(error);
         return false;
+      }
+    };
+
+    const writeControlResponse = (response: ClaudeControlResponse) => {
+      const ok = writeClaudeStreamJson(child, response);
+      if (!ok) {
+        appendToolPermissionAuditLog({
+          requestId: response.response.request_id,
+          event: "tool_permission.control_write_failed",
+          runtimeEnvId: options.runtimeEnvId ?? "unknown",
+          runtimeKind: options.runtimeKind,
+          conversationId: options.conversationId,
+          taskInstanceId: options.taskInstanceId,
+          taskId: options.taskId,
+          agentRunId: options.agentRunId,
+          errorMessage: "Claude CLI stdin is not writable",
+        });
+      }
+      return ok;
+    };
+
+    const handleToolPermissionControlRequest = async (payload: ClaudeCliPayload) => {
+      const requestId = payload.request_id;
+      const request = payload.request;
+      const toolName = request?.tool_name || request?.display_name;
+      if (!requestId || request?.subtype !== "can_use_tool" || !toolName) return;
+
+      const runtimeEnvId = options.runtimeEnvId;
+      const toolInput = request.input;
+      if (!runtimeEnvId) {
+        writeControlResponse(createDenyControlResponse(requestId, "Runtime environment is missing for tool authorization."));
+        return;
+      }
+
+      const suggestedRule = suggestToolPermissionRule(toolName);
+      const sessionKey = getToolPermissionSessionKey({
+        conversationId: options.conversationId,
+        taskInstanceId: options.taskInstanceId,
+        runtimeEnvId,
+      });
+      const match = matchToolPermission({
+        runtimeEnv: { filePolicy: options.filePolicy },
+        toolName,
+        sessionRules: getSessionToolPermissionRules(sessionKey),
+      });
+
+      if (match.matched && match.decision === "deny") {
+        appendToolPermissionAuditLog({
+          requestId,
+          event: "tool_permission.auto_denied",
+          runtimeEnvId,
+          runtimeKind: options.runtimeKind,
+          conversationId: options.conversationId,
+          taskInstanceId: options.taskInstanceId,
+          taskId: options.taskId,
+          agentRunId: options.agentRunId,
+          toolName,
+          toolInput,
+          rule: match.rule?.pattern,
+          scope: "deny",
+          decision: "deny",
+          matchedBy: "runtime_rule",
+        });
+        writeControlResponse(createDenyControlResponse(requestId, "Tool call denied by runtime policy."));
+        return;
+      }
+
+      if (match.matched && match.decision === "allow") {
+        appendToolPermissionAuditLog({
+          requestId,
+          event: "tool_permission.auto_allowed",
+          runtimeEnvId,
+          runtimeKind: options.runtimeKind,
+          conversationId: options.conversationId,
+          taskInstanceId: options.taskInstanceId,
+          taskId: options.taskId,
+          agentRunId: options.agentRunId,
+          toolName,
+          toolInput,
+          rule: match.rule?.pattern,
+          scope: "runtime",
+          decision: "allow",
+          matchedBy: match.source === "session_rule" ? "session_rule" : "runtime_rule",
+        });
+        writeControlResponse(createAllowControlResponse(requestId, toolInput));
+        return;
+      }
+
+      const toolPermissionRequest = {
+        id: requestId,
+        runtimeEnvId,
+        runtimeKind: options.runtimeKind,
+        conversationId: options.conversationId,
+        taskInstanceId: options.taskInstanceId,
+        taskId: options.taskId,
+        agentRunId: options.agentRunId,
+        runId: options.assistantMessageId,
+        daemonSessionId: canonicalSessionId,
+        toolName,
+        toolInput,
+        suggestedRule,
+        createdAt: new Date().toISOString(),
+      };
+
+      createToolPermissionRequest(toolPermissionRequest);
+      activeToolPermissionRequestIds.add(requestId);
+      appendToolPermissionAuditLog({
+        requestId,
+        event: "tool_permission.requested",
+        runtimeEnvId,
+        runtimeKind: options.runtimeKind,
+        conversationId: options.conversationId,
+        taskInstanceId: options.taskInstanceId,
+        taskId: options.taskId,
+        agentRunId: options.agentRunId,
+        daemonSessionId: canonicalSessionId,
+        toolName,
+        toolInput,
+        rule: suggestedRule,
+      });
+      if (!emitEvent({
+        type: "tool_permission_request",
+        requestId,
+        runtimeEnvId,
+        toolName,
+        suggestedRule,
+        toolInput,
+        conversationId: options.conversationId,
+        taskInstanceId: options.taskInstanceId,
+        runId: options.assistantMessageId,
+      })) return;
+
+      try {
+        const decision = await waitForToolPermissionDecision(toolPermissionRequest);
+        if (decision.detached) return;
+        if (settled || aborted) return;
+        if (!emitEvent({
+          type: "tool_permission_resolved",
+          requestId,
+          decision: decision.decision,
+          scope: decision.scope,
+          rule: decision.rule,
+        })) return;
+
+        if (decision.decision === "allow") {
+          writeControlResponse(createAllowControlResponse(requestId, toolInput));
+        } else {
+          writeControlResponse(createDenyControlResponse(requestId, "Tool call denied by user."));
+        }
+      } finally {
+        activeToolPermissionRequestIds.delete(requestId);
       }
     };
 
@@ -1053,6 +1334,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       aborted = true;
       emittedFatalError = true;
       subagentPoller.stop();
+      cancelActiveToolPermissionRequests();
       killChildTree(child);
       trace?.finish("aborted", "Claude CLI 流式调用已中断");
       if (emitEvent({ type: "done" })) {
@@ -1079,6 +1361,33 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
         return;
       }
       trace?.appendParsedEvent(payload);
+
+      if (payload.type === "control_response") {
+        return;
+      }
+      if (payload.type === "control_request") {
+        void handleToolPermissionControlRequest(payload).catch((error) => {
+          const requestId = payload.request_id ?? "unknown";
+          const toolName = payload.request?.tool_name;
+          appendToolPermissionAuditLog({
+            requestId,
+            event: "tool_permission.control_write_failed",
+            runtimeEnvId: options.runtimeEnvId ?? "unknown",
+            runtimeKind: options.runtimeKind,
+            conversationId: options.conversationId,
+            taskInstanceId: options.taskInstanceId,
+            taskId: options.taskId,
+            agentRunId: options.agentRunId,
+            toolName,
+            toolInput: payload.request?.input,
+            errorMessage: error instanceof Error ? error.message : "tool permission control handler failed",
+          });
+          if (payload.request_id) {
+            writeControlResponse(createDenyControlResponse(payload.request_id, "Tool authorization failed."));
+          }
+        });
+        return;
+      }
 
       const sessionDecision = classifySessionFromInitPayload(payload, canonicalSessionId);
       if (sessionDecision.kind === "set") {
@@ -1163,14 +1472,21 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
 
       if (payload.type === "result") {
         terminalResultReceived = true;
+        if (child.stdin?.writable && !child.stdin.destroyed) {
+          child.stdin.end();
+        }
         if (payload.permission_denials?.length) {
           emittedFatalError = true;
           const tools = Array.from(
-            new Set(payload.permission_denials.map((item) => item.tool_name).filter(Boolean)),
-          ).join("、");
-          const message = tools
-            ? `当前运行环境未允许 ${tools}。请在设置里的「工具权限策略」中开启后重试。`
-            : "当前运行环境未允许本次工具调用。请在设置里的「工具权限策略」中开启后重试。";
+            new Set(payload.permission_denials.flatMap((item) => (item.tool_name ? [item.tool_name] : []))),
+          );
+          const toolText = tools.join("、");
+          const unknownTools = tools.filter((tool) => !RUNTIME_MANAGED_TOOLS.includes(tool));
+          const message = toolText
+            ? unknownTools.length > 0
+              ? `当前 Runtime 尚未授权工具 ${toolText}。其中 ${unknownTools.join("、")} 不属于固定权限分类，请在「工具权限策略」的额外允许工具中添加规则后重试。`
+              : `当前运行环境未允许 ${toolText}。请在设置里的「工具权限策略」中开启对应能力后重试。`
+            : "当前运行环境未允许本次工具调用。请在设置里的「工具权限策略」中开启对应能力，或添加额外允许工具规则后重试。";
           if (!emitEvent({ type: "permission_request", reason: message })) return;
           emitEvent({ type: "error", message });
           return;
@@ -1229,6 +1545,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     child.on("error", (error) => {
       emittedFatalError = true;
       subagentPoller.stop();
+      cancelActiveToolPermissionRequests();
       trace?.finish("failed", error.message || "Claude CLI 启动失败");
       if (!emitEvent({
         type: "error",
@@ -1248,6 +1565,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       if (stdoutBuffer.trim()) {
         consumeLine(stdoutBuffer.trim());
       }
+      cancelActiveToolPermissionRequests();
       if (callbackError) return;
 
       if (code !== 0 && !emittedFatalError) {

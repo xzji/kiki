@@ -364,11 +364,109 @@ function buildProgress(input: {
   } satisfies GoalServerProgress;
 }
 
-function buildResumeContext(input: { approved: boolean; feedback: string; accumulatedFields?: Record<string, string> }) {
+function truncateResumeText(value: string, max = 420) {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function blockTextForResume(block: ResultBlock) {
+  if (block.kind === "heading") return `heading: ${block.text}`;
+  if (block.kind === "paragraph") return `paragraph: ${block.text}`;
+  if (block.kind === "markdown") return `markdown: ${block.content}`;
+  if (block.kind === "list") return `list: ${block.items.slice(0, 4).join("；")}`;
+  if (block.kind === "key_value") return `key_value: ${block.entries.slice(0, 4).map((entry) => `${entry.label}=${typeof entry.value === "object" ? entry.value.text : String(entry.value)}`).join("；")}`;
+  if (block.kind === "comparison_table") return `comparison_table: ${block.columns.join(", ")} / ${block.rows.length} rows`;
+  if (block.kind === "decision") return `decision: ${block.question}`;
+  if (block.kind === "callout") return `callout(${block.tone}): ${block.text}`;
+  return "";
+}
+
+function buildTrajectoryResumeSummary(trajectory: ExecutionTrajectoryStep[]) {
+  const toolCalls = trajectory
+    .filter((step) => step.type === "tool_call" && step.toolCall)
+    .map((step) => {
+      const name = step.toolCall?.name ?? "tool";
+      const summary = step.toolCall?.summary || step.title;
+      return `- ${name}${summary ? `：${truncateResumeText(summary, 180)}` : ""}`;
+    })
+    .slice(-20);
+  const recentSteps = trajectory
+    .slice(-12)
+    .map((step) => `- [${step.status}] ${step.type}：${truncateResumeText(step.title || step.thought || "", 180)}`)
+    .filter((line) => line.trim() !== "- [] ：");
+  const assistantOutputs = trajectory
+    .filter((step) => step.type === "assistant" || step.type === "result")
+    .slice(-4)
+    .map((step) => `- ${truncateResumeText([step.title, step.thought].filter(Boolean).join("："), 260)}`);
+  return { toolCalls, recentSteps, assistantOutputs };
+}
+
+function buildResultResumeSummary(resultPayload: Record<string, unknown>) {
+  const lines: string[] = [];
+  const summary = typeof resultPayload.summary === "string" ? resultPayload.summary : undefined;
+  const finalMessage = typeof resultPayload.finalMessage === "string" ? resultPayload.finalMessage : undefined;
+  if (summary) lines.push(`已有结果摘要：${truncateResumeText(summary, 360)}`);
+  if (finalMessage) lines.push(`已有 final_message：${truncateResumeText(finalMessage, 420)}`);
+
+  const taskResult = isRecord(resultPayload.taskResult) ? resultPayload.taskResult : undefined;
+  const blocks = Array.isArray(taskResult?.blocks) ? (taskResult.blocks as ResultBlock[]) : [];
+  if (typeof taskResult?.title === "string") lines.push(`已有 task_result 标题：${truncateResumeText(taskResult.title, 180)}`);
+  if (typeof taskResult?.status === "string") lines.push(`已有 task_result 状态：${taskResult.status}`);
+  if (blocks.length) {
+    lines.push(
+      "已有 task_result blocks 摘要：",
+      ...blocks.slice(0, 8).map((block, index) => `${index + 1}. ${truncateResumeText(blockTextForResume(block), 260)}`),
+    );
+  }
+
+  const artifactRefs = Array.isArray(taskResult?.artifactRefs) ? taskResult.artifactRefs : [];
+  if (artifactRefs.length) {
+    lines.push(
+      "已有产物：",
+      ...artifactRefs.slice(0, 8).map((ref, index) => {
+        const item = isRecord(ref) ? ref : {};
+        const label = typeof item.label === "string" ? item.label : typeof item.filename === "string" ? item.filename : "artifact";
+        const kind = typeof item.kind === "string" ? item.kind : "unknown";
+        return `${index + 1}. ${label}（${kind}）`;
+      }),
+    );
+  }
+  return lines;
+}
+
+function buildBlockerResumeSummary(blocker?: ExecutionBlocker | null) {
+  if (!blocker) return [];
+  const lines = [
+    `阻塞类型：${blocker.kind ?? "interaction"}`,
+    `阻塞原因：${truncateResumeText(blocker.interactionRequirement.reason || "", 420)}`,
+    `恢复策略：${blocker.resumeStrategy}`,
+  ];
+  if (blocker.toolPermission) {
+    lines.push(
+      `工具授权阻塞：${blocker.toolPermission.toolName}`,
+      `建议授权规则：${blocker.toolPermission.suggestedRule}`,
+      `权限请求 ID：${blocker.toolPermission.requestId}`,
+    );
+  }
+  return lines;
+}
+
+function buildResumeContext(input: {
+  approved: boolean;
+  feedback: string;
+  accumulatedFields?: Record<string, string>;
+  blocker?: ExecutionBlocker | null;
+  trajectory?: ExecutionTrajectoryStep[];
+  resultPayload?: Record<string, unknown>;
+}) {
   const lines = [
     `用户对上一次阻塞点的决定：${input.approved ? "确认继续" : "拒绝当前方案/要求修改"}`,
     `用户反馈：${input.feedback}`,
   ];
+  const blockerSummary = buildBlockerResumeSummary(input.blocker);
+  if (blockerSummary.length) {
+    lines.push("", "阻塞点信息：", ...blockerSummary.map((line) => `- ${line}`));
+  }
   const fieldEntries = Object.entries(input.accumulatedFields ?? {}).filter(([, value]) => value && value.trim());
   if (fieldEntries.length) {
     // 把迄今为止用户提供的所有字段一并带入，避免多轮分字段回答或“直接点继续”时丢失历史字段。
@@ -377,13 +475,32 @@ function buildResumeContext(input: { approved: boolean; feedback: string; accumu
       ...fieldEntries.map(([label, value]) => `- ${label}：${value}`),
     );
   }
+  const trajectorySummary = buildTrajectoryResumeSummary(input.trajectory ?? []);
+  if (trajectorySummary.recentSteps.length) {
+    lines.push("", "前序执行轨迹摘要（按已执行事实恢复，不要从头重做）：", ...trajectorySummary.recentSteps);
+  }
+  if (trajectorySummary.toolCalls.length) {
+    lines.push("", "前序已经调用过的工具（默认不要重复调用）：", ...trajectorySummary.toolCalls);
+  }
+  if (trajectorySummary.assistantOutputs.length) {
+    lines.push("", "前序 Agent 已产出的关键内容：", ...trajectorySummary.assistantOutputs);
+  }
+  const resultSummary = input.resultPayload ? buildResultResumeSummary(input.resultPayload) : [];
+  if (resultSummary.length) {
+    lines.push("", "已有产出/结果摘要（必须复用，不要丢弃）：", ...resultSummary);
+  }
   if (input.approved) {
     lines.push(
       "用户已确认上一轮候选/草案，请不要再次要求用户确认同一内容。",
+      "请从阻塞点之后继续执行，复用前序轨迹和已有产出，只补齐缺口。",
+      "除非前序信息不足，否则不要重复已经完成的工具调用；如果必须重复调用，必须说明原因。",
       "请基于已确认内容生成最终交付物，以完整 task_result.blocks 输出可直接展示给用户的最终方案卡片。",
     );
   } else {
-    lines.push("请根据用户反馈修订上一轮候选/草案，并输出更新后的完整方案。");
+    lines.push(
+      "请根据用户反馈修订上一轮候选/草案，并输出更新后的完整方案。",
+      "仍需复用前序已经完成的有效轨迹和产出，不要无差别从头执行。",
+    );
   }
   return lines.join("\n");
 }
@@ -663,6 +780,9 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       approved: body.approved,
       feedback,
       accumulatedFields: mapToRecord(feedbackFields),
+      blocker: job.blocker,
+      trajectory: nextTrajectory,
+      resultPayload,
     }),
     progress: nextProgress,
     trajectory: nextTrajectory,

@@ -34,6 +34,7 @@ import type {
   RuntimeFilePolicyMode,
   RuntimePermissionMode,
   RuntimeToolCapability,
+  RuntimeToolPermissionRule,
 } from "@/types/runtime";
 
 import { ConnectMachineDialog } from "./ConnectMachineDialog";
@@ -83,19 +84,19 @@ const toolCapabilityOptions: Array<{
     key: "fileWrite",
     label: "写入文件",
     description: "允许在当前调用 workspace 内创建或修改文件。",
-    tools: ["Write", "Edit", "NotebookEdit"],
+    tools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
   },
   {
     key: "shell",
     label: "终端命令",
     description: "允许在当前调用 workspace 内执行终端命令。",
-    tools: ["Bash"],
+    tools: ["Bash", "BashOutput", "KillShell"],
   },
   {
     key: "subagent",
     label: "子代理",
     description: "允许派发子代理或调用已安装 skill 处理复杂任务。",
-    tools: ["Task", "TaskOutput", "TaskStop", "Skill"],
+    tools: ["Task", "TaskOutput", "TaskStop", "Skill", "SlashCommand"],
   },
   {
     key: "schedule",
@@ -346,6 +347,26 @@ export function RuntimeEnvironmentPanel() {
       handleRuntimeCommandError(error, "Runtime 文件权限更新失败");
     }
   }, [handleRuntimeCommandError, setFilePolicyCustomCapability]);
+
+  const handleAllowedToolRulesChange = useCallback(async (
+    environment: RuntimeEnvironment,
+    allowedToolRules: RuntimeToolPermissionRule[],
+  ) => {
+    const filePolicy = {
+      ...normalizeRuntimeFilePolicy(environment.filePolicy),
+      allowedToolRules,
+    };
+    try {
+      const result = await updateEnvironmentCommand({
+        id: environment.id,
+        patch: { filePolicy },
+      });
+      useRuntimeEnvStore.getState().setFilePolicy(environment.id, filePolicy);
+      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+    } catch (error) {
+      handleRuntimeCommandError(error, "Runtime 工具规则更新失败");
+    }
+  }, [handleRuntimeCommandError]);
 
   useEffect(() => {
     const localEnvironments = environments.filter((item) => item.type === "local");
@@ -811,6 +832,7 @@ export function RuntimeEnvironmentPanel() {
                 onCapabilityChange={(capability, enabled) =>
                   void handleFilePolicyCapabilityChange(environment, capability, enabled)
                 }
+                onAllowedToolRulesChange={(rules) => void handleAllowedToolRulesChange(environment, rules)}
               />
             ) : null}
 
@@ -1134,12 +1156,57 @@ function ToolPolicySection({
   environment,
   onModeChange,
   onCapabilityChange,
+  onAllowedToolRulesChange,
 }: {
   environment: RuntimeEnvironment;
   onModeChange: (mode: RuntimeFilePolicyMode) => void;
   onCapabilityChange: (capability: RuntimeToolCapability, enabled: boolean) => void;
+  onAllowedToolRulesChange: (rules: RuntimeToolPermissionRule[]) => void;
 }) {
   const filePolicy = normalizeRuntimeFilePolicy(environment.filePolicy);
+  const [newRulePattern, setNewRulePattern] = useState("");
+  const allowedToolRules = filePolicy.allowedToolRules ?? [];
+
+  const addAllowedRule = () => {
+    const pattern = newRulePattern.trim();
+    if (!pattern) return;
+    if (allowedToolRules.some((rule) => rule.pattern === pattern)) {
+      setNewRulePattern("");
+      return;
+    }
+    const now = new Date().toISOString();
+    onAllowedToolRulesChange([
+      ...allowedToolRules,
+      {
+        id: `tool-rule-${Date.now().toString(36)}`,
+        pattern,
+        label: pattern,
+        source: "user",
+        createdAt: now,
+      },
+    ]);
+    setNewRulePattern("");
+  };
+
+  const editAllowedRule = (rule: RuntimeToolPermissionRule) => {
+    const nextPattern = window.prompt("修改工具规则", rule.pattern)?.trim();
+    if (!nextPattern || nextPattern === rule.pattern) return;
+    const nextRules = allowedToolRules.map((item) =>
+      item.id === rule.id
+        ? {
+            ...item,
+            pattern: nextPattern,
+            label: item.label === item.pattern ? nextPattern : item.label,
+            updatedAt: new Date().toISOString(),
+          }
+        : item,
+    );
+    onAllowedToolRulesChange(nextRules);
+  };
+
+  const removeAllowedRule = (rule: RuntimeToolPermissionRule) => {
+    onAllowedToolRulesChange(allowedToolRules.filter((item) => item.id !== rule.id));
+  };
 
   return (
     <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
@@ -1219,6 +1286,62 @@ function ToolPolicySection({
           })}
         </div>
       ) : null}
+      <div className="mt-4 border-t border-[#E5E7EB] pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[12px] font-medium text-[#111]">额外允许的工具</div>
+            <div className="mt-1 text-[11px] leading-5 text-[#6B7280]">
+              运行时授权后沉淀的工具规则会显示在这里，可删除或修改。
+            </div>
+          </div>
+          <div className="flex min-w-[260px] flex-1 justify-end gap-2">
+            <input
+              value={newRulePattern}
+              onChange={(event) => setNewRulePattern(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") addAllowedRule();
+              }}
+              placeholder="例如 Workflow 或 mcp__server__*"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 font-mono text-[12px] text-[#111] outline-none focus:border-[#111]"
+            />
+            <button
+              type="button"
+              onClick={addAllowedRule}
+              className="h-8 rounded-lg border border-[#111] bg-white px-3 text-[12px] text-[#111] hover:bg-[#F8F9FB]"
+            >
+              添加
+            </button>
+          </div>
+        </div>
+        {allowedToolRules.length > 0 ? (
+          <div className="mt-2 grid gap-2">
+            {allowedToolRules.map((rule) => (
+              <div
+                key={rule.id}
+                className="flex items-center gap-2 rounded-xl border border-[#E5E7EB] bg-white px-3 py-2"
+              >
+                <span className="min-w-0 flex-1 break-all font-mono text-[12px] text-[#111]">{rule.pattern}</span>
+                <button
+                  type="button"
+                  onClick={() => editAllowedRule(rule)}
+                  className="rounded-lg border border-[#E5E7EB] px-2 py-1 text-[11px] text-[#475467] hover:bg-[#F8F9FB]"
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeAllowedRule(rule)}
+                  className="rounded-lg border border-[#FECACA] px-2 py-1 text-[11px] text-[#B42318] hover:bg-[#FEF2F2]"
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-[#9CA3AF]">暂无额外允许工具。</div>
+        )}
+      </div>
     </div>
   );
 }

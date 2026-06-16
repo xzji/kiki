@@ -4,6 +4,7 @@ import {
   type RuntimeFilePolicy,
   type RuntimeFilePolicyMode,
   type RuntimePermissionMode,
+  type RuntimeToolPermissionRule,
   type RuntimeToolCapability,
 } from "@/types/runtime";
 
@@ -25,9 +26,9 @@ export type ResolvedToolPolicy = {
 export const TOOL_CAPABILITY_MAP: Record<RuntimeToolCapability, string[]> = {
   web: ["WebFetch", "WebSearch"],
   fileRead: ["Read", "Glob", "Grep"],
-  fileWrite: ["Write", "Edit", "NotebookEdit"],
-  shell: ["Bash"],
-  subagent: ["Task", "TaskOutput", "TaskStop", "Skill"],
+  fileWrite: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+  shell: ["Bash", "BashOutput", "KillShell", "KillBash"],
+  subagent: ["Task", "TaskOutput", "TaskStop", "Skill", "SlashCommand"],
   schedule: ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup"],
   planMode: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree"],
 };
@@ -35,7 +36,7 @@ export const TOOL_CAPABILITY_MAP: Record<RuntimeToolCapability, string[]> = {
 export const ALWAYS_ALLOWED_TOOLS = ["AskUserQuestion", "TodoWrite"];
 
 export const RUNTIME_MANAGED_TOOLS = Array.from(
-  new Set([...Object.values(TOOL_CAPABILITY_MAP).flat(), ...ALWAYS_ALLOWED_TOOLS, "MultiEdit"]),
+  new Set([...Object.values(TOOL_CAPABILITY_MAP).flat(), ...ALWAYS_ALLOWED_TOOLS]),
 );
 
 const JSON_CHANNEL_DISALLOWED_TOOLS = [
@@ -44,12 +45,16 @@ const JSON_CHANNEL_DISALLOWED_TOOLS = [
   "MultiEdit",
   "NotebookEdit",
   "Bash",
+  "BashOutput",
+  "KillShell",
+  "KillBash",
   "WebFetch",
   "WebSearch",
   "Task",
   "TaskOutput",
   "TaskStop",
   "Skill",
+  "SlashCommand",
   "CronCreate",
   "CronDelete",
   "CronList",
@@ -68,6 +73,32 @@ function isCapability(value: string): value is RuntimeToolCapability {
   return (RUNTIME_TOOL_CAPABILITIES as string[]).includes(value);
 }
 
+function normalizeToolPermissionRules(input: unknown): RuntimeToolPermissionRule[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const rules: RuntimeToolPermissionRule[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as Partial<RuntimeToolPermissionRule>;
+    const pattern = typeof candidate.pattern === "string" ? candidate.pattern.trim() : "";
+    if (!pattern || seen.has(pattern)) continue;
+    seen.add(pattern);
+    rules.push({
+      id: typeof candidate.id === "string" && candidate.id ? candidate.id : `tool-rule-${rules.length + 1}`,
+      pattern,
+      label: typeof candidate.label === "string" && candidate.label ? candidate.label : undefined,
+      source: "user",
+      createdAt:
+        typeof candidate.createdAt === "string" && candidate.createdAt
+          ? candidate.createdAt
+          : new Date(0).toISOString(),
+      updatedAt:
+        typeof candidate.updatedAt === "string" && candidate.updatedAt ? candidate.updatedAt : undefined,
+    });
+  }
+  return rules;
+}
+
 export function normalizeRuntimeFilePolicy(input?: RuntimeFilePolicy | null): RuntimeFilePolicy {
   const mode = isPolicyMode(input?.mode) ? input.mode : DEFAULT_RUNTIME_FILE_POLICY.mode;
   const custom = { ...DEFAULT_RUNTIME_FILE_POLICY.custom };
@@ -77,7 +108,12 @@ export function normalizeRuntimeFilePolicy(input?: RuntimeFilePolicy | null): Ru
       if (isCapability(key)) custom[key] = Boolean(value);
     }
   }
-  return { mode, custom };
+  return {
+    mode,
+    custom,
+    allowedToolRules: normalizeToolPermissionRules(input?.allowedToolRules),
+    deniedToolRules: normalizeToolPermissionRules(input?.deniedToolRules),
+  };
 }
 
 function resolveCapabilities(policy: RuntimeFilePolicy) {
@@ -139,6 +175,9 @@ export function resolveRuntimeToolPolicy(input: {
       allowed.add(tool);
     }
   }
+  for (const rule of normalized.allowedToolRules ?? []) {
+    allowed.add(rule.pattern);
+  }
 
   const channelDisallowed = new Set<string>(input.channelPolicy?.disallow ?? []);
   if (input.channelPolicy?.mode === "readonly_json") {
@@ -165,6 +204,10 @@ export function resolveRuntimeToolPolicy(input: {
   }
   for (const tool of Array.from(channelDisallowed)) {
     disallowed.add(tool);
+  }
+  for (const rule of normalized.deniedToolRules ?? []) {
+    disallowed.add(rule.pattern);
+    allowed.delete(rule.pattern);
   }
 
   return {

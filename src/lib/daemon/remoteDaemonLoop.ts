@@ -21,6 +21,7 @@ import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
 import { runRuntimePromptJson, runRuntimePromptText, streamRuntimePrompt } from "@/lib/server/runtime/runtimeTransport";
 import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
+import { resolveToolPermissionDecision } from "@/lib/server/toolPermission/toolPermissionBroker";
 import type {
   MachineCommand,
   MachineResult,
@@ -507,6 +508,17 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       }
       return;
     }
+    if (command.type === "tool_permission_decision") {
+      const resolved = resolveToolPermissionDecision(command.decision);
+      logDaemonEvent(resolved ? "info" : "debug", "stream", "tool permission decision", {
+        sessionId: command.sessionId,
+        requestId: command.decision.requestId,
+        decision: command.decision.decision,
+        scope: command.decision.scope,
+        resolved,
+      });
+      return;
+    }
     if (command.type === "stream_prompt") {
       activeStreamSessionIds.add(command.sessionId);
       logDaemonEvent("info", "stream", "start", {
@@ -534,6 +546,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             cliPath: payload.cliPath,
             permissionMode: payload.permissionMode,
             runtimeKind: payload.runtimeKind,
+            runtimeEnvId: payload.runtimeEnvId,
             resumeSessionId: payload.resumeSessionId,
             contextPack: payload.contextPack,
             collectFileArtifacts: payload.collectFileArtifacts,
@@ -543,6 +556,11 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             filePolicy: payload.filePolicy,
             channelPolicy: payload.channelPolicy,
             conversationId: payload.conversationId,
+            taskInstanceId: payload.taskInstanceId,
+            taskId: payload.taskId,
+            agentRunId: payload.agentRunId,
+            assistantMessageId: payload.assistantMessageId,
+            assistantCreatedAt: payload.assistantCreatedAt,
             onEvent: (event) => {
               trace?.appendStreamEvent({ seq, event });
               void sendStreamChunk(command.sessionId, event, seq++);

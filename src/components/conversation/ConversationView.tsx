@@ -14,6 +14,11 @@ import { TaskResultDrawer } from "@/components/task/TaskResultDrawer";
 import { MemoryEditor } from "@/components/memory/MemoryEditor";
 import { streamClaudeChat } from "@/lib/api/claude";
 import { fetchConversationMessages } from "@/lib/api/conversation-commands";
+import {
+  deleteMessageFeedback,
+  fetchMessageFeedbacks,
+  submitMessageFeedback,
+} from "@/lib/api/messageFeedback";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { activateEnvironmentCommand } from "@/lib/api/runtime-environment-commands";
 import { generateTopicSagaPlan, TopicSagaPlanError } from "@/lib/api/topics";
@@ -41,6 +46,12 @@ import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { ConversationMessage, Goal, GoalPlanningRunState, GoalWorkflowPhase } from "@/types/kiki";
 import { SUPPORTED_RUNTIME_KINDS } from "@/types/runtime";
+import type {
+  MessageFeedbackRating,
+  MessageFeedbackReasonCode,
+  MessageFeedbackRecord,
+  MessageFeedbackTargetFallback,
+} from "@/types/messageFeedback";
 import type {
   CliProcessEventInput,
   CliProcessEvent,
@@ -280,6 +291,19 @@ function buildQuotedMessageContext(message: ConversationMessage, goals: Goal[]):
   };
 }
 
+function buildMessageFeedbackFallback(message: ConversationMessage): MessageFeedbackTargetFallback | undefined {
+  if (message.role !== "kiki" || message.kind !== "text") return undefined;
+  return {
+    id: message.id,
+    kind: "text",
+    role: "kiki",
+    content: message.content,
+    createdAt: message.createdAt,
+    status: message.status,
+    source: message.source,
+  };
+}
+
 /**
  * 会话视图：
  * - 顶部栏：会话标题 + 右上角「目标规划」按钮（仅绑定目标时显示）
@@ -352,6 +376,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const [hasLocalActiveStream, setHasLocalActiveStream] = useState(false);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messagesLoadError, setMessagesLoadError] = useState<{ conversationId: string; message: string } | null>(null);
+  const [messageFeedbackById, setMessageFeedbackById] = useState<Record<string, MessageFeedbackRecord>>({});
+  const [messageFeedbackError, setMessageFeedbackError] = useState<string | null>(null);
   const resultMessageIdFromQuery = searchParams?.get("resultMessageId") ?? null;
   const refreshGoalsFromSnapshot = async () => {
     const snapshot = await fetchRuntimeStateSnapshot();
@@ -395,6 +421,29 @@ export function ConversationView({ conversationId }: { conversationId: string })
     };
   }, [activeConversationId, activeMessagesLoaded, hydrateConversationMessages, messagesLoadError?.conversationId]);
 
+  useEffect(() => {
+    if (!activeConversationId || activeMessagesLoaded === false) {
+      setMessageFeedbackById({});
+      return;
+    }
+    let cancelled = false;
+    fetchMessageFeedbacks(activeConversationId)
+      .then((feedbacks) => {
+        if (cancelled) return;
+        setMessageFeedbackById(
+          Object.fromEntries(feedbacks.map((feedback) => [feedback.messageId, feedback])),
+        );
+        setMessageFeedbackError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMessageFeedbackError(getErrorMessage(error, "读取消息反馈失败"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId, activeMessagesLoaded]);
+
   // 进入会话标记为已读
   useEffect(() => {
     if (!conversation) return;
@@ -413,6 +462,20 @@ export function ConversationView({ conversationId }: { conversationId: string })
     if (!conversation) return [] as ConversationMessage[];
     return [...conversation.messages].sort(compareConversationMessagesForDisplay);
   }, [conversation]);
+  const previousUserQuestionByMessageId = useMemo(() => {
+    const result: Record<string, string> = {};
+    let latestUserQuestion = "";
+    for (const message of sortedMessages) {
+      if (message.role === "user") {
+        latestUserQuestion = message.content;
+        continue;
+      }
+      if (message.role === "kiki" && message.kind === "text") {
+        result[message.id] = latestUserQuestion;
+      }
+    }
+    return result;
+  }, [sortedMessages]);
 
   // 默认定位到最新消息
   useEffect(() => {
@@ -822,6 +885,52 @@ export function ConversationView({ conversationId }: { conversationId: string })
           }
         : message,
     );
+  };
+
+  const onSubmitRuntimeMessageFeedback = async (
+    sourceMessage: ConversationMessage,
+    input:
+      | {
+          rating: MessageFeedbackRating;
+          reasonCodes?: MessageFeedbackReasonCode[];
+          comment?: string;
+        }
+      | null,
+  ) => {
+    if (!conversation) return;
+    try {
+      if (!input) {
+        await deleteMessageFeedback({
+          conversationId: conversation.id,
+          messageId: sourceMessage.id,
+        });
+        setMessageFeedbackById((current) => {
+          const next = { ...current };
+          delete next[sourceMessage.id];
+          return next;
+        });
+        setMessageFeedbackError(null);
+        return;
+      }
+      const feedback = await submitMessageFeedback({
+        conversationId: conversation.id,
+        messageId: sourceMessage.id,
+        rating: input.rating,
+        reasonCodes: input.reasonCodes,
+        comment: input.comment,
+        runtimeEnvId: activeRuntimeEnv?.id,
+        targetMessageFallback: buildMessageFeedbackFallback(sourceMessage),
+      });
+      setMessageFeedbackById((current) => ({
+        ...current,
+        [feedback.messageId]: feedback,
+      }));
+      setMessageFeedbackError(null);
+    } catch (error) {
+      const message = getErrorMessage(error, "反馈保存失败");
+      setMessageFeedbackError(message);
+      throw new Error(message);
+    }
   };
 
   const onTaskOptionalFeedback = async (sourceMessage: ConversationMessage, text: string) => {
@@ -2121,6 +2230,22 @@ export function ConversationView({ conversationId }: { conversationId: string })
               appendProcessEvent("status", { title: "权限受限", content: event.reason });
               return;
             }
+            if (event.type === "tool_permission_request") {
+              appendProcessEvent("status", {
+                title: "等待工具授权",
+                content: `${event.toolName} · ${event.suggestedRule}`,
+                input: { toolPermissionRequest: event },
+              });
+              return;
+            }
+            if (event.type === "tool_permission_resolved") {
+              window.dispatchEvent(new CustomEvent("kiki:tool-permission-resolved", { detail: { requestId: event.requestId } }));
+              appendProcessEvent("status", {
+                title: event.decision === "allow" ? "工具授权已允许" : "工具授权已拒绝",
+                content: event.rule ?? event.scope,
+              });
+              return;
+            }
             if (event.type === "error") {
               setStreamError(event.message);
               appendProcessEvent("error", { title: "任务失败", content: event.message });
@@ -2251,7 +2376,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
-          className="h-full overflow-y-auto overscroll-contain"
+          className="h-full overflow-x-hidden overflow-y-auto overscroll-contain"
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pb-5 pt-3 sm:px-6 lg:px-8">
             {streamErrorUi?.kind === "runtime" ? (
@@ -2280,6 +2405,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   </div>
                 </div>
               </div>
+            ) : null}
+            {messageFeedbackError ? (
+              <div className="text-[12px] text-[#B42318]">{messageFeedbackError}</div>
             ) : null}
             {messagesLoading && sortedMessages.length === 0 ? (
               <div className="mt-20 flex items-center justify-center gap-2 text-[13px] text-[#8C9198]">
@@ -2339,6 +2467,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
                         setPlanOpen(true);
                       }}
                       onTaskOptionalFeedback={onTaskOptionalFeedback}
+                      feedback={messageFeedbackById[msg.id] ?? null}
+                      shareQuestion={previousUserQuestionByMessageId[msg.id] ?? ""}
+                      onSubmitFeedback={onSubmitRuntimeMessageFeedback}
                       onGovernanceConfirm={onGovernanceConfirm}
                       onGovernanceCancel={onGovernanceCancel}
                       onDelete={(messageId) => {

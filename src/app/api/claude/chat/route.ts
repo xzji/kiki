@@ -114,6 +114,7 @@ async function POSTHandler(request: NextRequest) {
           cliPath: body.runtimeEnv.cliPath,
           permissionMode: body.runtimeEnv.permissionMode,
           runtimeKind: body.runtimeEnv.runtimeKind,
+          runtimeEnvId: body.runtimeEnv.id,
           filePolicy: body.runtimeEnv.filePolicy,
           resumeSessionId: resumeSessionId,
           conversationId: body.conversationId,

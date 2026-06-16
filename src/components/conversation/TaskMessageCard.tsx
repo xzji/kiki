@@ -3,12 +3,14 @@
 import { ArtifactSummaryChip } from "@/components/execution/ArtifactRenderer";
 import { buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
 import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
+import { ToolPermissionRequestDialog } from "@/components/runtime/ToolPermissionRequestDialog";
 import { OptionalFeedbackSuggestions } from "@/components/task/OptionalFeedbackSuggestions";
 import { TaskInlineResultView, canRenderInlineAgentResult } from "@/components/task/TaskInlineResultView";
 import { buildAwaitingDisplayModel, stripNotificationPrefix } from "@/lib/taskInstance/awaitingDisplayModel";
 import { getOptionalResultFeedbackRequirement, hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type { Task, TaskInstance } from "@/types/kiki";
+import type { ClaudeStreamEvent } from "@/types/runtime";
 
 const EXECUTION_KIND_LABEL: Record<Task["executionKind"], string> = {
   generic_result: "Agent 任务",
@@ -32,6 +34,19 @@ function hasSubmittedInteraction(instance: TaskInstance) {
 
 function errorReason(instance: TaskInstance) {
   return instance.execution?.errorMessage || instance.result?.summary || instance.result?.finalMessage;
+}
+
+function buildTaskToolPermissionRequest(instance: TaskInstance): Extract<ClaudeStreamEvent, { type: "tool_permission_request" }> | null {
+  const toolPermission = instance.awaitingUser?.blocker?.toolPermission ?? instance.blocker?.toolPermission;
+  if (!toolPermission) return null;
+  return {
+    type: "tool_permission_request",
+    requestId: toolPermission.requestId,
+    runtimeEnvId: toolPermission.runtimeEnvId,
+    toolName: toolPermission.toolName,
+    suggestedRule: toolPermission.suggestedRule,
+    taskInstanceId: instance.id,
+  };
 }
 
 /**
@@ -86,6 +101,7 @@ export function TaskMessageCard({
     (instance.result?.taskResult?.blocks.length ?? 0) > 0 ||
     Boolean(instance.result?.taskResult?.artifactRefs?.some((ref) => ref.kind === "webapp"));
   const showInlineResult = canRenderInlineAgentResult(task, instance);
+  const toolPermissionRequest = buildTaskToolPermissionRequest(instance);
   return (
     <div
       role="button"
@@ -123,7 +139,15 @@ export function TaskMessageCard({
           )}
         </div>
       </div>
-      {instance.awaitingUser && !isOptionalFeedbackResult ? (
+      {toolPermissionRequest ? (
+        <div className="mt-4" onClick={(event) => event.stopPropagation()}>
+          <ToolPermissionRequestDialog
+            request={toolPermissionRequest}
+            variant="inline"
+            onResolved={() => undefined}
+          />
+        </div>
+      ) : instance.awaitingUser && !isOptionalFeedbackResult ? (
         <div className="mt-4" onClick={(event) => event.stopPropagation()}>
           <AwaitingUserResumePanel task={task} instance={instance} />
         </div>

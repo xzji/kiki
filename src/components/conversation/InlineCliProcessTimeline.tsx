@@ -197,17 +197,18 @@ export function InlineCliProcessTimeline({ process }: { process: ConversationCli
   if (!events.length) return null;
   const subagentCount = countSubagents(events);
   return (
-    <div className="mt-3 max-w-3xl space-y-1 text-[12px]">
-      <div className="flex items-center gap-2 text-[#6B7280]">
+    <details className="group/process mb-3 max-w-3xl text-[12px]">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-[#6B7280] marker:hidden select-none [&::-webkit-details-marker]:hidden">
         <span className="font-medium text-[#374151]">执行过程</span>
         <span>{events.length} 条事件</span>
         {subagentCount ? <span>{subagentCount} 个子代理</span> : null}
-      </div>
-      <div className="space-y-1">
+        <ChevronDown className="h-3.5 w-3.5 text-[#8C9198] transition group-open/process:rotate-180" />
+      </summary>
+      <div className="mt-2 space-y-1">
         {events.map((event) => (
           <TimelineEventCard key={`${event.id}:${event.order}`} event={event} />
         ))}
       </div>
-    </div>
+    </details>
   );
 }

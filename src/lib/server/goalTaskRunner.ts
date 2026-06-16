@@ -1606,6 +1606,40 @@ function createExecutionBlocker(input: RunGoalTaskInput, result: ParsedTaskRunne
   };
 }
 
+function createToolPermissionExecutionBlocker(input: RunGoalTaskInput, request: {
+  requestId: string;
+  runtimeEnvId: string;
+  toolName: string;
+  suggestedRule: string;
+}, trajectoryLength: number): ExecutionBlocker {
+  const now = new Date().toISOString();
+  return {
+    kind: "tool_permission",
+    executionId: input.requestId,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+    blockedStepIndex: Math.max(trajectoryLength - 1, 0),
+    resumeToken: request.requestId,
+    interactionRequirement: {
+      type: "confirm",
+      timing: "during_execution",
+      reason: `Claude 请求使用工具 ${request.toolName}，需要用户授权后继续执行。`,
+      question: `是否允许工具 ${request.toolName} 运行？`,
+      suggestedActions: ["本次允许", "本会话内始终允许", "始终允许并写入 Runtime 策略", "拒绝"],
+      shouldNotifyUser: true,
+    },
+    resumeStrategy: "rerun_with_feedback",
+    status: "waiting",
+    createdAt: now,
+    toolPermission: {
+      requestId: request.requestId,
+      runtimeEnvId: request.runtimeEnvId,
+      toolName: request.toolName,
+      suggestedRule: request.suggestedRule,
+    },
+  };
+}
+
 function createTrajectoryStep(input: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & {
   index: number;
   startedAt?: string;
@@ -1725,8 +1759,13 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
       cliPath: input.runtimeEnv.cliPath,
       permissionMode,
       runtimeKind: input.runtimeEnv.runtimeKind,
+      runtimeEnvId: input.runtimeEnv.id,
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
+      conversationId: input.goal.conversationId,
+      taskInstanceId: input.instance.id,
+      taskId: input.task.id,
+      agentRunId: input.agentRunId,
       resumeSessionId: undefined,
       signal: input.signal,
       onSpawn: input.onSpawn,
@@ -1742,6 +1781,35 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
             toolName: event.toolName,
             input: event.input,
             summary: event.summary,
+          });
+        }
+        if (event.type === "tool_permission_request") {
+          const blocker = createToolPermissionExecutionBlocker(input, event, 0);
+          updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
+            status: "awaiting_user",
+            blocker,
+          });
+          appendGoalTaskAgentEvent(input, "awaiting_user", {
+            phase: "goal_task_auxiliary_prompt",
+            kind: "tool_permission.requested",
+            requestId: event.requestId,
+            runtimeEnvId: event.runtimeEnvId,
+            toolName: event.toolName,
+            suggestedRule: event.suggestedRule,
+          });
+        }
+        if (event.type === "tool_permission_resolved") {
+          updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
+            status: "running",
+            blocker: null,
+          });
+          appendGoalTaskAgentEvent(input, "log", {
+            phase: "goal_task_auxiliary_prompt",
+            kind: "tool_permission.resolved",
+            requestId: event.requestId,
+            decision: event.decision,
+            scope: event.scope,
+            rule: event.rule,
           });
         }
         if (event.type === "error") throw new Error(event.message);
@@ -2615,8 +2683,13 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
       cliPath: input.runtimeEnv.cliPath,
       permissionMode: input.runtimeEnv.permissionMode,
       runtimeKind: input.runtimeEnv.runtimeKind,
+      runtimeEnvId: input.runtimeEnv.id,
       filePolicy: input.runtimeEnv.filePolicy,
       channelPolicy: { mode: "task" },
+      conversationId: input.goal.conversationId,
+      taskInstanceId: input.instance.id,
+      taskId: input.task.id,
+      agentRunId: input.agentRunId,
       resumeSessionId: undefined,
       signal: input.signal,
       onSpawn: input.onSpawn,
@@ -2708,6 +2781,50 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
             goalId: input.goal.id,
             taskId: input.task.id,
             taskInstanceId: input.instance.id,
+          });
+        }
+        if (event.type === "tool_permission_request") {
+          const blocker = createToolPermissionExecutionBlocker(input, event, trajectory.length);
+          updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
+            status: "awaiting_user",
+            blocker,
+            trajectory,
+          });
+          appendGoalTaskAgentEvent(input, "awaiting_user", {
+            phase: "goal_task_main_execution",
+            kind: "tool_permission.requested",
+            requestId: event.requestId,
+            runtimeEnvId: event.runtimeEnvId,
+            toolName: event.toolName,
+            suggestedRule: event.suggestedRule,
+          });
+          appendTrajectory({
+            type: "system",
+            status: "running",
+            title: `等待工具授权：${event.toolName}`,
+            thought: `需要用户授权工具规则 ${event.suggestedRule} 后继续执行。`,
+          });
+        }
+        if (event.type === "tool_permission_resolved") {
+          updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
+            status: "running",
+            blocker: null,
+            trajectory,
+          });
+          appendGoalTaskAgentEvent(input, "log", {
+            phase: "goal_task_main_execution",
+            kind: "tool_permission.resolved",
+            requestId: event.requestId,
+            decision: event.decision,
+            scope: event.scope,
+            rule: event.rule,
+          });
+          appendTrajectory({
+            type: "system",
+            status: event.decision === "allow" ? "completed" : "failed",
+            title: event.decision === "allow" ? "工具授权已允许" : "工具授权已拒绝",
+            thought: event.rule ? `授权规则：${event.rule}` : undefined,
+            endedAt: new Date().toISOString(),
           });
         }
         if (event.type === "error") {

@@ -3,6 +3,7 @@ import type { InteractionRequirement } from "@/types/kiki";
 export type ExecutionBlockerDecision = "approved" | "rejected";
 
 export type ExecutionBlocker = {
+  kind?: "interaction" | "tool_permission";
   executionId: string;
   taskId: string;
   instanceId: string;
@@ -15,4 +16,10 @@ export type ExecutionBlocker = {
   resolvedAt?: string;
   decision?: ExecutionBlockerDecision;
   feedback?: string;
+  toolPermission?: {
+    requestId: string;
+    runtimeEnvId: string;
+    toolName: string;
+    suggestedRule: string;
+  };
 };

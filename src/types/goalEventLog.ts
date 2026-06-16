@@ -16,6 +16,11 @@ export type GoalEventKind =
   | "instance.user_command"
   | "task.definition_amended"
   | "schedule.event_synthesized"
+  | "tool_permission.requested"
+  | "tool_permission.resolved"
+  | "tool_permission.blocked"
+  | "tool_permission.resumed"
+  | "tool_permission.rule_changed"
   // Topic/Thread runtime events — Plan ref: §10.6 problem 26
   | "agent.run.started"
   | "agent.run.event"
@@ -104,6 +109,43 @@ export type GoalEventPayloadMap = {
   };
   "schedule.event_synthesized": {
     scheduleEventId: string;
+  };
+  "tool_permission.requested": {
+    requestId: string;
+    runtimeEnvId: string;
+    toolName: string;
+    rule?: string;
+    conversationId?: string;
+    taskInstanceId?: string;
+  };
+  "tool_permission.resolved": {
+    requestId: string;
+    runtimeEnvId: string;
+    toolName?: string;
+    decision: "allow" | "deny";
+    scope: "once" | "conversation" | "runtime" | "deny";
+    rule?: string;
+  };
+  "tool_permission.blocked": {
+    requestId: string;
+    runtimeEnvId: string;
+    toolName: string;
+    rule?: string;
+    reason?: string;
+  };
+  "tool_permission.resumed": {
+    requestId: string;
+    runtimeEnvId: string;
+    toolName?: string;
+    rule?: string;
+  };
+  "tool_permission.rule_changed": {
+    runtimeEnvId: string;
+    action: "created" | "updated" | "deleted";
+    ruleId?: string;
+    previousPattern?: string;
+    nextPattern?: string;
+    source: "settings" | "permission_dialog";
   };
   // Topic/Thread runtime payloads — Plan ref: §10.6 problem 26
   "agent.run.started": { run: AgentRun };

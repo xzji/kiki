@@ -13,9 +13,20 @@ export type RuntimeToolCapability =
   | "planMode";
 export type RuntimeFilePolicyMode = "all_on" | "all_off" | "custom";
 
+export type RuntimeToolPermissionRule = {
+  id: string;
+  pattern: string;
+  label?: string;
+  source: "user";
+  createdAt: string;
+  updatedAt?: string;
+};
+
 export type RuntimeFilePolicy = {
   mode: RuntimeFilePolicyMode;
   custom: Record<RuntimeToolCapability, boolean>;
+  allowedToolRules?: RuntimeToolPermissionRule[];
+  deniedToolRules?: RuntimeToolPermissionRule[];
 };
 
 export const RUNTIME_TOOL_CAPABILITIES: RuntimeToolCapability[] = [
@@ -39,6 +50,8 @@ export const DEFAULT_RUNTIME_FILE_POLICY: RuntimeFilePolicy = {
     schedule: false,
     planMode: false,
   },
+  allowedToolRules: [],
+  deniedToolRules: [],
 };
 
 export type RuntimeHealth =
@@ -178,5 +191,23 @@ export type ClaudeStreamEvent =
     }
   | { type: "file_artifact"; ref: ArtifactRef }
   | { type: "permission_request"; reason: string }
+  | {
+      type: "tool_permission_request";
+      requestId: string;
+      runtimeEnvId: string;
+      toolName: string;
+      suggestedRule: string;
+      toolInput?: unknown;
+      conversationId?: string;
+      taskInstanceId?: string;
+      runId?: string;
+    }
+  | {
+      type: "tool_permission_resolved";
+      requestId: string;
+      decision: "allow" | "deny";
+      scope: "once" | "conversation" | "runtime" | "deny";
+      rule?: string;
+    }
   | { type: "error"; message: string }
   | { type: "done" };

@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 19;
+export const KIKI_DB_SCHEMA_VERSION = 20;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -181,6 +181,29 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv_seq
   ON conversation_messages(conversation_id, seq);
+
+CREATE TABLE IF NOT EXISTS message_feedbacks (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  rating TEXT NOT NULL,
+  reason_codes_json TEXT NOT NULL,
+  comment TEXT,
+  context_snapshot_json TEXT NOT NULL,
+  runtime_env_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(conversation_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_conversation
+  ON message_feedbacks(conversation_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_message
+  ON message_feedbacks(message_id);
+
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_rating
+  ON message_feedbacks(rating, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS conversation_event_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -882,6 +905,33 @@ export const KIKI_DB_MIGRATIONS: Array<{
       CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_tick_jobs_idem
         ON governance_tick_jobs(idempotency_key)
         WHERE idempotency_key IS NOT NULL;
+    `,
+  },
+  {
+    version: 20,
+    sql: `
+      CREATE TABLE IF NOT EXISTS message_feedbacks (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        rating TEXT NOT NULL,
+        reason_codes_json TEXT NOT NULL,
+        comment TEXT,
+        context_snapshot_json TEXT NOT NULL,
+        runtime_env_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(conversation_id, message_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_message_feedbacks_conversation
+        ON message_feedbacks(conversation_id, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_message_feedbacks_message
+        ON message_feedbacks(message_id);
+
+      CREATE INDEX IF NOT EXISTS idx_message_feedbacks_rating
+        ON message_feedbacks(rating, updated_at DESC);
     `,
   },
 ];

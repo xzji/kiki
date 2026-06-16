@@ -280,8 +280,8 @@ function DeleteConversationDialog({
   );
 }
 
-function ProductLogo({ compact = false }: { compact?: boolean }) {
-  const size = compact ? 26 : 30;
+export function ProductLogo({ compact = false, size: sizeOverride }: { compact?: boolean; size?: number }) {
+  const size = sizeOverride ?? (compact ? 26 : 30);
 
   return (
     <div
