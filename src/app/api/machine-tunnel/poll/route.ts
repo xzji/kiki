@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { runWithUserContext } from "@/lib/server/context/userContext";
+import { reconcileGovernanceTickMachineHello } from "@/lib/server/governance/governanceTickDispatcher";
 import { pollMachineCommands } from "@/lib/server/tunnel/tunnelHub";
 
 export const runtime = "nodejs";
@@ -21,7 +23,10 @@ export async function POST(request: NextRequest) {
   if (!apiKey) {
     return NextResponse.json({ ok: false, reason: "缺少 machine api-key" }, { status: 401 });
   }
-  const body = (await request.json().catch(() => ({}))) as { fingerprint?: string };
+  const body = (await request.json().catch(() => ({}))) as {
+    fingerprint?: string;
+    runningGovernanceJobIds?: unknown;
+  };
   const outcome = await pollMachineCommands({
     apiKey,
     fingerprint: typeof body.fingerprint === "string" ? body.fingerprint : undefined,
@@ -29,6 +34,16 @@ export async function POST(request: NextRequest) {
   });
   if ("error" in outcome) {
     return NextResponse.json({ ok: false, reason: outcome.error }, { status: 401 });
+  }
+  const runningGovernanceJobIds = Array.isArray(body.runningGovernanceJobIds)
+    ? body.runningGovernanceJobIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  if (runningGovernanceJobIds.length > 0) {
+    runWithUserContext(outcome.machine.userId, () => reconcileGovernanceTickMachineHello({
+      machineId: outcome.machine.machineId,
+      userId: outcome.machine.userId,
+      runningGovernanceJobIds,
+    }));
   }
   return NextResponse.json({
     ok: true,

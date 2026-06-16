@@ -11,6 +11,7 @@ import type { DaemonLogDomain, DaemonLogLevel } from "@/lib/daemon/daemonLogger"
 const WS_INBOUND_WATCHDOG_MS = 70_000;
 const WS_MIN_RECONNECT_DELAY_MS = 1_000;
 const WS_MAX_RECONNECT_DELAY_MS = 30_000;
+const WS_HELLO_RENEW_INTERVAL_MS = 60_000;
 const MAX_PENDING_WS_OUTBOUND_ENVELOPES = 2_000;
 
 function sendEnvelopeOverWs(ws: WebSocket, envelope: MachineTunnelEnvelope) {
@@ -119,6 +120,7 @@ export async function runWebSocketTransport(input: {
     let ws: WebSocket | null = null;
     let openedAt = 0;
     let watchdogTimer: NodeJS.Timeout | null = null;
+    let helloRenewTimer: NodeJS.Timeout | null = null;
     let heartbeatSeen = false;
 
     const clearWatchdog = () => {
@@ -126,6 +128,39 @@ export async function runWebSocketTransport(input: {
       clearTimeout(watchdogTimer);
       watchdogTimer = null;
     };
+      const sendHello = (target: WebSocket) => {
+        const helloState = input.getHelloState();
+        sendEnvelopeOverWs(target, {
+          kind: "hello",
+          daemonVersion: input.daemonVersion,
+          fingerprint: input.fingerprint,
+          capabilities: [
+            "execute",
+            "discover_runtimes",
+            "check_runtime",
+            "select_directory",
+            "skills",
+            "daemon_service",
+            "run_prompt",
+            "stream_prompt",
+            "topic_governance_tick",
+            "thread_governance_tick",
+          ],
+          runningJobIds: helloState.runningJobIds,
+          runningGovernanceJobIds: helloState.runningGovernanceJobIds,
+          activeStreamSessionIds: helloState.activeStreamSessionIds,
+        });
+        if (helloState.runningGovernanceJobIds.length > 0) {
+          input.callbacks.logEvent("info", "hb", "WS governance lease renew hello sent", {
+            runningGovernanceJobs: helloState.runningGovernanceJobIds.length,
+          });
+        }
+      };
+      const clearHelloRenewTimer = () => {
+        if (!helloRenewTimer) return;
+        clearInterval(helloRenewTimer);
+        helloRenewTimer = null;
+      };
     const resetWatchdog = () => {
       clearWatchdog();
       watchdogTimer = setTimeout(() => {
@@ -159,27 +194,12 @@ export async function runWebSocketTransport(input: {
         });
         resetWatchdog();
         input.setOutboundTransport(bufferedOutbound.transport);
-        const helloState = input.getHelloState();
-        sendEnvelopeOverWs(currentWs, {
-          kind: "hello",
-          daemonVersion: input.daemonVersion,
-          fingerprint: input.fingerprint,
-          capabilities: [
-            "execute",
-            "discover_runtimes",
-            "check_runtime",
-            "select_directory",
-            "skills",
-            "daemon_service",
-            "run_prompt",
-            "stream_prompt",
-            "topic_governance_tick",
-            "thread_governance_tick",
-          ],
-          runningJobIds: helloState.runningJobIds,
-          runningGovernanceJobIds: helloState.runningGovernanceJobIds,
-          activeStreamSessionIds: helloState.activeStreamSessionIds,
-        });
+          sendHello(currentWs);
+          clearHelloRenewTimer();
+          helloRenewTimer = setInterval(() => {
+            if (ws !== currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+            sendHello(currentWs);
+          }, WS_HELLO_RENEW_INTERVAL_MS);
         bufferedOutbound.flushPending();
       });
 
@@ -223,6 +243,7 @@ export async function runWebSocketTransport(input: {
       currentWs.on("close", (code, reason) => {
         if (ws !== currentWs) return;
         clearWatchdog();
+          clearHelloRenewTimer();
         if (activeWs === currentWs) activeWs = null;
         input.setOutboundTransport(bufferedOutbound.transport);
         input.callbacks.logEvent("info", "conn", "WS tunnel closed", {

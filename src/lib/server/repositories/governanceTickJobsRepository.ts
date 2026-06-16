@@ -89,6 +89,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function logGovernanceLease(message: string, fields: Record<string, unknown>) {
+  console.info("[governance_tick_lease]", message, fields);
+}
+
 function mapRow<TPayload extends GovernanceTickJobPayload = GovernanceTickJobPayload>(
   row: GovernanceTickJobRow,
 ): GovernanceTickJobRecord<TPayload> {
@@ -148,7 +152,7 @@ export function createGovernanceTickJob<TPayload extends GovernanceTickJobPayloa
     createIdempotencyKey("governance_tick_job", input.targetKind, topicId, threadId, String(input.baseRevision));
   const id = input.id ?? createOpaqueId("idem");
 
-  db.prepare(
+  const insertResult = db.prepare(
     `
       INSERT OR IGNORE INTO governance_tick_jobs (
         id, target_kind, topic_id, thread_id, user_id, status, base_revision,
@@ -172,13 +176,49 @@ export function createGovernanceTickJob<TPayload extends GovernanceTickJobPayloa
     createdAt,
   );
 
+  if (insertResult.changes === 0) {
+    const existing = getGovernanceTickJobByIdempotencyKey(idempotencyKey);
+    if (existing?.status === "failed") {
+      const availableAt = input.availableAt ?? createdAt;
+      db.prepare(
+        `
+          UPDATE governance_tick_jobs
+          SET status = 'queued',
+              request_id = ?,
+              machine_id = ?,
+              payload_json = ?,
+              outcome_json = NULL,
+              lease_owner = NULL,
+              lease_token = NULL,
+              lease_expires_at = NULL,
+              available_at = ?,
+              updated_at = ?,
+              leased_at = NULL,
+              finished_at = NULL,
+              last_error = NULL
+          WHERE id = ?
+            AND status = 'failed'
+        `,
+      ).run(
+        input.requestId ?? null,
+        input.machineId ?? null,
+        JSON.stringify({ ...input.payload, topicId, threadId, baseRevision: input.baseRevision }),
+        availableAt,
+        createdAt,
+        existing.id,
+      );
+    }
+  }
+
   const record = getGovernanceTickJobByIdempotencyKey(idempotencyKey) ?? getById(id);
   if (!record) throw new Error("governance tick job append failed");
   return record as GovernanceTickJobRecord<TPayload>;
 }
 
-export function expireGovernanceTickJobLeases(input: { now?: Date } = {}) {
-  const now = (input.now ?? new Date()).toISOString();
+export function expireGovernanceTickJobLeases(input: { now?: Date; expiredLeaseGraceMs?: number } = {}) {
+  const nowDate = input.now ?? new Date();
+  const now = nowDate.toISOString();
+  const expireBefore = new Date(nowDate.getTime() - Math.max(0, input.expiredLeaseGraceMs ?? 0)).toISOString();
   const result = getDatabase()
     .prepare(
       `
@@ -191,7 +231,15 @@ export function expireGovernanceTickJobLeases(input: { now?: Date } = {}) {
           AND lease_expires_at <= ?
       `,
     )
-    .run(now, now);
+    .run(now, expireBefore);
+  if (result.changes > 0) {
+    logGovernanceLease("expired stale leases", {
+      count: result.changes,
+      now,
+      expireBefore,
+      expiredLeaseGraceMs: input.expiredLeaseGraceMs ?? 0,
+    });
+  }
   return result.changes;
 }
 
@@ -200,6 +248,7 @@ export function acquireGovernanceTickJobLease(input: {
   leaseDurationMs: number;
   now?: Date;
   targetKind?: GovernanceTickTargetKind;
+  expiredLeaseGraceMs?: number;
 }): GovernanceTickJobRecord | null {
   const db = getDatabase();
   const nowDate = input.now ?? new Date();
@@ -208,7 +257,7 @@ export function acquireGovernanceTickJobLease(input: {
   const leaseToken = createOpaqueId("idem");
 
   return db.transaction(() => {
-    expireGovernanceTickJobLeases({ now: nowDate });
+    expireGovernanceTickJobLeases({ now: nowDate, expiredLeaseGraceMs: input.expiredLeaseGraceMs });
     const params: Array<string | number> = [now];
     const kindFilter = input.targetKind ? "AND target_kind = ?" : "";
     if (input.targetKind) params.push(input.targetKind);
@@ -244,7 +293,20 @@ export function acquireGovernanceTickJobLease(input: {
       )
       .run(input.leaseOwner, leaseToken, leaseExpiresAt, now, now, row.id);
     if (updated.changes !== 1) return null;
-    return getById(row.id);
+    const leased = getById(row.id);
+    if (leased) {
+      logGovernanceLease("acquired lease", {
+        jobId: leased.id,
+        targetKind: leased.targetKind,
+        topicId: leased.topicId,
+        threadId: leased.threadId,
+        leaseOwner: input.leaseOwner,
+        leaseExpiresAt,
+        attemptCount: leased.attemptCount,
+        previousStatus: row.status,
+      });
+    }
+    return leased;
   })();
 }
 
@@ -254,8 +316,18 @@ export function completeGovernanceTickJob(input: {
   leaseToken: string;
   outcome: Record<string, unknown>;
   finishedAt?: string;
+  acceptLeaseTokenMismatch?: boolean;
 }) {
   const finishedAt = input.finishedAt ?? nowIso();
+  const leaseFilter = input.acceptLeaseTokenMismatch ? "" : "AND lease_token = ?";
+  const params = [
+    JSON.stringify(input.outcome),
+    finishedAt,
+    finishedAt,
+    input.jobId,
+    input.leaseOwner,
+    ...(input.acceptLeaseTokenMismatch ? [] : [input.leaseToken]),
+  ];
   const result = getDatabase()
     .prepare(
       `
@@ -266,12 +338,20 @@ export function completeGovernanceTickJob(input: {
             updated_at = ?,
             last_error = NULL
         WHERE id = ?
-          AND status = 'leased'
+          AND status IN ('leased', 'expired')
           AND lease_owner = ?
-          AND lease_token = ?
+          ${leaseFilter}
       `,
     )
-    .run(JSON.stringify(input.outcome), finishedAt, finishedAt, input.jobId, input.leaseOwner, input.leaseToken);
+    .run(...params);
+  if (result.changes === 1) {
+    logGovernanceLease("completed job", {
+      jobId: input.jobId,
+      leaseOwner: input.leaseOwner,
+      acceptLeaseTokenMismatch: input.acceptLeaseTokenMismatch === true,
+      finishedAt,
+    });
+  }
   return result.changes === 1 ? getById(input.jobId) : null;
 }
 
@@ -282,16 +362,29 @@ export function failGovernanceTickJob(input: {
   error: string;
   outcome?: Record<string, unknown>;
   failedAt?: string;
+  acceptLeaseTokenMismatch?: boolean;
 }) {
   const failedAt = input.failedAt ?? nowIso();
-  const leaseFilter = input.leaseOwner && input.leaseToken ? "AND lease_owner = ? AND lease_token = ?" : "";
+  const leaseFilter = input.leaseOwner
+    ? input.acceptLeaseTokenMismatch
+      ? "AND lease_owner = ?"
+      : input.leaseToken
+        ? "AND lease_owner = ? AND lease_token = ?"
+        : "AND lease_owner = ?"
+    : "";
   const params = [
     input.outcome ? JSON.stringify(input.outcome) : null,
     input.error,
     failedAt,
     failedAt,
     input.jobId,
-    ...(input.leaseOwner && input.leaseToken ? [input.leaseOwner, input.leaseToken] : []),
+    ...(input.leaseOwner
+      ? input.acceptLeaseTokenMismatch
+        ? [input.leaseOwner]
+        : input.leaseToken
+          ? [input.leaseOwner, input.leaseToken]
+          : [input.leaseOwner]
+      : []),
   ];
   const result = getDatabase()
     .prepare(
@@ -303,16 +396,27 @@ export function failGovernanceTickJob(input: {
             finished_at = ?,
             updated_at = ?
         WHERE id = ?
-          AND status = 'leased'
+          AND status IN ('leased', 'expired')
           ${leaseFilter}
       `,
     )
     .run(...params);
+  if (result.changes === 1) {
+    logGovernanceLease("failed job", {
+      jobId: input.jobId,
+      leaseOwner: input.leaseOwner,
+      error: input.error,
+      acceptLeaseTokenMismatch: input.acceptLeaseTokenMismatch === true,
+      failedAt,
+    });
+  }
   return result.changes === 1 ? getById(input.jobId) : null;
 }
 
-export function countPendingGovernanceTickJobs(input: { now?: Date } = {}) {
-  const now = (input.now ?? new Date()).toISOString();
+export function countPendingGovernanceTickJobs(input: { now?: Date; expiredLeaseGraceMs?: number } = {}) {
+  const nowDate = input.now ?? new Date();
+  const now = nowDate.toISOString();
+  const expireBefore = new Date(nowDate.getTime() - Math.max(0, input.expiredLeaseGraceMs ?? 0)).toISOString();
   const row = getDatabase()
     .prepare(
       `
@@ -329,7 +433,7 @@ export function countPendingGovernanceTickJobs(input: { now?: Date } = {}) {
           )
       `,
     )
-    .get(now, now) as { count: number } | undefined;
+    .get(now, expireBefore) as { count: number } | undefined;
   return row?.count ?? 0;
 }
 
@@ -360,5 +464,16 @@ export function renewGovernanceTickJobLeaseFromHello(input: {
       `,
     )
     .run(input.machineId, leaseExpiresAt, now, input.jobId, input.userId);
-  return result.changes === 1 ? getById(input.jobId) : null;
+  const renewed = result.changes === 1 ? getById(input.jobId) : null;
+  if (renewed) {
+    logGovernanceLease("renewed running job lease", {
+      jobId: input.jobId,
+      userId: input.userId,
+      machineId: input.machineId,
+      leaseExpiresAt,
+      status: renewed.status,
+      attemptCount: renewed.attemptCount,
+    });
+  }
+  return renewed;
 }

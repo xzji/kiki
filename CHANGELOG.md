@@ -2,6 +2,24 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-06-17
+
+### Changed
+- 会话任务询问卡片改为独立的 `task_interaction_request` 消息组件：用户提交补充信息后前端立即乐观更新，历史询问卡片不再被后续任务输出覆盖，新内容按新消息追加。
+- 会话消息与 CLI 过程聚合继续收敛：消息更新、导入、反馈与任务交互提交保持 append-only 语义，降低历史消息被运行时结果误覆盖的风险。
+- 远程 Runtime 流式调用补齐附件透传，Claude transport 与 tunnel payload 对齐图片/文件输入字段。
+- 治理 tick lease 链路增强为长耗时安全：daemon 执行治理期间会通过 WS hello 与 HTTP polling 上报运行中的 governance job，云端据此续租；过期 lease 增加 grace 抑制，避免刚过期即重复重发。
+- 治理回执处理补充 machine/user 上下文，云端控制面启动时即注册治理 result listener，避免第一帧前或无用户上下文时丢失回执。
+
+### Fixed
+- 修复 Topic / Thread 治理 job 在长耗时执行后因旧 `leaseToken` 回执被拒而永久卡在 `leased` 的问题；现在同一 lease owner 的旧 token 回执会在 revision 校验保护下被接受并完成落库。
+- 修复治理 job 失败后同 revision 幂等键阻塞后续重试的问题：failed job 再次到期时会重置为 queued。
+- 修复任务交互提交后新生成结果可能覆盖历史询问卡片的问题，保留用户询问/提交历史的独立消息视图。
+
+### Added
+- 新增长耗时治理死锁模拟规格，覆盖 `token A` 执行中超时、云端重租为 `token B` 后旧 token 回执仍能完成 job 的场景。
+- 增加治理 lease 关键日志：lease 获取、过期回收、续租、宽容接受旧 token、完成与失败均输出结构化埋点，便于 Railway 后续排查。
+
 ## 2026-06-16
 
 ### Changed

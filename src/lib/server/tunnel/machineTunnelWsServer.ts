@@ -4,6 +4,7 @@ import type { Server as HttpServer } from "http";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
+import { runWithUserContext } from "@/lib/server/context/userContext";
 import { pushStreamChunk } from "@/lib/server/tunnel/machineStreamHub";
 import {
   assertMachineFingerprint,
@@ -131,16 +132,16 @@ function handleEnvelope(connection: WsConnection, envelope: MachineTunnelEnvelop
       machineId: connection.machineId,
       userId: connection.userId,
     });
-    reconcileMachineTunnelHello({
+    runWithUserContext(connection.userId, () => reconcileMachineTunnelHello({
       machineId: connection.machineId,
       userId: connection.userId,
       runningJobIds: envelope.runningJobIds,
-    });
-    reconcileGovernanceTickMachineHello({
+    }));
+    runWithUserContext(connection.userId, () => reconcileGovernanceTickMachineHello({
       machineId: connection.machineId,
       userId: connection.userId,
       runningGovernanceJobIds: envelope.runningGovernanceJobIds ?? [],
-    });
+    }));
     appendRuntimeDaemonLog(
       `machine ${connection.machineId} WS hello：daemon=${envelope.daemonVersion} running=${envelope.runningJobIds.length} governanceRunning=${envelope.runningGovernanceJobIds?.length ?? 0} streams=${envelope.activeStreamSessionIds.length}`,
     );
@@ -148,7 +149,10 @@ function handleEnvelope(connection: WsConnection, envelope: MachineTunnelEnvelop
   }
 
   if (envelope.kind === "result") {
-    submitMachineResult(envelope.result);
+    submitMachineResult(envelope.result, {
+      userId: connection.userId,
+      machineId: connection.machineId,
+    });
     return;
   }
 

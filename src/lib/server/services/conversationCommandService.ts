@@ -99,6 +99,20 @@ export class ConversationCommandIdempotencyConflictError extends Error {
   }
 }
 
+function isTerminalRuntimeAssistantMessage(message: ConversationMessage) {
+  if (message.role !== "kiki") return false;
+  if (message.status !== "done" && message.status !== "error") return false;
+  if (message.kind !== "text" && message.kind !== "goal_plan_card") return false;
+  return Boolean(message.cliProcess);
+}
+
+function isClientRuntimeSnapshotPatch(patch: Partial<ConversationMessage>) {
+  if (!("content" in patch) && !("status" in patch) && !("cliProcess" in patch)) return false;
+  if (patch.kind !== undefined && patch.kind !== "text" && patch.kind !== "goal_plan_card") return false;
+  if (patch.role !== undefined && patch.role !== "kiki") return false;
+  return true;
+}
+
 export type DeleteConversationDeepResult = {
   deletedConversation: boolean;
   deletedWorkspace: boolean;
@@ -367,6 +381,22 @@ export function applyConversationCommand(input: {
     }
 
     if (command.type === "update_message") {
+      const existingMessage = getConversationMessage(conversationId, command.messageId);
+      if (
+        producedBy === "user" &&
+        existingMessage &&
+        isTerminalRuntimeAssistantMessage(existingMessage.message) &&
+        isClientRuntimeSnapshotPatch(command.patch)
+      ) {
+        const event = appendEvent({
+          conversationId,
+          kind: "message.updated",
+          payload: { message: existingMessage.message, version: existingMessage.version },
+          producedBy,
+          idempotencyKey,
+        });
+        return { event, conversation: getConversation(conversationId)?.conversation, revision: current.revision };
+      }
       const updated = updateConversationMessage({
         conversationId,
         messageId: command.messageId,

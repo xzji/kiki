@@ -6,12 +6,13 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { isImeCompositionKeyEvent } from "@/lib/browser/ime";
 import { getSlashCommandSuggestions } from "@/lib/slashCommands";
 import type { SlashCommand } from "@/lib/slashCommands";
-import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
+import type { QuotedConversationMessageContext, RuntimeEnvironment, RuntimeInputAttachment } from "@/types/runtime";
 
 type Props = {
   onSubmit: (
     value: string,
     quotedMessage?: QuotedConversationMessageContext | null,
+    attachments?: RuntimeInputAttachment[],
   ) => void | Promise<void>;
   placeholder?: string;
   quotedMessage?: QuotedConversationMessageContext | null;
@@ -50,6 +51,25 @@ function runtimeKindLabel(runtime: RuntimeEnvironment) {
   return runtime.runtimeKind || "Runtime";
 }
 
+function readFileAsAttachment(file: File): Promise<RuntimeInputAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === "string" ? reader.result : "";
+      const contentBase64 = value.includes(",") ? value.split(",").pop() || "" : value;
+      resolve({
+        id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+        filename: file.name,
+        mime: file.type || "application/octet-stream",
+        size: file.size,
+        contentBase64,
+      });
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("读取附件失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function AssistantComposer({
   onSubmit,
   placeholder = "输入任何想法，我会帮助你，没有什么大不了的事",
@@ -71,12 +91,12 @@ export function AssistantComposer({
   const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
   const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
   const [cursorIndex, setCursorIndex] = useState(0);
-  const [attachments, setAttachments] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<RuntimeInputAttachment[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
-  const isEmpty = value.trim().length === 0;
+  const isEmpty = value.trim().length === 0 && attachments.length === 0;
   const slashTrigger = disabled || selectedCommand ? null : getSlashCommandTrigger(value, cursorIndex);
   const commandSuggestions = slashTrigger ? getSlashCommandSuggestions(`/${slashTrigger.query}`) : [];
   const showCommandMenu = commandSuggestions.length > 0 && !commandMenuDismissed;
@@ -116,19 +136,24 @@ export function AssistantComposer({
 
   const submit = () => {
     const payload = value.trim();
-    if (!payload || disabled) return;
-    const next = selectedCommand ? `/${selectedCommand.name} ${payload}` : payload;
+    if (isEmpty || disabled) return;
+    const next = selectedCommand
+      ? `/${selectedCommand.name} ${payload}`.trim()
+      : payload || "请查看附件。";
+    const submittedAttachments = attachments;
     setValue("");
     setSelectedCommand(null);
     if (textareaRef.current) textareaRef.current.value = "";
     setAttachments([]);
-    void onSubmit(next, quotedMessage);
+    void onSubmit(next, quotedMessage, submittedAttachments);
   };
 
-  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
-    setAttachments(files.map((file) => file.name));
     event.target.value = "";
+    if (!files.length) return;
+    const nextAttachments = await Promise.all(files.map(readFileAsAttachment));
+    setAttachments((current) => [...current, ...nextAttachments]);
   };
 
   useEffect(() => {
@@ -281,12 +306,21 @@ export function AssistantComposer({
         ) : null}
         {attachments.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-2">
-            {attachments.map((fileName) => (
+            {attachments.map((attachment) => (
               <span
-                key={fileName}
-                className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-[#F8FAFC] px-3 py-1 text-xs text-[#6B7280]"
+                key={attachment.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E7EB] bg-[#F8FAFC] py-1 pl-3 pr-1.5 text-xs text-[#6B7280]"
               >
-                {fileName}
+                <span className="max-w-[180px] truncate">{attachment.filename}</span>
+                <button
+                  type="button"
+                  aria-label={`删除附件 ${attachment.filename}`}
+                  disabled={disabled}
+                  onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[#8C9198] hover:bg-[#E5E7EB] hover:text-[#1F2328] disabled:cursor-not-allowed"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </span>
             ))}
           </div>
@@ -298,6 +332,7 @@ export function AssistantComposer({
               type="file"
               className="hidden"
               multiple
+              accept="image/*"
               onChange={onFileChange}
             />
             <button

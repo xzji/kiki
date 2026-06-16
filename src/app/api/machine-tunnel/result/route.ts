@@ -26,6 +26,6 @@ export async function POST(request: NextRequest) {
   if (!body || typeof body.type !== "string") {
     return NextResponse.json({ ok: false, reason: "无效的结果体" }, { status: 400 });
   }
-  submitMachineResult(body);
+  submitMachineResult(body, { userId: machine.userId, machineId: machine.machineId });
   return NextResponse.json({ ok: true });
 }

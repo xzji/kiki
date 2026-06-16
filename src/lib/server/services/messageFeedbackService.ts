@@ -66,7 +66,7 @@ function buildSnapshotMessage(message: ConversationMessage): MessageFeedbackSnap
     if (message.sagaRequestId) refs.sagaRequestId = message.sagaRequestId;
     if (message.cliProcess?.runId) refs.cliProcessRunId = message.cliProcess.runId;
   }
-  if (message.kind === "task_card") {
+  if (message.kind === "task_card" || message.kind === "task_interaction_request") {
     refs.taskRef = message.taskRef;
   }
   if (message.kind === "governance_confirmation") {

@@ -25,7 +25,7 @@ import { readRelevantUserProfileMemoryForPrompt } from "@/lib/server/memory/user
 import { getConversation } from "@/lib/server/repositories/conversationsRepository";
 import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
 import { listConversationMessages } from "@/lib/server/repositories/conversationMessagesRepository";
-import type { ClaudeChatRequest } from "@/types/runtime";
+import type { ClaudeChatRequest, RuntimeInputAttachment } from "@/types/runtime";
 import { withAuth } from "@/lib/server/http/withAuth";
 import { normalizeWorkingDirectory } from "@/lib/server/runtimePath";
 
@@ -33,6 +33,35 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MEMORY_PRESSURE_PROMPT_BYTES = 96 * 1024;
+const MAX_INPUT_IMAGE_COUNT = 8;
+const MAX_INPUT_IMAGE_BYTES = 8 * 1024 * 1024;
+const SUPPORTED_INPUT_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+function normalizeInputAttachments(value: unknown): RuntimeInputAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const attachments: RuntimeInputAttachment[] = [];
+  let totalBytes = 0;
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const filename = typeof record.filename === "string" ? record.filename.trim() : "";
+    const mime = typeof record.mime === "string" ? record.mime.trim().toLowerCase() : "";
+    const contentBase64 = typeof record.contentBase64 === "string" ? record.contentBase64.trim() : "";
+    const size = typeof record.size === "number" && Number.isFinite(record.size) ? record.size : 0;
+    if (!filename || !contentBase64 || !SUPPORTED_INPUT_IMAGE_MIME.has(mime)) continue;
+    totalBytes += Math.max(0, size);
+    if (totalBytes > MAX_INPUT_IMAGE_BYTES) break;
+    attachments.push({
+      id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : `attachment-${attachments.length + 1}`,
+      filename,
+      mime,
+      size,
+      contentBase64,
+    });
+    if (attachments.length >= MAX_INPUT_IMAGE_COUNT) break;
+  }
+  return attachments;
+}
 
 /**
  * 服务端单点持久化某会话在指定 runtimeKind 下的 resume session id。
@@ -74,6 +103,7 @@ async function POSTHandler(request: NextRequest) {
   }
   const userId = getCurrentUserId();
   const runtimeKind = body.runtimeEnv.runtimeKind || "claude";
+  const attachments = normalizeInputAttachments(body.attachments);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -122,6 +152,7 @@ async function POSTHandler(request: NextRequest) {
           assistantCreatedAt: body.assistantCreatedAt,
           collectFileArtifacts,
           quotedMessage: body.quotedMessage,
+          attachments,
           contextPack,
           workspacePolicy: body.workspaceMode || "conversation",
           systemPromptMode: "conversation",

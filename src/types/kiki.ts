@@ -538,14 +538,15 @@ export type KikiMessage = {
 
 /**
  * 会话中的单条消息。
- * - text：纯文本（KiKi 或用户发言）
- * - task_card：KiKi 推送的任务执行消息，带任务卡片
+ * - text：基础消息，承载文本/Markdown/表格文本/图片或附件引用；streaming 时可动态更新
+ * - task_card：KiKi 推送的任务执行消息，live 读取任务实时状态
+ * - task_interaction_request：KiKi 发起的用户补充信息请求，消息自身保存交互快照
  */
 export type ConversationMessageQuote = {
   roleLabel: string;
   content: string;
   messageId?: string;
-  messageKind?: "text" | "goal_plan_card" | "task_card";
+  messageKind?: "text" | "goal_plan_card" | "task_card" | "task_interaction_request";
   taskRef?: {
     goalId: string;
     subGoalId: string;
@@ -606,6 +607,34 @@ export type ConversationMessage =
       taskSnapshot?: {
         task: Task;
         instance: TaskInstance;
+      };
+    }
+  | {
+      id: string;
+      kind: "task_interaction_request";
+      role: "kiki";
+      content: string;
+      createdAt: string;
+      unread?: boolean;
+      status?: "streaming" | "done" | "error";
+      source?: "user" | "kiki" | "system";
+      taskRef: {
+        goalId: string;
+        subGoalId: string;
+        taskId: string;
+        instanceId: string;
+      };
+      interactionSnapshot: {
+        panelTitle: string;
+        headline: string;
+        statusLabel: string;
+        fields: MissingFieldQuestion[];
+        hideFieldQuestions: string[];
+        reason: string;
+        resumeToken: string;
+        requirementType: InteractionRequirement["type"];
+        options?: string[];
+        submitted?: InteractionSubmission;
       };
     }
   | {

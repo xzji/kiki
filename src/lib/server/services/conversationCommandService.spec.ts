@@ -30,6 +30,32 @@ function textMessage(id: string, content: string): Extract<ConversationMessage, 
   };
 }
 
+function kikiRuntimeMessage(
+  id: string,
+  content: string,
+  status: Extract<ConversationMessage, { kind: "text" }>["status"] = "done",
+): Extract<ConversationMessage, { kind: "text" }> {
+  const now = new Date().toISOString();
+  return {
+    id,
+    kind: "text",
+    role: "kiki",
+    source: "kiki",
+    content,
+    createdAt: now,
+    status,
+    cliProcess: {
+      runId: id,
+      status: status === "streaming" ? "running" : status === "error" ? "error" : "completed",
+      startedAt: now,
+      finishedAt: status === "streaming" ? undefined : now,
+      promptSections: [],
+      events: [],
+      output: content,
+    },
+  };
+}
+
 export function runConversationCommandServiceSpecs() {
   ensureIsolatedPlanningSpecDataDir();
   const conversationId = "conv-command-spec";
@@ -163,6 +189,30 @@ export function runConversationCommandServiceSpecs() {
     (error) => error instanceof ConversationCommandConflictError,
   );
 
+  const runtimeMessageId = "msg-runtime-final";
+  applyConversationCommand({
+    command: {
+      type: "append_message",
+      conversationId,
+      message: kikiRuntimeMessage(runtimeMessageId, "完整最终结果"),
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.runtime-final.append", conversationId, runtimeMessageId),
+    producedBy: "system",
+  });
+  applyConversationCommand({
+    command: {
+      type: "update_message",
+      conversationId,
+      messageId: runtimeMessageId,
+      patch: kikiRuntimeMessage(runtimeMessageId, "半句话", "streaming"),
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.runtime-final.stale-client", conversationId, runtimeMessageId),
+  });
+  const afterStaleClientPatch = listConversationMessages({ conversationId, afterSeq: 0, limit: 20 }).find(
+    (message) => message.id === runtimeMessageId,
+  );
+  assert.equal(afterStaleClientPatch?.content, "完整最终结果", "客户端旧流式快照不能覆盖服务端终态结果");
+
   applyConversationCommand({
     command: { type: "append_message", conversationId, message: textMessage("msg-spec-2", "second") },
     idempotencyKey: createIdempotencyKey("conversation.spec.message", conversationId, "msg-spec-2"),
@@ -170,14 +220,14 @@ export function runConversationCommandServiceSpecs() {
   const paged = listConversationMessages({ conversationId, afterSeq: 1, limit: 10 });
   assert.deepEqual(
     paged.map((message) => message.id),
-    ["msg-governance-confirm-1", "msg-spec-2"],
+    ["msg-governance-confirm-1", "msg-runtime-final", "msg-spec-2"],
   );
   const summaryState = readConversationState();
   const summary = summaryState.conversations.find((conversation) => conversation.id === conversationId);
   assert.equal(summaryState.meta.mode, "summary");
   assert.equal(summary?.messagesLoaded, false);
   assert.equal("messages" in (summary as object), false, "summary state 不应返回完整 messages 数组");
-  assert.equal(summary?.messageCount, 3);
+  assert.equal(summary?.messageCount, 4);
   assert.equal(summary?.lastMessage?.id, "msg-spec-2");
   assert.equal(summary?.lastMessageAt, summary?.lastMessage?.createdAt);
 
@@ -245,7 +295,7 @@ export function runConversationCommandServiceSpecs() {
   const full = fullState.conversations.find((conversation) => conversation.id === conversationId);
   assert.equal(fullState.meta.mode, "full");
   assert.ok(full && "messages" in full);
-  assert.equal(full.messages.length, 3);
+  assert.equal(full.messages.length, 4);
 
   const cascadeConversationId = "conv-command-cascade-spec";
   const goalId = "goal-command-cascade-spec";

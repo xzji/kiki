@@ -553,6 +553,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             workspacePolicy: payload.workspacePolicy,
             systemPromptMode: payload.systemPromptMode,
             quotedMessage: payload.quotedMessage,
+            attachments: payload.attachments,
             filePolicy: payload.filePolicy,
             channelPolicy: payload.channelPolicy,
             conversationId: payload.conversationId,
@@ -741,6 +742,11 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     callbacks,
     shouldExitAfterHandoff: () => shouldExitAfterHandoff,
     getPendingHandoffCount: () => runningJobs.size + runningGovernanceJobs.size + activeStreamSessionIds.size,
+    getHelloState: () => ({
+      runningJobIds: Array.from(runningJobs),
+      runningGovernanceJobIds: Array.from(runningGovernanceJobs),
+      activeStreamSessionIds: Array.from(activeStreamSessionIds),
+    }),
   });
 
 }

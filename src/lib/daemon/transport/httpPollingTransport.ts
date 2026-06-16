@@ -1,7 +1,7 @@
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
 import type { MachineCommand, MachineResult } from "@/lib/server/tunnel/tunnelHub";
 import type { DaemonLogDomain, DaemonLogLevel } from "@/lib/daemon/daemonLogger";
-import { fetchWithTimeout, type DaemonOutboundTransport, type DaemonTransportCallbacks } from "@/lib/daemon/transport/types";
+import { fetchWithTimeout, type DaemonHelloState, type DaemonOutboundTransport, type DaemonTransportCallbacks } from "@/lib/daemon/transport/types";
 
 const POLL_PATH = "/api/machine-tunnel/poll";
 const RESULT_PATH = "/api/machine-tunnel/result";
@@ -98,6 +98,7 @@ export async function runHttpPollingTransport(input: {
   callbacks: DaemonTransportCallbacks;
   shouldExitAfterHandoff: () => boolean;
   getPendingHandoffCount: () => number;
+  getHelloState: () => DaemonHelloState;
 }): Promise<never> {
   const pollUrl = `${input.base}${POLL_PATH}`;
   input.callbacks.logEvent("info", "conn", "HTTP polling started", {
@@ -116,7 +117,11 @@ export async function runHttpPollingTransport(input: {
         {
           method: "POST",
           headers: { "content-type": "application/json", "x-machine-api-key": input.apiKey },
-          body: JSON.stringify({ fingerprint: input.fingerprint, daemonVersion: input.daemonVersion }),
+          body: JSON.stringify({
+            fingerprint: input.fingerprint,
+            daemonVersion: input.daemonVersion,
+            runningGovernanceJobIds: input.getHelloState().runningGovernanceJobIds,
+          }),
         },
         POLL_FETCH_TIMEOUT_MS,
       );

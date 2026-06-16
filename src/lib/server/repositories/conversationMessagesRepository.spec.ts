@@ -266,4 +266,77 @@ export async function runAppendThreadMessageSpecs() {
     assert.equal(message?.kind, "goal_plan_card");
     assert.deepEqual(message?.kind === "goal_plan_card" ? message.cliProcess : undefined, cliProcess);
   }
+
+  // 7. task_interaction_request 持久化 interactionSnapshot，并支持写回 submitted
+  {
+    seedConversation("conv-7", "topic-7");
+    insertConversationMessage("conv-7", {
+      id: "msg-interaction-7",
+      kind: "task_interaction_request",
+      role: "kiki",
+      content: "请补充信息以继续执行任务",
+      createdAt: "2026-06-01T04:00:00.000Z",
+      status: "done",
+      source: "system",
+      taskRef: {
+        goalId: "goal-7",
+        subGoalId: "sub-7",
+        taskId: "task-7",
+        instanceId: "inst-7",
+      },
+      interactionSnapshot: {
+        panelTitle: "请补充任务所需信息",
+        headline: "这次预算大概是什么范围？",
+        statusLabel: "需填写",
+        fields: [
+          {
+            id: "budget",
+            label: "预算",
+            question: "这次预算大概是什么范围？",
+            description: "预算是用户偏好，Agent 不能自行假设。",
+            options: ["3000 元以内", "3000-8000 元"],
+            source: "user",
+          },
+        ],
+        hideFieldQuestions: [],
+        reason: "预算是用户偏好，Agent 不能自行假设。",
+        resumeToken: "resume-7",
+        requirementType: "provide_context",
+        options: ["3000 元以内", "3000-8000 元"],
+      },
+    });
+    const [initial] = listConversationMessages({ conversationId: "conv-7" });
+    assert.equal(initial?.kind, "task_interaction_request");
+    assert.equal(initial?.kind === "task_interaction_request" ? initial.interactionSnapshot.resumeToken : "", "resume-7");
+
+    const updated = updateConversationMessage({
+      conversationId: "conv-7",
+      messageId: "msg-interaction-7",
+      patch:
+        initial?.kind === "task_interaction_request"
+          ? {
+              ...initial,
+              interactionSnapshot: {
+                ...initial.interactionSnapshot,
+                submitted: {
+                  type: "provide_context",
+                  status: "submitted",
+                  action: "提交反馈",
+                  approved: true,
+                  feedback: "预算：3000 元以内",
+                  fields: { "预算": "3000 元以内" },
+                  submittedAt: "2026-06-01T04:01:00.000Z",
+                },
+              },
+            }
+          : {},
+    });
+    assert.ok(updated && !("conflict" in updated && updated.conflict));
+    const [after] = listConversationMessages({ conversationId: "conv-7" });
+    assert.equal(after?.kind, "task_interaction_request");
+    assert.equal(
+      after?.kind === "task_interaction_request" ? after.interactionSnapshot.submitted?.feedback : "",
+      "预算：3000 元以内",
+    );
+  }
 }

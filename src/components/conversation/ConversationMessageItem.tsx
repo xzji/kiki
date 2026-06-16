@@ -8,6 +8,7 @@ import { KikiAvatar } from "@/components/layout/KikiAvatar";
 import { InlineCliProcessTimeline } from "@/components/conversation/InlineCliProcessTimeline";
 import { MessageFeedbackControls } from "@/components/conversation/MessageFeedbackControls";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
+import { TaskInteractionRequestMessage } from "@/components/conversation/TaskInteractionRequestMessage";
 import { ArtifactRenderer } from "@/components/execution/ArtifactRenderer";
 import { ToolPermissionRequestDialog } from "@/components/runtime/ToolPermissionRequestDialog";
 import { formatMessageTime } from "@/lib/date";
@@ -55,6 +56,7 @@ function getToolPermissionRequestFromEvent(input: unknown): ToolPermissionReques
  * - hover：右上角「更多」菜单（仅 KiKi task_card）
  */
 export function ConversationMessageItem({
+  conversationId,
   message,
   onQuote,
   onOpenResult,
@@ -68,6 +70,7 @@ export function ConversationMessageItem({
   onGovernanceCancel,
   onDelete,
 }: {
+  conversationId: string;
   message: ConversationMessage;
   onQuote: (message: ConversationMessage) => void;
   onOpenResult?: (message: ConversationMessage) => void;
@@ -109,10 +112,10 @@ export function ConversationMessageItem({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const taskInfo = useMemo(() => {
-    if (message.kind !== "task_card") return null;
+    if (message.kind !== "task_card" && message.kind !== "task_interaction_request") return null;
     const goal = goals.find((g) => g.id === message.taskRef.goalId);
     if (!goal) {
-      return message.taskSnapshot
+      return message.kind === "task_card" && message.taskSnapshot
         ? { goal: null, subGoal: null, ...message.taskSnapshot }
         : null;
     }
@@ -120,13 +123,13 @@ export function ConversationMessageItem({
       (sg) => sg.id === message.taskRef.subGoalId,
     );
     if (!subGoal) {
-      return message.taskSnapshot
+      return message.kind === "task_card" && message.taskSnapshot
         ? { goal, subGoal: null, ...message.taskSnapshot }
         : null;
     }
     const task = subGoal.tasks.find((t) => t.id === message.taskRef.taskId);
     if (!task) {
-      return message.taskSnapshot
+      return message.kind === "task_card" && message.taskSnapshot
         ? { goal, subGoal, ...message.taskSnapshot }
         : null;
     }
@@ -134,7 +137,7 @@ export function ConversationMessageItem({
       (i) => i.id === message.taskRef.instanceId,
     );
     if (!instance) {
-      return message.taskSnapshot
+      return message.kind === "task_card" && message.taskSnapshot
         ? {
             goal,
             subGoal,
@@ -318,6 +321,14 @@ export function ConversationMessageItem({
                 ? (feedback) => onTaskOptionalFeedback(message, feedback)
                 : undefined
             }
+          />
+        ) : null}
+
+        {message.kind === "task_interaction_request" ? (
+          <TaskInteractionRequestMessage
+            conversationId={conversationId}
+            message={message}
+            onOpen={taskInfo ? () => onOpenTaskInfo?.(message) : undefined}
           />
         ) : null}
 

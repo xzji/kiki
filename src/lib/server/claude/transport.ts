@@ -10,6 +10,7 @@ import type {
   QuotedConversationMessageContext,
   RuntimeEnvironment,
   RuntimeFilePolicy,
+  RuntimeInputAttachment,
   RuntimePermissionMode,
 } from "@/types/runtime";
 
@@ -152,6 +153,7 @@ export type ClaudeStreamOptions = {
   assistantMessageId?: string;
   assistantCreatedAt?: string;
   collectFileArtifacts?: boolean;
+  attachments?: RuntimeInputAttachment[];
   signal?: AbortSignal;
   onEvent: (event: RuntimeStreamEvent) => void;
   /** spawn 成功后回传子进程 pid，供上层（如 ProcessSupervisor）绑定 OS 进程做生命周期管理。 */
@@ -526,10 +528,26 @@ function redactInternalIdentifiersForPrompt(value: string) {
   return value.replace(/\b(?:conv|goal|sub|task|inst)-[A-Za-z0-9_-]+\b/g, "<redacted-id>");
 }
 
+function isSupportedClaudeImageAttachment(attachment: RuntimeInputAttachment) {
+  return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(attachment.mime);
+}
+
+function buildAttachmentPromptNote(attachments: RuntimeInputAttachment[] | undefined) {
+  const images = (attachments ?? []).filter(isSupportedClaudeImageAttachment);
+  if (images.length === 0) return "";
+  return [
+    "",
+    "【用户上传图片】",
+    ...images.map((attachment, index) => `${index + 1}. ${attachment.filename} (${attachment.mime}, ${attachment.size} bytes)`),
+    "这些图片已作为本轮消息的 image content blocks 一并发送给 CLI，请直接查看图片内容回答。",
+  ].join("\n");
+}
+
 function buildPrompt(
   message: string,
   quotedMessage?: ClaudeStreamOptions["quotedMessage"],
   redactionMode: "strict" | "passthrough" = "strict",
+  attachments?: RuntimeInputAttachment[],
 ) {
   const parts: string[] = [];
   if (quotedMessage) {
@@ -544,6 +562,8 @@ function buildPrompt(
     );
   }
   parts.push(`当前用户消息：`, redactionMode === "strict" ? redactInternalIdentifiersForPrompt(message) : message);
+  const attachmentNote = buildAttachmentPromptNote(attachments);
+  if (attachmentNote) parts.push(attachmentNote);
   return parts.join("\n");
 }
 
@@ -591,6 +611,7 @@ export function buildWorkspaceBoundPrompt(input: {
   message: string;
   quotedMessage?: ClaudeStreamOptions["quotedMessage"];
   contextPack?: string;
+  attachments?: RuntimeInputAttachment[];
   redactionMode?: "strict" | "passthrough";
 }) {
   const redactionMode = input.redactionMode ?? "strict";
@@ -602,8 +623,28 @@ export function buildWorkspaceBoundPrompt(input: {
         : input.contextPack.trim();
     parts.push("【当前会话上下文包】", contextPack);
   }
-  parts.push(buildPrompt(input.message, input.quotedMessage, redactionMode));
+  parts.push(buildPrompt(input.message, input.quotedMessage, redactionMode, input.attachments));
   return parts.join("\n");
+}
+
+type ClaudeInputContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
+
+function buildClaudeInputContent(promptInput: string, attachments: RuntimeInputAttachment[] | undefined): string | ClaudeInputContentBlock[] {
+  const images = (attachments ?? []).filter(isSupportedClaudeImageAttachment);
+  if (images.length === 0) return promptInput;
+  return [
+    { type: "text", text: promptInput },
+    ...images.map((attachment) => ({
+      type: "image" as const,
+      source: {
+        type: "base64" as const,
+        media_type: attachment.mime,
+        data: attachment.contentBase64,
+      },
+    })),
+  ];
 }
 
 export function buildWorkspacePromptPayload(input: {
@@ -613,6 +654,7 @@ export function buildWorkspacePromptPayload(input: {
   message: string;
   quotedMessage?: ClaudeStreamOptions["quotedMessage"];
   contextPack?: string;
+  attachments?: RuntimeInputAttachment[];
   redactionMode?: "strict" | "passthrough";
   includeConversationIdentity?: boolean;
 }): ClaudeWorkspacePromptPayload {
@@ -629,7 +671,7 @@ export function buildWorkspacePromptPayload(input: {
       ? redactInternalIdentifiersForPrompt(input.contextPack.trim())
       : input.contextPack.trim()
     : "";
-  const userPrompt = buildPrompt(input.message, input.quotedMessage, redactionMode);
+  const userPrompt = buildPrompt(input.message, input.quotedMessage, redactionMode, input.attachments);
   const promptInput = [
     contextContent ? ["【当前会话上下文包】", contextContent].join("\n") : "",
     userPrompt,
@@ -1077,10 +1119,12 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     message: options.message,
     quotedMessage: options.quotedMessage,
     contextPack: options.contextPack,
+    attachments: options.attachments,
     redactionMode,
     includeConversationIdentity,
   });
   const { systemPrompt, promptInput, promptSections } = promptPayload;
+  const userContent = buildClaudeInputContent(promptInput, options.attachments);
   const cliPath = await resolveCliPath(options.cliPath);
 
   options.onEvent({ type: "status", status: "checking" });
@@ -1146,7 +1190,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
       type: "user",
       message: {
         role: "user",
-        content: promptInput,
+        content: userContent,
       },
     });
 

@@ -2,7 +2,7 @@
 
 import { ArtifactSummaryChip } from "@/components/execution/ArtifactRenderer";
 import { buildInstanceCardTitle } from "@/components/task/ExecutionResultBody";
-import { AwaitingUserResumePanel, SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
+import { SubmittedInteractionPanel } from "@/components/task/AwaitingUserResumePanel";
 import { ToolPermissionRequestDialog } from "@/components/runtime/ToolPermissionRequestDialog";
 import { OptionalFeedbackSuggestions } from "@/components/task/OptionalFeedbackSuggestions";
 import { TaskInlineResultView, canRenderInlineAgentResult } from "@/components/task/TaskInlineResultView";
@@ -146,10 +146,6 @@ export function TaskMessageCard({
             variant="inline"
             onResolved={() => undefined}
           />
-        </div>
-      ) : instance.awaitingUser && !isOptionalFeedbackResult ? (
-        <div className="mt-4" onClick={(event) => event.stopPropagation()}>
-          <AwaitingUserResumePanel task={task} instance={instance} />
         </div>
       ) : instance.result?.interactionSubmission ? (
         <div className="mt-4" onClick={(event) => event.stopPropagation()}>

@@ -17,6 +17,7 @@ import type {
   RuntimeEnvironmentCheckInput,
   RuntimeEnvironmentCheckResult,
   RuntimeFilePolicy,
+  RuntimeInputAttachment,
   RuntimePermissionMode,
 } from "@/types/runtime";
 import type { ToolPermissionDecision } from "@/lib/server/toolPermission/types";
@@ -78,6 +79,7 @@ export type RemoteStreamPromptPayload = {
   workspacePolicy?: "conversation" | "task" | string;
   systemPromptMode?: "conversation" | "neutral";
   quotedMessage?: QuotedConversationMessageContext | null;
+  attachments?: RuntimeInputAttachment[];
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
 };
@@ -171,7 +173,11 @@ type ExecuteProgressListener = (input: {
   log?: GoalServerLogEntry;
   trajectory?: ExecutionTrajectoryStep[];
 }) => void;
-type GovernanceTickResultListener = (result: GovernanceTickMachineResult) => void;
+type MachineResultContext = {
+  userId?: string;
+  machineId?: string;
+};
+type GovernanceTickResultListener = (result: GovernanceTickMachineResult, context?: MachineResultContext) => void;
 type MachineDisconnectListener = (machineId: string) => void;
 type MachineCommandSender = (command: MachineCommand) => boolean;
 type MachineWsConnection = {
@@ -335,7 +341,7 @@ export function takeMachineCommands(machineId: string, timeoutMs: number): Promi
 }
 
 /** 处理 daemon 回传的命令结果 */
-export function submitMachineResult(result: MachineResult) {
+export function submitMachineResult(result: MachineResult, context?: MachineResultContext) {
   const state = getState();
   if (result.type === "execute") {
     const pending = state.pendingExecutes.get(result.jobId);
@@ -365,7 +371,7 @@ export function submitMachineResult(result: MachineResult) {
     return;
   }
   if (isGovernanceTickMachineResult(result)) {
-    state.governanceTickResultListener?.(result);
+    state.governanceTickResultListener?.(result, context);
     return;
   }
   if (result.type === "discover_runtimes") {

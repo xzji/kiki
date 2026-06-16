@@ -7,6 +7,7 @@ import {
 import { listUsersForOrchestratorTick } from "@/lib/server/orchestrator/listUsersWithPendingWork";
 import { getOrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { runOrchestratorUserFrame } from "@/lib/server/orchestrator/runOrchestratorUserFrame";
+import { registerGovernanceTickTunnelCallbacks } from "@/lib/server/governance/governanceTickDispatcher";
 import { registerTunnelDispatchCallbacks } from "@/lib/server/scheduling/taskDispatcher";
 import { initializeMachineTunnelWsServer } from "@/lib/server/tunnel/machineTunnelWsServer";
 import { describeSchedulingTimezone } from "@/lib/runtime/schedulingTimezone";
@@ -83,6 +84,7 @@ export async function runCloudOrchestratorLoop() {
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
 
   registerTunnelDispatchCallbacks();
+  registerGovernanceTickTunnelCallbacks();
   appendRuntimeDaemonLog("云端编排器已启动（Tunnel 走 HTTP 长轮询）");
   {
     const tzInfo = describeSchedulingTimezone();
@@ -99,6 +101,7 @@ export function bootstrapCloudControlPlane(server?: HttpServer) {
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
   if (server) initializeMachineTunnelWsServer(server);
   registerTunnelDispatchCallbacks();
+  registerGovernanceTickTunnelCallbacks();
   appendRuntimeDaemonLog("云端控制面已启动（Tunnel 优先 WS，HTTP 长轮询兜底）");
   {
     const tzInfo = describeSchedulingTimezone();

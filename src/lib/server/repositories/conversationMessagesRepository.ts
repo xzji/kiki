@@ -60,6 +60,12 @@ function messageRefs(message: ConversationMessage) {
       snapshotJson: message.taskSnapshot ? JSON.stringify({ taskSnapshot: message.taskSnapshot }) : null,
     };
   }
+  if (message.kind === "task_interaction_request") {
+    return {
+      refJson: JSON.stringify({ taskRef: message.taskRef }),
+      snapshotJson: JSON.stringify({ interactionSnapshot: message.interactionSnapshot }),
+    };
+  }
   if (message.kind === "governance_confirmation") {
     return {
       refJson: JSON.stringify({ governance: message.governance }),
@@ -108,6 +114,30 @@ export function mapConversationMessageRow(row: ConversationMessageRow): Conversa
       role: "kiki",
       taskRef: refs?.taskRef ?? { goalId: "", subGoalId: "", taskId: "", instanceId: "" },
       taskSnapshot: snapshot?.taskSnapshot,
+    };
+  }
+  if (row.kind === "task_interaction_request") {
+    const refs = parseJson<{
+      taskRef: Extract<ConversationMessage, { kind: "task_interaction_request" }>["taskRef"];
+    }>(row.ref_json);
+    const snapshot = parseJson<{
+      interactionSnapshot: Extract<ConversationMessage, { kind: "task_interaction_request" }>["interactionSnapshot"];
+    }>(row.snapshot_json);
+    return {
+      ...base,
+      kind: "task_interaction_request",
+      role: "kiki",
+      taskRef: refs?.taskRef ?? { goalId: "", subGoalId: "", taskId: "", instanceId: "" },
+      interactionSnapshot: snapshot?.interactionSnapshot ?? {
+        panelTitle: "请补充任务所需信息",
+        headline: row.content,
+        statusLabel: "需填写",
+        fields: [],
+        hideFieldQuestions: [],
+        reason: row.content,
+        resumeToken: "",
+        requirementType: "provide_context",
+      },
     };
   }
   if (row.kind === "governance_confirmation") {

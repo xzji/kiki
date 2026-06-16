@@ -99,6 +99,7 @@ export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
         workspacePolicy: options.workspacePolicy,
         systemPromptMode: options.systemPromptMode,
         quotedMessage: options.quotedMessage,
+        attachments: options.attachments,
         filePolicy: options.filePolicy,
         channelPolicy: options.channelPolicy,
       },

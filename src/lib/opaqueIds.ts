@@ -134,6 +134,17 @@ function migrateConversationMessageIds(message: ConversationMessage): Conversati
       },
     };
   }
+  if (message.kind === "task_interaction_request") {
+    return {
+      ...message,
+      taskRef: {
+        goalId: normalizeGoalId(message.taskRef.goalId),
+        subGoalId: normalizeSubGoalId(message.taskRef.subGoalId),
+        taskId: normalizeTaskId(message.taskRef.taskId),
+        instanceId: normalizeInstanceId(message.taskRef.instanceId),
+      },
+    };
+  }
   if (message.kind !== "task_card") return message;
 
   const migratedTask = message.taskSnapshot?.task ? migrateTaskIds(message.taskSnapshot.task) : undefined;

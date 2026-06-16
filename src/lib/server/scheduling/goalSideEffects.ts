@@ -13,7 +13,8 @@ import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceCompos
 import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
 import { getConversation } from "@/lib/server/repositories/conversationsRepository";
 import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import type { Goal, Task } from "@/types/kiki";
+import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
+import type { ConversationMessage, Goal, Task } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
 
 function buildScheduleEvent(goal: Goal, task: Task, instanceId: string, startedAt: Date): AgentEvent {
@@ -86,6 +87,76 @@ function findTaskContext(goals: Goal[], input: { goalId?: string; taskId?: strin
   return null;
 }
 
+function isAwaitingUserInteraction(instance: Task["instances"][number]) {
+  const blocker = instance.awaitingUser?.blocker;
+  // 工具授权 blocker 也带 interactionRequirement/resumeToken，但它有专属的授权弹窗（仅存在于 task_card），
+  // 不能走通用的「补充信息」交互消息，否则会丢失授权 UI。
+  if (blocker?.toolPermission) return false;
+  return Boolean(
+    blocker?.resumeToken &&
+      instance.awaitingUser?.interactionRequirement &&
+      instance.status === "awaiting_user",
+  );
+}
+
+function buildTaskConversationMessage(input: {
+  id: string;
+  content: string;
+  createdAt: string;
+  goal: Goal;
+  subGoalId: string;
+  task: Task;
+  instance: Task["instances"][number];
+}): ConversationMessage {
+  const taskRef = {
+    goalId: input.goal.id,
+    subGoalId: input.subGoalId,
+    taskId: input.task.id,
+    instanceId: input.instance.id,
+  };
+  if (isAwaitingUserInteraction(input.instance) && input.instance.awaitingUser) {
+    const displayModel = buildAwaitingDisplayModel(input.task, input.instance, "card");
+    const requirement = input.instance.awaitingUser.interactionRequirement;
+    return {
+      id: input.id,
+      kind: "task_interaction_request",
+      role: "kiki",
+      content: input.content,
+      createdAt: input.createdAt,
+      unread: true,
+      status: "done",
+      source: "system",
+      taskRef,
+      interactionSnapshot: {
+        panelTitle: displayModel.panelTitle,
+        headline: displayModel.headline || input.instance.awaitingUser.reason,
+        statusLabel: displayModel.statusLabel,
+        fields: displayModel.fields,
+        hideFieldQuestions: Array.from(displayModel.hideFieldQuestions),
+        reason: input.instance.awaitingUser.reason,
+        resumeToken: input.instance.awaitingUser.blocker?.resumeToken ?? "",
+        requirementType: requirement?.type ?? "provide_context",
+        options: requirement?.options,
+      },
+    };
+  }
+  return {
+    id: input.id,
+    kind: "task_card",
+    role: "kiki",
+    content: input.content,
+    createdAt: input.createdAt,
+    unread: true,
+    status: "done",
+    source: "system",
+    taskRef,
+    taskSnapshot: {
+      task: input.task,
+      instance: input.instance,
+    },
+  };
+}
+
 export function runGoalScheduleSynthesisWorker(goals: Goal[]) {
   let events = readScheduleEventsSnapshot([]);
   let synthesized = 0;
@@ -146,7 +217,7 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
     const conversationExists = goal.conversationId ? !!getConversation(goal.conversationId) : false;
     const conversationMessageId =
       goal.conversationId && conversationExists && shouldDeliverToConversation(deliveryChannel)
-        ? `msg-task-${instance.id}-n${nextSequence}`
+        ? `${isAwaitingUserInteraction(instance) ? "msg-interaction" : "msg-task"}-${instance.id}-n${nextSequence}`
         : undefined;
 
     // append 消息 + 标记 delivered + 投递事件必须原子：任一步失败则整笔回滚、保持 pending，
@@ -160,26 +231,15 @@ export function runGoalNotificationDeliveryWorker(goals: Goal[]) {
             command: {
               type: "append_message",
               conversationId: goal.conversationId!,
-              message: {
+              message: buildTaskConversationMessage({
                 id: conversationMessageId,
-                kind: "task_card",
-                role: "kiki",
                 content: notification.userMessage,
                 createdAt: notification.createdAt,
-                unread: true,
-                status: "done",
-                source: "system",
-                taskRef: {
-                  goalId: goal.id,
-                  subGoalId: subGoal.id,
-                  taskId: task.id,
-                  instanceId: instance.id,
-                },
-                taskSnapshot: {
-                  task,
-                  instance,
-                },
-              },
+                goal,
+                subGoalId: subGoal.id,
+                task,
+                instance,
+              }),
             },
             idempotencyKey: `conversation.message.append:${conversationMessageId}`,
             producedBy: "worker",

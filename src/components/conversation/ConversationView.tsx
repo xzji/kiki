@@ -57,6 +57,7 @@ import type {
   CliProcessEvent,
   ConversationCliProcess,
   QuotedConversationMessageContext,
+  RuntimeInputAttachment,
 } from "@/types/runtime";
 
 function isAbortError(error: unknown) {
@@ -290,25 +291,33 @@ function appendTerminalNotice(content: string, notice: string, emptyContent: str
 }
 
 function resolveTaskCardInfo(message: ConversationMessage | null, goals: Goal[]) {
-  if (!message || message.kind !== "task_card") return null;
+  if (!message || (message.kind !== "task_card" && message.kind !== "task_interaction_request")) return null;
   const goal = goals.find((item) => item.id === message.taskRef.goalId) ?? null;
   const subGoal = goal?.subGoals.find((item) => item.id === message.taskRef.subGoalId) ?? null;
   const storeTask = subGoal?.tasks.find((item) => item.id === message.taskRef.taskId) ?? null;
-  const task = storeTask ?? message.taskSnapshot?.task ?? null;
+  const task = storeTask ?? (message.kind === "task_card" ? message.taskSnapshot?.task : null) ?? null;
   const instance =
     storeTask?.instances.find((item) => item.id === message.taskRef.instanceId) ??
-    message.taskSnapshot?.instance ??
+    (message.kind === "task_card" ? message.taskSnapshot?.instance : null) ??
     null;
   if (!goal || !task || !instance) return null;
   return { goal, subGoal, task, instance, message };
 }
 
 function buildQuotedMessageContext(message: ConversationMessage, goals: Goal[]): QuotedConversationMessageContext {
-  if (message.kind === "task_card") {
+  if (message.kind === "task_card" || message.kind === "task_interaction_request") {
     const taskInfo = resolveTaskCardInfo(message, goals);
+    const interactionContent = message.kind === "task_interaction_request"
+      ? [
+          message.interactionSnapshot.headline || message.interactionSnapshot.reason,
+          message.interactionSnapshot.submitted?.feedback
+            ? `已提交：${message.interactionSnapshot.submitted.feedback}`
+            : undefined,
+        ].filter(Boolean).join("\n")
+      : undefined;
     return {
       roleLabel: "KiKi",
-      content: taskInfo ? buildTaskQuoteContent(taskInfo.task, taskInfo.instance) : message.content,
+      content: interactionContent ?? (taskInfo ? buildTaskQuoteContent(taskInfo.task, taskInfo.instance) : message.content),
       messageId: message.id,
       messageKind: message.kind,
       taskRef: message.taskRef,
@@ -1056,6 +1065,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const onSend = async (
     text: string,
     quoted?: QuotedConversationMessageContext | null,
+    attachments: RuntimeInputAttachment[] = [],
   ) => {
     const parsedCommand = parseSlashCommand(text);
     const canResumePlanning = parsedCommand.kind === "plain" && shouldResumePlanningFromMessage(text);
@@ -2132,6 +2142,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             goal: contextGoal,
           },
           quotedMessage: quoted,
+          attachments,
         },
         {
           onEvent: (event) => {
@@ -2488,6 +2499,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                       </div>
                     ) : null}
                     <ConversationMessageItem
+                      conversationId={conversation.id}
                       message={msg}
                       onQuote={(message) => setQuotedMessage(message)}
                       onOpenResult={(message) => {
@@ -2634,7 +2646,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   setTaskInfoMessage(null);
                   setActivePlanGoalId(taskInfo.goal.id);
                   setPlanFocus(
-                    taskInfoMessage?.kind === "task_card"
+                    taskInfoMessage?.kind === "task_card" || taskInfoMessage?.kind === "task_interaction_request"
                       ? taskInfoMessage.taskRef.subGoalId
                       : null,
                   );

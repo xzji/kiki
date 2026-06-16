@@ -112,6 +112,14 @@ export type RuntimeDiscoveryResult = {
 
 export type QuotedConversationMessageContext = import("@/types/kiki").ConversationMessageQuote;
 
+export type RuntimeInputAttachment = {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  contentBase64: string;
+};
+
 export type CliPromptSection = {
   id: string;
   kind: "system" | "context" | "user" | "tool_policy" | "other";
@@ -171,6 +179,7 @@ export type ClaudeChatRequest = {
     goal?: import("@/types/kiki").Goal | null;
   };
   quotedMessage?: QuotedConversationMessageContext | null;
+  attachments?: RuntimeInputAttachment[];
 };
 
 export type ClaudeStreamEvent =

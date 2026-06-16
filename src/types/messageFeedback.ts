@@ -23,7 +23,7 @@ export type MessageFeedbackSnapshotMessage = {
   source?: ConversationMessage["source"];
   truncated?: boolean;
   refs?: {
-    taskRef?: Extract<ConversationMessage, { kind: "task_card" }>["taskRef"];
+    taskRef?: Extract<ConversationMessage, { kind: "task_card" | "task_interaction_request" }>["taskRef"];
     goalRef?: Extract<ConversationMessage, { kind: "goal_plan_card" }>["goalRef"];
     sagaRequestId?: string;
     cliProcessRunId?: string;

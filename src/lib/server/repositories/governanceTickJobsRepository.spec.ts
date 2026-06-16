@@ -149,5 +149,22 @@ export function runGovernanceTickJobsRepositorySpecs() {
     });
     assert.equal(failed?.status, "failed");
     assert.equal(failed?.lastError, "runner_failed");
+
+    const requeued = createGovernanceTickJob({
+      targetKind: "topic",
+      topicId: "topic-fail",
+      baseRevision: 4,
+      payload: {
+        targetKind: "topic",
+        topicId: "topic-fail",
+        baseRevision: 4,
+        snapshot: {},
+      },
+      idempotencyKey: "governance-tick-repo-fail",
+      createdAt: "2026-06-01T00:03:00.000Z",
+    });
+    assert.equal(requeued.id, failedJob.id, "same due tick idempotency key is reused");
+    assert.equal(requeued.status, "queued", "failed due tick is requeued instead of blocking future scheduler frames");
+    assert.equal(requeued.lastError, undefined);
   }
 }

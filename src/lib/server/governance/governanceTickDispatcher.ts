@@ -1,5 +1,5 @@
 import { createIdempotencyKey } from "@/lib/opaqueIds";
-import { getCurrentUserId } from "@/lib/server/context/userContext";
+import { getCurrentUserId, runWithUserContext } from "@/lib/server/context/userContext";
 import { pushGovernanceChangeNotification } from "@/lib/server/governance/governanceChangeNotifications";
 import { dispatchThreadActions, type DispatchThreadActionsResult } from "@/lib/server/governance/dispatchActions";
 import {
@@ -46,6 +46,7 @@ import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { Thread, Topic } from "@/types/topic";
 
 const DEFAULT_GOVERNANCE_TICK_LEASE_MS = 10 * 60 * 1000;
+const DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS = 5 * 60 * 1000;
 
 export type GovernanceTickOutcomeProcessResult =
   | { ok: true; job: GovernanceTickJobRecord; duplicate?: boolean; dispatch?: DispatchThreadActionsResult }
@@ -76,6 +77,10 @@ export type GovernanceTickActionCallbacks = {
 
 function nowIso(now = new Date()) {
   return now.toISOString();
+}
+
+function logGovernanceTick(message: string, fields: Record<string, unknown> = {}) {
+  console.info("[governance_tick]", message, fields);
 }
 
 function buildJobIdempotencyKey(input: {
@@ -187,6 +192,7 @@ export function leaseAndDispatchGovernanceTickJob(input: {
     leaseDurationMs: input.leaseDurationMs,
     now: input.now,
     targetKind: input.targetKind,
+    expiredLeaseGraceMs: DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS,
   });
   if (!leased) return null;
   const command: GovernanceTickMachineCommand = {
@@ -200,6 +206,16 @@ export function leaseAndDispatchGovernanceTickJob(input: {
     ...(input.llm ? { llm: input.llm } : {}),
   };
   const sent = input.sendCommand(command);
+  logGovernanceTick("dispatched lease to machine", {
+    jobId: leased.id,
+    targetKind: leased.targetKind,
+    topicId: leased.topicId,
+    threadId: leased.threadId,
+    leaseOwner: command.leaseOwner,
+    leaseExpiresAt: leased.leaseExpiresAt,
+    attemptCount: leased.attemptCount,
+    sent,
+  });
   return { job: leased, command, sent };
 }
 
@@ -211,7 +227,10 @@ export function dispatchReadyGovernanceTickJobsToMachines(input: {
   llm?: GovernanceTickLlmPayload;
 }): { processed: number; skippedOffline: boolean } {
   const userId = getCurrentUserId();
-  if (countPendingGovernanceTickJobs({ now: input.now }) === 0) {
+  if (countPendingGovernanceTickJobs({
+    now: input.now,
+    expiredLeaseGraceMs: DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS,
+  }) === 0) {
     return { processed: 0, skippedOffline: false };
   }
   if (!input.llm) {
@@ -261,29 +280,72 @@ export function reconcileGovernanceTickMachineHello(input: {
     });
     if (job) renewed += 1;
   }
+  if (uniqueJobIds.length > 0) {
+    logGovernanceTick("reconciled running governance jobs from machine", {
+      machineId: input.machineId,
+      userId: input.userId,
+      checked: uniqueJobIds.length,
+      renewed,
+    });
+  }
   return { checked: uniqueJobIds.length, renewed };
 }
 
 export function registerGovernanceTickTunnelCallbacks() {
-  setTunnelGovernanceTickResultListener((result) => {
+  setTunnelGovernanceTickResultListener((result, context) => {
+    logGovernanceTick("received machine result", {
+      jobId: result.governanceJobId,
+      type: result.type,
+      ok: result.ok,
+      leaseOwner: result.leaseOwner,
+      userId: context?.userId,
+      machineId: context?.machineId,
+    });
+    if (context?.userId) {
+      void runWithUserContext(context.userId, () => handleGovernanceTickMachineResult({ result }));
+      return;
+    }
     void handleGovernanceTickMachineResult({ result });
   });
 }
+
+type GovernanceLeaseValidation =
+  | { ok: true; acceptLeaseTokenMismatch?: boolean; acceptedExpiredLease?: boolean }
+  | { ok: false; reason: string };
 
 function validateLeasedJob(input: {
   job: GovernanceTickJobRecord;
   leaseOwner: string;
   leaseToken: string;
   now: Date;
-}): string | null {
-  if (input.job.status !== "leased") return `invalid_job_status:${input.job.status}`;
-  if (input.job.leaseOwner !== input.leaseOwner || input.job.leaseToken !== input.leaseToken) {
-    return "lease_mismatch";
+}): GovernanceLeaseValidation {
+  if (input.job.status !== "leased" && input.job.status !== "expired") {
+    return { ok: false, reason: `invalid_job_status:${input.job.status}` };
   }
-  if (input.job.leaseExpiresAt && new Date(input.job.leaseExpiresAt).getTime() <= input.now.getTime()) {
-    return "lease_expired";
+  if (input.job.leaseOwner !== input.leaseOwner) {
+    return { ok: false, reason: "lease_owner_mismatch" };
   }
-  return null;
+  // 同一 cloud orchestrator 可能在治理长任务未回执前重租同一个 job，导致旧 token 回执。
+  // 这里仅放宽 token/过期校验；owner、baseRevision 和实体 revision 仍负责防止跨编排者或脏快照落库。
+  const tokenMismatch = input.job.leaseToken !== input.leaseToken;
+  const acceptedExpiredLease =
+    input.job.status === "expired" ||
+    Boolean(input.job.leaseExpiresAt && new Date(input.job.leaseExpiresAt).getTime() <= input.now.getTime());
+  if (tokenMismatch || acceptedExpiredLease) {
+    logGovernanceTick("accepting governance result with relaxed lease validation", {
+      jobId: input.job.id,
+      status: input.job.status,
+      leaseOwner: input.leaseOwner,
+      tokenMismatch,
+      acceptedExpiredLease,
+      leaseExpiresAt: input.job.leaseExpiresAt,
+    });
+  }
+  return {
+    ok: true,
+    acceptLeaseTokenMismatch: tokenMismatch,
+    acceptedExpiredLease,
+  };
 }
 
 function currentRevisionForOutcome(outcome: GovernanceTickOutcome) {
@@ -495,13 +557,24 @@ export async function persistGovernanceTickOutcome(input: {
   if (job.status === "completed") {
     return { ok: true, job, duplicate: true };
   }
-  const leaseError = validateLeasedJob({
+  const leaseValidation = validateLeasedJob({
     job,
     leaseOwner: input.leaseOwner,
     leaseToken: input.leaseToken,
     now: input.now ?? new Date(),
   });
-  if (leaseError) return { ok: false, job, reason: leaseError };
+  if (!leaseValidation.ok) {
+    logGovernanceTick("rejected machine result by lease validation", {
+      jobId: job.id,
+      reason: leaseValidation.reason,
+      jobStatus: job.status,
+      jobLeaseOwner: job.leaseOwner,
+      resultLeaseOwner: input.leaseOwner,
+    });
+    return { ok: false, job, reason: leaseValidation.reason };
+  }
+  const acceptLeaseTokenMismatch =
+    leaseValidation.acceptLeaseTokenMismatch === true || leaseValidation.acceptedExpiredLease === true;
   if (job.baseRevision !== input.outcome.baseRevision) {
     failGovernanceTickJob({
       jobId: job.id,
@@ -509,6 +582,7 @@ export async function persistGovernanceTickOutcome(input: {
       leaseToken: input.leaseToken,
       error: "base_revision_mismatch",
       outcome: input.outcome as unknown as Record<string, unknown>,
+      acceptLeaseTokenMismatch,
     });
     return { ok: false, job: getGovernanceTickJob(job.id), reason: "base_revision_mismatch", staleRevision: true };
   }
@@ -521,6 +595,7 @@ export async function persistGovernanceTickOutcome(input: {
       leaseToken: input.leaseToken,
       error: "stale_revision",
       outcome: input.outcome as unknown as Record<string, unknown>,
+      acceptLeaseTokenMismatch,
     });
     return { ok: false, job: failed ?? getGovernanceTickJob(job.id), reason: "stale_revision", staleRevision: true };
   }
@@ -547,6 +622,7 @@ export async function persistGovernanceTickOutcome(input: {
         leaseToken: input.leaseToken,
         error: applied.reason,
         outcome: input.outcome as unknown as Record<string, unknown>,
+          acceptLeaseTokenMismatch,
       });
       return { ok: false, job: failed ?? getGovernanceTickJob(job.id), reason: applied.reason, staleRevision: true, dispatch: applied.dispatch };
     }
@@ -560,6 +636,7 @@ export async function persistGovernanceTickOutcome(input: {
     leaseToken: input.leaseToken,
     outcome: input.outcome as unknown as Record<string, unknown>,
     finishedAt,
+    acceptLeaseTokenMismatch,
   });
   if (!completed) return { ok: false, job: getGovernanceTickJob(job.id), reason: "complete_failed", dispatch: applied.dispatch };
   try {
@@ -598,11 +675,27 @@ export async function handleGovernanceTickMachineResult(input: {
   const job = getGovernanceTickJob(input.result.governanceJobId);
   if (!job) return { ok: false as const, job: null, reason: "job_not_found" };
   if (!input.result.ok || !input.result.outcome) {
+    const leaseValidation = validateLeasedJob({
+      job,
+      leaseOwner: input.result.leaseOwner,
+      leaseToken: input.result.leaseToken,
+      now: input.now ?? new Date(),
+    });
+    if (!leaseValidation.ok) {
+      logGovernanceTick("rejected failed machine result by lease validation", {
+        jobId: job.id,
+        reason: leaseValidation.reason,
+        jobStatus: job.status,
+      });
+      return { ok: false as const, job, reason: leaseValidation.reason };
+    }
     const failed = failGovernanceTickJob({
       jobId: input.result.governanceJobId,
       leaseOwner: input.result.leaseOwner,
       leaseToken: input.result.leaseToken,
       error: input.result.error ?? "machine_result_failed",
+      acceptLeaseTokenMismatch:
+        leaseValidation.acceptLeaseTokenMismatch === true || leaseValidation.acceptedExpiredLease === true,
     });
     return failed
       ? { ok: false as const, job: failed, reason: "machine_result_failed" }

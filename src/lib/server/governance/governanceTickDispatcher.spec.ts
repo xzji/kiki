@@ -627,26 +627,36 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(getGovernanceTickJob(job.id)?.status, "completed");
   }
 
-  // 5. outcome 必须匹配 lease token。
+  // 5. 长耗时治理：旧 lease token 的回执仍按 jobId + owner 接受，避免重租后死锁。
   {
     ensureIsolatedPlanningSpecDataDir();
     seedGoal({});
     const job = createThreadJob(0);
-    const lease = acquireGovernanceTickJobLease({
-      leaseOwner: "lease-check-worker",
+    const firstLease = acquireGovernanceTickJobLease({
+      leaseOwner: "long-running-worker",
       leaseDurationMs: 1_000,
       now: new Date("2026-06-01T00:30:00.000Z"),
       targetKind: "thread",
     });
-    assert.equal(lease?.id, job.id);
-    const rejected = await persistGovernanceTickOutcome({
-      leaseOwner: "lease-check-worker",
-      leaseToken: "wrong-token",
-      outcome: makeOutcome(job.id),
-      now: new Date("2026-06-01T00:30:00.100Z"),
+    assert.equal(firstLease?.id, job.id);
+    expireGovernanceTickJobLeases({ now: new Date("2026-06-01T00:30:02.000Z") });
+    const secondLease = acquireGovernanceTickJobLease({
+      leaseOwner: "long-running-worker",
+      leaseDurationMs: 1_000,
+      now: new Date("2026-06-01T00:30:02.000Z"),
+      targetKind: "thread",
     });
-    assert.equal(rejected.ok, false);
-    assert.equal(rejected.reason, "lease_mismatch");
-    assert.equal(findThreadById(normalizeSubGoalId(THREAD_ID))?.revision, 0);
+    assert.equal(secondLease?.id, job.id);
+    assert.notEqual(secondLease?.leaseToken, firstLease?.leaseToken);
+
+    const accepted = await persistGovernanceTickOutcome({
+      leaseOwner: "long-running-worker",
+      leaseToken: firstLease!.leaseToken!,
+      outcome: makeOutcome(job.id),
+      now: new Date("2026-06-01T00:30:02.500Z"),
+    });
+    assert.equal(accepted.ok, true);
+    assert.equal(findThreadById(normalizeSubGoalId(THREAD_ID))?.revision, 1);
+    assert.equal(getGovernanceTickJob(job.id)?.status, "completed");
   }
 }
