@@ -35,7 +35,7 @@ function dependencyStatus(task: Task | undefined): DependencyStatus {
   if (!instance) return task.progress >= 100 ? "completed" : "not_started";
   if (instance.status === "completed") return "completed";
   if (instance.status === "awaiting_user") return "awaiting_user";
-  if (instance.status === "error") return "failed";
+  if (instance.status === "error" || instance.status === "terminated") return "failed";
   if (instance.status === "in_progress" || instance.status === "paused" || instance.status === "pending") {
     return "in_progress";
   }

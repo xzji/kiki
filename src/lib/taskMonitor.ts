@@ -208,7 +208,8 @@ function getMonitorGroup(instance: TaskInstance): TaskMonitorGroup | null {
   if (instance.status === "in_progress") return "running";
   if (instance.status === "paused" || instance.status === "awaiting_user" || instance.awaitingUser)
     return "paused";
-  if (instance.status === "completed" || instance.status === "error") return "done";
+  if (instance.status === "completed" || instance.status === "error" || instance.status === "terminated")
+    return "done";
   return null;
 }
 
@@ -216,6 +217,7 @@ function monitorStatusLabel(
   instance: TaskInstance,
   group: TaskMonitorGroup,
 ): string {
+  if (instance.status === "terminated") return "已终止";
   if (instance.status === "error") return "执行失败";
   return TASK_MONITOR_GROUP_LABEL[group];
 }

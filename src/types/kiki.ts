@@ -12,6 +12,7 @@ export type TaskInstanceStatus =
   | "completed"
   | "awaiting_user"
   | "paused"
+  | "terminated"
   | "error";
 
 export type TaskResultViewKind = "generic_result";

@@ -49,7 +49,11 @@ export class GoalsProjectionConflictError extends Error {
   }
 }
 
-function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus): TaskInstanceStatus {
+function isTerminationReason(reason?: string) {
+  return Boolean(reason && /终止|terminate/i.test(reason));
+}
+
+function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus, reason?: string): TaskInstanceStatus {
   switch (status) {
     case "running":
       return "in_progress";
@@ -60,7 +64,7 @@ function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus): TaskIns
     case "failed":
       return "error";
     case "cancelled":
-      return "paused";
+      return isTerminationReason(reason) ? "terminated" : "paused";
     case "queued":
     default:
       return "pending";
@@ -256,7 +260,7 @@ export function projectRuntimeJobStatusProjection(input: {
 }) {
   const taskId = input.job.taskId ?? input.job.payload.task.id;
   const instanceId = input.job.taskInstanceId ?? input.job.payload.instance.id;
-  const nextStatus = runtimeJobStatusToTaskInstanceStatus(input.status ?? input.job.status);
+  const nextStatus = runtimeJobStatusToTaskInstanceStatus(input.status ?? input.job.status, input.reason ?? input.job.lastError);
   const currentGoals = readGoalsSnapshotMeta([]).value;
   const located = findTaskInstance(currentGoals, taskId, instanceId);
   const previousStatus = located?.instance.status;

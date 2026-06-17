@@ -646,7 +646,11 @@ function completedLength(task: Task) {
 }
 
 function isArchivedExecutionInstance(instance: TaskInstance) {
-  return (instance.status === "completed" && !instance.awaitingUser) || instance.status === "error";
+  return (
+    (instance.status === "completed" && !instance.awaitingUser) ||
+    instance.status === "error" ||
+    instance.status === "terminated"
+  );
 }
 
 function sectionKeyForInstance(instance: TaskInstance): SectionKey {
@@ -689,8 +693,9 @@ function InstanceCard({
     instance.execution?.waitingReason,
   );
   const agentRunPlan = getAgentRunPlan(instance);
-  const hasFinalResult = instance.status === "completed" || instance.status === "error";
-  const canRetry = instance.status === "error";
+  const hasFinalResult =
+    instance.status === "completed" || instance.status === "error" || instance.status === "terminated";
+  const canRetry = instance.status === "error" || instance.status === "terminated";
   const showOuterToggle = canExpand;
   const detailOpen = expanded;
   const [resultOpen, setResultOpen] = useState(hasFinalResult);
@@ -753,7 +758,7 @@ function InstanceCard({
                   }}
                   className="rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"
                 >
-                  停止
+                  暂停
                 </button>
               ) : null}
               {showOuterToggle ? (
@@ -787,10 +792,16 @@ function InstanceCard({
                 </button>
               </div>
             ) : null}
-            {instance.status === "completed" || instance.status === "error" ? (
+            {instance.status === "completed" || instance.status === "error" || instance.status === "terminated" ? (
               <InstanceDetailSection
                 title="执行结果"
-                description={instance.status === "error" ? "失败原因与可重试信息" : "最终结论与产出物"}
+                description={
+                  instance.status === "error"
+                    ? "失败原因与可重试信息"
+                    : instance.status === "terminated"
+                      ? "本次任务已被用户终止"
+                      : "最终结论与产出物"
+                }
                 open={resultOpen}
                 onToggle={() => setResultOpen((value) => !value)}
               >
@@ -1046,6 +1057,7 @@ function instanceStatusClassName(status: Task["instances"][number]["status"]) {
   if (status === "awaiting_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
   if (status === "error") return "bg-[#FDECEC] text-[#B42318]";
   if (status === "paused") return "bg-[#E5E7EB] text-[#6B7280]";
+  if (status === "terminated") return "bg-[#EEF2FF] text-[#4F46E5]";
   return "bg-[#F5F6F8] text-[#8C9198]";
 }
 
@@ -1056,6 +1068,7 @@ function instanceStatusLabel(instance: Task["instances"][number]) {
   if (status === "in_progress") return "进行中";
   if (status === "error") return "执行失败";
   if (status === "paused") return "已暂停";
+  if (status === "terminated") return "已终止";
   if (status === "awaiting_user") {
     const type = instance.awaitingUser?.interactionRequirement?.type ?? instance.result?.interactionRequirement?.type;
     if (type === "answer") return "待作答";

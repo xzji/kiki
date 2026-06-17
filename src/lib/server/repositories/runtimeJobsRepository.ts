@@ -808,7 +808,7 @@ export function cancelRuntimeJobsByConversationId(conversationId: string) {
   return result.changes;
 }
 
-export function cancelRuntimeJobByTaskRun(input: { requestId?: string; taskInstanceId?: string }) {
+export function cancelRuntimeJobByTaskRun(input: { requestId?: string; taskInstanceId?: string; reason?: string }) {
   const db = getDatabase();
   const now = nowIso();
   const conditions: string[] = [];
@@ -859,7 +859,7 @@ export function cancelRuntimeJobByTaskRun(input: { requestId?: string; taskInsta
           last_error = ?
       WHERE id = ?
     `,
-  ).run(now, now, "用户手动停止任务执行", fallbackRow.id);
+  ).run(now, now, input.reason ?? "用户手动停止任务执行", fallbackRow.id);
   return getRuntimeJob(fallbackRow.id);
 }
 

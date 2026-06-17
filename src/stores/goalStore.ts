@@ -442,6 +442,8 @@ function normalizeInstance(instance: TaskInstance, task: Task): TaskInstance {
             ? "failed"
             : status === "paused"
               ? "paused"
+              : status === "terminated"
+                ? "cancelled"
               : "queued");
   return {
     ...instance,
@@ -870,10 +872,13 @@ export const useGoalStore = create<GoalStore>()((set) => ({
                                   ? "failed"
                                   : status === "paused"
                                     ? "paused"
+                                    : status === "terminated"
+                                      ? "cancelled"
                                     : "queued",
                         status,
                         startedAt: instance.execution?.startedAt ?? instance.createdAt,
-                        finishedAt: status === "completed" ? nowIso() : undefined,
+                        finishedAt:
+                          status === "completed" || status === "terminated" ? nowIso() : undefined,
                         lastUpdatedAt: nowIso(),
                         waitingReason:
                           status === "awaiting_user" ? instance.execution?.waitingReason : undefined,
@@ -928,7 +933,9 @@ export const useGoalStore = create<GoalStore>()((set) => ({
                       ? "awaiting_user"
                       : "completed"
                     : progress?.status === "cancelled"
-                      ? "paused"
+                      ? progress.error && /终止|terminate/i.test(progress.error)
+                        ? "terminated"
+                        : "paused"
                       : progress?.status === "failed"
                         ? "error"
                         : "in_progress";
@@ -966,6 +973,8 @@ export const useGoalStore = create<GoalStore>()((set) => ({
                               ? "failed"
                               : nextStatus === "paused"
                                 ? "cancelled"
+                                : nextStatus === "terminated"
+                                  ? "cancelled"
                                 : "running",
                       status: nextStatus,
                       startedAt: instance.execution?.startedAt ?? progress?.startedAt ?? instance.createdAt,

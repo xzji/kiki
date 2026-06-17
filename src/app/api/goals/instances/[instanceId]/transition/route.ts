@@ -7,7 +7,10 @@ import {
   type RuntimeJobStatus,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
+import {
+  transitionTaskInstanceProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import type { Goal, TaskInstanceStatus } from "@/types/kiki";
 import { withAuth } from "@/lib/server/http/withAuth";
 
@@ -33,6 +36,7 @@ function findInstance(goals: Goal[], instanceId: string) {
 function toCommand(status: TaskInstanceStatus) {
   if (status === "paused") return "pause";
   if (status === "in_progress") return "resume";
+  if (status === "terminated") return "cancel";
   if (status === "error") return "cancel";
   return "transition";
 }
@@ -44,6 +48,7 @@ function isTaskInstanceStatus(value: unknown): value is TaskInstanceStatus {
     value === "completed" ||
     value === "awaiting_user" ||
     value === "paused" ||
+    value === "terminated" ||
     value === "error"
   );
 }
@@ -53,7 +58,7 @@ function toRuntimeJobStatus(status: TaskInstanceStatus): RuntimeJobStatus {
   if (status === "awaiting_user") return "awaiting_user";
   if (status === "completed") return "completed";
   if (status === "error") return "failed";
-  if (status === "paused") return "cancelled";
+  if (status === "paused" || status === "terminated") return "cancelled";
   return "queued";
 }
 
@@ -66,7 +71,15 @@ async function POSTHandler(
   },
 ) {
   const body = (await request.json()) as Body;
-  const validStatuses: TaskInstanceStatus[] = ["pending", "in_progress", "completed", "awaiting_user", "paused", "error"];
+  const validStatuses: TaskInstanceStatus[] = [
+    "pending",
+    "in_progress",
+    "completed",
+    "awaiting_user",
+    "paused",
+    "terminated",
+    "error",
+  ];
   if (!validStatuses.includes(body.status)) {
     return NextResponse.json({ reason: "非法任务实例状态" }, { status: 400 });
   }
@@ -110,13 +123,20 @@ async function POSTHandler(
   if (!isTaskInstanceStatus(nextStatus) || nextStatus !== body.status) {
     return NextResponse.json({ reason: "Idempotency-Key 已用于不同的状态变更" }, { status: 409 });
   }
+  transitionTaskInstanceProjection({
+    goals,
+    taskId: located.task.id,
+    instanceId: located.instance.id,
+    status: nextStatus,
+    reason: body.reason,
+  });
   const job = getRuntimeJobByTaskInstanceId(located.instance.id);
   if (job) {
     updateGoalRuntimeJobExecution(job.id, {
       status: toRuntimeJobStatus(nextStatus),
       lastError: body.reason,
       finishedAt:
-        nextStatus === "completed" || nextStatus === "error" || nextStatus === "paused"
+        nextStatus === "completed" || nextStatus === "error" || nextStatus === "paused" || nextStatus === "terminated"
           ? new Date().toISOString()
           : undefined,
       leaseOwner: nextStatus === "in_progress" ? job.leaseOwner : undefined,

@@ -1,7 +1,7 @@
 "use client";
 
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
-import { cancelGoalInstance } from "@/lib/api/goal-commands";
+import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { createTaskRequestId, startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { createOpaqueId } from "@/lib/opaqueIds";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
@@ -22,8 +22,9 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     const target = resolveTargetInstance(location.task, "pause", options?.instanceId);
     if (!target) throw new Error("未找到可停止的任务实例。");
     if (!canStopTaskInstance(target)) throw new Error("当前任务实例不在执行中。");
-    await cancelGoalInstance({
+    await transitionGoalInstance({
       instanceId: target.id,
+      status: "paused",
       reason: "用户暂停任务执行",
     });
     await syncGoalsFromRuntimeSnapshot();
@@ -108,8 +109,9 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     const errorMessage = error instanceof Error ? error.message : "任务执行失败";
     if (error instanceof TaskRunApiError && error.status >= 400 && error.status < 500) {
       if (targetInstance) {
-        await cancelGoalInstance({
+        await transitionGoalInstance({
           instanceId: targetInstance.id,
+          status: "paused",
           reason: errorMessage,
         });
       }

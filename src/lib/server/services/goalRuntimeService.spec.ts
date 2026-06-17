@@ -6,6 +6,7 @@ import {
   readGoalsSnapshotMeta,
   upsertGoalsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshotMeta } from "@/lib/server/runtime/instanceComposition";
 import { deriveOpaqueId } from "@/lib/opaqueIds";
 import { getGoalEventsSince } from "@/lib/server/repositories/goalEventLogRepository";
 import {
@@ -23,6 +24,7 @@ import type { RuntimeEnvironment } from "@/types/runtime";
 import {
   mutateGoalsProjection,
   projectRuntimeJobStatusProjection,
+  transitionTaskInstanceProjection,
   updateGoalRuntimeJobExecution,
 } from "./goalRuntimeService";
 
@@ -364,6 +366,30 @@ export function runGoalRuntimeServiceSpecs() {
   assert.notEqual(requeuedInstance?.blocker, undefined);
   assert.equal(requeuedInstance?.execution?.waitingReason, "等待用户补充信息");
 
+  seedGoals([buildGoal(), buildProjectionGoal()]);
+  const pausedJob = {
+    ...projectionJob("cancelled"),
+    lastError: "用户暂停任务执行",
+    finishedAt: "2026-06-03T00:00:06.000Z",
+  };
+  upsertRuntimeJob(pausedJob);
+  transitionTaskInstanceProjection({
+    goals: readGoalsSnapshot([]),
+    taskId: PROJECTION_TASK_ID,
+    instanceId: PROJECTION_INSTANCE_ID,
+    status: "terminated",
+    reason: "用户终止任务执行",
+  });
+  const terminatedComposedInstance = readComposedGoalsSnapshotMeta([])
+    .value.find((goal) => goal.id === PROJECTION_GOAL_ID)
+    ?.subGoals[0]?.tasks[0]?.instances[0];
+  assert.equal(
+    terminatedComposedInstance?.status,
+    "terminated",
+    "terminated snapshot must not be overwritten by an older paused cancelled runtime job",
+  );
+
+  seedGoals([buildGoal(), buildAwaitingProjectionGoal()]);
   const backfilled = backfillTaskNotificationStatesFromGoals(readGoalsSnapshot([]));
   assert.equal(backfilled.changed, 1);
   const backfilledNotification = getTaskNotificationStateByInstanceId(PROJECTION_INSTANCE_ID);

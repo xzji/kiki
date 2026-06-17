@@ -36,7 +36,12 @@ function executionPhaseFromInstanceStatus(status: TaskInstanceStatus): TaskExecu
   if (status === "in_progress") return "running";
   if (status === "error") return "failed";
   if (status === "paused") return "paused";
+  if (status === "terminated") return "cancelled";
   return "queued";
+}
+
+function isTerminationReason(reason?: string) {
+  return Boolean(reason && /终止|terminate/i.test(reason));
 }
 
 function normalizeTimelineFromLogs(logs: GoalServerLogEntry[] | undefined): TaskExecutionStep[] | undefined {
@@ -507,7 +512,10 @@ export function markGoalInstanceStatusSnapshot(
                     phase: executionPhaseFromInstanceStatus(input.status),
                     status: input.status,
                     startedAt: instance.execution?.startedAt ?? instance.createdAt,
-                    finishedAt: input.status === "completed" ? now : instance.execution?.finishedAt,
+                    finishedAt:
+                      input.status === "completed" || input.status === "terminated"
+                        ? now
+                        : instance.execution?.finishedAt,
                     lastUpdatedAt: now,
                     waitingReason:
                       input.status === "awaiting_user" ? instance.execution?.waitingReason : undefined,
@@ -590,7 +598,7 @@ export function deriveTaskInstanceFromProgress(input: {
         ? "awaiting_user"
         : "completed"
       : input.progress.status === "cancelled"
-        ? "paused"
+        ? isTerminationReason(input.progress.error) ? "terminated" : "paused"
       : input.progress.status === "failed"
         ? "error"
       : "in_progress";
@@ -602,6 +610,8 @@ export function deriveTaskInstanceFromProgress(input: {
       : nextStatus === "error"
         ? "failed"
       : nextStatus === "paused"
+        ? "cancelled"
+      : nextStatus === "terminated"
         ? "cancelled"
       : "running";
   const nextKind = normalizeTaskResultViewKind(

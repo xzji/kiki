@@ -115,13 +115,17 @@ export async function respondGoalInstance(input: {
 export async function cancelGoalInstance(input: {
   instanceId: string;
   reason?: string;
+  mode?: "pause" | "terminate";
   idempotencyKey?: string;
 }) {
-  const idempotencyKey = input.idempotencyKey ?? createIdempotencyKey("instance.status_changed.cancel", input.instanceId);
+  const idempotencyKey =
+    input.idempotencyKey ??
+    createIdempotencyKey("instance.status_changed.cancel", input.instanceId, input.mode ?? "terminate");
   return postCommand<{ ok: true; event: GoalEventRecord }>({
     url: `/api/goals/instances/${input.instanceId}/cancel`,
     body: {
       reason: input.reason,
+      mode: input.mode,
     },
     idempotencyKey,
   });

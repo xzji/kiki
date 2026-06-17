@@ -16,7 +16,7 @@ import {
   fetchRuntimeStateSnapshot,
   setRuntimeDaemonMaxConcurrentTasks,
 } from "@/lib/api/runtime-daemon";
-import { cancelGoalInstance } from "@/lib/api/goal-commands";
+import { cancelGoalInstance, transitionGoalInstance } from "@/lib/api/goal-commands";
 import {
   groupTaskMonitorRows,
   selectTaskMonitorRows,
@@ -133,10 +133,17 @@ export function TaskMonitorDrawer() {
     setPendingAction(actionKey);
     setErrorMessage(null);
     try {
-      if (action === "stop" || action === "pause") {
+      if (action === "pause") {
+        await transitionGoalInstance({
+          instanceId,
+          status: "paused",
+          reason: "用户暂停任务执行",
+        });
+      } else if (action === "stop") {
         await cancelGoalInstance({
           instanceId,
-          reason: action === "pause" ? "用户暂停任务执行" : "用户停止任务执行",
+          mode: "terminate",
+          reason: "用户终止任务执行",
         });
       } else {
         await runTaskExecutionAction(taskId, action, { instanceId });

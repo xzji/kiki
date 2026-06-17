@@ -100,6 +100,7 @@ function countInstancesByStatus(goals: Goal[]) {
     completed: 0,
     awaiting_user: 0,
     paused: 0,
+    terminated: 0,
     error: 0,
   };
   let tasks = 0;

@@ -160,6 +160,8 @@ export function ExecutionResultBody(props: {
             ? "执行失败"
             : instance.status === "paused"
               ? "已暂停"
+              : instance.status === "terminated"
+                ? "已终止"
               : "排队中";
 
   useEffect(() => {
@@ -263,7 +265,7 @@ export function ExecutionResultBody(props: {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {instance.status === "error" || instance.status === "paused" ? (
+            {instance.status === "error" || instance.status === "paused" || instance.status === "terminated" ? (
               <button
                 type="button"
                 onClick={() => {
@@ -275,7 +277,7 @@ export function ExecutionResultBody(props: {
                 }}
                 className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
               >
-                {instance.status === "paused" ? "继续执行本次" : "重试本次"}
+                {instance.status === "paused" ? "继续执行本次" : instance.status === "terminated" ? "重新执行" : "重试本次"}
               </button>
             ) : null}
           </div>

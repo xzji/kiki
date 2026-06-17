@@ -60,6 +60,7 @@ function dependencyStatusLabel(task: Task) {
   if (latest.status === "awaiting_user") return "待补充";
   if (latest.status === "in_progress") return "进行中";
   if (latest.status === "paused") return "已暂停";
+  if (latest.status === "terminated") return "已终止";
   if (latest.status === "error") return "执行失败";
   return "待处理";
 }
@@ -73,6 +74,7 @@ function dependencyStatusReason(task: Task) {
   }
   if (latest.status === "in_progress") return "上游任务仍在执行，需等待它结束并产生产出。";
   if (latest.status === "paused") return "上游任务已暂停，需先继续或重新执行该任务。";
+  if (latest.status === "terminated") return "上游任务已终止，需重新执行该任务。";
   if (latest.status === "error") {
     return latest.execution?.errorMessage || "上游任务执行失败，需先修复或重试该任务。";
   }

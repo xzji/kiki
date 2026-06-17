@@ -82,6 +82,8 @@ export function TaskMessageCard({
           ? awaitingStatusLabel(task, instance)
           : instance.status === "paused"
             ? "已暂停"
+            : instance.status === "terminated"
+              ? "已终止"
             : "待处理";
   const badgeLabel =
     submittedInteraction || isOptionalFeedbackResult

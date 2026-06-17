@@ -9,7 +9,11 @@ import { deriveTaskInstanceFromProgress } from "@/lib/server/runtime/goalStateSn
 import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
 import type { Goal, Task, TaskExecutionPhase, TaskInstance, TaskInstanceStatus } from "@/types/kiki";
 
-function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus): TaskInstanceStatus {
+function isTerminationReason(reason?: string) {
+  return Boolean(reason && /终止|terminate/i.test(reason));
+}
+
+function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus, reason?: string): TaskInstanceStatus {
   switch (status) {
     case "running":
       return "in_progress";
@@ -20,7 +24,7 @@ function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus): TaskIns
     case "failed":
       return "error";
     case "cancelled":
-      return "paused";
+      return isTerminationReason(reason) ? "terminated" : "paused";
     case "queued":
     default:
       return "pending";
@@ -33,6 +37,7 @@ function executionPhaseFromStatus(status: TaskInstanceStatus): TaskExecutionPhas
   if (status === "in_progress") return "running";
   if (status === "error") return "failed";
   if (status === "paused") return "cancelled";
+  if (status === "terminated") return "cancelled";
   return "queued";
 }
 
@@ -69,7 +74,11 @@ function composeInstanceFromJob(input: {
   job: RuntimeJobRecord;
   notification?: TaskInstance["notification"];
 }) {
-  const nextStatus = runtimeJobStatusToTaskInstanceStatus(input.job.status);
+  const projectedStatus = runtimeJobStatusToTaskInstanceStatus(input.job.status, input.job.lastError);
+  const nextStatus =
+    input.job.status === "cancelled" && input.instance.status === "terminated"
+      ? "terminated"
+      : projectedStatus;
   const resultProgress = input.job.result
     ? {
         requestId: input.job.requestId ?? `goal-task-${input.job.id}`,
