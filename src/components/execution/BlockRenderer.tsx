@@ -1,6 +1,9 @@
 "use client";
 
+import type { Ref, ReactNode } from "react";
+
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
+import { DeliverableArticle } from "@/components/execution/DeliverableArticle";
 import { TablePreview } from "@/components/spreadsheet/TablePreview";
 import { cellClassName, cellText } from "@/lib/spreadsheet/adapters/cell";
 import { comparisonTableBlockToTable } from "@/lib/spreadsheet/adapters/comparisonTableBlock";
@@ -102,23 +105,46 @@ function isDuplicateLeadingHeading(title: string, block: ResultBlock) {
   return normalizedTitle.includes(normalizedHeading) || normalizedHeading.includes(normalizedTitle);
 }
 
-export function TaskResultBlockView({ result }: { result: TaskResult }) {
+export function TaskResultBlockView({
+  result,
+  headerActions,
+  clipMaxHeight,
+  bodyRef,
+  bodyOverlay,
+  embedded = false,
+}: {
+  result: TaskResult;
+  headerActions?: React.ReactNode;
+  /** 限制卡片总高度，仅正文区域滚动 */
+  clipMaxHeight?: number;
+  bodyRef?: Ref<HTMLDivElement>;
+  /** 正文区域底部叠层，如截断渐变 */
+  bodyOverlay?: ReactNode;
+  /** 仅渲染 blocks 正文，不包含产出物卡片外壳 */
+  embedded?: boolean;
+}) {
   const presentationLabel = result.meta.presentation ? PRESENTATION_LABEL[result.meta.presentation] : "结构化产物";
   const displayBlocks = isDuplicateLeadingHeading(result.title, result.blocks[0])
     ? result.blocks.slice(1)
     : result.blocks;
+  const blockNodes = displayBlocks.map((block, index) => (
+    <BlockRenderer key={`${block.kind}-${index}`} block={block} />
+  ));
+
+  if (embedded) {
+    return <div className="space-y-4">{blockNodes}</div>;
+  }
 
   return (
-    <article className="rounded-xl border border-[#E5E7EB] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-      <div className="text-[12px] font-medium text-[#8C9198]">
-        产出物 · {presentationLabel}
-      </div>
-      <h3 className="mt-2 text-[16px] font-semibold leading-7 text-[#1F2328]">{result.title}</h3>
-      <div className="mt-4 space-y-4">
-        {displayBlocks.map((block, index) => (
-          <BlockRenderer key={`${block.kind}-${index}`} block={block} />
-        ))}
-      </div>
-    </article>
+    <DeliverableArticle
+      label={`产出物 · ${presentationLabel}`}
+      title={result.title}
+      headerActions={headerActions}
+      clipMaxHeight={clipMaxHeight}
+      bodyRef={bodyRef}
+      bodyOverlay={bodyOverlay}
+    >
+      <div className="space-y-4">{blockNodes}</div>
+    </DeliverableArticle>
   );
 }

@@ -178,6 +178,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
                 task={taskContext.task}
                 instance={taskContext.instance}
                 onOpen={() => setResultOpen(true)}
+                onExpandStart={() => setResultOpen(false)}
               />
             ) : null}
           </div>

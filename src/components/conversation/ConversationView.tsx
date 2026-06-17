@@ -2507,6 +2507,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                         setPlanOpen(false);
                         setResultMessage(message);
                       }}
+                      onCollapseResult={() => setResultMessage(null)}
                       onOpenTaskInfo={(message) => {
                         setResultMessage(null);
                         setTaskInfoMessage(message);

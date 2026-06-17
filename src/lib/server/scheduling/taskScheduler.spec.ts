@@ -332,6 +332,7 @@ function schedulerConfig(): RuntimeDaemonConfig {
     maxConcurrentTasks: 3,
     jobMaxDurationMs: 30 * 60_000,
     jobIdleTimeoutMs: 5 * 60_000,
+    dispatchPaused: false,
     updatedAt: "2026-05-30T00:00:00.000Z",
   };
 }

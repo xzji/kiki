@@ -19,7 +19,7 @@ export function runGovernanceTickProtocolSpecs() {
       topicId: "goal_1",
       threadId: "sg_1",
       baseRevision: 0,
-      snapshot: { topic: {}, thread: {} },
+      snapshot: { topic: {}, thread: {}, currentTasks: [], recentTaskInstances: [] },
     },
   };
   assert.equal(isGovernanceTickCommand(command), true, "thread governance command schema accepted");
@@ -27,6 +27,35 @@ export function runGovernanceTickProtocolSpecs() {
     isGovernanceTickCommand({ ...command, type: "topic_governance_tick" }),
     false,
     "command type must match targetKind",
+  );
+  assert.equal(
+    isGovernanceTickCommand({
+      ...command,
+      payload: { ...command.payload, snapshot: { topic: {}, thread: {} } },
+    }),
+    false,
+    "thread payload missing currentTasks/recentTaskInstances must be rejected",
+  );
+
+  const topicCommand = {
+    ...command,
+    type: "topic_governance_tick",
+    targetKind: "topic",
+    payload: {
+      targetKind: "topic",
+      topicId: "goal_1",
+      baseRevision: 0,
+      snapshot: { topic: {}, threads: [] },
+    },
+  };
+  assert.equal(isGovernanceTickCommand(topicCommand), true, "topic governance command schema accepted");
+  assert.equal(
+    isGovernanceTickCommand({
+      ...topicCommand,
+      payload: { ...topicCommand.payload, snapshot: { topic: {} } },
+    }),
+    false,
+    "topic payload missing threads must be rejected",
   );
 
   const threadOutcome = {

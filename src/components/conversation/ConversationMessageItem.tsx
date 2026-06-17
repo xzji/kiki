@@ -60,6 +60,7 @@ export function ConversationMessageItem({
   message,
   onQuote,
   onOpenResult,
+  onCollapseResult,
   onOpenTaskInfo,
   onOpenGoalPlan,
   onTaskOptionalFeedback,
@@ -74,6 +75,7 @@ export function ConversationMessageItem({
   message: ConversationMessage;
   onQuote: (message: ConversationMessage) => void;
   onOpenResult?: (message: ConversationMessage) => void;
+  onCollapseResult?: () => void;
   onOpenTaskInfo?: (message: ConversationMessage) => void;
   onOpenGoalPlan?: (goalId: string) => void;
   onTaskOptionalFeedback?: (
@@ -316,6 +318,7 @@ export function ConversationMessageItem({
             task={taskInfo.task}
             instance={taskInfo.instance}
             onOpen={() => onOpenResult?.(message)}
+            onExpandStart={onCollapseResult}
             onOptionalFeedbackSelect={
               message.kind === "task_card" && onTaskOptionalFeedback
                 ? (feedback) => onTaskOptionalFeedback(message, feedback)

@@ -294,6 +294,32 @@ export async function setRuntimeDaemonMaxConcurrentTasks(
   return payload.config;
 }
 
+export type DispatchPauseResult = {
+  ok: boolean;
+  message?: string;
+  config: RuntimeDaemonConfig | null;
+  pausedCount?: number;
+  resumedCount?: number;
+  skippedCount?: number;
+  dispatchPaused?: boolean;
+  reason?: string;
+};
+
+export async function setRuntimeDaemonDispatchPaused(paused: boolean): Promise<DispatchPauseResult> {
+  const response = await fetch("/api/runtime/daemon/dispatch-pause", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ paused }),
+  });
+  const payload = (await response.json()) as DispatchPauseResult;
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || "任务调度暂停设置失败");
+  }
+  return payload;
+}
+
 export async function resetLocalDevData(): Promise<LocalDataResetPayload> {
   const response = await fetch("/api/dev/runtime/reset-local-data", {
     method: "POST",

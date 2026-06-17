@@ -34,6 +34,7 @@ import {
   type GovernanceTickTargetKind,
 } from "@/lib/server/repositories/governanceTickJobsRepository";
 import { appendInboxMessage } from "@/lib/server/repositories/inboxRepository";
+import { listRecentByThreadId } from "@/lib/server/repositories/taskInstancesRepository";
 import { findThreadById, ThreadRevisionMismatchError, updateThread } from "@/lib/server/repositories/threadsRepository";
 import { findTopicById, TopicRevisionMismatchError, updateTopic } from "@/lib/server/repositories/topicsRepository";
 import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
@@ -124,7 +125,7 @@ function threadPayload(topic: Topic, thread: Thread, due: ReturnType<typeof isTh
     topicId: topic.id,
     threadId: thread.id,
     baseRevision: thread.revision,
-    snapshot: { topic, thread },
+    snapshot: buildThreadSnapshot(topic, thread),
     dueReason: due?.reason,
     scheduledAt: due?.scheduledAt.toISOString(),
   };
@@ -135,10 +136,167 @@ function topicPayload(topic: Topic, due: NonNullable<ReturnType<typeof isTopicDu
     targetKind: "topic",
     topicId: topic.id,
     baseRevision: topic.revision,
-    snapshot: { topic },
+    snapshot: buildTopicSnapshot(topic),
     dueReason: due.reason,
     scheduledAt: due.scheduledAt.toISOString(),
   };
+}
+
+/**
+ * 构造 thread tick payload 的 snapshot。
+ *
+ * 与本地 `runThreadLoopFrame` 的 callback 对齐（threadGovernorCallbacks.ts）：
+ *  - currentTasks   ← goalsSnapshotThreadTaskView.listByThread（envelope 当前快照）
+ *  - recentTaskInstances ← listRecentByThreadId（最近 7 天，limit 12）
+ *
+ * 漏装这两个字段会让远端 ThreadRunner 在 prompt 里看到「板块尚无 Task / 最近无实例」，
+ * 进而幻觉出 dispatch_task；同时 schema 层的 duplicate_dispatch_task 校验依赖
+ * currentTasks，缺失会让重复检测被绕过。
+ */
+function buildThreadSnapshot(topic: Topic, thread: Thread) {
+  return {
+    topic,
+    thread,
+    currentTasks: safeListThreadTasks(topic.id, thread.id),
+    recentTaskInstances: safeListRecentTaskInstances(thread.id),
+  } satisfies Record<string, unknown>;
+}
+
+/**
+ * 构造 topic tick payload 的 snapshot。
+ *
+ * Topic.threads 已在 Topic 结构上，但显式再写一份 `threads` 字段，与
+ * `governanceTickLocalExecutor.readArrayField(snapshot, "threads")` 的优先级对齐，
+ * 且为后续 lease-time 刷新留接口（届时 threads 可独立于 topic 被刷新）。
+ */
+function buildTopicSnapshot(topic: Topic) {
+  return {
+    topic,
+    threads: topic.threads,
+  } satisfies Record<string, unknown>;
+}
+
+function safeListThreadTasks(topicId: string, threadId: string) {
+  try {
+    return goalsSnapshotThreadTaskView.listByThread({ topicId, threadId });
+  } catch (error) {
+    logGovernanceTick("listThreadTasks failed when building snapshot", {
+      topicId,
+      threadId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+function safeListRecentTaskInstances(threadId: string) {
+  try {
+    return listRecentByThreadId(threadId, { limit: 12, sinceDays: 7 });
+  } catch (error) {
+    logGovernanceTick("listRecentByThreadId failed when building snapshot", {
+      threadId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+/**
+ * 在派发前用 envelope 当前态刷新 payload.snapshot。
+ *
+ * 行为：
+ *  - thread：重新从 readTopicsSnapshot 取最新 topic + thread + currentTasks +
+ *    recentTaskInstances；任何字段不可用就回退到原 payload 对应字段，
+ *    并把新字段 `currentTasks` / `recentTaskInstances` / `threads` 默认为空数组，
+ *    保证下游协议层（isGovernanceTickPayload）不会因为旧 payload 缺字段被拒。
+ *  - topic：重新取 topic + threads；不可用则回退原 payload 并补 `threads: []`。
+ *  - 不修改 baseRevision；revision 校验仍用入队时的 leased.baseRevision。
+ *
+ * 失败回退到原 payload 而不是抛错：保证派发链路稳健，最坏情况也只是退化为
+ * 入队时的快照（即 P0 修复后的快照，仍包含正确的 currentTasks）。
+ */
+function refreshGovernancePayload(payload: GovernanceTickJobPayload): GovernanceTickJobPayload {
+  try {
+    const topics = readTopicsSnapshot([]);
+    const topic = topics.find((item) => item.id === payload.topicId);
+    if (!topic) return ensureSnapshotShape(payload);
+    if (payload.targetKind === "topic") {
+      return { ...payload, snapshot: buildTopicSnapshot(topic) };
+    }
+    const thread = topic.threads.find((item) => item.id === payload.threadId);
+    if (!thread) return ensureSnapshotShape(payload);
+    return { ...payload, snapshot: buildThreadSnapshot(topic, thread) };
+  } catch (error) {
+    logGovernanceTick("refreshGovernancePayload failed; fallback to enqueued snapshot", {
+      jobTopicId: payload.topicId,
+      jobThreadId: payload.threadId,
+      targetKind: payload.targetKind,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return ensureSnapshotShape(payload);
+  }
+}
+
+/**
+ * 兼容旧 job：旧 payload 可能不带 currentTasks / recentTaskInstances / threads，
+ * 协议层校验（isGovernanceTickPayload）会因此拒绝。这里把缺失字段补为空数组，
+ * 保证至少能下发；远端 governanceTickLocalExecutor 仍按 `?? []` 兜底。
+ */
+function ensureSnapshotShape(payload: GovernanceTickJobPayload): GovernanceTickJobPayload {
+  const snapshot = payload.snapshot ?? {};
+  if (payload.targetKind === "thread") {
+    return {
+      ...payload,
+      snapshot: {
+        ...snapshot,
+        currentTasks: Array.isArray(snapshot.currentTasks) ? snapshot.currentTasks : [],
+        recentTaskInstances: Array.isArray(snapshot.recentTaskInstances) ? snapshot.recentTaskInstances : [],
+      },
+    };
+  }
+  return {
+    ...payload,
+    snapshot: {
+      ...snapshot,
+      threads: Array.isArray(snapshot.threads) ? snapshot.threads : [],
+    },
+  };
+}
+
+/**
+ * 派发前 revision staleness 检查。
+ *
+ * lease 时 envelope 可能已经被会话治理 / 用户编辑改过；如果 fresh entity revision
+ * 已经超过 leased.baseRevision，回执 apply 必然 stale_revision 失败，直接派发就是
+ * 烧 LLM。提前在派发链路放弃，让上层失败计数 / dashboard 早一点看到事实。
+ *
+ * 找不到 entity（被删）也视为 stale——后续的 readRecordField 会抛错，不如此刻就拒。
+ */
+function checkLeasedRevisionStaleness(
+  leased: GovernanceTickJobRecord,
+): { stale: false } | { stale: true; currentRevision: number | null } {
+  try {
+    if (leased.targetKind === "topic") {
+      const topic = findTopicById(leased.topicId);
+      if (!topic) return { stale: true, currentRevision: null };
+      return topic.revision === leased.baseRevision
+        ? { stale: false }
+        : { stale: true, currentRevision: topic.revision };
+    }
+    if (!leased.threadId) return { stale: true, currentRevision: null };
+    const thread = findThreadById(leased.threadId);
+    if (!thread) return { stale: true, currentRevision: null };
+    return thread.revision === leased.baseRevision
+      ? { stale: false }
+      : { stale: true, currentRevision: thread.revision };
+  } catch (error) {
+    logGovernanceTick("checkLeasedRevisionStaleness failed; treating as not stale to keep lease alive", {
+      jobId: leased.id,
+      targetKind: leased.targetKind,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { stale: false };
+  }
 }
 
 export function enqueueManualGovernanceTickJob(input: {
@@ -164,7 +322,7 @@ export function enqueueManualGovernanceTickJob(input: {
         targetKind: "topic",
         topicId: topic.id,
         baseRevision: topic.revision,
-        snapshot: { topic },
+        snapshot: buildTopicSnapshot(topic),
         dueReason: "manual",
         scheduledAt: nowIso(now),
       },
@@ -201,7 +359,7 @@ export function enqueueManualGovernanceTickJob(input: {
         topicId: topic.id,
         threadId: thread.id,
         baseRevision: thread.revision,
-        snapshot: { topic, thread },
+        snapshot: buildThreadSnapshot(topic, thread),
         dueReason: "manual",
         scheduledAt: nowIso(now),
       },
@@ -302,6 +460,31 @@ export function leaseAndDispatchGovernanceTickJob(input: {
     expiredLeaseGraceMs: DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS,
   });
   if (!leased) return null;
+  // Lease 期 envelope 已变更：fresh revision != baseRevision 时不再派发，
+  // 直接把 job 标记 stale_revision 失败，避免烧 LLM。回执注定也会被
+  // base_revision_mismatch / stale_revision 拒绝，提前放弃成本最低。
+  const staleCheck = checkLeasedRevisionStaleness(leased);
+  if (staleCheck.stale) {
+    failGovernanceTickJob({
+      jobId: leased.id,
+      leaseOwner: leased.leaseOwner ?? input.leaseOwner,
+      leaseToken: leased.leaseToken,
+      error: "stale_revision_at_lease",
+    });
+    logGovernanceTick("abandoned lease due to stale revision before dispatch", {
+      jobId: leased.id,
+      targetKind: leased.targetKind,
+      topicId: leased.topicId,
+      threadId: leased.threadId,
+      jobBaseRevision: leased.baseRevision,
+      currentRevision: staleCheck.currentRevision,
+    });
+    return null;
+  }
+  // 派发前刷新 snapshot：job 入队和真正下发之间可能间隔很久（machine 离线、租约过期重租），
+  // 远端 LLM 看到的 thread/topic + tasks 必须是最新的。baseRevision 仍以 leased.baseRevision
+  // 锁住，回执 apply 时如果 entity 已被改写会被 stale_revision 拒绝。
+  const refreshedPayload = refreshGovernancePayload(leased.payload);
   const command: GovernanceTickMachineCommand = {
     type: commandTypeForGovernanceTarget(leased.targetKind),
     requestId: leased.requestId ?? `governance-tick-${leased.id}`,
@@ -309,7 +492,7 @@ export function leaseAndDispatchGovernanceTickJob(input: {
     leaseOwner: leased.leaseOwner ?? input.leaseOwner,
     leaseToken: leased.leaseToken ?? "",
     targetKind: leased.targetKind,
-    payload: leased.payload,
+    payload: refreshedPayload,
     ...(input.llm ? { llm: input.llm } : {}),
   };
   const sent = input.sendCommand(command);

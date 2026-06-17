@@ -97,6 +97,9 @@ export function runGoalSchedulerEngine(input: {
   runtimeEnv: RuntimeEnvironment | null;
   config: RuntimeDaemonConfig;
 }) {
+  if (input.config.dispatchPaused) {
+    return { createdJobs: 0, skipped: 0 } satisfies SchedulerResult;
+  }
   if (!input.runtimeEnv || input.runtimeEnv.type !== "local") {
     return { createdJobs: 0, skipped: 0 } satisfies SchedulerResult;
   }

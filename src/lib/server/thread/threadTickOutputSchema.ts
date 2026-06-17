@@ -1,7 +1,7 @@
 /**
  * ThreadTickOutput 运行时校验器 — 计划 §3.3.4。
  *
- * 与 [threadRunnerPrompt.ts](file:///Users/bytedance/Documents/trae/long_horizon_agent/src/lib/server/thread/threadRunnerPrompt.ts)
+ * 与 `src/lib/server/thread/threadRunnerPrompt.ts`
  * 形成闭环：prompt 写下 8 条必备约束，本模块在解析模型输出时强制校验，
  * 防止模型在结构化输出里偷偷违反约束（缺字段 / 错 kind / silent 与其他动作并存等）。
  *
@@ -138,6 +138,28 @@ function isSimilarTaskText(left: string, right: string): boolean {
   if (a.length >= 4 && b.includes(a)) return true;
   if (b.length >= 4 && a.includes(b)) return true;
   return diceCoefficient(a, b) >= SIMILAR_TASK_TEXT_THRESHOLD;
+}
+
+/**
+ * 判断 dispatch_task 草稿是否与 currentTasks 中既有 Task 实质重复。
+ *
+ * 与 schema 解析阶段同源（threadTickOutputSchema.ts:471-487）；
+ * 暴露给 governanceTickDispatcher 在 apply 阶段做兜底复检：
+ * 远端 machine 解析 schema 时若 currentTasks 缺失（云路径快照漏装），
+ * 本地一侧拿到 fresh currentTasks 后仍能拒绝重复 dispatch_task。
+ */
+export function isDispatchTaskDuplicate(
+  draft: { title?: unknown; objective?: unknown },
+  currentTasks: ReadonlyArray<{ title: string; description: string; expectedOutcome: string }>,
+): boolean {
+  const title = typeof draft.title === "string" ? draft.title : "";
+  const objective = typeof draft.objective === "string" ? draft.objective : "";
+  return currentTasks.some(
+    (task) =>
+      isSimilarTaskText(task.title, title) ||
+      isSimilarTaskText(task.description, objective) ||
+      isSimilarTaskText(task.expectedOutcome, objective),
+  );
 }
 
 function hasArchiveEvidence(text: string): boolean {

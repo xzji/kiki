@@ -112,7 +112,19 @@ function isGovernanceTickPayload(value: unknown): value is GovernanceTickJobPayl
   if (!isNonEmptyString(value.topicId)) return false;
   if (value.targetKind === "thread" && !isNonEmptyString(value.threadId)) return false;
   if (typeof value.baseRevision !== "number" || !Number.isInteger(value.baseRevision) || value.baseRevision < 0) return false;
-  return isRecord(value.snapshot);
+  if (!isRecord(value.snapshot)) return false;
+  // P0 修复后新建的 payload 必带这些字段；旧 payload 在 lease 时会被
+  // refreshGovernancePayload 重建。两端都没塞才认为是异常 command。
+  if (value.targetKind === "thread") {
+    if (!isRecord(value.snapshot.topic)) return false;
+    if (!isRecord(value.snapshot.thread)) return false;
+    if (!Array.isArray(value.snapshot.currentTasks)) return false;
+    if (!Array.isArray(value.snapshot.recentTaskInstances)) return false;
+  } else {
+    if (!isRecord(value.snapshot.topic)) return false;
+    if (!Array.isArray(value.snapshot.threads)) return false;
+  }
+  return true;
 }
 
 function isThreadTickResult(value: unknown): value is ThreadTickResult {

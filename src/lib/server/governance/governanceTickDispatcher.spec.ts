@@ -53,6 +53,7 @@ function topicStatusToWorkflow(status: Topic["status"]): Goal["workflow"] {
 function seedGoal(input: {
   topic?: Partial<Topic>;
   thread?: Partial<Thread>;
+  tasks?: Goal["subGoals"][number]["tasks"];
 }) {
   getDatabase().prepare(`DELETE FROM governance_tick_jobs`).run();
   const thread: Thread = {
@@ -123,7 +124,7 @@ function seedGoal(input: {
         failureCount: thread.failureCount,
         infraFailureCount: thread.infraFailureCount,
         threadRevision: thread.revision,
-        tasks: [],
+        tasks: input.tasks ?? [],
       },
     ],
   };
@@ -277,6 +278,185 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(threadJob.status, "queued");
     assert.equal(threadJob.payload.dueReason, "manual");
     assert.equal(threadJob.threadId, THREAD_ID);
+  }
+
+  // 1a-snapshot. enqueueDueGovernanceTickJobs 必须把 thread/topic 的真实
+  // currentTasks/recentTaskInstances/threads 注入 payload.snapshot，否则
+  // 远端 ThreadRunner.prompt 会读到「板块尚无 Task」并幻觉出 dispatch_task。
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    const seededTaskId = deriveOpaqueId("task", "governance-tick-existing-task");
+    seedGoal({
+      tasks: [
+        {
+          id: seededTaskId,
+          subGoalId: THREAD_ID,
+          title: "已存在的任务",
+          description: "盘点公司公告",
+          expectedOutcome: "得到一份周报",
+          taskType: "repeat",
+          triggerRule: "每周一 09:00",
+          progress: 0,
+          instances: [],
+          executionKind: "generic_result",
+        },
+      ],
+    });
+    const jobs = enqueueDueGovernanceTickJobs({
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    const threadJob = jobs.find((job) => job.targetKind === "thread");
+    assert.ok(threadJob, "thread job created");
+    const threadSnapshot = threadJob.payload.snapshot as Record<string, unknown>;
+    const currentTasks = threadSnapshot.currentTasks as Array<{ id: string }> | undefined;
+    const recentTaskInstances = threadSnapshot.recentTaskInstances as unknown[] | undefined;
+    assert.ok(Array.isArray(currentTasks), "thread snapshot.currentTasks is array");
+    assert.equal(currentTasks?.length, 1, "thread snapshot carries seeded task");
+    assert.equal(currentTasks?.[0]?.id, seededTaskId);
+    assert.ok(Array.isArray(recentTaskInstances), "thread snapshot.recentTaskInstances is array");
+
+    const topicJob = jobs.find((job) => job.targetKind === "topic");
+    assert.ok(topicJob, "topic job created");
+    const topicSnapshot = topicJob.payload.snapshot as Record<string, unknown>;
+    const topicThreads = topicSnapshot.threads as Array<{ id: string }> | undefined;
+    assert.ok(Array.isArray(topicThreads), "topic snapshot.threads is array");
+    assert.equal(topicThreads?.[0]?.id, THREAD_ID);
+
+    // 手动入队同样要带齐
+    ensureIsolatedPlanningSpecDataDir();
+    seedGoal({
+      topic: { nextTickAt: "2026-06-20T00:00:00.000Z" },
+      thread: { nextTickAt: "2026-06-20T00:00:00.000Z" },
+      tasks: [
+        {
+          id: seededTaskId,
+          subGoalId: THREAD_ID,
+          title: "已存在的任务",
+          description: "盘点公司公告",
+          expectedOutcome: "得到一份周报",
+          taskType: "repeat",
+          triggerRule: "每周一 09:00",
+          progress: 0,
+          instances: [],
+          executionKind: "generic_result",
+        },
+      ],
+    });
+    const manualThreadJob = enqueueManualGovernanceTickJob({
+      targetKind: "thread",
+      entityId: THREAD_ID,
+      idempotencyKey: "manual-thread-snapshot",
+      userId: "spec-test-user",
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    const manualThreadSnapshot = manualThreadJob.payload.snapshot as Record<string, unknown>;
+    assert.ok(Array.isArray(manualThreadSnapshot.currentTasks), "manual thread snapshot.currentTasks is array");
+    assert.equal((manualThreadSnapshot.currentTasks as Array<{ id: string }>).length, 1);
+    assert.ok(
+      Array.isArray(manualThreadSnapshot.recentTaskInstances),
+      "manual thread snapshot.recentTaskInstances is array",
+    );
+
+    const manualTopicJob = enqueueManualGovernanceTickJob({
+      targetKind: "topic",
+      entityId: TOPIC_ID,
+      idempotencyKey: "manual-topic-snapshot",
+      userId: "spec-test-user",
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    const manualTopicSnapshot = manualTopicJob.payload.snapshot as Record<string, unknown>;
+    assert.ok(Array.isArray(manualTopicSnapshot.threads), "manual topic snapshot.threads is array");
+  }
+
+  // 1a-refresh. 派发前必须从 envelope 重新刷新 snapshot：入队时 currentTasks 为空，
+  // 之后 envelope 新增 task，lease+dispatch 出去的 command.payload.snapshot.currentTasks
+  // 必须看到新 task；否则远端 LLM 仍会拿到旧空快照。
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    seedGoal({});
+    const jobs = enqueueDueGovernanceTickJobs({
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    const threadJobBeforeRefresh = jobs.find((job) => job.targetKind === "thread");
+    assert.ok(threadJobBeforeRefresh, "thread job created");
+    const threadSnapshotBefore = threadJobBeforeRefresh.payload.snapshot as Record<string, unknown>;
+    assert.equal((threadSnapshotBefore.currentTasks as Array<unknown>).length, 0, "enqueued snapshot has no task yet");
+
+    // mutate envelope: 直接重写 goals projection，给 thread 增加一个 task。
+    const seededTaskId = deriveOpaqueId("task", "governance-tick-refresh-task");
+    const meta = readGoalsSnapshotMeta([]);
+    const goal = meta.value[0]!;
+    const subGoal = goal.subGoals[0]!;
+    const nextGoals = [
+      {
+        ...goal,
+        subGoals: [
+          {
+            ...subGoal,
+            tasks: [
+              {
+                id: seededTaskId,
+                subGoalId: subGoal.id,
+                title: "刷新后的新任务",
+                description: "envelope 新增的任务",
+                expectedOutcome: "应该出现在派发命令里",
+                taskType: "repeat",
+                triggerRule: "每天 09:00",
+                progress: 0,
+                instances: [],
+                executionKind: "generic_result",
+              },
+            ],
+          },
+        ],
+      },
+    ] as unknown as Goal[];
+    const writeResult = writeGoalsProjection(nextGoals, meta.revision);
+    assert.equal(writeResult.ok, true, "envelope rewrite ok");
+
+    let dispatchedCommand: MachineCommand | undefined;
+    const dispatched = leaseAndDispatchGovernanceTickJob({
+      leaseOwner: "dispatcher-refresh",
+      leaseDurationMs: 10_000,
+      now: new Date("2026-06-01T00:00:00.000Z"),
+      targetKind: "thread",
+      sendCommand(command) {
+        dispatchedCommand = command;
+        return true;
+      },
+    });
+    assert.ok(dispatched);
+    assert.ok(dispatchedCommand);
+    const refreshedSnapshot = (dispatchedCommand as { payload: { snapshot: Record<string, unknown> } }).payload.snapshot;
+    const refreshedTasks = refreshedSnapshot.currentTasks as Array<{ id: string }>;
+    assert.equal(refreshedTasks.length, 1, "refreshed snapshot picks up new task");
+    assert.equal(refreshedTasks[0]?.id, seededTaskId);
+  }
+
+  // 1a-stale-revision-abandon. lease 时如果 envelope 里 thread.revision 已变，
+  // 直接 fail 这次 job，不烧 LLM、也不发 command（回执肯定 stale_revision）。
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    seedGoal({});
+    enqueueDueGovernanceTickJobs({
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    // 把 envelope 里 thread.revision 推进到 1
+    updateThread(THREAD_ID, { lastTickAt: "2026-06-01T01:00:00.000Z" }, 0);
+
+    let sendCalled = 0;
+    const dispatched = leaseAndDispatchGovernanceTickJob({
+      leaseOwner: "dispatcher-stale",
+      leaseDurationMs: 10_000,
+      now: new Date("2026-06-01T00:00:00.000Z"),
+      targetKind: "thread",
+      sendCommand() {
+        sendCalled += 1;
+        return true;
+      },
+    });
+    assert.equal(dispatched, null, "stale revision should abandon lease before dispatch");
+    assert.equal(sendCalled, 0, "command should never be sent for stale lease");
   }
 
   // 1b. cloud orchestrator 路径能把 queued governance job 下发到在线 machine。

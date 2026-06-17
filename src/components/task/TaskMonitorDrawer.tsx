@@ -13,7 +13,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  fetchRuntimeDaemonStatus,
   fetchRuntimeStateSnapshot,
+  setRuntimeDaemonDispatchPaused,
   setRuntimeDaemonMaxConcurrentTasks,
 } from "@/lib/api/runtime-daemon";
 import { cancelGoalInstance, transitionGoalInstance } from "@/lib/api/goal-commands";
@@ -75,6 +77,8 @@ export function TaskMonitorDrawer() {
 
   const [detailWidth, setDetailWidth] = useState(DETAIL_MIN_WIDTH);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [dispatchPaused, setDispatchPaused] = useState(false);
+  const [pendingGlobalAction, setPendingGlobalAction] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
 
@@ -113,6 +117,15 @@ export function TaskMonitorDrawer() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [closeMonitor, closeTaskDrawer, detailOpen, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    void fetchRuntimeDaemonStatus()
+      .then((status) => setDispatchPaused(status.config?.dispatchPaused === true))
+      .catch(() => {
+        // 守护进程未就绪时忽略，默认视为未暂停。
+      });
+  }, [open]);
 
   if (!open) return null;
 
@@ -165,6 +178,24 @@ export function TaskMonitorDrawer() {
       await setRuntimeDaemonMaxConcurrentTasks(clamped);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "并发上限设置失败");
+    }
+  };
+
+  const toggleDispatchPause = async () => {
+    const nextPaused = !dispatchPaused;
+    setPendingGlobalAction(true);
+    setErrorMessage(null);
+    try {
+      const result = await setRuntimeDaemonDispatchPaused(nextPaused);
+      setDispatchPaused(result.config?.dispatchPaused === true);
+      await syncGoals();
+      if (result.reason) {
+        setErrorMessage(result.reason);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "任务调度暂停设置失败");
+    } finally {
+      setPendingGlobalAction(false);
     }
   };
 
@@ -230,28 +261,56 @@ export function TaskMonitorDrawer() {
               <div className="text-[13px] font-medium text-[#1F2328]">最多同时执行</div>
               <div className="mt-0.5 text-[12px] text-[#8C9198]">超出上限的任务进入等待队列</div>
             </div>
-            <div className="inline-flex items-center overflow-hidden rounded-lg border border-[#D0D7DE] bg-white">
-              <button
-                type="button"
-                disabled={maxConcurrentTasks <= 1}
-                onClick={() => void changeConcurrency(maxConcurrentTasks - 1)}
-                className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
-              >
-                -
-              </button>
-              <span className="min-w-8 border-x border-[#D0D7DE] px-2 text-center text-[13px] font-semibold">
-                {maxConcurrentTasks}
-              </span>
-              <button
-                type="button"
-                disabled={maxConcurrentTasks >= 10}
-                onClick={() => void changeConcurrency(maxConcurrentTasks + 1)}
-                className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
-              >
-                +
-              </button>
+            <div className="flex items-center gap-2">
+              {dispatchPaused ? (
+                <button
+                  type="button"
+                  disabled={pendingGlobalAction}
+                  onClick={() => void toggleDispatchPause()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#1F2328] bg-[#1F2328] px-3 text-[12px] font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  恢复执行
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={pendingGlobalAction}
+                  onClick={() => void toggleDispatchPause()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#D0D7DE] bg-white px-3 text-[12px] font-medium text-[#1F2328] hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Pause className="h-3.5 w-3.5" />
+                  全部暂停
+                </button>
+              )}
+              <div className="inline-flex items-center overflow-hidden rounded-lg border border-[#D0D7DE] bg-white">
+                <button
+                  type="button"
+                  disabled={maxConcurrentTasks <= 1 || dispatchPaused}
+                  onClick={() => void changeConcurrency(maxConcurrentTasks - 1)}
+                  className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
+                >
+                  -
+                </button>
+                <span className="min-w-8 border-x border-[#D0D7DE] px-2 text-center text-[13px] font-semibold">
+                  {maxConcurrentTasks}
+                </span>
+                <button
+                  type="button"
+                  disabled={maxConcurrentTasks >= 10 || dispatchPaused}
+                  onClick={() => void changeConcurrency(maxConcurrentTasks + 1)}
+                  className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
+          {dispatchPaused ? (
+            <div className="mt-3 rounded-lg border border-[#FFF4CC] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#7A5A00]">
+              任务调度已全局暂停，执行中与待执行的任务均已停止。
+            </div>
+          ) : null}
           <div className="mt-3 flex items-center gap-3">
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EEF0F3]">
               <div
@@ -304,6 +363,7 @@ export function TaskMonitorDrawer() {
                         active={row.kind === "task" && activeInstanceId === row.instanceId}
                         maxConcurrentTasks={maxConcurrentTasks}
                         runningCount={taskRunningCount}
+                        dispatchPaused={dispatchPaused}
                         pendingAction={pendingAction}
                         onOpen={
                           row.kind === "task" && row.taskId
@@ -335,6 +395,7 @@ function TaskMonitorCard({
   active,
   maxConcurrentTasks,
   runningCount,
+  dispatchPaused,
   pendingAction,
   onOpen,
   onAction,
@@ -343,6 +404,7 @@ function TaskMonitorCard({
   active: boolean;
   maxConcurrentTasks: number;
   runningCount: number;
+  dispatchPaused: boolean;
   pendingAction: string | null;
   onOpen?: () => void;
   onAction: (row: TaskMonitorRow, action: "start" | "pause" | "resume" | "rerun" | "stop") => void;
@@ -397,7 +459,7 @@ function TaskMonitorCard({
         {isTask && row.group === "running" ? (
           <>
             <ActionButton
-              disabled={busy || !canStop}
+              disabled={busy || !canStop || dispatchPaused}
               onClick={() => onAction(row, "pause")}
               icon={<Pause className="h-3.5 w-3.5" />}
             >
@@ -418,11 +480,11 @@ function TaskMonitorCard({
           <>
             <ActionButton
               primary
-              disabled={busy || full}
+              disabled={busy || full || dispatchPaused}
               onClick={() => onAction(row, "start")}
               icon={<Play className="h-3.5 w-3.5 fill-current" />}
             >
-              {full ? "排队中" : "立即开始"}
+              {dispatchPaused ? "已暂停" : full ? "排队中" : "立即开始"}
             </ActionButton>
             <ActionButton
               danger
@@ -439,11 +501,11 @@ function TaskMonitorCard({
           <>
             <ActionButton
               primary
-              disabled={busy || full}
+              disabled={busy || full || dispatchPaused}
               onClick={() => onAction(row, "resume")}
               icon={<Play className="h-3.5 w-3.5 fill-current" />}
             >
-              {full ? "排队中" : "继续"}
+              {dispatchPaused ? "已暂停" : full ? "排队中" : "继续"}
             </ActionButton>
             <ActionButton
               danger

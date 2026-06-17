@@ -2,6 +2,23 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-06-18
+
+### Changed
+- 任务结果卡片改为“产出物为主体”的内联展示：长报告、结构化文档和交互产物可在会话内预览，并支持一键全屏展开阅读，减少卡片内嵌套滚动的负担。
+- 任务监控抽屉新增全局暂停/恢复入口：暂停会阻止新任务派发，并将待执行、执行中的任务统一转为可恢复状态；恢复时按本地 Runtime 可用性重新排队。
+- 治理 tick 派发前会刷新 topic/thread snapshot，补齐当前任务列表、近期实例和线程列表，避免远端治理模型基于过期快照重复派发任务。
+
+### Fixed
+- 修复治理 job 在 lease 后 entity revision 已变化时仍继续派发的问题；现在会在派发前识别 stale revision 并提前失败，避免浪费 LLM 调用且减少后续回执冲突。
+- 修复 thread governance payload 缺少 `currentTasks` / `recentTaskInstances` 时重复任务校验被绕过的问题，并补充协议校验与回退兼容。
+- 修复治理动作展示与通知中缺少 `update_task` / `cancel_task` 细节的问题，提升治理变更在会话和收件箱里的可读性。
+
+### Added
+- 新增 `ExpandableContentCard`、`DeliverableArticle` 与内容溢出检测 hook，统一任务产出物的折叠预览、全屏展开和阅读遮罩能力。
+- 新增任务调度全局暂停 API `/api/runtime/daemon/dispatch-pause` 及服务端暂停/恢复服务。
+- 补充治理派发、协议校验和调度边界规格测试，覆盖 snapshot 刷新、stale revision 拦截、重复派发检测和全局暂停调度。
+
 ## 2026-06-17
 
 ### Changed

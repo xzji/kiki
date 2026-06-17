@@ -90,6 +90,19 @@ export function buildThreadActionDetails(input: {
     if (action.kind === "dispatch_task") {
       const record = dispatched.shift();
       const taskTitle = record?.draft.title ?? action.taskDraft.title;
+      // 没有 record 说明 dispatchThreadActions 没真正派发——可能因为 fresh
+      // currentTasks 兜底 dedup（见 dispatchActions.ts）或回调抛错。
+      // 此时降级为 silent 展示，避免给用户写一条虚假的"新增任务"消息。
+      if (!record) {
+        details.push(threadDetail({
+          kind: "silent",
+          title: "已跳过派发",
+          summary: `已跳过派发任务「${taskTitle}」（与既有任务重复或派发失败）`,
+          reason: action.reason,
+          severity: "info",
+        }));
+        continue;
+      }
       const trigger = action.taskDraft.triggerRule ?? action.taskDraft.cadence ?? action.taskDraft.triggerCondition;
       details.push(threadDetail({
         kind: "dispatch_task",

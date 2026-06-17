@@ -111,6 +111,14 @@ function buildTopicChangeTextFromDetails(details: GovernanceActionPresentation[]
 
 function reasonSuffix(reason: string | undefined) {
   if (!reason?.trim()) return "";
+  // 明显与现实矛盾的幻觉文案不入会话流：例如 "尚无任何 Task / 没有任务 / 未发现任务"
+  // 之类自相矛盾的解释（板块明明已有 Task 才会触发文案模板）。
+  // 这里只识别明确字面量；P0 修复云路径漏装 currentTasks 后此分支正常情况下不再触发，
+  // 仅作为最后一道兜底，防止历史旧 job / 兼容路径再次把这类 reason 写入用户可见消息。
+  if (CONTRADICTORY_REASON_PATTERN.test(reason)) return "";
   const clipped = reason.length > 80 ? `${reason.slice(0, 79)}…` : reason;
   return `原因：${clipped}`;
 }
+
+const CONTRADICTORY_REASON_PATTERN =
+  /(尚无任何|没有任何|不存在任何|未发现任何|暂无任何|完全没有)[\s\S]{0,12}(任务|task)/i;

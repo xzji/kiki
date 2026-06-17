@@ -26,6 +26,8 @@ export type RuntimeDaemonConfig = {
   jobMaxDurationMs: number;
   /** 单个 goal task 执行的空闲超时（毫秒），期间无任何进展事件即判定卡死并 abort。 */
   jobIdleTimeoutMs: number;
+  /** 为 true 时暂停调度与派发，并阻止新建任务进入执行队列。 */
+  dispatchPaused: boolean;
   updatedAt: string;
 };
 
@@ -43,6 +45,7 @@ const DEFAULT_CONFIG: RuntimeDaemonConfig = {
   maxConcurrentTasks: 3,
   jobMaxDurationMs: 30 * 60_000,
   jobIdleTimeoutMs: 5 * 60_000,
+  dispatchPaused: false,
   updatedAt: new Date().toISOString(),
 };
 
@@ -72,6 +75,7 @@ export function readRuntimeDaemonConfig() {
       ...parsed,
       filePolicy: normalizeRuntimeFilePolicy(parsed.filePolicy),
       maxConcurrentTasks: clampMaxConcurrentTasks(parsed.maxConcurrentTasks),
+      dispatchPaused: parsed.dispatchPaused === true,
       authorizedDirectories:
         parsed.authorizedDirectories?.filter((item): item is string => Boolean(item?.trim())) ??
         DEFAULT_CONFIG.authorizedDirectories,

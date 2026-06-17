@@ -240,4 +240,39 @@ export async function runDispatchActionsSpecs() {
     assert.equal(result.sentMessages.length, 0);
     assert.equal(result.errors.length, 0);
   }
+
+  // ---------- dispatch_task 兜底重复检测：fresh currentTasks 命中既有任务时降级为 silent ----------
+  {
+    let dispatchCalled = 0;
+    const currentTasks = [makeTask("task-existing", "复盘 NVDA")];
+    const output = makeOutput([
+      {
+        kind: "dispatch_task",
+        threadId: THREAD_ID,
+        reason: "周报",
+        taskDraft: makeDraft("复盘 NVDA"),
+      },
+    ]);
+    const result = await dispatchThreadActions({
+      topicId: TOPIC_ID,
+      threadId: THREAD_ID,
+      output,
+      currentTasks,
+      callbacks: {
+        dispatchTask: async () => {
+          dispatchCalled += 1;
+          return { taskId: "should-not-happen" };
+        },
+        sendThreadMessage: noopSend(),
+      },
+    });
+    assert.equal(dispatchCalled, 0, "重复 dispatch_task 不应真正下发");
+    assert.equal(result.dispatchedTasks.length, 0);
+    assert.equal(result.silentReasons.length, 1);
+    assert.match(result.silentReasons[0]!.reason, /dispatch_skipped_duplicate/);
+    // 不能写 errors[]——否则上层 applyThreadOutcome 会把整次 tick 标记为
+    // dispatch_partial_failure，thread 状态机不推进，下次重试还会被 dedup 拦下，
+    // 陷入循环。dedup 语义上属于 silent。
+    assert.equal(result.errors.length, 0, "dedup 应表现为 silent，而不是 dispatch error");
+  }
 }

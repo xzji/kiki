@@ -113,6 +113,10 @@ function dispatchFrame(leaseOwner: string): { processed: number; inFlight: numbe
   const config = readRuntimeDaemonConfig();
   const device = ensureDeviceState(config.deviceId);
 
+  if (config.dispatchPaused) {
+    return { processed: 0, inFlight: inFlightJobs.size };
+  }
+
   // 按剩余并发额度领取：最多领取 maxConcurrentTasks - 当前在执行数。
   const available = Math.max(0, config.maxConcurrentTasks - inFlightJobs.size);
   if (available === 0) {

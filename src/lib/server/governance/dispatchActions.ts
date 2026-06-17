@@ -21,6 +21,7 @@ import type {
   SendThreadMessageRequest,
   UpdateTaskRequest,
 } from "@/lib/server/services/dispatchTaskFromThread";
+import { isDispatchTaskDuplicate } from "@/lib/server/thread/threadTickOutputSchema";
 import type { Task } from "@/types/kiki";
 import type {
   ThreadTickAction,
@@ -204,6 +205,29 @@ export async function dispatchThreadActions(
     const action = output.actions[i]!;
     if (action.kind !== "dispatch_task") continue;
     if (action.threadId !== threadId) continue; // 防御
+    // 兜底重复检测：schema 解析阶段已用 currentTasks 做过相似度判重，
+    // 但云路径远端 machine 解析时可能拿不到 currentTasks（payload 漏装），
+    // 此处用 fresh currentTasks 再判一次，命中则降级为 silent。
+    //
+    // 注意：不写 errors[]——dispatchTickOutcome 在 errors > 0 时会让 thread tick 进入
+    // dispatch_partial_failure 重试态，下次重试 LLM 输出多半还会是同一份 dispatch_task，
+    // 又会被 dedup 拦下，陷入循环 burn。dedup 是治理层"决策无效"判定，语义上属于
+    // silent（已识别但无副作用），不该阻塞 thread 状态机推进。
+    if (isDispatchTaskDuplicate(action.taskDraft, Array.from(currentTaskById.values()))) {
+      result.silentReasons.push({
+        reason: `dispatch_skipped_duplicate: ${action.taskDraft.title ?? "(无标题)"}`,
+      });
+      console.warn(
+        "[governance] dispatch_task skipped as duplicate of existing task in thread",
+        {
+          topicId,
+          threadId,
+          actionIndex: i,
+          draftTitle: action.taskDraft.title,
+        },
+      );
+      continue;
+    }
     try {
       const dispatched = await callbacks.dispatchTask({
         topicId,

@@ -49,20 +49,120 @@ function buildTaskToolPermissionRequest(instance: TaskInstance): Extract<ClaudeS
   };
 }
 
+function TaskCardMetaContent({
+  task,
+  instance,
+  statusLabel,
+  badgeLabel,
+  summaryText,
+  hasInteractiveSurface,
+  hideSummary,
+}: {
+  task: Task;
+  instance: TaskInstance;
+  statusLabel: string;
+  badgeLabel: string | null;
+  summaryText: string | undefined;
+  hasInteractiveSurface: boolean;
+  hideSummary: boolean;
+}) {
+  return (
+    <>
+      <div className="text-[15px] font-semibold text-[#1F2328]">
+        {buildInstanceCardTitle(task, instance)}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+        <span>{EXECUTION_KIND_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</span>
+        <span className="text-[#D0D7DE]">/</span>
+        <span>{statusLabel}</span>
+        {badgeLabel ? (
+          <>
+            <span className="text-[#D0D7DE]">/</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F8F1DF] px-2 py-0.5 font-medium text-[#9A7A34] before:h-1 before:w-1 before:rounded-full before:bg-current">
+              {badgeLabel}
+            </span>
+          </>
+        ) : null}
+        <ArtifactSummaryChip refs={instance.result?.taskResult?.artifactRefs} hasInteractiveSurface={hasInteractiveSurface} />
+      </div>
+      {hideSummary ? null : (
+        <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">{summaryText}</div>
+      )}
+    </>
+  );
+}
+
+function TaskCardMeta({
+  task,
+  instance,
+  statusLabel,
+  badgeLabel,
+  summaryText,
+  hasInteractiveSurface,
+  hideSummary,
+  interactive,
+  onOpen,
+}: {
+  task: Task;
+  instance: TaskInstance;
+  statusLabel: string;
+  badgeLabel: string | null;
+  summaryText: string | undefined;
+  hasInteractiveSurface: boolean;
+  hideSummary: boolean;
+  interactive: boolean;
+  onOpen: () => void;
+}) {
+  const content = (
+    <TaskCardMetaContent
+      task={task}
+      instance={instance}
+      statusLabel={statusLabel}
+      badgeLabel={badgeLabel}
+      summaryText={summaryText}
+      hasInteractiveSurface={hasInteractiveSurface}
+      hideSummary={hideSummary}
+    />
+  );
+
+  if (!interactive) return content;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="cursor-pointer rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
+    >
+      {content}
+    </div>
+  );
+}
+
 /**
  * 会话消息里的任务卡片。
  * - 展示任务结果摘要
- * - 点击整张卡片，打开右侧结果边栏
+ * - 有内联产出物时：元信息平铺，产出物卡片为主体
+ * - 点击元信息区域，打开右侧结果边栏
  */
 export function TaskMessageCard({
   task,
   instance,
   onOpen,
+  onExpandStart,
   onOptionalFeedbackSelect,
 }: {
   task: Task;
   instance: TaskInstance;
   onOpen: () => void;
+  /** 内联产出物全屏展开时回调，用于收起结果抽屉等 */
+  onExpandStart?: () => void;
   onOptionalFeedbackSelect?: (message: string) => Promise<void> | void;
 }) {
   const submittedInteraction = hasSubmittedInteraction(instance);
@@ -104,43 +204,23 @@ export function TaskMessageCard({
     Boolean(instance.result?.taskResult?.artifactRefs?.some((ref) => ref.kind === "webapp"));
   const showInlineResult = canRenderInlineAgentResult(task, instance);
   const toolPermissionRequest = buildTaskToolPermissionRequest(instance);
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-      className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-6 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
-    >
-      <div className="flex items-start gap-3">
-        <div className="block min-w-0 flex-1 text-left">
-          <div className="text-[15px] font-semibold text-[#1F2328]">
-            {buildInstanceCardTitle(task, instance)}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
-            <span>{EXECUTION_KIND_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</span>
-            <span className="text-[#D0D7DE]">/</span>
-            <span>{statusLabel}</span>
-            {badgeLabel ? (
-              <>
-                <span className="text-[#D0D7DE]">/</span>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F8F1DF] px-2 py-0.5 font-medium text-[#9A7A34] before:h-1 before:w-1 before:rounded-full before:bg-current">{badgeLabel}</span>
-              </>
-            ) : null}
-            <ArtifactSummaryChip refs={instance.result?.taskResult?.artifactRefs} hasInteractiveSurface={hasInteractiveSurface} />
-          </div>
-          {awaitingDisplay.hideOuterSummary ? null : (
-            <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">
-              {summaryText}
-            </div>
-          )}
-        </div>
-      </div>
+
+  const meta = (
+    <TaskCardMeta
+      task={task}
+      instance={instance}
+      statusLabel={statusLabel}
+      badgeLabel={badgeLabel}
+      summaryText={summaryText}
+      hasInteractiveSurface={hasInteractiveSurface}
+      hideSummary={awaitingDisplay.hideOuterSummary}
+      interactive={showInlineResult}
+      onOpen={onOpen}
+    />
+  );
+
+  const interactionPanels = (
+    <>
       {toolPermissionRequest ? (
         <div className="mt-4" onClick={(event) => event.stopPropagation()}>
           <ToolPermissionRequestDialog
@@ -154,17 +234,43 @@ export function TaskMessageCard({
           <SubmittedInteractionPanel instance={instance} />
         </div>
       ) : null}
-      {showInlineResult ? (
-        <div onClick={(event) => event.stopPropagation()}>
-          <TaskInlineResultView task={task} instance={instance} />
-          {optionalFeedback ? (
-            <OptionalFeedbackSuggestions
-              requirement={optionalFeedback}
-              onSelect={onOptionalFeedbackSelect}
-            />
-          ) : null}
-        </div>
+    </>
+  );
+
+  const inlineResult = showInlineResult ? (
+    <div className="mt-4" onClick={(event) => event.stopPropagation()}>
+      <TaskInlineResultView task={task} instance={instance} onExpandStart={onExpandStart} />
+      {optionalFeedback ? (
+        <OptionalFeedbackSuggestions requirement={optionalFeedback} onSelect={onOptionalFeedbackSelect} />
       ) : null}
+    </div>
+  ) : null;
+
+  if (showInlineResult) {
+    return (
+      <div className="mt-3 w-full text-left">
+        {meta}
+        {interactionPanels}
+        {inlineResult}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-6 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
+    >
+      {meta}
+      {interactionPanels}
     </div>
   );
 }
