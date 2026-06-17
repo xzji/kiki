@@ -98,6 +98,22 @@ export type RunThreadTickInput = {
   agentRunId: string;
 };
 
+const GOVERNANCE_RAW_LOG_LIMIT = 1200;
+
+function clipForGovernanceLog(value: string | undefined) {
+  if (!value) return "";
+  return value.length > GOVERNANCE_RAW_LOG_LIMIT ? `${value.slice(0, GOVERNANCE_RAW_LOG_LIMIT)}...` : value;
+}
+
+function parsedRootKeys(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return Object.keys(value as Record<string, unknown>);
+}
+
+function logThreadGovernance(message: string, fields: Record<string, unknown> = {}) {
+  console.info("[thread_governance]", message, fields);
+}
+
 // ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
@@ -132,7 +148,21 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
       prompt,
       context: { topicId: ctx.topic.id, threadId: ctx.thread.id },
     });
+    logThreadGovernance("llm result received", {
+      agentRunId,
+      topicId: ctx.topic.id,
+      threadId: ctx.thread.id,
+      rawBytes: Buffer.byteLength(raw.rawText ?? "", "utf8"),
+      parsedKeys: parsedRootKeys(raw.parsed),
+      rawSnippet: clipForGovernanceLog(raw.rawText),
+    });
   } catch (error) {
+    logThreadGovernance("llm invoke failed", {
+      agentRunId,
+      topicId: ctx.topic.id,
+      threadId: ctx.thread.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return buildFailureResult(ctx, lastTickAt, { kind: "invoke_error", error });
   }
 
@@ -151,6 +181,13 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
       try {
         parsed = JSON.parse(raw.rawText);
       } catch (parseError) {
+        logThreadGovernance("llm json parse failed", {
+          agentRunId,
+          topicId: ctx.topic.id,
+          threadId: ctx.thread.id,
+          error: parseError instanceof Error ? parseError.message : String(parseError),
+          rawSnippet: clipForGovernanceLog(raw.rawText),
+        });
         return buildFailureResult(ctx, lastTickAt, {
           kind: "validation_error",
           error: new ThreadTickOutputValidationError(
@@ -167,6 +204,16 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
     }
   } catch (error) {
     if (error instanceof ThreadTickOutputValidationError) {
+      const parsed = raw.parsed ?? safeParseJson(raw.rawText);
+      logThreadGovernance("llm output validation failed", {
+        agentRunId,
+        topicId: ctx.topic.id,
+        threadId: ctx.thread.id,
+        code: error.code,
+        message: error.message,
+        parsedKeys: parsedRootKeys(parsed),
+        rawSnippet: clipForGovernanceLog(raw.rawText),
+      });
       return buildFailureResult(ctx, lastTickAt, { kind: "validation_error", error });
     }
     // 不应到这里；按未知错误处理。
@@ -213,6 +260,15 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
     },
     output,
   };
+}
+
+function safeParseJson(value: string | undefined): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------

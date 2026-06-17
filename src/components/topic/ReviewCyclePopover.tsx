@@ -3,7 +3,11 @@
 import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { fetchGovernanceHistory, type GovernanceTickEntry } from "@/lib/api/runtime-daemon";
+import {
+  fetchGovernanceHistory,
+  triggerGovernanceTick,
+  type GovernanceTickEntry,
+} from "@/lib/api/runtime-daemon";
 import { formatMessageTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +36,9 @@ export function ReviewCyclePopover({
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [triggerMessage, setTriggerMessage] = useState<string | null>(null);
   const [entries, setEntries] = useState<GovernanceTickEntry[]>([]);
   const rootRef = useRef<HTMLSpanElement | null>(null);
 
@@ -75,6 +81,29 @@ export function ReviewCyclePopover({
     };
   }, [entityId, kind, open]);
 
+  const reloadHistory = async () => {
+    const payload = await fetchGovernanceHistory({ kind, entityId, limit: 30 });
+    setEntries(payload.entries);
+  };
+
+  const runNow = async () => {
+    if (triggering) return;
+    setTriggering(true);
+    setError(null);
+    setTriggerMessage(null);
+    try {
+      const payload = await triggerGovernanceTick({ kind, entityId });
+      // job 入队成功即代表本次治理一定会被执行（编排器循环会自动拾取派发）；
+      // dispatched 仅表示本次请求已顺带即时派发，未派发时也无需用户额外操作。
+      setTriggerMessage(payload.dispatched ? "已发起治理" : "已发起治理，正在排队执行");
+      await reloadHistory().catch(() => undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "治理发起失败");
+    } finally {
+      setTriggering(false);
+    }
+  };
+
   return (
     <span ref={rootRef} className="relative inline-flex">
       <button
@@ -93,6 +122,26 @@ export function ReviewCyclePopover({
               <div className="mt-1 text-sm font-semibold text-[#1F2328]">回顾周期：{label}</div>
             </div>
             {phaseLabel ? <GovernanceBadge tone={phaseTone}>{phaseLabel}</GovernanceBadge> : null}
+          </div>
+
+          <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[12px] font-medium text-[#1F2328]">立即执行一次治理</div>
+                <div className="mt-1 text-[11px] leading-4 text-[#8C9198]">
+                  复用当前治理队列、机器派发和回执链路。
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={runNow}
+                disabled={triggering}
+                className="shrink-0 rounded-lg bg-[#1F2328] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#111827] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {triggering ? "发起中..." : "立即执行"}
+              </button>
+            </div>
+            {triggerMessage ? <div className="mt-2 text-[11px] text-[#137333]">{triggerMessage}</div> : null}
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">

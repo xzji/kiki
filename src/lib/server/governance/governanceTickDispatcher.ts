@@ -98,6 +98,21 @@ function buildJobIdempotencyKey(input: {
   );
 }
 
+function buildManualJobIdempotencyKey(input: {
+  targetKind: GovernanceTickTargetKind;
+  topicId: string;
+  threadId?: string;
+  requestKey: string;
+}) {
+  return createIdempotencyKey(
+    "governance_tick_job_manual",
+    input.targetKind,
+    input.topicId,
+    input.threadId,
+    input.requestKey,
+  );
+}
+
 function threadPayload(topic: Topic, thread: Thread, due: ReturnType<typeof isThreadDue>): GovernanceTickJobPayload {
   return {
     targetKind: "thread",
@@ -119,6 +134,93 @@ function topicPayload(topic: Topic, due: NonNullable<ReturnType<typeof isTopicDu
     dueReason: due.reason,
     scheduledAt: due.scheduledAt.toISOString(),
   };
+}
+
+export function enqueueManualGovernanceTickJob(input: {
+  targetKind: GovernanceTickTargetKind;
+  entityId: string;
+  idempotencyKey: string;
+  userId?: string;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const topics = readTopicsSnapshot([]);
+
+  if (input.targetKind === "topic") {
+    const topic = topics.find((item) => item.id === input.entityId);
+    if (!topic) throw new Error("未找到 Topic");
+    if (topic.status !== "active") throw new Error("Topic 当前不可治理");
+    const job = createGovernanceTickJob({
+      targetKind: "topic",
+      topicId: topic.id,
+      userId: input.userId,
+      baseRevision: topic.revision,
+      payload: {
+        targetKind: "topic",
+        topicId: topic.id,
+        baseRevision: topic.revision,
+        snapshot: { topic },
+        dueReason: "manual",
+        scheduledAt: nowIso(now),
+      },
+      idempotencyKey: buildManualJobIdempotencyKey({
+        targetKind: "topic",
+        topicId: topic.id,
+        requestKey: input.idempotencyKey,
+      }),
+      availableAt: nowIso(now),
+      createdAt: nowIso(now),
+    });
+    logGovernanceTick("enqueued manual governance job", {
+      jobId: job.id,
+      targetKind: job.targetKind,
+      topicId: job.topicId,
+      baseRevision: job.baseRevision,
+      status: job.status,
+    });
+    return job;
+  }
+
+  for (const topic of topics) {
+    const thread = topic.threads.find((item) => item.id === input.entityId);
+    if (!thread) continue;
+    if (topic.status !== "active" || thread.status !== "active") throw new Error("Thread 当前不可治理");
+    const job = createGovernanceTickJob({
+      targetKind: "thread",
+      topicId: topic.id,
+      threadId: thread.id,
+      userId: input.userId,
+      baseRevision: thread.revision,
+      payload: {
+        targetKind: "thread",
+        topicId: topic.id,
+        threadId: thread.id,
+        baseRevision: thread.revision,
+        snapshot: { topic, thread },
+        dueReason: "manual",
+        scheduledAt: nowIso(now),
+      },
+      idempotencyKey: buildManualJobIdempotencyKey({
+        targetKind: "thread",
+        topicId: topic.id,
+        threadId: thread.id,
+        requestKey: input.idempotencyKey,
+      }),
+      availableAt: nowIso(now),
+      createdAt: nowIso(now),
+    });
+    logGovernanceTick("enqueued manual governance job", {
+      jobId: job.id,
+      targetKind: job.targetKind,
+      topicId: job.topicId,
+      threadId: job.threadId,
+      baseRevision: job.baseRevision,
+      status: job.status,
+    });
+    return job;
+  }
+
+  throw new Error("未找到 Thread");
 }
 
 export function enqueueDueGovernanceTickJobs(input: { now?: Date; userId?: string } = {}) {
@@ -227,18 +329,31 @@ export function dispatchReadyGovernanceTickJobsToMachines(input: {
   llm?: GovernanceTickLlmPayload;
 }): { processed: number; skippedOffline: boolean } {
   const userId = getCurrentUserId();
-  if (countPendingGovernanceTickJobs({
+  const pendingCount = countPendingGovernanceTickJobs({
     now: input.now,
     expiredLeaseGraceMs: DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS,
-  }) === 0) {
+  });
+  if (pendingCount === 0) {
     return { processed: 0, skippedOffline: false };
   }
   if (!input.llm) {
+    logGovernanceTick("skipped governance dispatch without llm runtime", {
+      userId,
+      pendingCount,
+      leaseOwner: input.leaseOwner,
+    });
     return { processed: 0, skippedOffline: false };
   }
   const hub = getTunnelHub();
   const onlineMachineIds = hub.getOnlineMachineIdsForUser(userId);
-  if (onlineMachineIds.length === 0) return { processed: 0, skippedOffline: true };
+  if (onlineMachineIds.length === 0) {
+    logGovernanceTick("skipped governance dispatch because machine offline", {
+      userId,
+      pendingCount,
+      leaseOwner: input.leaseOwner,
+    });
+    return { processed: 0, skippedOffline: true };
+  }
 
   const machineId = onlineMachineIds[0];
   const limit = Math.max(0, input.limit ?? 10);
@@ -258,6 +373,14 @@ export function dispatchReadyGovernanceTickJobsToMachines(input: {
     processed += 1;
   }
 
+  logGovernanceTick("dispatch ready governance jobs completed", {
+    userId,
+    machineId,
+    pendingCount,
+    processed,
+    limit,
+    leaseOwner: input.leaseOwner,
+  });
   return { processed, skippedOffline: false };
 }
 
@@ -584,6 +707,13 @@ export async function persistGovernanceTickOutcome(input: {
       outcome: input.outcome as unknown as Record<string, unknown>,
       acceptLeaseTokenMismatch,
     });
+    logGovernanceTick("rejected outcome by base revision mismatch", {
+      jobId: job.id,
+      jobBaseRevision: job.baseRevision,
+      outcomeBaseRevision: input.outcome.baseRevision,
+      targetKind: input.outcome.targetKind,
+      topicId: input.outcome.topicId,
+    });
     return { ok: false, job: getGovernanceTickJob(job.id), reason: "base_revision_mismatch", staleRevision: true };
   }
 
@@ -596,6 +726,13 @@ export async function persistGovernanceTickOutcome(input: {
       error: "stale_revision",
       outcome: input.outcome as unknown as Record<string, unknown>,
       acceptLeaseTokenMismatch,
+    });
+    logGovernanceTick("rejected outcome by stale revision", {
+      jobId: job.id,
+      targetKind: input.outcome.targetKind,
+      topicId: input.outcome.topicId,
+      currentRevision,
+      jobBaseRevision: job.baseRevision,
     });
     return { ok: false, job: failed ?? getGovernanceTickJob(job.id), reason: "stale_revision", staleRevision: true };
   }
@@ -614,6 +751,17 @@ export async function persistGovernanceTickOutcome(input: {
     applied = applyTopicOutcome({ outcome: input.outcome });
   }
 
+  logGovernanceTick("applied machine outcome", {
+    jobId: job.id,
+    targetKind: input.outcome.targetKind,
+    topicId: input.outcome.topicId,
+    threadId: input.outcome.targetKind === "thread" ? input.outcome.threadId : undefined,
+    outcomeOk: input.outcome.targetKind === "thread" ? input.outcome.result.ok : input.outcome.ok,
+    appliedOk: applied.ok,
+    reason: applied.ok ? undefined : applied.reason,
+    dispatchErrors: applied.dispatch?.errors.length,
+  });
+
   if (!applied.ok) {
     if (applied.staleRevision) {
       const failed = failGovernanceTickJob({
@@ -622,7 +770,12 @@ export async function persistGovernanceTickOutcome(input: {
         leaseToken: input.leaseToken,
         error: applied.reason,
         outcome: input.outcome as unknown as Record<string, unknown>,
-          acceptLeaseTokenMismatch,
+        acceptLeaseTokenMismatch,
+      });
+      logGovernanceTick("failed outcome after apply stale revision", {
+        jobId: job.id,
+        targetKind: input.outcome.targetKind,
+        reason: applied.reason,
       });
       return { ok: false, job: failed ?? getGovernanceTickJob(job.id), reason: applied.reason, staleRevision: true, dispatch: applied.dispatch };
     }
@@ -638,9 +791,24 @@ export async function persistGovernanceTickOutcome(input: {
     finishedAt,
     acceptLeaseTokenMismatch,
   });
-  if (!completed) return { ok: false, job: getGovernanceTickJob(job.id), reason: "complete_failed", dispatch: applied.dispatch };
+  if (!completed) {
+    logGovernanceTick("complete job failed", {
+      jobId: job.id,
+      targetKind: input.outcome.targetKind,
+      topicId: input.outcome.topicId,
+      leaseOwner: input.leaseOwner,
+    });
+    return { ok: false, job: getGovernanceTickJob(job.id), reason: "complete_failed", dispatch: applied.dispatch };
+  }
   try {
     recordDispatcherTickHistory({ job: completed, outcome: input.outcome, dispatch: applied.dispatch, finishedAt });
+    logGovernanceTick("recorded dispatcher tick history", {
+      jobId: completed.id,
+      targetKind: input.outcome.targetKind,
+      topicId: input.outcome.topicId,
+      threadId: input.outcome.targetKind === "thread" ? input.outcome.threadId : undefined,
+      finishedAt,
+    });
   } catch (error) {
     console.warn("[governance] record dispatcher tick history failed", error);
   }
@@ -653,11 +821,25 @@ export async function persistGovernanceTickOutcome(input: {
         paused: input.outcome.result.pauseReason === "failure_threshold",
         traceId: `dispatcher:${job.id}`,
       });
+      logGovernanceTick("pushed thread governance notification", {
+        jobId: completed.id,
+        topicId: input.outcome.topicId,
+        threadId: input.outcome.threadId,
+        outcomeOk: input.outcome.result.ok,
+        paused: input.outcome.result.pauseReason === "failure_threshold",
+      });
     } else if (!input.outcome.ok || input.outcome.patch.phase === "failed") {
       pushGovernanceChangeNotification({
         topicId: input.outcome.topicId,
         topicFailureReason: input.outcome.error ?? (input.outcome.patch.phase === "failed" ? "主题治理进入失败状态" : undefined),
         traceId: `dispatcher:${job.id}`,
+      });
+      logGovernanceTick("pushed topic governance notification", {
+        jobId: completed.id,
+        topicId: input.outcome.topicId,
+        outcomeOk: input.outcome.ok,
+        error: input.outcome.error,
+        phase: input.outcome.patch.phase,
       });
     }
   } catch (error) {
@@ -696,6 +878,11 @@ export async function handleGovernanceTickMachineResult(input: {
       error: input.result.error ?? "machine_result_failed",
       acceptLeaseTokenMismatch:
         leaseValidation.acceptLeaseTokenMismatch === true || leaseValidation.acceptedExpiredLease === true,
+    });
+    logGovernanceTick("persisted failed machine result", {
+      jobId: input.result.governanceJobId,
+      error: input.result.error ?? "machine_result_failed",
+      persisted: Boolean(failed),
     });
     return failed
       ? { ok: false as const, job: failed, reason: "machine_result_failed" }

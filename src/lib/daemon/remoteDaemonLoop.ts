@@ -174,7 +174,25 @@ export async function handleGovernanceTickDaemonCommand(input: {
     invoke: input.invoke,
     now: input.now,
   });
+  console.info("[governance_daemon]", "local tick finished", {
+    governanceJobId: input.command.governanceJobId,
+    targetKind: input.command.targetKind,
+    ok: result.ok,
+    outcomeOk: result.outcome?.targetKind === "topic" ? result.outcome.ok : result.outcome?.result.ok,
+    error:
+      result.error ??
+      (result.outcome?.targetKind === "topic"
+        ? result.outcome.error
+        : result.outcome?.result.ok === false
+          ? result.outcome.result.error.kind
+          : undefined),
+  });
   await input.sendResult(result);
+  console.info("[governance_daemon]", "result sent", {
+    governanceJobId: input.command.governanceJobId,
+    targetKind: input.command.targetKind,
+    ok: result.ok,
+  });
   return result;
 }
 

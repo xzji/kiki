@@ -49,6 +49,22 @@ export type RunTopicTickInput = {
   agentRunId: string;
 };
 
+const GOVERNANCE_RAW_LOG_LIMIT = 1200;
+
+function clipForGovernanceLog(value: string | undefined) {
+  if (!value) return "";
+  return value.length > GOVERNANCE_RAW_LOG_LIMIT ? `${value.slice(0, GOVERNANCE_RAW_LOG_LIMIT)}...` : value;
+}
+
+function parsedRootKeys(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return Object.keys(value as Record<string, unknown>);
+}
+
+function logTopicGovernance(message: string, fields: Record<string, unknown> = {}) {
+  console.info("[topic_governance]", message, fields);
+}
+
 export class TopicTickOutputValidationError extends Error {
   constructor(
     message: string,
@@ -71,7 +87,19 @@ export async function runTopicTick(input: RunTopicTickInput): Promise<TopicTickR
       prompt,
       context: { topicId: ctx.topic.id },
     });
+    logTopicGovernance("llm result received", {
+      agentRunId,
+      topicId: ctx.topic.id,
+      rawBytes: Buffer.byteLength(raw.rawText ?? "", "utf8"),
+      parsedKeys: parsedRootKeys(raw.parsed),
+      rawSnippet: clipForGovernanceLog(raw.rawText),
+    });
   } catch (error) {
+    logTopicGovernance("llm invoke failed", {
+      agentRunId,
+      topicId: ctx.topic.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return buildFailureResult(ctx, lastTickAt, { kind: "invoke_error", error });
   }
 
@@ -80,8 +108,23 @@ export async function runTopicTick(input: RunTopicTickInput): Promise<TopicTickR
     output = parseTopicTickOutput(raw.parsed ?? JSON.parse(raw.rawText));
   } catch (error) {
     if (error instanceof TopicTickOutputValidationError) {
+      const parsed = raw.parsed ?? safeParseJson(raw.rawText);
+      logTopicGovernance("llm output validation failed", {
+        agentRunId,
+        topicId: ctx.topic.id,
+        code: error.code,
+        message: error.message,
+        parsedKeys: parsedRootKeys(parsed),
+        rawSnippet: clipForGovernanceLog(raw.rawText),
+      });
       return buildFailureResult(ctx, lastTickAt, { kind: "validation_error", error });
     }
+    logTopicGovernance("llm json parse failed", {
+      agentRunId,
+      topicId: ctx.topic.id,
+      error: error instanceof Error ? error.message : String(error),
+      rawSnippet: clipForGovernanceLog(raw.rawText),
+    });
     return buildFailureResult(ctx, lastTickAt, {
       kind: "validation_error",
       error: new TopicTickOutputValidationError(`TopicRunner output is not valid JSON: ${String(error)}`, "invalid_json"),
@@ -110,6 +153,15 @@ export async function runTopicTick(input: RunTopicTickInput): Promise<TopicTickR
     patch: { ...tuned.patch, phase },
     output,
   };
+}
+
+function safeParseJson(value: string | undefined): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildTopicRunnerDecisionPrompt(ctx: TopicTickContext) {

@@ -166,6 +166,41 @@ export async function fetchGovernanceHistory(input: {
   return payload;
 }
 
+export type TriggerGovernanceTickPayload = {
+  ok: boolean;
+  job?: {
+    id: string;
+    targetKind: "thread" | "topic";
+    topicId: string;
+    threadId?: string;
+    status: string;
+  };
+  dispatched?: boolean;
+  skippedOffline?: boolean;
+  reason?: string;
+};
+
+export async function triggerGovernanceTick(input: {
+  kind: "thread" | "topic";
+  entityId: string;
+}): Promise<TriggerGovernanceTickPayload> {
+  const response = await fetch("/api/runtime/governance-ticks", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": `manual-governance-${input.kind}-${input.entityId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`,
+    },
+    body: JSON.stringify(input),
+  });
+  const payload = (await response.json()) as TriggerGovernanceTickPayload;
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.reason || "治理发起失败");
+  }
+  return payload;
+}
+
 export async function fetchRuntimeDaemonStatus(): Promise<RuntimeDaemonStatusPayload> {
   const response = await fetch("/api/runtime/daemon/status", { cache: "no-store" });
   if (!response.ok) {

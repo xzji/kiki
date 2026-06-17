@@ -30,6 +30,7 @@ import type { Thread, Topic } from "@/types/topic";
 import {
   enqueueDueGovernanceTickJobs,
   dispatchReadyGovernanceTickJobsToMachines,
+  enqueueManualGovernanceTickJob,
   handleGovernanceTickMachineResult,
   leaseAndDispatchGovernanceTickJob,
   persistGovernanceTickOutcome,
@@ -241,6 +242,36 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(dispatched?.command.leaseOwner, "dispatcher-worker");
     assert.equal(dispatched?.command.leaseToken, dispatched?.job.leaseToken);
     assert.equal(sentCommands.length, 1);
+  }
+
+  // 1a. 手动治理使用同一张 governance_tick_jobs 队列表，且不受 nextTickAt 限制。
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    seedGoal({
+      topic: { nextTickAt: "2026-06-20T00:00:00.000Z" },
+      thread: { nextTickAt: "2026-06-20T00:00:00.000Z" },
+    });
+    const topicJob = enqueueManualGovernanceTickJob({
+      targetKind: "topic",
+      entityId: TOPIC_ID,
+      idempotencyKey: "manual-topic-spec",
+      userId: "spec-test-user",
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    const threadJob = enqueueManualGovernanceTickJob({
+      targetKind: "thread",
+      entityId: THREAD_ID,
+      idempotencyKey: "manual-thread-spec",
+      userId: "spec-test-user",
+      now: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    assert.equal(topicJob.targetKind, "topic");
+    assert.equal(topicJob.status, "queued");
+    assert.equal(topicJob.payload.dueReason, "manual");
+    assert.equal(threadJob.targetKind, "thread");
+    assert.equal(threadJob.status, "queued");
+    assert.equal(threadJob.payload.dueReason, "manual");
+    assert.equal(threadJob.threadId, THREAD_ID);
   }
 
   // 1b. cloud orchestrator 路径能把 queued governance job 下发到在线 machine。
