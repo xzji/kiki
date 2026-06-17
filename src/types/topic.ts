@@ -55,6 +55,12 @@ export type Thread = {
   silentCount: number;
   /** 连续 tick 失败次数，达 5 自动 paused（§9.3 问题 12）。 */
   failureCount: number;
+  /**
+   * 连续治理基础设施失败次数（LLM 调用失败 / 输出校验失败 / JSON 解析失败）。
+   * 与业务 failureCount 分离：基础设施故障不代表业务无法推进，
+   * 不参与 mark_failed 判断、不进入模型 prompt，仅用于可观测/重试退避。成功一次即清零。
+   */
+  infraFailureCount: number;
   createdAt: string;
   updatedAt: string;
   revision: number;
@@ -75,6 +81,12 @@ export type Topic = {
   silentCount: number;
   /** 连续 tick 失败次数。 */
   failureCount: number;
+  /**
+   * 连续治理基础设施失败次数（LLM 调用失败 / 输出校验失败 / JSON 解析失败）。
+   * 与业务 failureCount 分离：基础设施故障不置 phase=failed、不进入模型 prompt，
+   * 仅用于可观测/重试退避。成功一次即清零。
+   */
+  infraFailureCount: number;
   /** 可选 — 仅当用户显式给出时填写。 */
   deadline?: string;
   /** 可选 — 仅当用户显式给出时填写。 */

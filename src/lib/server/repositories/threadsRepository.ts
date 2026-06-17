@@ -115,6 +115,7 @@ export type ThreadPatch = Partial<
     | "memory"
     | "silentCount"
     | "failureCount"
+    | "infraFailureCount"
   >
 >;
 
@@ -172,6 +173,7 @@ export function updateThread(
     threadMemory: patch.memory !== undefined ? { ...(subGoal.threadMemory ?? {}), ...patch.memory } : subGoal.threadMemory,
     silentCount: patch.silentCount ?? subGoal.silentCount,
     failureCount: patch.failureCount ?? subGoal.failureCount,
+    infraFailureCount: "infraFailureCount" in patch ? patch.infraFailureCount : subGoal.infraFailureCount,
     threadRevision: currentRevision + 1,
   };
 

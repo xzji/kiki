@@ -56,6 +56,7 @@ export type TopicPatch = Partial<
     | "nextTickAt"
     | "silentCount"
     | "failureCount"
+    | "infraFailureCount"
   >
 >;
 
@@ -83,6 +84,7 @@ export function updateTopic(
     topicNextTickAt: "nextTickAt" in patch ? patch.nextTickAt : goal.topicNextTickAt,
     topicSilentCount: "silentCount" in patch ? patch.silentCount : goal.topicSilentCount,
     topicFailureCount: "failureCount" in patch ? patch.failureCount : goal.topicFailureCount,
+    topicInfraFailureCount: "infraFailureCount" in patch ? patch.infraFailureCount : goal.topicInfraFailureCount,
     topicRevision: currentRevision + 1,
   };
 

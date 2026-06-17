@@ -15,6 +15,7 @@ function makeTopic(): Topic {
     nextTickAt: "2026-06-01T00:00:00.000Z",
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -77,8 +78,11 @@ export async function runTopicRunnerSpecs() {
       agentRunId: "agent-topic-3",
     });
     assert.equal(result.ok, false);
-    assert.equal(result.patch.phase, "failed");
-    assert.equal(result.patch.failureCount, 1);
+    // 基础设施失败（actions 为空属于输出校验失败）：保留当前 phase，不置 failed，
+    // 不累加业务 failureCount，仅累加 infraFailureCount。
+    assert.equal(result.patch.phase, "idle");
+    assert.equal(result.patch.failureCount, 0);
+    assert.equal(result.patch.infraFailureCount, 1);
   }
 
   {

@@ -20,6 +20,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     memory: {},
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     revision: 1,

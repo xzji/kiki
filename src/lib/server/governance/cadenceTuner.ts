@@ -211,7 +211,7 @@ export function tuneLoopCadence(input: CadenceTunerInput): CadenceTunerResult {
   return { loop, changed: true, reasons, history, appendedHistory };
 }
 
-export type TopicCadencePatch = Partial<Pick<Topic, "loop" | "lastTickAt" | "nextTickAt" | "silentCount" | "failureCount">>;
+export type TopicCadencePatch = Partial<Pick<Topic, "loop" | "lastTickAt" | "nextTickAt" | "silentCount" | "failureCount" | "infraFailureCount">>;
 
 export function tuneTopicTickPatch(input: {
   topic: Topic;
@@ -243,6 +243,7 @@ export function tuneTopicTickPatch(input: {
       memory: {},
       silentCount,
       failureCount: input.patch.failureCount ?? input.topic.failureCount,
+      infraFailureCount: 0,
       createdAt: input.topic.createdAt,
       updatedAt: input.topic.updatedAt,
       revision: input.topic.revision,

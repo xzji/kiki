@@ -37,6 +37,7 @@ function buildThread(overrides: Partial<Thread> = {}): Thread {
     memory: {},
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     createdAt: "2026-05-30T00:00:00.000Z",
     updatedAt: "2026-05-30T00:00:00.000Z",
     revision: 1,

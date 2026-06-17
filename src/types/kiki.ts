@@ -461,6 +461,8 @@ export type SubGoal = {
   threadMemory?: Record<string, unknown>;
   silentCount?: number;
   failureCount?: number;
+  /** 连续治理基础设施失败次数（与业务 failureCount 分离）。 */
+  infraFailureCount?: number;
   threadRevision?: number;
   tasks: Task[];
 };
@@ -494,6 +496,8 @@ export type Goal = {
   topicNextTickAt?: string;
   topicSilentCount?: number;
   topicFailureCount?: number;
+  /** 连续治理基础设施失败次数（与业务 topicFailureCount 分离）。 */
+  topicInfraFailureCount?: number;
   topicRevision?: number;
   kind?: GoalKind;
   summary?: string;

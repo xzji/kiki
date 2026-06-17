@@ -55,6 +55,7 @@ function topicAsLoopThread(topic: Topic): Thread {
     memory: {},
     silentCount: topic.silentCount,
     failureCount: topic.failureCount,
+    infraFailureCount: topic.infraFailureCount,
     createdAt: topic.createdAt,
     updatedAt: topic.updatedAt,
     revision: topic.revision,

@@ -67,6 +67,7 @@ function seedGoal(input: {
     memory: {},
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     revision: 0,
@@ -82,6 +83,7 @@ function seedGoal(input: {
     nextTickAt: "2026-06-01T00:00:00.000Z",
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     threads: [thread],
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -103,6 +105,7 @@ function seedGoal(input: {
     topicNextTickAt: topic.nextTickAt,
     topicSilentCount: topic.silentCount,
     topicFailureCount: topic.failureCount,
+    topicInfraFailureCount: topic.infraFailureCount,
     topicRevision: topic.revision,
     subGoals: [
       {
@@ -118,6 +121,7 @@ function seedGoal(input: {
         threadMemory: thread.memory,
         silentCount: thread.silentCount,
         failureCount: thread.failureCount,
+        infraFailureCount: thread.infraFailureCount,
         threadRevision: thread.revision,
         tasks: [],
       },
@@ -138,6 +142,7 @@ function makeThreadResult(overrides: Partial<Extract<ThreadTickResult, { ok: tru
       memory: {},
       silentCount: 1,
       failureCount: 0,
+      infraFailureCount: 0,
     },
     output: {
       assessment: "本轮无外部动作",

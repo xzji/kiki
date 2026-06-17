@@ -16,6 +16,7 @@ function makeTopic(overrides: Partial<Topic> = {}): Topic {
     threads: [],
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     createdAt: "2026-06-01T00:00:00.000Z",
     updatedAt: "2026-06-01T00:00:00.000Z",
     revision: 1,

@@ -19,6 +19,7 @@ function makeTopic(overrides: Partial<Topic> = {}): Topic {
     phase: "idle",
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-05-01T00:00:00.000Z",

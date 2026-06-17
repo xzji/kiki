@@ -34,6 +34,7 @@ function makeTopic(id = "topic-w-1"): Topic {
     phase: "idle",
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     threads: [],
     status: "active",
     createdAt: NOW.toISOString(),
@@ -53,6 +54,7 @@ function makeThread(id: string, overrides: Partial<Thread> = {}): Thread {
     memory: {},
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     revision: 1,
@@ -325,13 +327,13 @@ export async function runThreadGovernorSpecs() {
     assert.equal(inboxEvents.length, 1, "thread tick post_message should project one inbox notification");
   }
 
-  // ---------- smoke：连续失败达到阈值 → thread_paused event + inbox alert ----------
+  // ---------- smoke：连续基础设施失败不再 paused（基础设施失败与业务 failureCount 分离） ----------
   {
     const suffix = `${Date.now().toString(36)}-paused`;
     const topic = makeTopic(`topic-smoke-${suffix}`);
     const thread = makeThread(`thread-smoke-${suffix}`, {
       topicId: topic.id,
-      failureCount: THREAD_FAILURE_PAUSE_THRESHOLD - 1,
+      infraFailureCount: THREAD_FAILURE_PAUSE_THRESHOLD + 2,
     });
     const agentRunId = `agent-run-smoke-${suffix}`;
 
@@ -357,9 +359,10 @@ export async function runThreadGovernorSpecs() {
         },
         persistThreadPatch: async ({ result }) => {
           assert.equal(result.ok, false);
-          assert.equal(result.patch.status, "paused");
-          assert.equal(result.patch.failureCount, THREAD_FAILURE_PAUSE_THRESHOLD);
-          assert.equal(result.pauseReason, "failure_threshold");
+          assert.equal(result.patch.status, "active", "基础设施失败不应 paused");
+          assert.equal(result.patch.failureCount, 0, "基础设施失败不累加业务 failureCount");
+          assert.equal(result.patch.infraFailureCount, THREAD_FAILURE_PAUSE_THRESHOLD + 3);
+          assert.equal(result.pauseReason, undefined, "基础设施失败不产生 failure_threshold");
           return { ok: true };
         },
         recordTickOutcome,
@@ -377,25 +380,16 @@ export async function runThreadGovernorSpecs() {
     assert.match(outcome.ticked[0]?.failureReason ?? "", /tick_failed/);
 
     const agentEvents = listAgentEvents({ agentRunId });
+    // 仅失败事件，不再产生 thread_paused 事件。
     assert.deepEqual(
       agentEvents.map((event) => event.type),
-      ["error", "error", "thread_paused", "thread_paused"],
+      ["error", "error"],
     );
     const failedKinds = agentEvents.map((event) => event.payload.kind);
     assert.ok(failedKinds.includes("loop.thread.tick.failed"));
     assert.ok(failedKinds.includes("thread.tick.failed"));
-    assert.ok(failedKinds.includes("loop.thread.paused.failure_threshold"));
-    assert.ok(failedKinds.includes("thread.paused.failure_threshold"));
-
-    const inboxEvents = getGoalEvents({ goalId: topic.id, fromId: 0, limit: 500 }).filter((event) => {
-      const payload = event.payload as { target?: unknown; notificationId?: unknown };
-      return (
-        event.kind === "notification.delivered" &&
-        payload.target === "inbox" &&
-        payload.notificationId === `inbox-thread_paused-${thread.id}-thread-paused:${agentRunId}`
-      );
-    });
-    assert.equal(inboxEvents.length, 1, "thread pause should project one inbox alert");
+    assert.ok(!failedKinds.includes("loop.thread.paused.failure_threshold"), "基础设施失败不应产生 paused 事件");
+    assert.ok(!failedKinds.includes("thread.paused.failure_threshold"), "基础设施失败不应产生 paused 事件");
   }
 
   // ---------- smoke：daemon 重启后 paused/阈值 thread 不再 tick，active thread 继续 ----------

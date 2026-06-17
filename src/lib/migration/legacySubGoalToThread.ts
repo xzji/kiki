@@ -89,6 +89,7 @@ export function legacySubGoalToThread(input: LegacySubGoalToThreadInput): Thread
     memory: normalizeMemory(subGoal.threadMemory),
     silentCount: normalizeNonNegativeNumber(subGoal.silentCount),
     failureCount: normalizeNonNegativeNumber(subGoal.failureCount),
+    infraFailureCount: normalizeNonNegativeNumber(subGoal.infraFailureCount),
     createdAt: now,
     updatedAt: subGoal.threadUpdatedAt ?? now,
     revision: normalizeNonNegativeNumber(subGoal.threadRevision),

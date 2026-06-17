@@ -36,6 +36,7 @@ function makeTopic(): Topic {
     phase: "idle",
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-05-30T00:00:00.000Z",
@@ -55,6 +56,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     memory: { lastDigest: "2026-05-31" },
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     createdAt: "2026-05-30T00:00:00.000Z",
     updatedAt: "2026-05-30T00:00:00.000Z",
     revision: 3,
@@ -183,10 +185,10 @@ export async function runThreadRunnerSpecs() {
     assert.equal(grouped.archive.length, 1);
   }
 
-  // ---------- failure: invoke 异常 → failureCount + 1 ----------
+  // ---------- failure: invoke 异常 → 基础设施失败，infraFailureCount + 1，业务 failureCount 不变 ----------
   {
     const result = await runThreadTick({
-      ctx: makeCtx({ thread: makeThread({ failureCount: 1 }) }),
+      ctx: makeCtx({ thread: makeThread({ failureCount: 1, infraFailureCount: 1 }) }),
       agentRunId: "ar-4",
       invoke: async () => {
         throw new Error("network down");
@@ -195,13 +197,14 @@ export async function runThreadRunnerSpecs() {
     assert.equal(result.ok, false);
     if (result.ok) throw new Error("unreachable");
     assert.equal(result.error.kind, "invoke_error");
-    assert.equal(result.patch.failureCount, 2);
+    assert.equal(result.patch.failureCount, 1, "基础设施失败不累加业务 failureCount");
+    assert.equal(result.patch.infraFailureCount, 2, "基础设施失败累加 infraFailureCount");
     assert.equal(result.patch.silentCount, 0, "失败不计 silent");
-    assert.equal(result.patch.status, "active", "未达阈值不应 paused");
-    assert.ok(result.patch.nextTickAt, "未达阈值仍应有 nextTickAt");
+    assert.equal(result.patch.status, "active", "基础设施失败不应 paused");
+    assert.ok(result.patch.nextTickAt, "基础设施失败仍应有 nextTickAt");
   }
 
-  // ---------- failure: 校验失败 → failureCount + 1 ----------
+  // ---------- failure: 校验失败 → 基础设施失败，infraFailureCount + 1 ----------
   {
     const result = await runThreadTick({
       ctx: makeCtx(),
@@ -220,14 +223,15 @@ export async function runThreadRunnerSpecs() {
         "validation_error 应包装 ThreadTickOutputValidationError",
       );
     }
-    assert.equal(result.patch.failureCount, 1);
+    assert.equal(result.patch.failureCount, 0, "校验失败不累加业务 failureCount");
+    assert.equal(result.patch.infraFailureCount, 1, "校验失败累加 infraFailureCount");
   }
 
-  // ---------- failure: 阈值触发 paused ----------
+  // ---------- failure: 大量基础设施失败也不触发 paused ----------
   {
     const result = await runThreadTick({
       ctx: makeCtx({
-        thread: makeThread({ failureCount: THREAD_FAILURE_PAUSE_THRESHOLD - 1 }),
+        thread: makeThread({ infraFailureCount: THREAD_FAILURE_PAUSE_THRESHOLD + 3 }),
       }),
       agentRunId: "ar-6",
       invoke: async () => {
@@ -236,10 +240,11 @@ export async function runThreadRunnerSpecs() {
     });
     assert.equal(result.ok, false);
     if (result.ok) throw new Error("unreachable");
-    assert.equal(result.patch.status, "paused");
-    assert.equal(result.patch.failureCount, THREAD_FAILURE_PAUSE_THRESHOLD);
-    assert.equal(result.patch.nextTickAt, undefined, "paused 后应清空 nextTickAt");
-    assert.equal(result.pauseReason, "failure_threshold");
+    assert.equal(result.patch.status, "active", "基础设施失败无论多少次都不应 paused");
+    assert.equal(result.patch.failureCount, 0, "业务 failureCount 始终不受基础设施失败影响");
+    assert.equal(result.patch.infraFailureCount, THREAD_FAILURE_PAUSE_THRESHOLD + 4);
+    assert.ok(result.patch.nextTickAt, "基础设施失败仍应有 nextTickAt 以便下次重试");
+    assert.equal(result.pauseReason, undefined, "基础设施失败不产生 failure_threshold");
   }
 
   // ---------- rawText fallback：parsed 缺失 + 合法 JSON ----------

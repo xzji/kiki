@@ -640,6 +640,9 @@ async function applyThreadOutcome(input: {
         memory: result.patch.memory,
         silentCount: result.patch.silentCount,
         failureCount: result.patch.failureCount,
+        ...(result.patch.infraFailureCount !== undefined
+          ? { infraFailureCount: result.patch.infraFailureCount }
+          : {}),
       },
       input.outcome.baseRevision,
     );

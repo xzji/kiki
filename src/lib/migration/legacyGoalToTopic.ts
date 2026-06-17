@@ -78,6 +78,7 @@ export function legacyGoalToTopic(input: LegacyGoalToTopicInput): Topic {
     nextTickAt: goal.topicNextTickAt,
     silentCount: goal.topicSilentCount ?? 0,
     failureCount: goal.topicFailureCount ?? 0,
+    infraFailureCount: goal.topicInfraFailureCount ?? 0,
     deadline,
     completionCriteria: undefined,
     deliveryContract: goal.deliveryContract ?? readWorkflowDeliveryContract(goal),

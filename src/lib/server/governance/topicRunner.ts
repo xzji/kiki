@@ -144,6 +144,7 @@ export async function runTopicTick(input: RunTopicTickInput): Promise<TopicTickR
       lastTickAt,
       silentCount: isAllSilent ? ctx.topic.silentCount + 1 : 0,
       failureCount: 0,
+      infraFailureCount: 0,
     },
     now: ctx.now,
   });
@@ -178,6 +179,11 @@ export function buildTopicRunnerDecisionPrompt(ctx: TopicTickContext) {
   return [
     "You are the Topic governance runner.",
     "Review the topic-level loop state and return strict JSON only.",
+    "",
+    "Guidance on failures:",
+    "- failureCount only counts business-level governance failures, not infrastructure issues (LLM/transport/validation), which are excluded by design.",
+    "- Do NOT use mark_failed merely because failureCount is non-zero or threads previously failed. Only mark_failed when the topic itself genuinely cannot progress (e.g. completion impossible, deadline passed with no path forward).",
+    "- When in doubt, prefer mark_running or silent and let governance retry on the next tick.",
     "",
     "Output schema:",
     JSON.stringify({
@@ -254,16 +260,22 @@ function buildFailureResult(
   lastTickAt: string,
   error: TopicTickFailure,
 ): Extract<TopicTickResult, { ok: false }> {
+  // 治理 tick 失败（invoke / 输出校验 / JSON 解析）属于基础设施故障，
+  // 不代表 Topic 业务无法推进：
+  //  - 不累加业务 failureCount、不把 phase 置为 failed，避免污染模型后续判断；
+  //  - 仅累加 infraFailureCount 供可观测与重试退避；
+  //  - 保留当前 phase 与 failureCount，下次 tick 正常重试。
   const tuned = tuneTopicTickPatch({
     topic: ctx.topic,
     patch: {
       lastTickAt,
       silentCount: ctx.topic.silentCount,
-      failureCount: ctx.topic.failureCount + 1,
+      failureCount: ctx.topic.failureCount,
+      infraFailureCount: (ctx.topic.infraFailureCount ?? 0) + 1,
     },
     now: ctx.now,
   });
-  return { ok: false, patch: { ...tuned.patch, phase: "failed" }, error };
+  return { ok: false, patch: { ...tuned.patch, phase: ctx.topic.phase }, error };
 }
 
 function phaseFromActions(actions: TopicTickAction[]): TopicPhase | undefined {

@@ -17,6 +17,7 @@ function makeTopic(): Topic {
     nextTickAt: "2026-06-01T00:00:00.000Z",
     silentCount: 0,
     failureCount: 0,
+    infraFailureCount: 0,
     threads: [],
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",

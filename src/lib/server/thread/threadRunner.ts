@@ -21,7 +21,6 @@ import {
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { Task, TaskInstance } from "@/types/kiki";
 import {
-  THREAD_FAILURE_PAUSE_THRESHOLD,
   type Thread,
   type ThreadLoopInterval,
   type ThreadStatus,
@@ -68,6 +67,11 @@ export type ThreadTickPatch = {
   memory: Record<string, unknown>;
   silentCount: number;
   failureCount: number;
+  /**
+   * 连续治理基础设施失败次数（与业务 failureCount 分离）。
+   * 基础设施故障只累加此字段，不触发 failure_threshold 暂停。成功一次即清零。
+   */
+  infraFailureCount: number;
 };
 
 export type ThreadTickResult =
@@ -257,6 +261,7 @@ export async function runThreadTick(input: RunThreadTickInput): Promise<ThreadTi
       memory: memoryWithCadenceHistory,
       silentCount,
       failureCount: 0, // 成功一次即重置
+      infraFailureCount: 0, // 成功一次即清零基础设施失败计数
     },
     output,
   };
@@ -280,9 +285,12 @@ function buildFailureResult(
   lastTickAt: string,
   failure: ThreadTickFailure,
 ): Extract<ThreadTickResult, { ok: false }> {
-  const failureCount = ctx.thread.failureCount + 1;
-  const reachedThreshold = failureCount >= THREAD_FAILURE_PAUSE_THRESHOLD;
-  const status: ThreadStatus = reachedThreshold ? "paused" : ctx.thread.status;
+  // 治理 tick 失败（invoke / 输出校验 / JSON 解析）属于基础设施故障，
+  // 不代表 Thread 业务连续失败：
+  //  - 不累加业务 failureCount、不触发 failure_threshold 暂停；
+  //  - 仅累加 infraFailureCount 供可观测与重试退避；
+  //  - 保留当前 status 与 failureCount，下次 tick 正常重试。
+  const infraFailureCount = (ctx.thread.infraFailureCount ?? 0) + 1;
   const cadence = tuneLoopCadence({
     entityKind: "thread",
     currentLoop: ctx.thread.loopTrigger ?? ctx.thread.loopInterval,
@@ -294,23 +302,21 @@ function buildFailureResult(
   const memoryWithCadenceHistory = cadence.appendedHistory
     ? writeCadenceHistoryToMemory(ctx.thread.memory, cadence.history)
     : ctx.thread.memory;
-  const nextTickAt = reachedThreshold
-    ? undefined // paused 后清空 nextTickAt，恢复时由调用方重新计算
-    : computeNextTickAtIso({ ...ctx.thread, loopInterval: cadence.loop, lastTickAt }, ctx.now);
+  const nextTickAt = computeNextTickAtIso({ ...ctx.thread, loopInterval: cadence.loop, lastTickAt }, ctx.now);
 
   return {
     ok: false,
     patch: {
-      status,
-      ...(!reachedThreshold && cadence.changed ? { loopInterval: cadence.loop } : {}),
+      status: ctx.thread.status,
+      ...(cadence.changed ? { loopInterval: cadence.loop } : {}),
       lastTickAt,
       nextTickAt,
       memory: memoryWithCadenceHistory, // 失败不写 memoryDelta，但允许 cadence history
       silentCount: ctx.thread.silentCount, // 失败不计 silent
-      failureCount,
+      failureCount: ctx.thread.failureCount, // 基础设施失败不累加业务 failureCount
+      infraFailureCount,
     },
     error: failure,
-    ...(reachedThreshold ? { pauseReason: "failure_threshold" as const } : {}),
   };
 }
 
