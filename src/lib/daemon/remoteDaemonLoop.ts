@@ -19,6 +19,7 @@ import { provisionUserWorkspace } from "@/lib/server/services/userProvisioning";
 import type { RuntimeJobPayload } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
+import { normalizeClaudeJsonText } from "@/lib/server/claude/jsonRepair";
 import { runRuntimePromptJson, runRuntimePromptText, streamRuntimePrompt } from "@/lib/server/runtime/runtimeTransport";
 import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
 import { resolveToolPermissionDecision } from "@/lib/server/toolPermission/toolPermissionBroker";
@@ -103,6 +104,13 @@ function safeJsonBytes(value: unknown) {
   } catch {
     return 0;
   }
+}
+
+const GOVERNANCE_RAW_LOG_LIMIT = 1200;
+
+function clipGovernanceRaw(value: string | undefined) {
+  if (!value) return "";
+  return value.length > GOVERNANCE_RAW_LOG_LIMIT ? `${value.slice(0, GOVERNANCE_RAW_LOG_LIMIT)}...` : value;
 }
 
 function commandPayloadKeys(command: MachineCommand) {
@@ -331,16 +339,39 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         "json",
       );
       let parsed: Record<string, unknown> | undefined;
+      let parseError: string | undefined;
+      let parsedShape: "object" | "array" | "primitive" | "invalid_json" = "invalid_json";
+      const normalizedRaw = normalizeClaudeJsonText(result.raw);
       try {
-        const value = JSON.parse(result.raw) as unknown;
+        const value = JSON.parse(normalizedRaw) as unknown;
         if (value && typeof value === "object" && !Array.isArray(value)) {
           parsed = value as Record<string, unknown>;
+          parsedShape = "object";
+        } else if (Array.isArray(value)) {
+          parsedShape = "array";
+        } else {
+          parsedShape = "primitive";
         }
-      } catch {
+      } catch (error) {
         parsed = undefined;
+        parseError = error instanceof Error ? error.message : String(error);
       }
+      // 记录 runtime 返回的原貌，覆盖“模型连合法决策 JSON 都没返回”导致下游 validation_error 的场景。
+      console.info("[governance_invoke]", "machine prompt result", {
+        governanceJobId: command.governanceJobId,
+        targetKind: command.targetKind,
+        exitCode: result.exitCode,
+        elapsedMs: result.elapsedMs,
+        rawBytes: Buffer.byteLength(result.raw ?? "", "utf8"),
+        normalizedBytes: Buffer.byteLength(normalizedRaw ?? "", "utf8"),
+        parsedShape,
+        parsedKeys: parsed ? Object.keys(parsed) : undefined,
+        parseError,
+        rawSnippet: clipGovernanceRaw(result.raw),
+        normalizedSnippet: clipGovernanceRaw(normalizedRaw),
+      });
       return {
-        rawText: result.raw,
+        rawText: normalizedRaw,
         parsed,
         meta: { exitCode: result.exitCode, elapsedMs: result.elapsedMs },
       };
