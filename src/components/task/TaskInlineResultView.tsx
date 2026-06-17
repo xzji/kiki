@@ -74,7 +74,7 @@ export function TaskInlineResultView({
       title={title}
       maxHeight={INLINE_RESULT_MAX_HEIGHT}
       onExpandStart={onExpandStart}
-      renderContent={({ expandButton, bodyRef, bodyOverlay, clipMaxHeight }) => (
+      renderContent={({ expandButton, bodyRef, bodyOverlay, clipMaxHeight, expanded }) => (
         <GenericAgentResultView
           {...resultProps}
           presentationClip={{
@@ -82,6 +82,7 @@ export function TaskInlineResultView({
             clipMaxHeight,
             bodyRef,
             bodyOverlay,
+            expanded,
           }}
         />
       )}

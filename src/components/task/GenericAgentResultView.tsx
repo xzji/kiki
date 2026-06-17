@@ -17,6 +17,8 @@ export type ResultPresentationClip = {
   clipMaxHeight?: number;
   bodyRef?: Ref<HTMLDivElement>;
   bodyOverlay?: ReactNode;
+  /** 全屏展开态：去掉产出物卡片外框，内容铺满主区域 */
+  expanded?: boolean;
 };
 
 const PRESENTATION_LABEL: Record<NonNullable<TaskResult["meta"]["presentation"]>, string> = {
@@ -67,9 +69,9 @@ function InteractiveRenderSurface({
   return <TaskResultBlockView result={taskResult} embedded={embedded} />;
 }
 
-function FileArtifactSurface({ taskResult }: { taskResult: TaskResult }) {
+function FileArtifactSurface({ taskResult, bare = false }: { taskResult: TaskResult; bare?: boolean }) {
   const hasInteractiveSurface = hasInteractiveDeliverable(taskResult);
-  return <ArtifactRefList refs={taskResult.artifactRefs} hasInteractiveSurface={hasInteractiveSurface} />;
+  return <ArtifactRefList refs={taskResult.artifactRefs} hasInteractiveSurface={hasInteractiveSurface} bare={bare} />;
 }
 
 export function GenericAgentResultView({
@@ -104,9 +106,29 @@ export function GenericAgentResultView({
   if (hidePendingUserPlaceholder && isPendingUserPlaceholderTaskResult(taskResult)) return null;
   const presentationTaskResult = filterTaskResultForPresentation(taskResult);
   const interactive = (
-    <InteractiveRenderSurface taskResult={presentationTaskResult} embedded={Boolean(presentationClip?.clipMaxHeight)} />
+    <InteractiveRenderSurface
+      taskResult={presentationTaskResult}
+      embedded={Boolean(presentationClip?.clipMaxHeight || presentationClip?.expanded)}
+    />
   );
-  const files = <FileArtifactSurface taskResult={presentationTaskResult} />;
+  const files = (
+    <FileArtifactSurface taskResult={presentationTaskResult} bare={Boolean(presentationClip?.expanded)} />
+  );
+
+  if (presentationClip?.expanded && hasInteractiveDeliverable(presentationTaskResult)) {
+    return (
+      <article className="min-w-0">
+        <header className="mb-6">
+          <div className="text-[12px] font-medium text-[#8C9198]">{deliverableLabel(presentationTaskResult)}</div>
+          <h2 className="mt-1 text-[18px] font-semibold leading-8 text-[#1F2328]">{presentationTaskResult.title}</h2>
+        </header>
+        <div className="space-y-6">
+          {interactive}
+          {files}
+        </div>
+      </article>
+    );
+  }
 
   if (presentationClip?.clipMaxHeight && hasInteractiveDeliverable(presentationTaskResult)) {
     return (

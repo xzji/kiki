@@ -129,10 +129,10 @@ export function ExpandableContentCard({
         aria-modal={expanded ? true : undefined}
         aria-labelledby={expanded ? titleId : undefined}
         className={cn(
-          expanded && "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+          expanded && "min-h-0 flex-1 overflow-auto overscroll-contain",
         )}
       >
-        <div className={cn(expanded && "mx-auto w-full max-w-3xl px-6 py-6")}>{content}</div>
+        <div className={cn(expanded && "w-full px-6 py-6")}>{content}</div>
       </div>
     </div>
   );
