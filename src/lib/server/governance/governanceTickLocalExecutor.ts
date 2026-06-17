@@ -100,6 +100,7 @@ export async function runTopicGovernanceTickLocally(input: {
     patch: result.patch,
     ok: result.ok,
     error: result.ok ? undefined : result.error.kind,
+    output: result.ok ? result.output : undefined,
   };
 }
 

@@ -110,15 +110,25 @@ export type SentMessageRecord = {
   severity: ThreadTickPostMessageSeverity;
 };
 
+export type DispatchFieldChangeRecord = {
+  field: string;
+  label: string;
+  before?: string;
+  after?: string;
+};
+
 export type UpdatedTaskRecord = {
   taskId: string;
   patch: Partial<TaskDraft>;
   reason: string;
+  currentTaskTitle?: string;
+  fieldChanges?: DispatchFieldChangeRecord[];
 };
 
 export type CancelledTaskRecord = {
   taskId: string;
   reason: string;
+  currentTaskTitle?: string;
 };
 
 export type SilentReasonRecord = {
@@ -237,6 +247,8 @@ export async function dispatchThreadActions(
         taskId: updated.taskId,
         patch: action.patch,
         reason: action.reason,
+        currentTaskTitle: currentTask.title,
+        fieldChanges: buildFieldChanges(currentTask, action.patch),
       });
     } catch (error) {
       result.errors.push({ index: i, kind: action.kind, error });
@@ -264,6 +276,7 @@ export async function dispatchThreadActions(
       result.cancelledTasks.push({
         taskId: cancelled.taskId,
         reason: action.reason,
+        currentTaskTitle: currentTaskById.get(action.taskId)?.title,
       });
     } catch (error) {
       result.errors.push({ index: i, kind: action.kind, error });
@@ -301,4 +314,69 @@ export async function dispatchThreadActions(
   }
 
   return result;
+}
+
+const TASK_FIELD_LABELS: Record<string, string> = {
+  title: "任务标题",
+  objective: "任务目标",
+  description: "任务目标",
+  deliverable: "交付物",
+  expectedOutcome: "交付物",
+  acceptanceCriteria: "验收标准",
+  taskType: "任务类型",
+  triggerRule: "触发规则",
+  cadence: "触发规则",
+  triggerCondition: "触发规则",
+  triggerSpec: "触发规则",
+  priorityHint: "优先级",
+  estimatedMinutes: "预计耗时",
+  requiredUserInputs: "需要用户补充的信息",
+};
+
+function buildFieldChanges(currentTask: Task, patch: Partial<TaskDraft>): DispatchFieldChangeRecord[] {
+  return Object.entries(patch)
+    .filter(([, value]) => value !== undefined)
+    .map(([field, after]) => ({
+      field,
+      label: TASK_FIELD_LABELS[field] ?? field,
+      before: valueForTaskDraftField(currentTask, field),
+      after: stringifyFieldValue(after),
+    }))
+    .filter((change) => change.before !== change.after);
+}
+
+function valueForTaskDraftField(task: Task, field: string) {
+  switch (field) {
+    case "title":
+      return stringifyFieldValue(task.title);
+    case "objective":
+    case "description":
+      return stringifyFieldValue(task.description);
+    case "deliverable":
+    case "expectedOutcome":
+      return stringifyFieldValue(task.expectedOutcome);
+    case "taskType":
+      return stringifyFieldValue(task.taskType);
+    case "triggerRule":
+    case "cadence":
+    case "triggerCondition":
+      return stringifyFieldValue(task.triggerRule);
+    case "triggerSpec":
+      return stringifyFieldValue(task.trigger);
+    case "requiredUserInputs":
+      return stringifyFieldValue(task.requiredUserInputs);
+    default:
+      return stringifyFieldValue((task as unknown as Record<string, unknown>)[field]);
+  }
+}
+
+function stringifyFieldValue(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

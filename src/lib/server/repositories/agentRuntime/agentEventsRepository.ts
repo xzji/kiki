@@ -11,6 +11,7 @@
 import { randomUUID } from "crypto";
 
 import { getDatabase } from "@/lib/server/db/client";
+import type { GovernanceActionPresentation } from "@/lib/server/governance/governanceActionPresentation";
 import type { AgentEvent, AgentEventType } from "@/types/agentRuntime";
 
 type AgentEventRow = {
@@ -140,6 +141,7 @@ export type GovernanceTickEntry = {
   errorKind?: string;
   assessment?: string;
   confidence?: number | string;
+  actionDetails?: GovernanceActionPresentation[];
   paused: boolean;
 };
 
@@ -204,8 +206,86 @@ export function listGovernanceTicksByEntity(input: {
           typeof event.payload.confidence === "number" || typeof event.payload.confidence === "string"
             ? event.payload.confidence
             : undefined,
+        actionDetails: parseGovernanceActionDetails(event.payload.actionDetails),
         paused: kind.endsWith(".paused.failure_threshold"),
       };
     })
     .filter((entry) => entry.phase !== "unknown");
+}
+
+function parseGovernanceActionDetails(value: unknown): GovernanceActionPresentation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const details = value
+    .map(parseGovernanceActionDetail)
+    .filter((item): item is GovernanceActionPresentation => Boolean(item));
+  return details.length > 0 ? details : undefined;
+}
+
+function parseGovernanceActionDetail(value: unknown): GovernanceActionPresentation | null {
+  if (!isRecord(value)) return null;
+  const scope = readEnum(value.scope, ["topic", "thread"] as const);
+  const severity = readEnum(value.severity, ["info", "success", "warning", "danger"] as const);
+  const title = readString(value.title);
+  const reason = readString(value.reason);
+  const summary = readString(value.summary);
+  if (!scope || !severity || !title || !summary) return null;
+
+  if (scope === "topic") {
+    const kind = readEnum(value.kind, ["silent", "mark_running", "mark_completed", "mark_failed", "adjust_loop"] as const);
+    if (!kind) return null;
+    return {
+      scope,
+      kind,
+      title,
+      reason: reason ?? "",
+      summary,
+      severity,
+      before: readString(value.before),
+      after: readString(value.after),
+    };
+  }
+
+  const kind = readEnum(value.kind, ["dispatch_task", "update_task", "cancel_task", "archive_thread", "post_message", "silent"] as const);
+  if (!kind) return null;
+  return {
+    scope,
+    kind,
+    title,
+    reason: reason ?? "",
+    summary,
+    severity,
+    taskId: readString(value.taskId),
+    taskTitle: readString(value.taskTitle),
+    instanceId: readString(value.instanceId),
+    fieldChanges: parseFieldChanges(value.fieldChanges),
+  };
+}
+
+function parseFieldChanges(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const changes = value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const field = readString(item.field);
+    const label = readString(item.label);
+    if (!field || !label) return [];
+    return [{
+      field,
+      label,
+      before: readString(item.before),
+      after: readString(item.after),
+    }];
+  });
+  return changes.length > 0 ? changes : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readEnum<const T extends readonly string[]>(value: unknown, allowed: T): T[number] | undefined {
+  return typeof value === "string" && allowed.includes(value) ? value : undefined;
 }

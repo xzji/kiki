@@ -1,5 +1,6 @@
 import type { GovernanceTickJobPayload, GovernanceTickTargetKind } from "@/lib/server/repositories/governanceTickJobsRepository";
 import type { TopicPatch } from "@/lib/server/repositories/topicsRepository";
+import type { TopicTickOutput } from "@/lib/server/governance/topicRunner";
 import type { ThreadTickResult } from "@/lib/server/thread/threadRunner";
 import type { Task } from "@/types/kiki";
 import type {
@@ -47,6 +48,7 @@ export type GovernanceTickTopicOutcome = {
   patch: TopicPatch;
   ok: boolean;
   error?: string;
+  output?: TopicTickOutput;
 };
 
 export type GovernanceTickOutcome = GovernanceTickThreadOutcome | GovernanceTickTopicOutcome;
@@ -99,7 +101,7 @@ export function isGovernanceTickOutcome(value: unknown): value is GovernanceTick
     return isNonEmptyString(value.threadId) && isThreadTickResult(value.result);
   }
   if (value.targetKind === "topic") {
-    return typeof value.ok === "boolean" && isRecord(value.patch);
+    return typeof value.ok === "boolean" && isRecord(value.patch) && (value.output === undefined || isTopicTickOutput(value.output));
   }
   return false;
 }
@@ -122,6 +124,11 @@ function isThreadTickResult(value: unknown): value is ThreadTickResult {
     return isRecord(value.patch) && isRecord(value.error);
   }
   return false;
+}
+
+function isTopicTickOutput(value: unknown): value is TopicTickOutput {
+  if (!isRecord(value)) return false;
+  return typeof value.assessment === "string" && typeof value.confidence === "string" && Array.isArray(value.actions);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

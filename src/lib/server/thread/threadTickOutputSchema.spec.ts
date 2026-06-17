@@ -419,4 +419,41 @@ export function runThreadTickOutputSchemaSpecs() {
     "duplicate_dispatch_task",
     "重复 dispatch",
   );
+
+  // dispatch_task 近似重复：标题中插入修饰词也应判重（论文综述 vs 代表性论文综述）
+  expectError(
+    () =>
+      parseThreadTickOutput(
+        decision([
+          {
+            kind: "dispatch_task",
+            threadId: THREAD_ID,
+            reason: "补充代表性论文综述",
+            taskDraft: {
+              title: "产出长程运行 Agent 代表性论文综述",
+              objective: "围绕核心能力维度筛选代表性论文并完成综述",
+            },
+          },
+        ]),
+        {
+          expectedThreadId: THREAD_ID,
+          currentTasks: [
+            {
+              id: "task-existing",
+              subGoalId: THREAD_ID,
+              title: "产出长程运行 Agent 论文综述",
+              description: "围绕核心能力维度发现代表性论文并完成综述",
+              expectedOutcome: "长程 Agent 论文综述",
+              taskType: "repeat",
+              triggerRule: "立即触发",
+              progress: 0,
+              instances: [],
+              executionKind: "generic_result",
+            },
+          ],
+        },
+      ),
+    "duplicate_dispatch_task",
+    "近似重复 dispatch",
+  );
 }

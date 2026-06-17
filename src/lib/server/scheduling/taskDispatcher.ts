@@ -12,6 +12,10 @@ import {
   setTunnelExecuteResultListener,
 } from "@/lib/server/tunnel/tunnelHub";
 import {
+  cancelToolPermissionRequest,
+  createToolPermissionRequest,
+} from "@/lib/server/toolPermission/toolPermissionBroker";
+import {
   claimQueuedRuntimeJobs,
   getRuntimeJob,
   renewRuntimeJobLease,
@@ -31,6 +35,7 @@ type ActiveTunnelDispatch = {
   userId: string;
   machineId: string;
   renewTimer: NodeJS.Timeout;
+  pendingToolPermissionRequestIds: Set<string>;
 };
 
 const inFlightTunnelJobs = new Set<string>();
@@ -41,6 +46,10 @@ function finishTunnelDispatch(jobId: string) {
   const active = activeTunnelDispatches.get(jobId);
   if (!active) return;
   clearInterval(active.renewTimer);
+  for (const requestId of Array.from(active.pendingToolPermissionRequestIds)) {
+    cancelToolPermissionRequest(requestId);
+  }
+  active.pendingToolPermissionRequestIds.clear();
   activeTunnelDispatches.delete(jobId);
   inFlightTunnelJobs.delete(jobId);
   orchestratorConcurrencyBudget.release(active.userId, 1);
@@ -185,6 +194,48 @@ function mergeRuntimeJobTrajectoryFromLog(existing: ExecutionTrajectoryStep[], l
   return [...existing, next].slice(-MAX_TUNNEL_PROGRESS_LOGS).map((step, index) => ({ ...step, index }));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRuntimeJobStatusPatch(progress?: GoalServerProgress): {
+  status: "running" | "awaiting_user";
+  blocker?: ExecutionBlocker | null;
+} | null {
+  const payload = progress?.resultPayload;
+  if (!isRecord(payload)) return null;
+  const status = payload.runtimeJobStatus;
+  if (status !== "running" && status !== "awaiting_user") return null;
+  const blocker = payload.blocker;
+  if (blocker === null) return { status, blocker: null };
+  if (isRecord(blocker)) return { status, blocker: blocker as ExecutionBlocker };
+  return { status };
+}
+
+function registerTunnelToolPermissionRequest(input: {
+  active: ActiveTunnelDispatch;
+  blocker: ExecutionBlocker;
+}) {
+  const toolPermission = input.blocker.toolPermission;
+  if (!toolPermission) return;
+  if (input.active.pendingToolPermissionRequestIds.has(toolPermission.requestId)) return;
+  input.active.pendingToolPermissionRequestIds.add(toolPermission.requestId);
+  createToolPermissionRequest({
+    id: toolPermission.requestId,
+    runtimeEnvId: toolPermission.runtimeEnvId,
+    runtimeKind: input.active.job.payload.runtimeEnv.runtimeKind,
+    conversationId: input.active.job.conversationId,
+    taskInstanceId: input.active.job.taskInstanceId,
+    taskId: input.active.job.taskId,
+    daemonSessionId: `execute:${input.active.job.id}`,
+    machineId: input.active.machineId,
+    streamSessionId: `execute:${input.active.job.id}`,
+    toolName: toolPermission.toolName,
+    suggestedRule: toolPermission.suggestedRule,
+    createdAt: new Date().toISOString(),
+  });
+}
+
 function handleTunnelJobProgress(input: {
   jobId: string;
   progress?: GoalServerProgress;
@@ -198,7 +249,13 @@ function handleTunnelJobProgress(input: {
     const logs = input.log ? mergeRuntimeJobLogs(current.logs, input.log) : undefined;
     const trajectoryFromLog = input.log ? mergeRuntimeJobTrajectoryFromLog(current.trajectory, input.log) : undefined;
     const trajectory = input.trajectory && input.trajectory.length > 0 ? input.trajectory : trajectoryFromLog;
+    const statusPatch = readRuntimeJobStatusPatch(input.progress);
+    if (statusPatch?.status === "awaiting_user" && statusPatch.blocker) {
+      registerTunnelToolPermissionRequest({ active, blocker: statusPatch.blocker });
+    }
     const next = updateGoalRuntimeJobExecution(input.jobId, {
+      ...(statusPatch ? { status: statusPatch.status } : {}),
+      ...(statusPatch && "blocker" in statusPatch ? { blocker: statusPatch.blocker } : {}),
       ...(input.progress ? { progress: input.progress } : {}),
       ...(logs ? { logs } : {}),
       ...(trajectory && trajectory.length > 0 ? { trajectory } : {}),
@@ -278,6 +335,7 @@ export function reconcileMachineTunnelHello(input: {
         userId: input.userId,
         machineId: input.machineId,
         renewTimer: createRenewTimer(job.id, input.machineId, input.userId, leaseOwner),
+        pendingToolPermissionRequestIds: new Set<string>(),
       });
     });
   }
@@ -351,6 +409,7 @@ export async function dispatchReadyTasksToMachines(input: {
       userId,
       machineId,
       renewTimer: createRenewTimer(job.id, machineId, userId, input.leaseOwner),
+      pendingToolPermissionRequestIds: new Set<string>(),
     });
 
     runWithUserContext(userId, () => {

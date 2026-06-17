@@ -7,6 +7,7 @@
  */
 
 import { createDaemonTrace, logDaemonEvent } from "@/lib/daemon/daemonLogger";
+import type { GovernanceActionPresentation } from "@/lib/server/governance/governanceActionPresentation";
 import { appendAgentEvent } from "@/lib/server/repositories/agentRuntime/agentEventsRepository";
 import { recordTickSummary } from "@/lib/server/observability/tickRecorder";
 import type { AgentEventType } from "@/types/agentRuntime";
@@ -36,6 +37,7 @@ export type LoopTickRecord = {
   confidence?: number | string;
   pauseReason?: "failure_threshold";
   failureCount?: number;
+  actionDetails?: GovernanceActionPresentation[];
   tracePayload?: Record<string, unknown>;
 };
 
@@ -123,19 +125,20 @@ export function recordEntity(record: LoopTickRecord): void {
     assessment: record.assessment,
     confidence: record.confidence,
     pauseReason: record.pauseReason,
+    actionDetails: record.actionDetails,
   };
   const eventType: AgentEventType = record.phase === "completed" ? "decision" : "error";
 
   appendAgentEvent({
     agentRunId: record.agentRunId,
     type: eventType,
-    payloadJson: JSON.stringify({ kind: newKind, ...sharedPayload }),
+    payloadJson: stringifyAgentEventPayload({ kind: newKind, ...sharedPayload }),
   });
   if (legacyKind) {
     appendAgentEvent({
       agentRunId: record.agentRunId,
       type: eventType,
-      payloadJson: JSON.stringify({ kind: legacyKind, ...sharedPayload }),
+      payloadJson: stringifyAgentEventPayload({ kind: legacyKind, ...sharedPayload }),
     });
   }
 
@@ -179,6 +182,13 @@ export function recordEntity(record: LoopTickRecord): void {
     trace.writePayload({ record, details: record.tracePayload });
     trace.finish(record.ok ? "completed" : "failed", record.failureReason);
   }
+}
+
+function stringifyAgentEventPayload(payload: Record<string, unknown>) {
+  const json = JSON.stringify(payload);
+  if (Buffer.byteLength(json, "utf8") <= 7_800) return json;
+  const compact = { ...payload, actionDetails: undefined, actionDetailsTruncated: true };
+  return JSON.stringify(compact);
 }
 
 export function frameError(err: LoopFrameError): void {

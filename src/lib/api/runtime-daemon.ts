@@ -139,8 +139,38 @@ export type GovernanceTickEntry = {
   errorKind?: string;
   assessment?: string;
   confidence?: number | string;
+  actionDetails?: GovernanceActionPresentation[];
   paused: boolean;
 };
+
+export type GovernanceActionPresentation =
+  | {
+      scope: "topic";
+      kind: "silent" | "mark_running" | "mark_completed" | "mark_failed" | "adjust_loop";
+      title: string;
+      reason: string;
+      summary: string;
+      severity: "info" | "success" | "warning" | "danger";
+      before?: string;
+      after?: string;
+    }
+  | {
+      scope: "thread";
+      kind: "dispatch_task" | "update_task" | "cancel_task" | "archive_thread" | "post_message" | "silent";
+      title: string;
+      reason: string;
+      summary: string;
+      severity: "info" | "success" | "warning" | "danger";
+      taskId?: string;
+      taskTitle?: string;
+      instanceId?: string;
+      fieldChanges?: Array<{
+        field: string;
+        label: string;
+        before?: string;
+        after?: string;
+      }>;
+    };
 
 export type GovernanceHistoryPayload = {
   ok: boolean;

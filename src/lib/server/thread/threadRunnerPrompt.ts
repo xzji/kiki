@@ -163,7 +163,7 @@ export function buildThreadRunnerDecisionPrompt(input: ThreadRunnerDecisionPromp
     "9. 当 post_message / dispatch_task / update_task / cancel_task 引用失败或 error 的 Task instance 时，必须包含上下文中的 failureReason；如果 failureReason=失败原因未记录，只能如实说明“失败原因未记录”，禁止猜测外部数据源、配置、权限等原因。",
     "10. assessment ≤120 字，必须给出 actions 的关键依据；actions 不能从 assessment 推出时必须删除。",
     "11. confidence 只能为 high / medium / low：high=证据充分；medium=允许 dispatch/update/post_message，但 archive/cancel 必须有强证据；low=禁止 archive_thread/cancel_task/dispatch_task，只允许 post_message 或 silent。",
-    "12. 高风险动作硬约束：archive_thread 必须引用 terminationCondition 并列出 taskId/instanceId/结果证据；cancel_task 必须说明关注点永久消失、已完成无需继续或被明确 taskId 替代；dispatch_task 前必须确认 currentTasks 无相近 title/objective 的活跃 Task，否则改用 update_task。",
+    "12. 高风险动作硬约束：archive_thread 必须引用 terminationCondition 并列出 taskId/instanceId/结果证据；cancel_task 必须说明关注点永久消失、已完成无需继续或被明确 taskId 替代；dispatch_task 前必须逐条比对 currentTasks（含进行中/已结束的 Task），只要新草稿与既有 Task 目标实质重叠，即使标题/措辞不同（如仅增删修饰词、换同义说法）也禁止新建——应改用 update_task 调整既有 Task，或无新增价值时直接 silent；只为换个说法重开任务属于违规。",
     "",
     "# 上下文",
     `现在: ${formatContextTime(now)}`,

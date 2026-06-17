@@ -103,6 +103,43 @@ function containsMeaningfulOverlap(left: string, right: string): boolean {
   return false;
 }
 
+// 任务标题/目标判重阈值：基于字符 bigram 的 Dice 系数。
+// 子串包含只能挡完全一致的措辞，挡不住“论文综述”vs“代表性论文综述”这类插词改写，
+// 因此 dispatch_task 判重需要近似相似度。
+const SIMILAR_TASK_TEXT_THRESHOLD = 0.6;
+
+function countBigrams(text: string): Map<string, number> {
+  const grams = new Map<string, number>();
+  for (let i = 0; i < text.length - 1; i += 1) {
+    const gram = text.slice(i, i + 2);
+    grams.set(gram, (grams.get(gram) ?? 0) + 1);
+  }
+  return grams;
+}
+
+function diceCoefficient(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+  const aGrams = countBigrams(a);
+  const bGrams = countBigrams(b);
+  let intersection = 0;
+  for (const [gram, countA] of Array.from(aGrams.entries())) {
+    const countB = bGrams.get(gram);
+    if (countB) intersection += Math.min(countA, countB);
+  }
+  return (2 * intersection) / (a.length - 1 + (b.length - 1));
+}
+
+function isSimilarTaskText(left: string, right: string): boolean {
+  const a = normalizeComparableText(left);
+  const b = normalizeComparableText(right);
+  if (!a || !b) return false;
+  // 一方完全包含另一方仍判重（兼容旧的子串规则）。
+  if (a.length >= 4 && b.includes(a)) return true;
+  if (b.length >= 4 && a.includes(b)) return true;
+  return diceCoefficient(a, b) >= SIMILAR_TASK_TEXT_THRESHOLD;
+}
+
 function hasArchiveEvidence(text: string): boolean {
   return /(taskId|instanceId|task[-_\w]*|inst[-_\w]*|instance[-_\w]*|任务|实例|证据|结果|result)/i.test(text);
 }
@@ -437,9 +474,9 @@ function enforceRiskGuards(
       const objective = typeof action.taskDraft.objective === "string" ? action.taskDraft.objective : "";
       const hasDuplicate = currentTasks.some(
         (task) =>
-          containsMeaningfulOverlap(task.title, title) ||
-          containsMeaningfulOverlap(task.description, objective) ||
-          containsMeaningfulOverlap(task.expectedOutcome, objective),
+          isSimilarTaskText(task.title, title) ||
+          isSimilarTaskText(task.description, objective) ||
+          isSimilarTaskText(task.expectedOutcome, objective),
       );
       if (hasDuplicate) {
         throw new ThreadTickOutputValidationError(

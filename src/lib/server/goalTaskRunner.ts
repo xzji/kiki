@@ -1789,6 +1789,19 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
             status: "awaiting_user",
             blocker,
           });
+          updateGoalTelemetry({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            phase: "executing",
+            message: `等待工具授权：${event.toolName}`,
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+            resultPayload: {
+              runtimeJobStatus: "awaiting_user",
+              blocker,
+            },
+          });
           appendGoalTaskAgentEvent(input, "awaiting_user", {
             phase: "goal_task_auxiliary_prompt",
             kind: "tool_permission.requested",
@@ -1797,11 +1810,37 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
             toolName: event.toolName,
             suggestedRule: event.suggestedRule,
           });
+          appendGoalLog({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            level: "info",
+            phase: "executing",
+            message: `等待工具授权：${event.toolName}`,
+            eventType: "await_user",
+            toolName: event.toolName,
+            status: "awaiting_user",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+          });
         }
         if (event.type === "tool_permission_resolved") {
           updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
             status: "running",
             blocker: null,
+          });
+          updateGoalTelemetry({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            phase: "executing",
+            message: event.decision === "allow" ? "工具授权已允许，继续执行" : "工具授权已拒绝，继续执行替代路径",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+            resultPayload: {
+              runtimeJobStatus: "running",
+              blocker: null,
+            },
           });
           appendGoalTaskAgentEvent(input, "log", {
             phase: "goal_task_auxiliary_prompt",
@@ -2785,10 +2824,29 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
         }
         if (event.type === "tool_permission_request") {
           const blocker = createToolPermissionExecutionBlocker(input, event, trajectory.length);
+          appendTrajectory({
+            type: "system",
+            status: "awaiting_user",
+            title: `等待工具授权：${event.toolName}`,
+            thought: `需要用户授权工具规则 ${event.suggestedRule} 后继续执行。`,
+          });
           updateGoalRuntimeJobExecution(`job-${input.instance.id}`, {
             status: "awaiting_user",
             blocker,
             trajectory,
+          });
+          updateGoalTelemetry({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            phase: "executing",
+            message: `等待工具授权：${event.toolName}`,
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+            resultPayload: progressPayloadWithTrajectory(trajectory, {
+              runtimeJobStatus: "awaiting_user",
+              blocker,
+            }),
           });
           appendGoalTaskAgentEvent(input, "awaiting_user", {
             phase: "goal_task_main_execution",
@@ -2798,11 +2856,18 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
             toolName: event.toolName,
             suggestedRule: event.suggestedRule,
           });
-          appendTrajectory({
-            type: "system",
-            status: "running",
-            title: `等待工具授权：${event.toolName}`,
-            thought: `需要用户授权工具规则 ${event.suggestedRule} 后继续执行。`,
+          appendGoalLog({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            level: "info",
+            phase: "executing",
+            message: `等待工具授权：${event.toolName}`,
+            eventType: "await_user",
+            toolName: event.toolName,
+            status: "awaiting_user",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
           });
         }
         if (event.type === "tool_permission_resolved") {
@@ -2810,6 +2875,19 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
             status: "running",
             blocker: null,
             trajectory,
+          });
+          updateGoalTelemetry({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            phase: "executing",
+            message: event.decision === "allow" ? "工具授权已允许，继续执行" : "工具授权已拒绝，继续执行替代路径",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+            resultPayload: progressPayloadWithTrajectory(trajectory, {
+              runtimeJobStatus: "running",
+              blocker: null,
+            }),
           });
           appendGoalTaskAgentEvent(input, "log", {
             phase: "goal_task_main_execution",

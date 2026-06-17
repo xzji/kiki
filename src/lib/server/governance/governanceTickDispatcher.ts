@@ -1,5 +1,10 @@
 import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { getCurrentUserId, runWithUserContext } from "@/lib/server/context/userContext";
+import {
+  buildThreadActionDetails,
+  buildTopicActionDetails,
+  type GovernanceActionPresentation,
+} from "@/lib/server/governance/governanceActionPresentation";
 import { pushGovernanceChangeNotification } from "@/lib/server/governance/governanceChangeNotifications";
 import { dispatchThreadActions, type DispatchThreadActionsResult } from "@/lib/server/governance/dispatchActions";
 import {
@@ -483,10 +488,33 @@ function durationMs(startedAt: string | undefined, finishedAt: string) {
   return Math.max(0, finished - started);
 }
 
+function topicSnapshotFromJob(job: GovernanceTickJobRecord) {
+  const topic = job.payload.snapshot.topic;
+  return topic && typeof topic === "object" && !Array.isArray(topic) ? topic as Topic : undefined;
+}
+
+function buildDispatcherActionDetails(input: {
+  job: GovernanceTickJobRecord;
+  outcome: GovernanceTickOutcome;
+  dispatch?: DispatchThreadActionsResult;
+}) {
+  if (input.outcome.targetKind === "thread") {
+    return buildThreadActionDetails({
+      output: input.outcome.result.ok ? input.outcome.result.output : undefined,
+      dispatch: input.dispatch,
+    });
+  }
+  return buildTopicActionDetails({
+    outcome: input.outcome,
+    topicSnapshot: topicSnapshotFromJob(input.job),
+  });
+}
+
 function recordDispatcherTickHistory(input: {
   job: GovernanceTickJobRecord;
   outcome: GovernanceTickOutcome;
   dispatch?: DispatchThreadActionsResult;
+  actionDetails?: GovernanceActionPresentation[];
   finishedAt: string;
 }) {
   const startedAt = input.job.leasedAt ?? input.job.createdAt;
@@ -530,6 +558,8 @@ function recordDispatcherTickHistory(input: {
     phase = input.outcome.ok ? "completed" : "failed";
     failureReason = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
     errorKind = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
+    assessment = input.outcome.output?.assessment;
+    confidence = input.outcome.output?.confidence;
     silentCount = input.outcome.patch.silentCount ?? 0;
     failureCount = input.outcome.patch.failureCount;
   }
@@ -555,6 +585,7 @@ function recordDispatcherTickHistory(input: {
     confidence,
     pauseReason,
     failureCount,
+    actionDetails: input.actionDetails,
   });
 
   updateAgentRun({ id: run.id, status: ok ? "completed" : "failed", finishedAt: input.finishedAt });
@@ -804,7 +835,8 @@ export async function persistGovernanceTickOutcome(input: {
     return { ok: false, job: getGovernanceTickJob(job.id), reason: "complete_failed", dispatch: applied.dispatch };
   }
   try {
-    recordDispatcherTickHistory({ job: completed, outcome: input.outcome, dispatch: applied.dispatch, finishedAt });
+    const actionDetails = buildDispatcherActionDetails({ job: completed, outcome: input.outcome, dispatch: applied.dispatch });
+    recordDispatcherTickHistory({ job: completed, outcome: input.outcome, dispatch: applied.dispatch, actionDetails, finishedAt });
     logGovernanceTick("recorded dispatcher tick history", {
       jobId: completed.id,
       targetKind: input.outcome.targetKind,
@@ -816,11 +848,13 @@ export async function persistGovernanceTickOutcome(input: {
     console.warn("[governance] record dispatcher tick history failed", error);
   }
   try {
+    const actionDetails = buildDispatcherActionDetails({ job: completed, outcome: input.outcome, dispatch: applied.dispatch });
     if (input.outcome.targetKind === "thread") {
       pushGovernanceChangeNotification({
         topicId: input.outcome.topicId,
         threadId: input.outcome.threadId,
         dispatch: applied.dispatch,
+        actionDetails,
         paused: input.outcome.result.pauseReason === "failure_threshold",
         traceId: `dispatcher:${job.id}`,
       });
@@ -831,9 +865,10 @@ export async function persistGovernanceTickOutcome(input: {
         outcomeOk: input.outcome.result.ok,
         paused: input.outcome.result.pauseReason === "failure_threshold",
       });
-    } else if (!input.outcome.ok || input.outcome.patch.phase === "failed") {
+    } else {
       pushGovernanceChangeNotification({
         topicId: input.outcome.topicId,
+        actionDetails,
         topicFailureReason: input.outcome.error ?? (input.outcome.patch.phase === "failed" ? "主题治理进入失败状态" : undefined),
         traceId: `dispatcher:${job.id}`,
       });
