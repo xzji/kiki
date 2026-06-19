@@ -26,10 +26,12 @@ import {
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import { processSupervisor } from "@/lib/runtime/processSupervisor";
+import {
+  RUNTIME_JOB_LEASE_RENEW_DURATION_MS as LEASE_RENEW_DURATION_MS,
+  RUNTIME_JOB_LEASE_RENEW_INTERVAL_MS as LEASE_RENEW_INTERVAL_MS,
+} from "@/lib/server/scheduling/runtimeJobLease";
 
 const DAEMON_VERSION = "0.1.0";
-const LEASE_RENEW_INTERVAL_MS = 30 * 1000;
-const LEASE_RENEW_DURATION_MS = 2 * 60 * 1000;
 
 /**
  * 进程内「正在执行」的 job 集合。用于在每个调度帧按

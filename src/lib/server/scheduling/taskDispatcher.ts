@@ -21,12 +21,14 @@ import {
   renewRuntimeJobLease,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import {
+  RUNTIME_JOB_LEASE_RENEW_DURATION_MS as LEASE_RENEW_DURATION_MS,
+  RUNTIME_JOB_LEASE_RENEW_INTERVAL_MS as LEASE_RENEW_INTERVAL_MS,
+} from "@/lib/server/scheduling/runtimeJobLease";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 
-const LEASE_RENEW_INTERVAL_MS = 30_000;
-const LEASE_RENEW_DURATION_MS = 2 * 60 * 1000;
 const DEFAULT_TUNNEL_LEASE_OWNER = "cloud-orchestrator";
 
 type ActiveTunnelDispatch = {

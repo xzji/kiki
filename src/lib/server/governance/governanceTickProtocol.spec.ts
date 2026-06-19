@@ -72,6 +72,7 @@ export function runGovernanceTickProtocolSpecs() {
         memory: {},
         silentCount: 1,
         failureCount: 0,
+        infraFailureCount: 0,
       },
       output: {
         assessment: "no change",
@@ -82,6 +83,49 @@ export function runGovernanceTickProtocolSpecs() {
     currentTasks: [],
   };
   assert.equal(isGovernanceTickOutcome(threadOutcome), true, "thread outcome schema accepted");
+
+  // §candidate-6 P4: 深化 guards 后这些异常 outcome 应被拒
+  assert.equal(
+    isGovernanceTickOutcome({
+      ...threadOutcome,
+      result: {
+        ...threadOutcome.result,
+        output: { ...threadOutcome.result.output, confidence: "very-high" },
+      },
+    }),
+    false,
+    "invalid confidence value must be rejected",
+  );
+  assert.equal(
+    isGovernanceTickOutcome({
+      ...threadOutcome,
+      result: {
+        ...threadOutcome.result,
+        output: { ...threadOutcome.result.output, actions: [{ kind: "unknown_kind", reason: "x" }] },
+      },
+    }),
+    false,
+    "unknown action kind must be rejected",
+  );
+  assert.equal(
+    isGovernanceTickOutcome({
+      ...threadOutcome,
+      result: {
+        ...threadOutcome.result,
+        output: { ...threadOutcome.result.output, actions: [{}] },
+      },
+    }),
+    false,
+    "shape-only action object must be rejected",
+  );
+  assert.equal(
+    isGovernanceTickOutcome({
+      ...threadOutcome,
+      result: { ...threadOutcome.result, patch: { ...threadOutcome.result.patch, status: "weird" } },
+    }),
+    false,
+    "invalid thread status must be rejected",
+  );
   assert.equal(
     isGovernanceTickMachineResult({
       type: "thread_governance_tick",

@@ -1,21 +1,19 @@
 /**
- * Topic 命令服务 — PR6 阶段最小骨架（thin wrapper）。
+ * Topic 命令服务 — API 命名层（§candidate-5 P6 收敛后）。
+ *
+ * **当前作用范围**：仅作为 `/api/topics/commands` route 的命名映射；
+ * 治理 / 调度链路（governance / scheduling / dispatchTaskFromThread）不再
+ * 经过本模块，已直调 `applyGoalCommand`。
  *
  * 设计意图：
- *   - 在 P0/P1 阶段保留 goalCommandService 的全部实现细节（snapshot 读写、
- *     idempotency、revision 锁、事件投影），仅在外层提供 Topic/Thread
- *     语义的命令名映射，方便页面/路由层先行迁移到新命名而不破坏底层逻辑。
- *   - PR9-10 之后真正切到 Topic/Thread 数据模型时，再把这里的实现内化，
- *     反向把 goalCommandService 改造为 thin wrapper（§9.4 问题 15 — 必须
- *     内部转发，不能 308 redirect）。
+ *   - PR9-10 之后真正切到 Topic/Thread 数据模型时，本文件会反向变成
+ *     "Topic/Thread 一等模型 → legacy goal 命令"的 adapter；目前暂为浅命名层，
+ *     不再被业务代码穿透引用，是 hypothetical seam 的占位（§9.4 问题 15）。
  *
- * 已知 leak（有意为之，PR9-10 一并清理，避免本期重构面扩散）：
- *   1. 底层 createSubGoal 会把 title 强制改写为「子目标N：xxx」，从 /api/topics
- *      入口创建 thread 时仍会落到 goal 措辞；
- *   2. 错误信息（如「未找到目标」「目标已存在」）继承自 goalCommandService，
- *      不在本文件改写以维持 catch 链兼容；UI 层在 P0 阶段直接展示透传文案；
- *   3. 写出的事件 kind 仍为 goal.structure_changed / goal.workflow_changed，
- *      Topic/Thread 专属事件 kind 留待 PR11+ 引入 ThreadRunner 后再切换。
+ * 已知 leak（PR9-10 一并清理）：
+ *   1. 底层 createSubGoal 会把 title 强制改写为「子目标N：xxx」；
+ *   2. 错误信息（如「未找到目标」「目标已存在」）继承自 goalCommandService；
+ *   3. 写出的事件 kind 仍为 goal.structure_changed / goal.workflow_changed。
  */
 
 import {

@@ -6,7 +6,7 @@
  * 设计：
  *  - ThreadRunner.tick 输出的 `dispatch_task` action 已通过 `parseThreadTickOutput`
  *    校验 threadId/taskDraft；本服务的职责仅是把 `TaskDraft` + `threadId` 翻译为
- *    底层 `applyTopicCommand({ type: "create_task" })`。Task 的执行频率由 draft
+ *    底层 `applyGoalCommand({ type: "create_task" })`。Task 的执行频率由 draft
  *    自带 cadence / triggerCondition 推断，不再由 Thread tick 强制 one_shot。
  *  - 不引入新事件 kind，直接复用 goalCommandService 投影路径，确保 task 落入
  *    `runtime_state_snapshots["goals"]` envelope，taskInstancesRepository
@@ -21,7 +21,7 @@ import { deriveOpaqueId, normalizeGoalId, normalizeSubGoalId } from "@/lib/opaqu
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import { mergeTaskPatch } from "@/lib/server/governance/taskPatchMerge";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { applyTopicCommand } from "@/lib/server/services/topicCommandService";
+import { applyGoalCommand } from "@/lib/server/services/goalCommandService";
 import { runSpecWriter } from "@/lib/server/taskExecution/runSpecWriter";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
 import type { TaskDraft } from "@/lib/server/goalPlanning/taskDraftSchema";
@@ -203,7 +203,7 @@ async function buildTaskSpecForDraft(input: {
  * 强约束：
  *  - request.threadId 必填（否则抛错，避免没有归属的 task 进入 envelope）
  * 幂等：调用方必须传入稳定 idempotencyKey；同 key 重入不会重复创建 task（由
- * 底层 applyTopicCommand 的事件去重保证）。
+ * 底层 applyGoalCommand 的事件去重保证）。
  *
  * 当前不返回 instanceId — task 创建后 instances=[]，由 scheduler/runner
  * 后续生成实例。后续 PR 如果需要立即创建首个 instance，再扩展返回。
@@ -221,11 +221,11 @@ export async function dispatchTaskFromThread(
 
   const taskSpec = await buildTaskSpecForDraft({ request, invoke: options.invoke });
 
-  const result = applyTopicCommand({
+  const result = applyGoalCommand({
     command: {
       type: "create_task",
-      topicId: request.topicId,
-      threadId: request.threadId,
+      goalId: request.topicId,
+      subGoalId: request.threadId,
       task: buildTaskCommandInput(request.taskDraft, taskSpec),
     },
     idempotencyKey: options.idempotencyKey,
@@ -235,7 +235,7 @@ export async function dispatchTaskFromThread(
   // 直接复算即可（不依赖 envelope 顺序，避免并发或重入歧义）。
   const taskId = deriveOpaqueId("task", options.idempotencyKey);
 
-  // 校验 envelope 中确实存在该 task（保证 applyTopicCommand 已成功投影）；
+  // 校验 envelope 中确实存在该 task（保证 applyGoalCommand 已成功投影）；
   // 同时尝试取首个 instance（当前 createTask instances=[]，预留给后续 PR）。
   const normalizedTopicId = normalizeGoalId(request.topicId);
   const normalizedThreadId = normalizeSubGoalId(request.threadId);
@@ -254,7 +254,7 @@ export async function dispatchTaskFromThread(
   return { taskId, instanceId };
 }
 
-function locateTask(topicId: string, taskId: string, goals: ReturnType<typeof applyTopicCommand>["goals"]) {
+function locateTask(topicId: string, taskId: string, goals: ReturnType<typeof applyGoalCommand>["goals"]) {
   const normalizedTopicId = normalizeGoalId(topicId);
   const topicGoal = goals.find((g) => normalizeGoalId(g.id) === normalizedTopicId);
   for (const subGoal of topicGoal?.subGoals ?? []) {
@@ -268,10 +268,10 @@ export async function updateTaskFromThread(
   request: UpdateTaskRequest,
   options: { idempotencyKey: string },
 ) {
-  const current = applyTopicCommand({
+  const current = applyGoalCommand({
     command: {
       type: "update_task",
-      topicId: request.topicId,
+      goalId: request.topicId,
       taskId: request.taskId,
       task: mergeTaskPatch(request.currentTask, request.patch),
     },
@@ -288,10 +288,10 @@ export async function cancelTaskFromThread(
   request: CancelTaskRequest,
   options: { idempotencyKey: string },
 ) {
-  applyTopicCommand({
+  applyGoalCommand({
     command: {
       type: "delete_task",
-      topicId: request.topicId,
+      goalId: request.topicId,
       taskId: request.taskId,
     },
     idempotencyKey: options.idempotencyKey,
