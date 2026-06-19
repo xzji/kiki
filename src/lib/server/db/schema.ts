@@ -402,6 +402,7 @@ CREATE TABLE IF NOT EXISTS governance_tick_jobs (
   lease_expires_at TEXT,
   available_at TEXT NOT NULL,
   attempt_count INTEGER NOT NULL DEFAULT 0,
+  partial_attempt_count INTEGER NOT NULL DEFAULT 0,
   idempotency_key TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -932,6 +933,13 @@ export const KIKI_DB_MIGRATIONS: Array<{
 
       CREATE INDEX IF NOT EXISTS idx_message_feedbacks_rating
         ON message_feedbacks(rating, updated_at DESC);
+    `,
+  },
+  {
+    version: 21,
+    sql: `
+      ALTER TABLE governance_tick_jobs
+      ADD COLUMN partial_attempt_count INTEGER NOT NULL DEFAULT 0;
     `,
   },
 ];

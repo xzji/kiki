@@ -37,6 +37,14 @@ export type GovernanceTickJobRecord<TPayload extends GovernanceTickJobPayload = 
   leaseExpiresAt?: string;
   availableAt: string;
   attemptCount: number;
+  /**
+   * dispatch_partial_failure 累计次数。
+   * 与 attemptCount 区分：attemptCount 是 lease 次数（包含正常 retry），
+   * partialAttemptCount 仅在 outcome 标记 dispatch_partial_failure 时累加。
+   * §candidate-1 P1：partialAttemptCount >= 3 时强制 persist + final fail，
+   * 避免 thread 卡在重试循环。
+   */
+  partialAttemptCount: number;
   idempotencyKey?: string;
   createdAt: string;
   updatedAt: string;
@@ -77,6 +85,7 @@ type GovernanceTickJobRow = {
   lease_expires_at: string | null;
   available_at: string;
   attempt_count: number;
+  partial_attempt_count: number;
   idempotency_key: string | null;
   created_at: string;
   updated_at: string;
@@ -113,6 +122,7 @@ function mapRow<TPayload extends GovernanceTickJobPayload = GovernanceTickJobPay
     leaseExpiresAt: row.lease_expires_at ?? undefined,
     availableAt: row.available_at,
     attemptCount: row.attempt_count,
+    partialAttemptCount: row.partial_attempt_count,
     idempotencyKey: row.idempotency_key ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -408,6 +418,67 @@ export function failGovernanceTickJob(input: {
       error: input.error,
       acceptLeaseTokenMismatch: input.acceptLeaseTokenMismatch === true,
       failedAt,
+    });
+  }
+  return result.changes === 1 ? getById(input.jobId) : null;
+}
+
+/**
+ * §candidate-1 P1：dispatch_partial_failure 重试 — 把 leased job 放回 queued，
+ * 累加 partial_attempt_count，让下一帧 lease 重新跑 LLM tick。
+ *
+ * 与 failGovernanceTickJob 区别：
+ *  - 不写 last_error / finished_at（job 没死，只是没完成）
+ *  - status 回 queued 而不是 failed
+ *  - 释放 lease（owner/token/expires 清空）
+ *  - partial_attempt_count + 1
+ *
+ * 返回 null：job 不存在或不在 leased/expired 状态。
+ */
+export function requeueGovernanceTickJobForRetry(input: {
+  jobId: string;
+  leaseOwner: string;
+  leaseToken: string;
+  acceptLeaseTokenMismatch?: boolean;
+  retryAfter?: string; // 默认立即可重租
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const updatedAt = now.toISOString();
+  const availableAt = input.retryAfter ?? updatedAt;
+  const leaseFilter = input.acceptLeaseTokenMismatch
+    ? "AND lease_owner = ?"
+    : "AND lease_owner = ? AND lease_token = ?";
+  const params = [
+    availableAt,
+    updatedAt,
+    input.jobId,
+    input.leaseOwner,
+    ...(input.acceptLeaseTokenMismatch ? [] : [input.leaseToken]),
+  ];
+  const result = getDatabase()
+    .prepare(
+      `
+        UPDATE governance_tick_jobs
+        SET status = 'queued',
+            lease_owner = NULL,
+            lease_token = NULL,
+            lease_expires_at = NULL,
+            available_at = ?,
+            partial_attempt_count = partial_attempt_count + 1,
+            updated_at = ?
+        WHERE id = ?
+          AND status IN ('leased', 'expired')
+          ${leaseFilter}
+      `,
+    )
+    .run(...params);
+  if (result.changes === 1) {
+    logGovernanceLease("requeued job for partial-failure retry", {
+      jobId: input.jobId,
+      leaseOwner: input.leaseOwner,
+      acceptLeaseTokenMismatch: input.acceptLeaseTokenMismatch === true,
+      availableAt,
     });
   }
   return result.changes === 1 ? getById(input.jobId) : null;

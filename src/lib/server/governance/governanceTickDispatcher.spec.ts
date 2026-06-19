@@ -843,7 +843,84 @@ export async function runGovernanceTickDispatcherSpecs() {
     assert.equal(getGovernanceTickJob(job.id)?.status, "completed");
   }
 
-  // 5. 长耗时治理：旧 lease token 的回执仍按 jobId + owner 接受，避免重租后死锁。
+  // 5b. §candidate-1 P1: dispatch_partial_failure 重试上限 N=3。
+  // 第 1/2/3 次 partial → requeue（不写回 patch）；第 4 次（partialAttemptCount=3）
+  // 强制 persist + complete，避免 thread 卡在重试循环烧 LLM。
+  {
+    ensureIsolatedPlanningSpecDataDir();
+    seedGoal({});
+    const job = createThreadJob(0);
+    const result = makeThreadResult({
+      output: {
+        assessment: "需要派发并通知",
+        confidence: "high",
+        actions: [
+          {
+            kind: "dispatch_task",
+            threadId: THREAD_ID,
+            reason: "补充跟踪",
+            taskDraft: {
+              title: "跟踪新闻",
+              objective: "收集新闻",
+              deliverable: "新闻摘要",
+              acceptanceCriteria: ["包含来源"],
+            },
+          },
+          {
+            kind: "post_message",
+            threadId: THREAD_ID,
+            text: "已安排跟踪",
+            severity: "info",
+          },
+        ],
+      },
+    });
+    const outcome = makeOutcome(job.id, result);
+    const callbacks = {
+      dispatchTask: async () => ({ taskId: "task-x" }),
+      sendThreadMessage: async () => {
+        // 始终失败模拟确定性 transient（应被 dedup 之外的真 IO failure 触发）
+        throw new Error("conversation write keeps failing");
+      },
+    };
+
+    // 帮 lease/applyOutcome 4 轮
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const lease = acquireGovernanceTickJobLease({
+        leaseOwner: `partial-retry-worker-${attempt}`,
+        leaseDurationMs: 60_000,
+        now: new Date(`2026-06-01T01:0${attempt}:00.000Z`),
+        targetKind: "thread",
+      });
+      assert.ok(lease, `attempt ${attempt} lease ok`);
+      assert.equal(lease!.id, job.id);
+
+      const persisted = await persistGovernanceTickOutcome({
+        leaseOwner: `partial-retry-worker-${attempt}`,
+        leaseToken: lease!.leaseToken!,
+        outcome,
+        now: new Date(`2026-06-01T01:0${attempt}:00.500Z`),
+        callbacks,
+      });
+
+      if (attempt <= 3) {
+        // 前三次 partial → requeue
+        assert.equal(persisted.ok, false, `attempt ${attempt} should be partial`);
+        assert.equal(persisted.reason, "dispatch_partial_failure");
+        const reloaded = getGovernanceTickJob(job.id);
+        assert.equal(reloaded?.status, "queued", `attempt ${attempt} should requeue`);
+        assert.equal(reloaded?.partialAttemptCount, attempt);
+        assert.equal(findThreadById(THREAD_ID)?.revision, 0, `attempt ${attempt} patch waits for retry`);
+      } else {
+        // 第四次（count=3, >=3）触发强制 persist 路径
+        assert.equal(persisted.ok, true, "attempt 4 should force-complete");
+        const reloaded = getGovernanceTickJob(job.id);
+        assert.equal(reloaded?.status, "completed", "attempt 4 completes job");
+        assert.equal(findThreadById(THREAD_ID)?.revision, 1, "attempt 4 force-persists patch");
+      }
+    }
+  }
+
   {
     ensureIsolatedPlanningSpecDataDir();
     seedGoal({});

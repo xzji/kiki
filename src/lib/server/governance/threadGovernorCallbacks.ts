@@ -11,7 +11,6 @@
  *      - 任一端写入抛错由 dispatchActions 的 errors[] 收集，不在此处吞错。
  */
 
-import { listRecentByThreadId } from "@/lib/server/repositories/taskInstancesRepository";
 import {
   findThreadById,
   listThreadsByTopicStatus,
@@ -27,7 +26,8 @@ import {
   updateTaskFromThread,
 } from "@/lib/server/services/dispatchTaskFromThread";
 import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { goalsSnapshotThreadTaskView } from "@/lib/server/services/threadTaskView";
+import { buildThreadTickContext } from "@/lib/server/governance/governanceTickContext";
+import { buildThreadActionDetails } from "@/lib/server/governance/governanceActionPresentation";
 import {
   recordEntity as recordLoopEntity,
   type LoopTickPhase,
@@ -83,18 +83,25 @@ export const collectActiveThreadsFromRepo: CollectActiveThreadsCallback = async 
 
 // ---------------------------------------------------------------------------
 // 2. collectRecentTaskInstances
+//
+// §candidate-3 P5：实现走统一 buildThreadTickContext，让 in-process / cloud
+// 两条路径的"thread tick 数据获取"是同一个入口。callback 接口保留，
+// 仅作为 governor 编排的注入点；底层实现已收敛。
 // ---------------------------------------------------------------------------
 export const collectRecentTaskInstances: CollectRecentTaskInstancesCallback = async ({
+  topicId,
   threadId,
 }) => {
-  return listRecentByThreadId(threadId, { limit: 12, sinceDays: 7 });
+  const ctx = buildThreadTickContext({ topicId, threadId });
+  return ctx.ok ? ctx.data.recentTaskInstances : [];
 };
 
 export const collectCurrentThreadTasks: CollectCurrentThreadTasksCallback = async ({
   topicId,
   threadId,
 }) => {
-  return goalsSnapshotThreadTaskView.listByThread({ topicId, threadId });
+  const ctx = buildThreadTickContext({ topicId, threadId });
+  return ctx.ok ? ctx.data.currentTasks : [];
 };
 
 // ---------------------------------------------------------------------------
@@ -129,6 +136,10 @@ export const persistThreadPatch: PersistThreadPatchCallback = async ({ thread, r
         memory: result.patch.memory,
         silentCount: result.patch.silentCount,
         failureCount: result.patch.failureCount,
+        // §candidate-1 P0：与 cloud 路径对齐，infraFailureCount 也写回
+        ...(result.patch.infraFailureCount !== undefined
+          ? { infraFailureCount: result.patch.infraFailureCount }
+          : {}),
       },
       thread.revision,
     );
@@ -159,6 +170,11 @@ export const recordTickOutcome: RecordTickOutcomeCallback = async ({
   else if (dispatch && dispatch.errors.length > 0) phase = "dispatch_partial_failure";
   else phase = "completed";
 
+  // §candidate-1 P0：与 cloud 路径对齐，加 actionDetails 让 UI 卡片可消费
+  const actionDetails = result.ok
+    ? buildThreadActionDetails({ output: result.output, dispatch })
+    : [];
+
   recordLoopEntity({
     kind: "thread",
     entityId: thread.id,
@@ -184,8 +200,12 @@ export const recordTickOutcome: RecordTickOutcomeCallback = async ({
     confidence: result.ok ? result.output.confidence : undefined,
     pauseReason: !result.ok && result.pauseReason === "failure_threshold" ? "failure_threshold" : undefined,
     failureCount: result.patch.failureCount,
+    actionDetails,
   });
 
+  // §candidate-1 P2：pause 走双通道——inbox 卡片（高可见，由本 callback 负责）
+  // + 会话流治理消息（由 governor 调 pushGovernanceChangeNotification 负责，
+  // 共享同一 traceId=`governor:${agentRunId}`，便于审计追溯）。
   if (!result.ok && result.pauseReason === "failure_threshold") {
     appendInboxMessage({
       topicId: topic.id,
@@ -193,7 +213,7 @@ export const recordTickOutcome: RecordTickOutcomeCallback = async ({
       text: `线程「${thread.title}」连续失败 ${result.patch.failureCount} 次，已自动暂停。`,
       severity: "warning",
       source: "thread_paused",
-      traceId: `thread-paused:${agentRunId}`,
+      traceId: `governor:${agentRunId}`,
     });
   }
 };

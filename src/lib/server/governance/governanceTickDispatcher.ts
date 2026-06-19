@@ -1,64 +1,55 @@
 import { createIdempotencyKey } from "@/lib/opaqueIds";
-import { getCurrentUserId, runWithUserContext } from "@/lib/server/context/userContext";
 import {
   buildThreadActionDetails,
   buildTopicActionDetails,
   type GovernanceActionPresentation,
 } from "@/lib/server/governance/governanceActionPresentation";
 import { pushGovernanceChangeNotification } from "@/lib/server/governance/governanceChangeNotifications";
-import { dispatchThreadActions, type DispatchThreadActionsResult } from "@/lib/server/governance/dispatchActions";
+import { type DispatchThreadActionsResult } from "@/lib/server/governance/dispatchActions";
+import { applyThreadTickResult } from "@/lib/server/governance/applyThreadTickResult";
+import type {
+  CancelTaskRequest,
+  DispatchTaskRequest,
+  SendThreadMessageRequest,
+  UpdateTaskRequest,
+} from "@/lib/server/services/dispatchTaskFromThread";
 import {
-  commandTypeForGovernanceTarget,
-  type GovernanceTickLlmPayload,
   type GovernanceTickMachineCommand,
   type GovernanceTickMachineResult,
   type GovernanceTickOutcome,
   type GovernanceTickThreadOutcome,
   type GovernanceTickTopicOutcome,
 } from "@/lib/server/governance/governanceTickProtocol";
-import { isTopicDue } from "@/lib/server/governance/topicScheduler";
-import { isThreadDue, selectDueThreads } from "@/lib/server/governance/threadScheduler";
 import { recordEntity as recordLoopEntity, type LoopTickPhase } from "@/lib/server/observability/loopTickLog";
 import { createAgentRun, updateAgentRun } from "@/lib/server/repositories/agentRuntime/agentRunsRepository";
 import { appendThreadMessage } from "@/lib/server/repositories/conversationMessagesRepository";
 import {
-  acquireGovernanceTickJobLease,
   completeGovernanceTickJob,
-  countPendingGovernanceTickJobs,
-  createGovernanceTickJob,
   failGovernanceTickJob,
   getGovernanceTickJob,
-  renewGovernanceTickJobLeaseFromHello,
-  type GovernanceTickJobPayload,
+  requeueGovernanceTickJobForRetry,
   type GovernanceTickJobRecord,
-  type GovernanceTickTargetKind,
 } from "@/lib/server/repositories/governanceTickJobsRepository";
 import { appendInboxMessage } from "@/lib/server/repositories/inboxRepository";
-import { listRecentByThreadId } from "@/lib/server/repositories/taskInstancesRepository";
-import { findThreadById, ThreadRevisionMismatchError, updateThread } from "@/lib/server/repositories/threadsRepository";
-import { findTopicById, TopicRevisionMismatchError, updateTopic } from "@/lib/server/repositories/topicsRepository";
-import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import {
-  getTunnelHub,
-  setTunnelGovernanceTickResultListener,
-} from "@/lib/server/tunnel/tunnelHub";
+import { findThreadById } from "@/lib/server/repositories/threadsRepository";
+import { TopicRevisionMismatchError, updateTopic } from "@/lib/server/repositories/topicsRepository";
 import {
   cancelTaskFromThread,
   dispatchTaskFromThread,
   updateTaskFromThread,
 } from "@/lib/server/services/dispatchTaskFromThread";
-import { goalsSnapshotThreadTaskView } from "@/lib/server/services/threadTaskView";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import type { Thread, Topic } from "@/types/topic";
 
-const DEFAULT_GOVERNANCE_TICK_LEASE_MS = 10 * 60 * 1000;
-const DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS = 5 * 60 * 1000;
+// §candidate-2 P3b：lease / expire 默认常量集中在 governanceTickQueue。
+// 这里通过 alias 引用，避免本文件维护副本。
 
 export type GovernanceTickOutcomeProcessResult =
   | { ok: true; job: GovernanceTickJobRecord; duplicate?: boolean; dispatch?: DispatchThreadActionsResult }
   | { ok: false; job: GovernanceTickJobRecord | null; reason: string; staleRevision?: boolean; dispatch?: DispatchThreadActionsResult };
 
-export type GovernanceTickDispatchSender = (command: GovernanceTickMachineCommand) => boolean;
+// §candidate-2 P3b：GovernanceTickDispatchSender 由 governanceTickQueue 拥有，
+// 通过下面的 re-export 暴露。
 
 export type {
   GovernanceTickMachineCommand,
@@ -89,587 +80,42 @@ function logGovernanceTick(message: string, fields: Record<string, unknown> = {}
   console.info("[governance_tick]", message, fields);
 }
 
-function buildJobIdempotencyKey(input: {
-  targetKind: GovernanceTickTargetKind;
-  topicId: string;
-  threadId?: string;
-  baseRevision: number;
-}) {
-  return createIdempotencyKey(
-    "governance_tick_job",
-    input.targetKind,
-    input.topicId,
-    input.threadId,
-    String(input.baseRevision),
-  );
-}
+// §candidate-2 P3b：enqueue / lease / reconcile 已迁移到 governanceTickQueue，
+// 通过下面的 re-export 兼容旧 import 路径。
 
-function buildManualJobIdempotencyKey(input: {
-  targetKind: GovernanceTickTargetKind;
-  topicId: string;
-  threadId?: string;
-  requestKey: string;
-}) {
-  return createIdempotencyKey(
-    "governance_tick_job_manual",
-    input.targetKind,
-    input.topicId,
-    input.threadId,
-    input.requestKey,
-  );
-}
 
-function threadPayload(topic: Topic, thread: Thread, due: ReturnType<typeof isThreadDue>): GovernanceTickJobPayload {
-  return {
-    targetKind: "thread",
-    topicId: topic.id,
-    threadId: thread.id,
-    baseRevision: thread.revision,
-    snapshot: buildThreadSnapshot(topic, thread),
-    dueReason: due?.reason,
-    scheduledAt: due?.scheduledAt.toISOString(),
-  };
-}
+export {
+  enqueueDueGovernanceTickJobs,
+  enqueueManualGovernanceTickJob,
+  leaseAndDispatchGovernanceTickJob,
+  reconcileGovernanceTickMachineHello,
+} from "@/lib/server/governance/governanceTickQueue";
+export type { GovernanceTickDispatchSender } from "@/lib/server/governance/governanceTickQueue";
 
-function topicPayload(topic: Topic, due: NonNullable<ReturnType<typeof isTopicDue>>): GovernanceTickJobPayload {
-  return {
-    targetKind: "topic",
-    topicId: topic.id,
-    baseRevision: topic.revision,
-    snapshot: buildTopicSnapshot(topic),
-    dueReason: due.reason,
-    scheduledAt: due.scheduledAt.toISOString(),
-  };
-}
 
-/**
- * 构造 thread tick payload 的 snapshot。
- *
- * 与本地 `runThreadLoopFrame` 的 callback 对齐（threadGovernorCallbacks.ts）：
- *  - currentTasks   ← goalsSnapshotThreadTaskView.listByThread（envelope 当前快照）
- *  - recentTaskInstances ← listRecentByThreadId（最近 7 天，limit 12）
- *
- * 漏装这两个字段会让远端 ThreadRunner 在 prompt 里看到「板块尚无 Task / 最近无实例」，
- * 进而幻觉出 dispatch_task；同时 schema 层的 duplicate_dispatch_task 校验依赖
- * currentTasks，缺失会让重复检测被绕过。
- */
-function buildThreadSnapshot(topic: Topic, thread: Thread) {
-  return {
-    topic,
-    thread,
-    currentTasks: safeListThreadTasks(topic.id, thread.id),
-    recentTaskInstances: safeListRecentTaskInstances(thread.id),
-  } satisfies Record<string, unknown>;
-}
 
-/**
- * 构造 topic tick payload 的 snapshot。
- *
- * Topic.threads 已在 Topic 结构上，但显式再写一份 `threads` 字段，与
- * `governanceTickLocalExecutor.readArrayField(snapshot, "threads")` 的优先级对齐，
- * 且为后续 lease-time 刷新留接口（届时 threads 可独立于 topic 被刷新）。
- */
-function buildTopicSnapshot(topic: Topic) {
-  return {
-    topic,
-    threads: topic.threads,
-  } satisfies Record<string, unknown>;
-}
+// §candidate-2 P3c：transport 已迁移到 governanceTickTransport。
+// dispatchReadyGovernanceTickJobsToMachines re-export 自该模块；
+// registerGovernanceTickTunnelCallbacks 通过 callback 注入避免循环依赖。
+export { dispatchReadyGovernanceTickJobsToMachines } from "@/lib/server/governance/governanceTickTransport";
 
-function safeListThreadTasks(topicId: string, threadId: string) {
-  try {
-    return goalsSnapshotThreadTaskView.listByThread({ topicId, threadId });
-  } catch (error) {
-    logGovernanceTick("listThreadTasks failed when building snapshot", {
-      topicId,
-      threadId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-}
-
-function safeListRecentTaskInstances(threadId: string) {
-  try {
-    return listRecentByThreadId(threadId, { limit: 12, sinceDays: 7 });
-  } catch (error) {
-    logGovernanceTick("listRecentByThreadId failed when building snapshot", {
-      threadId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-}
-
-/**
- * 在派发前用 envelope 当前态刷新 payload.snapshot。
- *
- * 行为：
- *  - thread：重新从 readTopicsSnapshot 取最新 topic + thread + currentTasks +
- *    recentTaskInstances；任何字段不可用就回退到原 payload 对应字段，
- *    并把新字段 `currentTasks` / `recentTaskInstances` / `threads` 默认为空数组，
- *    保证下游协议层（isGovernanceTickPayload）不会因为旧 payload 缺字段被拒。
- *  - topic：重新取 topic + threads；不可用则回退原 payload 并补 `threads: []`。
- *  - 不修改 baseRevision；revision 校验仍用入队时的 leased.baseRevision。
- *
- * 失败回退到原 payload 而不是抛错：保证派发链路稳健，最坏情况也只是退化为
- * 入队时的快照（即 P0 修复后的快照，仍包含正确的 currentTasks）。
- */
-function refreshGovernancePayload(payload: GovernanceTickJobPayload): GovernanceTickJobPayload {
-  try {
-    const topics = readTopicsSnapshot([]);
-    const topic = topics.find((item) => item.id === payload.topicId);
-    if (!topic) return ensureSnapshotShape(payload);
-    if (payload.targetKind === "topic") {
-      return { ...payload, snapshot: buildTopicSnapshot(topic) };
-    }
-    const thread = topic.threads.find((item) => item.id === payload.threadId);
-    if (!thread) return ensureSnapshotShape(payload);
-    return { ...payload, snapshot: buildThreadSnapshot(topic, thread) };
-  } catch (error) {
-    logGovernanceTick("refreshGovernancePayload failed; fallback to enqueued snapshot", {
-      jobTopicId: payload.topicId,
-      jobThreadId: payload.threadId,
-      targetKind: payload.targetKind,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return ensureSnapshotShape(payload);
-  }
-}
-
-/**
- * 兼容旧 job：旧 payload 可能不带 currentTasks / recentTaskInstances / threads，
- * 协议层校验（isGovernanceTickPayload）会因此拒绝。这里把缺失字段补为空数组，
- * 保证至少能下发；远端 governanceTickLocalExecutor 仍按 `?? []` 兜底。
- */
-function ensureSnapshotShape(payload: GovernanceTickJobPayload): GovernanceTickJobPayload {
-  const snapshot = payload.snapshot ?? {};
-  if (payload.targetKind === "thread") {
-    return {
-      ...payload,
-      snapshot: {
-        ...snapshot,
-        currentTasks: Array.isArray(snapshot.currentTasks) ? snapshot.currentTasks : [],
-        recentTaskInstances: Array.isArray(snapshot.recentTaskInstances) ? snapshot.recentTaskInstances : [],
-      },
-    };
-  }
-  return {
-    ...payload,
-    snapshot: {
-      ...snapshot,
-      threads: Array.isArray(snapshot.threads) ? snapshot.threads : [],
-    },
-  };
-}
-
-/**
- * 派发前 revision staleness 检查。
- *
- * lease 时 envelope 可能已经被会话治理 / 用户编辑改过；如果 fresh entity revision
- * 已经超过 leased.baseRevision，回执 apply 必然 stale_revision 失败，直接派发就是
- * 烧 LLM。提前在派发链路放弃，让上层失败计数 / dashboard 早一点看到事实。
- *
- * 找不到 entity（被删）也视为 stale——后续的 readRecordField 会抛错，不如此刻就拒。
- */
-function checkLeasedRevisionStaleness(
-  leased: GovernanceTickJobRecord,
-): { stale: false } | { stale: true; currentRevision: number | null } {
-  try {
-    if (leased.targetKind === "topic") {
-      const topic = findTopicById(leased.topicId);
-      if (!topic) return { stale: true, currentRevision: null };
-      return topic.revision === leased.baseRevision
-        ? { stale: false }
-        : { stale: true, currentRevision: topic.revision };
-    }
-    if (!leased.threadId) return { stale: true, currentRevision: null };
-    const thread = findThreadById(leased.threadId);
-    if (!thread) return { stale: true, currentRevision: null };
-    return thread.revision === leased.baseRevision
-      ? { stale: false }
-      : { stale: true, currentRevision: thread.revision };
-  } catch (error) {
-    logGovernanceTick("checkLeasedRevisionStaleness failed; treating as not stale to keep lease alive", {
-      jobId: leased.id,
-      targetKind: leased.targetKind,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return { stale: false };
-  }
-}
-
-export function enqueueManualGovernanceTickJob(input: {
-  targetKind: GovernanceTickTargetKind;
-  entityId: string;
-  idempotencyKey: string;
-  userId?: string;
-  now?: Date;
-}) {
-  const now = input.now ?? new Date();
-  const topics = readTopicsSnapshot([]);
-
-  if (input.targetKind === "topic") {
-    const topic = topics.find((item) => item.id === input.entityId);
-    if (!topic) throw new Error("未找到 Topic");
-    if (topic.status !== "active") throw new Error("Topic 当前不可治理");
-    const job = createGovernanceTickJob({
-      targetKind: "topic",
-      topicId: topic.id,
-      userId: input.userId,
-      baseRevision: topic.revision,
-      payload: {
-        targetKind: "topic",
-        topicId: topic.id,
-        baseRevision: topic.revision,
-        snapshot: buildTopicSnapshot(topic),
-        dueReason: "manual",
-        scheduledAt: nowIso(now),
-      },
-      idempotencyKey: buildManualJobIdempotencyKey({
-        targetKind: "topic",
-        topicId: topic.id,
-        requestKey: input.idempotencyKey,
-      }),
-      availableAt: nowIso(now),
-      createdAt: nowIso(now),
-    });
-    logGovernanceTick("enqueued manual governance job", {
-      jobId: job.id,
-      targetKind: job.targetKind,
-      topicId: job.topicId,
-      baseRevision: job.baseRevision,
-      status: job.status,
-    });
-    return job;
-  }
-
-  for (const topic of topics) {
-    const thread = topic.threads.find((item) => item.id === input.entityId);
-    if (!thread) continue;
-    if (topic.status !== "active" || thread.status !== "active") throw new Error("Thread 当前不可治理");
-    const job = createGovernanceTickJob({
-      targetKind: "thread",
-      topicId: topic.id,
-      threadId: thread.id,
-      userId: input.userId,
-      baseRevision: thread.revision,
-      payload: {
-        targetKind: "thread",
-        topicId: topic.id,
-        threadId: thread.id,
-        baseRevision: thread.revision,
-        snapshot: buildThreadSnapshot(topic, thread),
-        dueReason: "manual",
-        scheduledAt: nowIso(now),
-      },
-      idempotencyKey: buildManualJobIdempotencyKey({
-        targetKind: "thread",
-        topicId: topic.id,
-        threadId: thread.id,
-        requestKey: input.idempotencyKey,
-      }),
-      availableAt: nowIso(now),
-      createdAt: nowIso(now),
-    });
-    logGovernanceTick("enqueued manual governance job", {
-      jobId: job.id,
-      targetKind: job.targetKind,
-      topicId: job.topicId,
-      threadId: job.threadId,
-      baseRevision: job.baseRevision,
-      status: job.status,
-    });
-    return job;
-  }
-
-  throw new Error("未找到 Thread");
-}
-
-export function enqueueDueGovernanceTickJobs(input: { now?: Date; userId?: string } = {}) {
-  const now = input.now ?? new Date();
-  const topics = readTopicsSnapshot([]);
-  const jobs: GovernanceTickJobRecord[] = [];
-
-  for (const topic of topics) {
-    const due = isTopicDue(topic, now);
-    if (due) {
-      jobs.push(
-        createGovernanceTickJob({
-          targetKind: "topic",
-          topicId: topic.id,
-          userId: input.userId,
-          baseRevision: topic.revision,
-          payload: topicPayload(topic, due),
-          idempotencyKey: buildJobIdempotencyKey({
-            targetKind: "topic",
-            topicId: topic.id,
-            baseRevision: topic.revision,
-          }),
-          availableAt: nowIso(now),
-          createdAt: nowIso(now),
-        }),
-      );
-    }
-  }
-
-  const activePairs = topics
-    .filter((topic) => topic.status === "active")
-    .flatMap((topic) => topic.threads.map((thread) => ({ topic, thread })));
-  const dueThreads = selectDueThreads(activePairs.map((pair) => pair.thread), now);
-  const pairByThreadId = new Map(activePairs.map((pair) => [pair.thread.id, pair]));
-  for (const due of dueThreads) {
-    const pair = pairByThreadId.get(due.thread.id);
-    if (!pair) continue;
-    jobs.push(
-      createGovernanceTickJob({
-        targetKind: "thread",
-        topicId: pair.topic.id,
-        threadId: pair.thread.id,
-        userId: input.userId,
-        baseRevision: pair.thread.revision,
-        payload: threadPayload(pair.topic, pair.thread, due),
-        idempotencyKey: buildJobIdempotencyKey({
-          targetKind: "thread",
-          topicId: pair.topic.id,
-          threadId: pair.thread.id,
-          baseRevision: pair.thread.revision,
-        }),
-        availableAt: nowIso(now),
-        createdAt: nowIso(now),
-      }),
-    );
-  }
-
-  return jobs;
-}
-
-export function leaseAndDispatchGovernanceTickJob(input: {
-  leaseOwner: string;
-  leaseDurationMs: number;
-  sendCommand: GovernanceTickDispatchSender;
-  now?: Date;
-  targetKind?: GovernanceTickTargetKind;
-  llm?: GovernanceTickLlmPayload;
-}) {
-  const leased = acquireGovernanceTickJobLease({
-    leaseOwner: input.leaseOwner,
-    leaseDurationMs: input.leaseDurationMs,
-    now: input.now,
-    targetKind: input.targetKind,
-    expiredLeaseGraceMs: DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS,
-  });
-  if (!leased) return null;
-  // Lease 期 envelope 已变更：fresh revision != baseRevision 时不再派发，
-  // 直接把 job 标记 stale_revision 失败，避免烧 LLM。回执注定也会被
-  // base_revision_mismatch / stale_revision 拒绝，提前放弃成本最低。
-  const staleCheck = checkLeasedRevisionStaleness(leased);
-  if (staleCheck.stale) {
-    failGovernanceTickJob({
-      jobId: leased.id,
-      leaseOwner: leased.leaseOwner ?? input.leaseOwner,
-      leaseToken: leased.leaseToken,
-      error: "stale_revision_at_lease",
-    });
-    logGovernanceTick("abandoned lease due to stale revision before dispatch", {
-      jobId: leased.id,
-      targetKind: leased.targetKind,
-      topicId: leased.topicId,
-      threadId: leased.threadId,
-      jobBaseRevision: leased.baseRevision,
-      currentRevision: staleCheck.currentRevision,
-    });
-    return null;
-  }
-  // 派发前刷新 snapshot：job 入队和真正下发之间可能间隔很久（machine 离线、租约过期重租），
-  // 远端 LLM 看到的 thread/topic + tasks 必须是最新的。baseRevision 仍以 leased.baseRevision
-  // 锁住，回执 apply 时如果 entity 已被改写会被 stale_revision 拒绝。
-  const refreshedPayload = refreshGovernancePayload(leased.payload);
-  const command: GovernanceTickMachineCommand = {
-    type: commandTypeForGovernanceTarget(leased.targetKind),
-    requestId: leased.requestId ?? `governance-tick-${leased.id}`,
-    governanceJobId: leased.id,
-    leaseOwner: leased.leaseOwner ?? input.leaseOwner,
-    leaseToken: leased.leaseToken ?? "",
-    targetKind: leased.targetKind,
-    payload: refreshedPayload,
-    ...(input.llm ? { llm: input.llm } : {}),
-  };
-  const sent = input.sendCommand(command);
-  logGovernanceTick("dispatched lease to machine", {
-    jobId: leased.id,
-    targetKind: leased.targetKind,
-    topicId: leased.topicId,
-    threadId: leased.threadId,
-    leaseOwner: command.leaseOwner,
-    leaseExpiresAt: leased.leaseExpiresAt,
-    attemptCount: leased.attemptCount,
-    sent,
-  });
-  return { job: leased, command, sent };
-}
-
-export function dispatchReadyGovernanceTickJobsToMachines(input: {
-  leaseOwner: string;
-  limit?: number;
-  leaseDurationMs?: number;
-  now?: Date;
-  llm?: GovernanceTickLlmPayload;
-}): { processed: number; skippedOffline: boolean } {
-  const userId = getCurrentUserId();
-  const pendingCount = countPendingGovernanceTickJobs({
-    now: input.now,
-    expiredLeaseGraceMs: DEFAULT_GOVERNANCE_TICK_EXPIRED_LEASE_GRACE_MS,
-  });
-  if (pendingCount === 0) {
-    return { processed: 0, skippedOffline: false };
-  }
-  if (!input.llm) {
-    logGovernanceTick("skipped governance dispatch without llm runtime", {
-      userId,
-      pendingCount,
-      leaseOwner: input.leaseOwner,
-    });
-    return { processed: 0, skippedOffline: false };
-  }
-  const hub = getTunnelHub();
-  const onlineMachineIds = hub.getOnlineMachineIdsForUser(userId);
-  if (onlineMachineIds.length === 0) {
-    logGovernanceTick("skipped governance dispatch because machine offline", {
-      userId,
-      pendingCount,
-      leaseOwner: input.leaseOwner,
-    });
-    return { processed: 0, skippedOffline: true };
-  }
-
-  const machineId = onlineMachineIds[0];
-  const limit = Math.max(0, input.limit ?? 10);
-  let processed = 0;
-  for (let index = 0; index < limit; index += 1) {
-    const dispatched = leaseAndDispatchGovernanceTickJob({
-      leaseOwner: input.leaseOwner,
-      leaseDurationMs: input.leaseDurationMs ?? DEFAULT_GOVERNANCE_TICK_LEASE_MS,
-      now: input.now,
-      llm: input.llm,
-      sendCommand(command) {
-        hub.sendGovernanceTick({ machineId, command });
-        return true;
-      },
-    });
-    if (!dispatched) break;
-    processed += 1;
-  }
-
-  logGovernanceTick("dispatch ready governance jobs completed", {
-    userId,
-    machineId,
-    pendingCount,
-    processed,
-    limit,
-    leaseOwner: input.leaseOwner,
-  });
-  return { processed, skippedOffline: false };
-}
-
-export function reconcileGovernanceTickMachineHello(input: {
-  machineId: string;
-  userId: string;
-  runningGovernanceJobIds: string[];
-  leaseDurationMs?: number;
-  now?: Date;
-}) {
-  const uniqueJobIds = Array.from(new Set(input.runningGovernanceJobIds));
-  let renewed = 0;
-  for (const jobId of uniqueJobIds) {
-    const job = renewGovernanceTickJobLeaseFromHello({
-      jobId,
-      userId: input.userId,
-      machineId: input.machineId,
-      leaseDurationMs: input.leaseDurationMs ?? DEFAULT_GOVERNANCE_TICK_LEASE_MS,
-      now: input.now,
-    });
-    if (job) renewed += 1;
-  }
-  if (uniqueJobIds.length > 0) {
-    logGovernanceTick("reconciled running governance jobs from machine", {
-      machineId: input.machineId,
-      userId: input.userId,
-      checked: uniqueJobIds.length,
-      renewed,
-    });
-  }
-  return { checked: uniqueJobIds.length, renewed };
-}
+import { registerGovernanceTickTunnelCallbacks as registerTransportCallbacks } from "@/lib/server/governance/governanceTickTransport";
 
 export function registerGovernanceTickTunnelCallbacks() {
-  setTunnelGovernanceTickResultListener((result, context) => {
-    logGovernanceTick("received machine result", {
-      jobId: result.governanceJobId,
-      type: result.type,
-      ok: result.ok,
-      leaseOwner: result.leaseOwner,
-      userId: context?.userId,
-      machineId: context?.machineId,
-    });
-    if (context?.userId) {
-      void runWithUserContext(context.userId, () => handleGovernanceTickMachineResult({ result }));
-      return;
-    }
-    void handleGovernanceTickMachineResult({ result });
+  registerTransportCallbacks({
+    handleResult: async ({ result }) => {
+      await handleGovernanceTickMachineResult({ result });
+    },
   });
 }
 
-type GovernanceLeaseValidation =
-  | { ok: true; acceptLeaseTokenMismatch?: boolean; acceptedExpiredLease?: boolean }
-  | { ok: false; reason: string };
-
-function validateLeasedJob(input: {
-  job: GovernanceTickJobRecord;
-  leaseOwner: string;
-  leaseToken: string;
-  now: Date;
-}): GovernanceLeaseValidation {
-  if (input.job.status !== "leased" && input.job.status !== "expired") {
-    return { ok: false, reason: `invalid_job_status:${input.job.status}` };
-  }
-  if (input.job.leaseOwner !== input.leaseOwner) {
-    return { ok: false, reason: "lease_owner_mismatch" };
-  }
-  // 同一 cloud orchestrator 可能在治理长任务未回执前重租同一个 job，导致旧 token 回执。
-  // 这里仅放宽 token/过期校验；owner、baseRevision 和实体 revision 仍负责防止跨编排者或脏快照落库。
-  const tokenMismatch = input.job.leaseToken !== input.leaseToken;
-  const acceptedExpiredLease =
-    input.job.status === "expired" ||
-    Boolean(input.job.leaseExpiresAt && new Date(input.job.leaseExpiresAt).getTime() <= input.now.getTime());
-  if (tokenMismatch || acceptedExpiredLease) {
-    logGovernanceTick("accepting governance result with relaxed lease validation", {
-      jobId: input.job.id,
-      status: input.job.status,
-      leaseOwner: input.leaseOwner,
-      tokenMismatch,
-      acceptedExpiredLease,
-      leaseExpiresAt: input.job.leaseExpiresAt,
-    });
-  }
-  return {
-    ok: true,
-    acceptLeaseTokenMismatch: tokenMismatch,
-    acceptedExpiredLease,
-  };
-}
-
-function currentRevisionForOutcome(outcome: GovernanceTickOutcome) {
-  if (outcome.targetKind === "thread") return findThreadById(outcome.threadId)?.revision;
-  return findTopicById(outcome.topicId)?.revision;
-}
-
-function durationMs(startedAt: string | undefined, finishedAt: string) {
-  const started = startedAt ? Date.parse(startedAt) : Number.NaN;
-  const finished = Date.parse(finishedAt);
-  if (Number.isNaN(started) || Number.isNaN(finished)) return 0;
-  return Math.max(0, finished - started);
-}
+// §candidate-2 P3d：lease + revision 校验已迁移到 governanceTickValidation。
+// dispatcher 改用 import；GovernanceLeaseValidation 类型也在该模块。
+import {
+  currentRevisionForOutcome,
+  durationMs,
+  validateLeasedJob,
+} from "@/lib/server/governance/governanceTickValidation";
 
 function topicSnapshotFromJob(job: GovernanceTickJobRecord) {
   const topic = job.payload.snapshot.topic;
@@ -693,6 +139,13 @@ function buildDispatcherActionDetails(input: {
   });
 }
 
+/**
+ * 创建 / 完成 dispatcher 端的 agent_run。
+ *
+ * §candidate-1 P0：thread 路径的 loopTickLog 已由 applyThreadTickResult 写入，
+ * 这里只负责 agent_run 行（id 复用 jobId 让两端 join 时简单）。
+ * topic 路径仍由本函数写 loopTickLog（topicGovernor 还没接 module）。
+ */
 function recordDispatcherTickHistory(input: {
   job: GovernanceTickJobRecord;
   outcome: GovernanceTickOutcome;
@@ -711,65 +164,38 @@ function recordDispatcherTickHistory(input: {
     startedAt,
   });
 
-  let phase: LoopTickPhase = "completed";
   let ok = true;
-  let failureReason: string | undefined;
-  let errorKind: string | undefined;
-  let assessment: string | undefined;
-  let confidence: string | undefined;
-  let pauseReason: "failure_threshold" | undefined;
-  let silentCount = 0;
-  let failureCount: number | undefined;
 
   if (input.outcome.targetKind === "thread") {
-    const { result } = input.outcome;
-    ok = result.ok;
-    phase = !result.ok ? "failed" : input.dispatch && input.dispatch.errors.length > 0 ? "dispatch_partial_failure" : "completed";
-    failureReason = result.ok
-      ? input.dispatch && input.dispatch.errors.length > 0
-        ? `dispatch_partial_failure(${input.dispatch.errors.length})`
-        : undefined
-      : result.error.kind;
-    errorKind = result.ok ? undefined : result.error.kind;
-    assessment = result.ok ? result.output.assessment : undefined;
-    confidence = result.ok ? result.output.confidence : undefined;
-    pauseReason = result.pauseReason === "failure_threshold" ? "failure_threshold" : undefined;
-    silentCount = input.dispatch?.silentReasons.length ?? 0;
-    failureCount = result.patch.failureCount;
+    // thread 路径的 loopTickLog 已由 applyThreadTickResult 写。
+    // 这里只汇报 agent_run 状态。
+    ok = input.outcome.result.ok;
   } else {
     ok = input.outcome.ok;
-    phase = input.outcome.ok ? "completed" : "failed";
-    failureReason = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
-    errorKind = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
-    assessment = input.outcome.output?.assessment;
-    confidence = input.outcome.output?.confidence;
-    silentCount = input.outcome.patch.silentCount ?? 0;
-    failureCount = input.outcome.patch.failureCount;
+    const phase: LoopTickPhase = input.outcome.ok ? "completed" : "failed";
+    const failureReason = input.outcome.ok ? undefined : input.outcome.error ?? "topic_tick_failed";
+    recordLoopEntity({
+      kind: "topic",
+      entityId: input.outcome.topicId,
+      agentRunId: run.id,
+      startedAt,
+      finishedAt: input.finishedAt,
+      durationMs: durationMs(startedAt, input.finishedAt),
+      ok,
+      phase,
+      failureReason,
+      errorKind: failureReason,
+      dispatchedTaskCount: 0,
+      updatedTaskCount: 0,
+      cancelledTaskCount: 0,
+      sentMessageCount: 0,
+      silentCount: input.outcome.patch.silentCount ?? 0,
+      assessment: input.outcome.output?.assessment,
+      confidence: input.outcome.output?.confidence,
+      failureCount: input.outcome.patch.failureCount,
+      actionDetails: input.actionDetails,
+    });
   }
-
-  recordLoopEntity({
-    kind: input.outcome.targetKind,
-    entityId: input.outcome.targetKind === "thread" ? input.outcome.threadId : input.outcome.topicId,
-    parentId: input.outcome.targetKind === "thread" ? input.outcome.topicId : undefined,
-    agentRunId: run.id,
-    startedAt,
-    finishedAt: input.finishedAt,
-    durationMs: durationMs(startedAt, input.finishedAt),
-    ok,
-    phase,
-    failureReason,
-    errorKind,
-    dispatchedTaskCount: input.dispatch?.dispatchedTasks.length ?? 0,
-    updatedTaskCount: input.dispatch?.updatedTasks.length ?? 0,
-    cancelledTaskCount: input.dispatch?.cancelledTasks.length ?? 0,
-    sentMessageCount: input.dispatch?.sentMessages.length ?? 0,
-    silentCount,
-    assessment,
-    confidence,
-    pauseReason,
-    failureCount,
-    actionDetails: input.actionDetails,
-  });
 
   updateAgentRun({ id: run.id, status: ok ? "completed" : "failed", finishedAt: input.finishedAt });
 }
@@ -809,65 +235,118 @@ async function applyThreadOutcome(input: {
   outcome: GovernanceTickThreadOutcome;
   callbacks?: GovernanceTickActionCallbacks;
   invoke?: LlmInvoke;
+  startedAt: string;
+  finishedAt: string;
 }) {
   const callbacks = { ...defaultActionCallbacks(input.job.id, input.invoke), ...(input.callbacks ?? {}) };
-  let dispatch: DispatchThreadActionsResult | undefined;
   const result = input.outcome.result;
-  if (result.ok) {
-    const actionCounters: Record<string, number> = {};
-    const nextActionKey = (kind: string) => {
-      actionCounters[kind] = (actionCounters[kind] ?? 0) + 1;
-      return buildActionKey(input.job.id, kind, actionCounters[kind]);
-    };
-    const currentTasks =
-      input.outcome.currentTasks ??
-      goalsSnapshotThreadTaskView.listByThread({
-        topicId: input.outcome.topicId,
-        threadId: input.outcome.threadId,
-      });
-    dispatch = await dispatchThreadActions({
-      topicId: input.outcome.topicId,
-      threadId: input.outcome.threadId,
-      output: result.output,
-      currentTasks,
-      callbacks: {
-        dispatchTask: (request) => callbacks.dispatchTask(request, { idempotencyKey: nextActionKey("dispatch_task"), invoke: input.invoke }),
-        updateTask: (request) => callbacks.updateTask(request, { idempotencyKey: nextActionKey("update_task") }),
-        cancelTask: (request) => callbacks.cancelTask(request, { idempotencyKey: nextActionKey("cancel_task") }),
-        sendThreadMessage: async (request) => {
-          const traceId = nextActionKey("post_message");
-          return callbacks.sendThreadMessage({ ...request, traceId });
-        },
-      },
-    });
-    if (dispatch.errors.length > 0) return { ok: false as const, reason: "dispatch_partial_failure", dispatch };
-  }
 
+  // §candidate-1 P1：partial-failure 重试上限。达上限时强制 persist patch
+  // 让 thread 推进，避免无限循环烧 LLM。partialAttemptCount 由
+  // requeueGovernanceTickJobForRetry 累加。
+  const partialAttempts = input.job.partialAttemptCount ?? 0;
+  const persistPatchPolicy: "always" | "auto-skip-on-dispatch-errors" =
+    partialAttempts >= GOVERNANCE_PARTIAL_RETRY_MAX
+      ? "always"
+      : "auto-skip-on-dispatch-errors";
+
+  // §candidate-1 P0：dispatch + persist + record + notify 走共享尾路。
+  // dispatcher 仍负责 agent_run / job 状态机。
+  const startedAtMs = Date.parse(input.startedAt);
+  const finishedAtMs = Date.parse(input.finishedAt);
+  let applied: Awaited<ReturnType<typeof applyThreadTickResult>>;
   try {
-    updateThread(
-      input.outcome.threadId,
-      {
-        loopInterval: result.patch.loopInterval,
-        status: result.patch.status,
-        lastTickAt: result.patch.lastTickAt,
-        nextTickAt: result.patch.nextTickAt,
-        memory: result.patch.memory,
-        silentCount: result.patch.silentCount,
-        failureCount: result.patch.failureCount,
-        ...(result.patch.infraFailureCount !== undefined
-          ? { infraFailureCount: result.patch.infraFailureCount }
-          : {}),
+    applied = await applyThreadTickResult({
+      topic: { id: input.outcome.topicId } as never as Topic,
+      thread: dispatcherThreadStub(input),
+      baseRevision: input.outcome.baseRevision,
+      agentRunId: input.job.id,
+      result,
+      currentTasks: input.outcome.currentTasks,
+      callbacks: {
+        dispatchTask: (request: DispatchTaskRequest) =>
+          callbacks.dispatchTask(request, {
+            idempotencyKey: buildActionKey(input.job.id, "dispatch_task", nextCounter(input.job.id, "dispatch_task")),
+            invoke: input.invoke,
+          }),
+        updateTask: (request: UpdateTaskRequest) =>
+          callbacks.updateTask(request, {
+            idempotencyKey: buildActionKey(input.job.id, "update_task", nextCounter(input.job.id, "update_task")),
+          }),
+        cancelTask: (request: CancelTaskRequest) =>
+          callbacks.cancelTask(request, {
+            idempotencyKey: buildActionKey(input.job.id, "cancel_task", nextCounter(input.job.id, "cancel_task")),
+          }),
+        sendThreadMessage: (request: SendThreadMessageRequest) =>
+          callbacks.sendThreadMessage({
+            ...request,
+            traceId: buildActionKey(input.job.id, "post_message", nextCounter(input.job.id, "post_message")),
+          }),
       },
-      input.outcome.baseRevision,
-    );
-  } catch (error) {
-    if (error instanceof ThreadRevisionMismatchError) {
-      return { ok: false as const, reason: "stale_revision", staleRevision: true, dispatch };
-    }
-    throw error;
+      startedAt: input.startedAt,
+      finishedAt: input.finishedAt,
+      durationMs:
+        Number.isFinite(startedAtMs) && Number.isFinite(finishedAtMs)
+          ? Math.max(0, finishedAtMs - startedAtMs)
+          : 0,
+      persistPatchPolicy,
+      traceIdPrefix: `dispatcher:${input.job.id}`,
+    });
+  } finally {
+    resetCounters(input.job.id);
   }
 
-  return { ok: true as const, dispatch };
+  if (applied.dispatchHadErrors && !applied.patchPersisted) {
+    return {
+      ok: false as const,
+      reason: "dispatch_partial_failure",
+      dispatch: applied.dispatch,
+      shouldRequeue: partialAttempts < GOVERNANCE_PARTIAL_RETRY_MAX,
+      partialAttemptCount: partialAttempts,
+    };
+  }
+  if (applied.staleRevision) {
+    return { ok: false as const, reason: "stale_revision", staleRevision: true, dispatch: applied.dispatch };
+  }
+  if (!applied.patchPersisted) {
+    return { ok: false as const, reason: "persist_failed", dispatch: applied.dispatch };
+  }
+  return {
+    ok: true as const,
+    dispatch: applied.dispatch,
+    actionDetails: applied.actionDetails,
+    /** dispatch 仍有 errors，但因为达到 retry 上限已强制 persist；caller 应 complete + 记录 final_partial */
+    forcedFinalPartial: applied.dispatchHadErrors,
+  };
+}
+
+const GOVERNANCE_PARTIAL_RETRY_MAX = 3;
+
+// dispatcher 端没有完整 Thread 对象（只有 outcome.threadId + topicId + baseRevision）；
+// applyThreadTickResult 只读 thread.id / thread.title / thread.revision。
+// title 用 envelope 现取；revision 用 baseRevision；id 用 outcome.threadId。
+function dispatcherThreadStub(input: {
+  outcome: GovernanceTickThreadOutcome;
+}) {
+  const located = findThreadById(input.outcome.threadId);
+  return {
+    id: input.outcome.threadId,
+    title: located?.title ?? "(unknown thread)",
+    revision: input.outcome.baseRevision,
+  } as never as Thread;
+}
+
+// 共享 counter map：同一 jobId 的同 kind 动作应使用单调递增 ordinal。
+// 与原 dispatcher 行为一致；resetCounters 在 applyThreadOutcome 退出前清理。
+const dispatcherActionCounters = new Map<string, Record<string, number>>();
+function nextCounter(jobId: string, kind: string): number {
+  const counters = dispatcherActionCounters.get(jobId) ?? {};
+  counters[kind] = (counters[kind] ?? 0) + 1;
+  dispatcherActionCounters.set(jobId, counters);
+  return counters[kind];
+}
+function resetCounters(jobId: string): void {
+  dispatcherActionCounters.delete(jobId);
 }
 
 function applyTopicOutcome(input: {
@@ -955,14 +434,18 @@ export async function persistGovernanceTickOutcome(input: {
   }
 
   let applied:
-    | { ok: true; dispatch?: DispatchThreadActionsResult }
+    | { ok: true; dispatch?: DispatchThreadActionsResult; actionDetails?: GovernanceActionPresentation[] }
     | { ok: false; reason: string; staleRevision?: boolean; dispatch?: DispatchThreadActionsResult };
   if (input.outcome.targetKind === "thread") {
+    const startedAt = job.leasedAt ?? job.createdAt;
+    const finishedAtForApply = nowIso(input.now);
     applied = await applyThreadOutcome({
       job,
       outcome: input.outcome,
       callbacks: input.callbacks,
       invoke: input.invoke,
+      startedAt,
+      finishedAt: finishedAtForApply,
     });
   } else {
     applied = applyTopicOutcome({ outcome: input.outcome });
@@ -995,6 +478,37 @@ export async function persistGovernanceTickOutcome(input: {
         reason: applied.reason,
       });
       return { ok: false, job: failed ?? getGovernanceTickJob(job.id), reason: applied.reason, staleRevision: true, dispatch: applied.dispatch };
+    }
+    // §candidate-1 P1：dispatch_partial_failure 在重试上限内 → requeue 让下一帧重跑 LLM；
+    // 超过上限会进入 always policy（applied.ok=true + forcedFinalPartial）由下面的 complete 分支处理。
+    if (
+      applied.reason === "dispatch_partial_failure" &&
+      "shouldRequeue" in applied &&
+      applied.shouldRequeue === true
+    ) {
+      const requeued = requeueGovernanceTickJobForRetry({
+        jobId: job.id,
+        leaseOwner: input.leaseOwner,
+        leaseToken: input.leaseToken,
+        acceptLeaseTokenMismatch,
+        now: input.now,
+      });
+      const previousAttempt =
+        "partialAttemptCount" in applied && typeof applied.partialAttemptCount === "number"
+          ? applied.partialAttemptCount
+          : 0;
+      logGovernanceTick("requeued job for partial-failure retry", {
+        jobId: job.id,
+        partialAttemptCount: previousAttempt + 1,
+        max: GOVERNANCE_PARTIAL_RETRY_MAX,
+        dispatchErrors: applied.dispatch?.errors.length,
+      });
+      return {
+        ok: false,
+        job: requeued ?? getGovernanceTickJob(job.id),
+        reason: "dispatch_partial_failure",
+        dispatch: applied.dispatch,
+      };
     }
     return { ok: false, job, reason: applied.reason, dispatch: applied.dispatch };
   }
@@ -1031,17 +545,10 @@ export async function persistGovernanceTickOutcome(input: {
     console.warn("[governance] record dispatcher tick history failed", error);
   }
   try {
-    const actionDetails = buildDispatcherActionDetails({ job: completed, outcome: input.outcome, dispatch: applied.dispatch });
     if (input.outcome.targetKind === "thread") {
-      pushGovernanceChangeNotification({
-        topicId: input.outcome.topicId,
-        threadId: input.outcome.threadId,
-        dispatch: applied.dispatch,
-        actionDetails,
-        paused: input.outcome.result.pauseReason === "failure_threshold",
-        traceId: `dispatcher:${job.id}`,
-      });
-      logGovernanceTick("pushed thread governance notification", {
+      // §candidate-1 P0：thread 路径的 change-notification 已由 applyThreadTickResult 推送，
+      // 这里不再重复推。
+      logGovernanceTick("thread governance notification handled by applyThreadTickResult", {
         jobId: completed.id,
         topicId: input.outcome.topicId,
         threadId: input.outcome.threadId,
@@ -1049,6 +556,7 @@ export async function persistGovernanceTickOutcome(input: {
         paused: input.outcome.result.pauseReason === "failure_threshold",
       });
     } else {
+      const actionDetails = buildDispatcherActionDetails({ job: completed, outcome: input.outcome, dispatch: applied.dispatch });
       pushGovernanceChangeNotification({
         topicId: input.outcome.topicId,
         actionDetails,
