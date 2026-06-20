@@ -93,16 +93,46 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
 function normalizeTitleForCompare(value: string) {
   return value
     .toLowerCase()
-    .replace(/demo|报告|结果|分析|复盘|产出物/g, "")
-    .replace(/[\s\-_.,，。:：;；!?！？()[\]【】"'“”‘’/\\]+/g, "");
+    .replace(/[（(]\s*\d{4}[./-]\d{1,2}[./-]\d{1,2}\s*[）)]/g, "")
+    .replace(/\d{4}[./-]\d{1,2}[./-]\d{1,2}/g, "")
+    .replace(/\d{4}年\d{1,2}月\d{1,2}日?/g, "")
+    .replace(/[\s\-_.,，。:：;；!?！？()[\]【】"'“”‘’·／/\\（）]+/g, "");
 }
 
-function isDuplicateLeadingHeading(title: string, block: ResultBlock) {
-  if (block.kind !== "heading") return false;
+function isDuplicateTitleText(title: string, text: string) {
   const normalizedTitle = normalizeTitleForCompare(title);
-  const normalizedHeading = normalizeTitleForCompare(block.text);
-  if (!normalizedTitle || !normalizedHeading) return false;
-  return normalizedTitle.includes(normalizedHeading) || normalizedHeading.includes(normalizedTitle);
+  const normalizedText = normalizeTitleForCompare(text);
+  if (!normalizedTitle || !normalizedText) return false;
+  return normalizedTitle.includes(normalizedText) || normalizedText.includes(normalizedTitle);
+}
+
+/** 去掉与 result.title 重复的首个 block（heading / markdown 标题行 / 同文段落） */
+function preprocessDisplayBlock(title: string, block: ResultBlock): ResultBlock | null {
+  if (block.kind === "heading") {
+    return isDuplicateTitleText(title, block.text) ? null : block;
+  }
+  if (block.kind === "paragraph") {
+    return isDuplicateTitleText(title, block.text) ? null : block;
+  }
+  if (block.kind === "markdown") {
+    const lines = block.content.split("\n");
+    const firstLine = lines[0]?.trim() ?? "";
+    const headingMatch = firstLine.match(/^#{1,4}\s+(.+)$/);
+    if (headingMatch && isDuplicateTitleText(title, headingMatch[1])) {
+      const rest = lines.slice(1).join("\n").trimStart();
+      if (!rest) return null;
+      return { ...block, content: rest };
+    }
+  }
+  return block;
+}
+
+function getDisplayBlocks(title: string, blocks: ResultBlock[]) {
+  if (!blocks.length) return blocks;
+  const first = preprocessDisplayBlock(title, blocks[0]);
+  if (first === null) return blocks.slice(1);
+  if (first !== blocks[0]) return [first, ...blocks.slice(1)];
+  return blocks;
 }
 
 export function TaskResultBlockView({
@@ -124,9 +154,7 @@ export function TaskResultBlockView({
   embedded?: boolean;
 }) {
   const presentationLabel = result.meta.presentation ? PRESENTATION_LABEL[result.meta.presentation] : "结构化产物";
-  const displayBlocks = isDuplicateLeadingHeading(result.title, result.blocks[0])
-    ? result.blocks.slice(1)
-    : result.blocks;
+  const displayBlocks = getDisplayBlocks(result.title, result.blocks);
   const blockNodes = displayBlocks.map((block, index) => (
     <BlockRenderer key={`${block.kind}-${index}`} block={block} />
   ));

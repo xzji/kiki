@@ -2,6 +2,15 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-06-20
+
+### Changed
+- 机器隧道命令协议收敛：服务端 `tunnelHub.ts` 引入 `MachineCommandRegistry` 统一描述各命令的超时、requestId 前缀与结果解析，并将分散的 `pendingXxx` 队列合并为单一 `pendingRequests` 生命周期管理；`remoteDaemonLoop.ts` 改为注册表式 `commandHandlers` 分发，替代长 `if/else` 链，避免命令定义与执行实现脱节。
+- 任务结果卡片标题去重增强：除首个 heading 外，新增对首个段落与 markdown 标题行的同标题识别，并在比较前归一化日期（如 `（2026/06/20）`、`2026年6月20日`），减少产出物正文与卡片标题的重复展示。
+
+### Fixed
+- 修复远程取消语义：`cancel` 命令不再伪造 `execute/failed` 终态回执，改为仅记录显式 unsupported 日志，避免提前 resolve `pendingExecutes` 并触发运行中任务的错误状态流转与真实结果回传时的二次冲突。
+
 ## 2026-06-18
 
 ### Changed

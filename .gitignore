@@ -51,6 +51,11 @@ next-env.d.ts
 # local agent workspace documents
 /.trae/
 
+# local agent / skill tooling (per-machine, never commit)
+/.agents/
+/.claude/
+/skills-lock.json
+
 # project documents are kept outside git
 /docs/
 

@@ -386,13 +386,33 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     logDaemonEvent("info", "life", "machine bound user", { userId });
   }
 
-  async function handleCommand(command: MachineCommand) {
-    const startedAt = Date.now();
-    if ("requestId" in command) commandStartedAtByRequestId.set(command.requestId, startedAt);
-    if ("jobId" in command) commandStartedAtByJobId.set(command.jobId, startedAt);
-    logDaemonEvent("info", "cmd", "recv", commandLogFields(command));
-    logDaemonEvent("debug", "cmd", "payload keys", { ...commandLogFields(command), keys: commandPayloadKeys(command) });
-    if (command.type === "discover_runtimes") {
+  type DaemonCommandHandler = (command: MachineCommand, startedAt: number) => Promise<void> | void;
+
+  async function handleGovernanceCommand(command: MachineCommand) {
+    if (!isGovernanceTickCommand(command)) return;
+    if (runningGovernanceJobs.has(command.governanceJobId)) return;
+    runningGovernanceJobs.add(command.governanceJobId);
+    logDaemonEvent("info", "cmd", "governance tick start", {
+      requestId: command.requestId,
+      governanceJobId: command.governanceJobId,
+      targetKind: command.targetKind,
+    });
+    void (async () => {
+      try {
+        await handleGovernanceTickDaemonCommand({
+          command,
+          invoke: buildGovernanceLlmInvoke(command),
+          sendResult,
+        });
+      } finally {
+        runningGovernanceJobs.delete(command.governanceJobId);
+      }
+    })();
+  }
+
+  const commandHandlers: Partial<Record<MachineCommand["type"], DaemonCommandHandler>> = {
+    async discover_runtimes(command) {
+      if (command.type !== "discover_runtimes") return;
       try {
         const result = await discoverLocalRuntimes();
         await sendResult({
@@ -410,9 +430,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "扫描失败",
         });
       }
-      return;
-    }
-    if (command.type === "check_runtime") {
+    },
+    async check_runtime(command) {
+      if (command.type !== "check_runtime") return;
       try {
         const result = await validateRuntimeEnvironment(command.payload as RuntimeEnvironmentCheckInput);
         await sendResult({ type: "check_runtime", requestId: command.requestId, ok: result.ok, result });
@@ -424,26 +444,16 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "检测失败",
         });
       }
-      return;
-    }
-    if (command.type === "select_directory") {
+    },
+    async select_directory(command) {
+      if (command.type !== "select_directory") return;
       try {
         const picked = await pickDirectoryWithOsascript();
         if ("canceled" in picked) {
-          await sendResult({
-            type: "select_directory",
-            requestId: command.requestId,
-            ok: true,
-            canceled: true,
-          });
+          await sendResult({ type: "select_directory", requestId: command.requestId, ok: true, canceled: true });
           return;
         }
-        await sendResult({
-          type: "select_directory",
-          requestId: command.requestId,
-          ok: true,
-          path: picked.path,
-        });
+        await sendResult({ type: "select_directory", requestId: command.requestId, ok: true, path: picked.path });
       } catch (error) {
         await sendResult({
           type: "select_directory",
@@ -452,9 +462,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "目录选择失败",
         });
       }
-      return;
-    }
-    if (command.type === "skills_status") {
+    },
+    async skills_status(command) {
+      if (command.type !== "skills_status") return;
       try {
         const result = getKikiDefaultSkillsStatus();
         await sendResult({ type: "skills_status", requestId: command.requestId, ok: true, result });
@@ -466,9 +476,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "KiKi 默认 skills 状态获取失败",
         });
       }
-      return;
-    }
-    if (command.type === "skills_install") {
+    },
+    async skills_install(command) {
+      if (command.type !== "skills_install") return;
       try {
         const result = installKikiDefaultSkills();
         await sendResult({ type: "skills_install", requestId: command.requestId, ok: true, result });
@@ -480,13 +490,11 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "KiKi 默认 skills 安装失败",
         });
       }
-      return;
-    }
-    if (command.type === "daemon_service_status") {
+    },
+    async daemon_service_status(command) {
+      if (command.type !== "daemon_service_status") return;
       try {
-        if (!input.serviceManager) {
-          throw new Error("当前 daemon 不支持后台服务状态查询，请更新 @kiki_agent/daemon");
-        }
+        if (!input.serviceManager) throw new Error("当前 daemon 不支持后台服务状态查询，请更新 @kiki_agent/daemon");
         const result = await input.serviceManager.serviceStatus();
         await sendResult({ type: "daemon_service_status", requestId: command.requestId, ok: true, result });
       } catch (error) {
@@ -497,13 +505,11 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "后台服务状态获取失败",
         });
       }
-      return;
-    }
-    if (command.type === "daemon_service_autostart") {
+    },
+    async daemon_service_autostart(command) {
+      if (command.type !== "daemon_service_autostart") return;
       try {
-        if (!input.serviceManager) {
-          throw new Error("当前 daemon 不支持后台服务设置，请更新 @kiki_agent/daemon");
-        }
+        if (!input.serviceManager) throw new Error("当前 daemon 不支持后台服务设置，请更新 @kiki_agent/daemon");
         if (command.enabled) {
           await input.serviceManager.installService();
         } else {
@@ -511,14 +517,8 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         }
         const result = await input.serviceManager.serviceStatus();
         await sendResult({ type: "daemon_service_autostart", requestId: command.requestId, ok: true, result });
-        // 方案 A：网页开启 24h 成功后，后台服务（launchd/systemd）已接管 poll。
-        // 若当前是非托管的前台进程，则在结果回传后主动退出，避免同机双进程争抢
-        // 同一 machineId 的长轮询与命令队列（导致任务丢失/心跳抖动）。
-        // 仅在确认后台服务确实 running 时才退出，否则继续 poll 兜底，防止掉线空窗。
         const isManaged = process.env.KIKI_DAEMON_MANAGED === "1";
-        if (command.enabled && !isManaged && result.running) {
-          shouldExitAfterHandoff = true;
-        }
+        if (command.enabled && !isManaged && result.running) shouldExitAfterHandoff = true;
       } catch (error) {
         await sendResult({
           type: "daemon_service_autostart",
@@ -527,9 +527,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "后台服务设置失败",
         });
       }
-      return;
-    }
-    if (command.type === "run_prompt_json") {
+    },
+    async run_prompt_json(command) {
+      if (command.type !== "run_prompt_json") return;
       try {
         const result = await runPromptOnMachine(command.payload, "json");
         await sendResult({ type: "run_prompt_json", requestId: command.requestId, ok: true, result });
@@ -541,9 +541,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "JSON 调用失败",
         });
       }
-      return;
-    }
-    if (command.type === "run_prompt_text") {
+    },
+    async run_prompt_text(command) {
+      if (command.type !== "run_prompt_text") return;
       try {
         const result = await runPromptOnMachine(command.payload, "text");
         await sendResult({ type: "run_prompt_text", requestId: command.requestId, ok: true, result });
@@ -555,9 +555,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           error: error instanceof Error ? error.message : "文本调用失败",
         });
       }
-      return;
-    }
-    if (command.type === "tool_permission_decision") {
+    },
+    tool_permission_decision(command) {
+      if (command.type !== "tool_permission_decision") return;
       const resolved = resolveToolPermissionDecision(command.decision);
       logDaemonEvent(resolved ? "info" : "debug", "stream", "tool permission decision", {
         sessionId: command.sessionId,
@@ -566,9 +566,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         scope: command.decision.scope,
         resolved,
       });
-      return;
-    }
-    if (command.type === "stream_prompt") {
+    },
+    stream_prompt(command, startedAt) {
+      if (command.type !== "stream_prompt") return;
       activeStreamSessionIds.add(command.sessionId);
       logDaemonEvent("info", "stream", "start", {
         sessionId: command.sessionId,
@@ -621,10 +621,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           trace?.finish("failed", error instanceof Error ? error.message : String(error));
           await sendStreamChunk(
             command.sessionId,
-            {
-              type: "error",
-              message: error instanceof Error ? error.message : "流式调用失败",
-            },
+            { type: "error", message: error instanceof Error ? error.message : "流式调用失败" },
             seq++,
           );
           await sendStreamChunk(command.sessionId, { type: "done" }, seq++);
@@ -637,31 +634,11 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           });
         }
       })();
-      return;
-    }
-    if (isGovernanceTickCommand(command)) {
-      if (runningGovernanceJobs.has(command.governanceJobId)) return;
-      runningGovernanceJobs.add(command.governanceJobId);
-      logDaemonEvent("info", "cmd", "governance tick start", {
-        requestId: command.requestId,
-        governanceJobId: command.governanceJobId,
-        targetKind: command.targetKind,
-      });
-      void (async () => {
-        try {
-          await handleGovernanceTickDaemonCommand({
-            command,
-            invoke: buildGovernanceLlmInvoke(command),
-            sendResult,
-          });
-        } finally {
-          runningGovernanceJobs.delete(command.governanceJobId);
-        }
-      })();
-      return;
-    }
-    if (command.type === "execute") {
-      // 异步执行，不阻塞 poll 循环（保持心跳与并发）。
+    },
+    topic_governance_tick: handleGovernanceCommand,
+    thread_governance_tick: handleGovernanceCommand,
+    execute(command, startedAt) {
+      if (command.type !== "execute") return;
       if (runningJobs.has(command.jobId)) return;
       runningJobs.add(command.jobId);
       requestIdToRunningJob.set(command.requestId, command.jobId);
@@ -671,20 +648,14 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         bytes: safeJsonBytes(command.payload),
       });
       void (async () => {
-        const trace = createDaemonTrace({
-          type: "execute",
-          requestId: command.requestId,
-          jobId: command.jobId,
-        });
+        const trace = createDaemonTrace({ type: "execute", requestId: command.requestId, jobId: command.jobId });
         try {
           const raw = command.payload as Partial<RuntimeJobPayload> & { trajectory?: ExecutionTrajectoryStep[] };
           trace?.writePayload(raw);
           if (!raw.goal || !raw.subGoal || !raw.task || !raw.instance || !raw.runtimeEnv) {
             throw new Error("execute payload 不完整");
           }
-          if (!boundUserId) {
-            throw new Error("machine 尚未绑定用户");
-          }
+          if (!boundUserId) throw new Error("machine 尚未绑定用户");
           const payload: RuntimeJobPayload = {
             goal: raw.goal,
             subGoal: raw.subGoal,
@@ -695,12 +666,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           };
           const initialTrajectory = Array.isArray(raw.trajectory) ? raw.trajectory : [];
           const outcome = await runWithUserContext(boundUserId, () =>
-            executeRemoteJob({
-              jobId: command.jobId,
-              requestId: command.requestId,
-              payload,
-              initialTrajectory,
-            }),
+            executeRemoteJob({ jobId: command.jobId, requestId: command.requestId, payload, initialTrajectory }),
           );
           logDaemonEvent("info", "exec", "done", {
             requestId: command.requestId,
@@ -742,6 +708,30 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           requestIdToRunningJob.delete(command.requestId);
         }
       })();
+    },
+    cancel(command) {
+      if (command.type !== "cancel") return;
+      // 暂未实现真正的远程取消：daemon 不会中断 runningJobs，对应的 execute 仍会跑到自然终态。
+      // 这里只做显式记录，避免静默缺席；不可伪造 execute/failed 结果，否则会提前 resolve
+      // pendingExecutes 并触发 executeResultListener 把仍在运行的任务标记为 failed，
+      // 随后真实结果回传又会产生同 jobId 的双重结果与状态竞争。
+      logDaemonEvent("info", "cmd", "cancel unsupported", {
+        requestId: command.requestId,
+        jobId: command.jobId,
+        running: runningJobs.has(command.jobId),
+      });
+    },
+  };
+
+  async function handleCommand(command: MachineCommand) {
+    const startedAt = Date.now();
+    if ("requestId" in command) commandStartedAtByRequestId.set(command.requestId, startedAt);
+    if ("jobId" in command) commandStartedAtByJobId.set(command.jobId, startedAt);
+    logDaemonEvent("info", "cmd", "recv", commandLogFields(command));
+    logDaemonEvent("debug", "cmd", "payload keys", { ...commandLogFields(command), keys: commandPayloadKeys(command) });
+    const handler = commandHandlers[command.type];
+    if (handler) {
+      await handler(command, startedAt);
       return;
     }
     logDaemonEvent("info", "cmd", "ignored unsupported command", { type: command.type });

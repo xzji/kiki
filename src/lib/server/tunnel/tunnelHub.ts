@@ -153,6 +153,139 @@ type PendingTunnelRequest<T> = {
   timer: NodeJS.Timeout;
 };
 
+type RequestMachineCommandType =
+  | "discover_runtimes"
+  | "check_runtime"
+  | "select_directory"
+  | "skills_status"
+  | "skills_install"
+  | "daemon_service_status"
+  | "daemon_service_autostart"
+  | "run_prompt_json"
+  | "run_prompt_text";
+
+type RequestMachineResult = Extract<MachineResult, { type: RequestMachineCommandType }>;
+
+type RequestCommandResultMap = {
+  discover_runtimes: { items: RuntimeDiscoveryItem[]; workingDirectory: string };
+  check_runtime: RuntimeEnvironmentCheckResult;
+  select_directory: { path: string } | { canceled: true };
+  skills_status: KikiSkillsStatusPayload;
+  skills_install: KikiSkillsInstallPayload;
+  daemon_service_status: RemoteDaemonServiceStatus;
+  daemon_service_autostart: RemoteDaemonServiceStatus;
+  run_prompt_json: ClaudePromptJsonResult;
+  run_prompt_text: ClaudePromptJsonResult;
+};
+
+type MachineCommandDescriptor<TType extends RequestMachineCommandType> = {
+  requestIdPrefix: string;
+  defaultTimeoutMs: number;
+  timeoutMessage: string;
+  parseResult: (result: Extract<RequestMachineResult, { type: TType }>) => RequestCommandResultMap[TType];
+};
+
+function defineMachineCommand<TType extends RequestMachineCommandType>(
+  descriptor: MachineCommandDescriptor<TType>,
+) {
+  return descriptor;
+}
+
+export const MachineCommandRegistry = {
+  discover_runtimes: defineMachineCommand({
+    requestIdPrefix: "discover",
+    defaultTimeoutMs: 60_000,
+    timeoutMessage: "本机扫描超时。请确认 daemon 已全局安装并更新到最新版（npm i -g @kiki_agent/daemon@latest）且保持在线。",
+    parseResult(result) {
+      if (!result.ok || !result.items) throw new Error(result.error || "本机 Runtime 扫描失败");
+      return { items: result.items, workingDirectory: result.workingDirectory || "" };
+    },
+  }),
+  check_runtime: defineMachineCommand({
+    requestIdPrefix: "check",
+    defaultTimeoutMs: 90_000,
+    timeoutMessage: "本机 Runtime 检测超时，请确认 daemon 在线且为最新版",
+    parseResult(result) {
+      if (!result.result) throw new Error(result.error || "本机 Runtime 检测失败");
+      return result.result;
+    },
+  }),
+  select_directory: defineMachineCommand({
+    requestIdPrefix: "select-dir",
+    defaultTimeoutMs: 6 * 60 * 1000,
+    timeoutMessage: "本机目录选择超时。请确认 daemon 已更新到最新版并保持在线。",
+    parseResult(result) {
+      if (result.canceled) return { canceled: true };
+      if (!result.ok || !result.path) throw new Error(result.error || "本机目录选择失败");
+      return { path: result.path };
+    },
+  }),
+  skills_status: defineMachineCommand({
+    requestIdPrefix: "skills-status",
+    defaultTimeoutMs: 60_000,
+    timeoutMessage: "本机 KiKi 默认 skills 状态获取超时，请确认 daemon 已更新到最新版并保持在线",
+    parseResult(result) {
+      if (!result.ok || !result.result) throw new Error(result.error || "本机 KiKi 默认 skills 状态获取失败");
+      return result.result;
+    },
+  }),
+  skills_install: defineMachineCommand({
+    requestIdPrefix: "skills-install",
+    defaultTimeoutMs: 90_000,
+    timeoutMessage: "本机 KiKi 默认 skills 安装超时，请确认 daemon 已更新到最新版并保持在线",
+    parseResult(result) {
+      if (!result.ok || !result.result) throw new Error(result.error || "本机 KiKi 默认 skills 安装失败");
+      return result.result;
+    },
+  }),
+  daemon_service_status: defineMachineCommand({
+    requestIdPrefix: "daemon-service-status",
+    defaultTimeoutMs: 15_000,
+    timeoutMessage: "本机后台服务状态获取超时，请确认 daemon 已更新到最新版并保持在线",
+    parseResult(result) {
+      if (!result.ok || !result.result) throw new Error(result.error || "本机后台服务状态获取失败");
+      return result.result;
+    },
+  }),
+  daemon_service_autostart: defineMachineCommand({
+    requestIdPrefix: "daemon-service-autostart",
+    defaultTimeoutMs: 25_000,
+    timeoutMessage: "本机后台服务设置超时，请确认 daemon 已更新到最新版并保持在线",
+    parseResult(result) {
+      if (!result.ok || !result.result) throw new Error(result.error || "本机后台服务设置失败");
+      return result.result;
+    },
+  }),
+  run_prompt_json: defineMachineCommand({
+    requestIdPrefix: "json",
+    defaultTimeoutMs: 10 * 60 * 1000,
+    timeoutMessage: "本机 Claude JSON 调用超时，请确认 daemon 在线且为最新版",
+    parseResult(result) {
+      if (!result.ok || !result.result) throw new Error(result.error || "本机 Claude JSON 调用失败");
+      return result.result;
+    },
+  }),
+  run_prompt_text: defineMachineCommand({
+    requestIdPrefix: "text",
+    defaultTimeoutMs: 10 * 60 * 1000,
+    timeoutMessage: "本机 Claude 文本调用超时，请确认 daemon 在线且为最新版",
+    parseResult(result) {
+      if (!result.ok || !result.result) throw new Error(result.error || "本机 Claude 文本调用失败");
+      return result.result;
+    },
+  }),
+} satisfies {
+  [TType in RequestMachineCommandType]: MachineCommandDescriptor<TType>;
+};
+
+function isRequestMachineResult(result: MachineResult): result is RequestMachineResult {
+  return result.type in MachineCommandRegistry && "requestId" in result;
+}
+
+function createMachineRequestId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 type WaitingPoll = {
   resolve: (commands: MachineCommand[]) => void;
   timer: NodeJS.Timeout;
@@ -196,15 +329,7 @@ type TunnelHubState = {
   wsPreferredMachines: Set<string>;
   httpPollingMachines: Map<string, MachineHttpPollingPresence>;
   pendingExecutes: Map<string, PendingTunnelRequest<{ ok: boolean; error?: string }>>;
-  pendingDiscover: Map<string, PendingTunnelRequest<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>>;
-  pendingCheckRuntime: Map<string, PendingTunnelRequest<RuntimeEnvironmentCheckResult>>;
-  pendingSelectDirectory: Map<string, PendingTunnelRequest<{ path: string } | { canceled: true }>>;
-  pendingSkillsStatus: Map<string, PendingTunnelRequest<KikiSkillsStatusPayload>>;
-  pendingSkillsInstall: Map<string, PendingTunnelRequest<KikiSkillsInstallPayload>>;
-  pendingDaemonServiceStatus: Map<string, PendingTunnelRequest<RemoteDaemonServiceStatus>>;
-  pendingDaemonServiceAutostart: Map<string, PendingTunnelRequest<RemoteDaemonServiceStatus>>;
-  pendingRunPromptJson: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
-  pendingRunPromptText: Map<string, PendingTunnelRequest<ClaudePromptJsonResult>>;
+  pendingRequests: Map<string, PendingTunnelRequest<unknown>>;
   executeResultListener: ExecuteResultListener | null;
   executeProgressListener: ExecuteProgressListener | null;
   governanceTickResultListener: GovernanceTickResultListener | null;
@@ -225,20 +350,15 @@ function getState(): TunnelHubState {
       wsPreferredMachines: new Set(),
       httpPollingMachines: new Map(),
       pendingExecutes: new Map(),
-      pendingDiscover: new Map(),
-      pendingCheckRuntime: new Map(),
-      pendingSelectDirectory: new Map(),
-      pendingSkillsStatus: new Map(),
-      pendingSkillsInstall: new Map(),
-      pendingDaemonServiceStatus: new Map(),
-      pendingDaemonServiceAutostart: new Map(),
-      pendingRunPromptJson: new Map(),
-      pendingRunPromptText: new Map(),
+      pendingRequests: new Map(),
       executeResultListener: null,
       executeProgressListener: null,
       governanceTickResultListener: null,
       machineDisconnectListener: null,
     };
+  }
+  if (!globalRef[HUB_STATE_KEY].pendingRequests) {
+    globalRef[HUB_STATE_KEY].pendingRequests = new Map();
   }
   return globalRef[HUB_STATE_KEY];
 }
@@ -279,6 +399,31 @@ function enqueueCommand(machineId: string, command: MachineCommand) {
   const queue = state.queues.get(machineId) ?? [];
   queue.push(command);
   state.queues.set(machineId, queue);
+}
+
+function requestMachineCommand<TType extends RequestMachineCommandType>(input: {
+  state: TunnelHubState;
+  machineId: string;
+  type: TType;
+  timeoutMs?: number;
+  buildCommand: (requestId: string) => Extract<MachineCommand, { type: TType }>;
+}): Promise<RequestCommandResultMap[TType]> {
+  const descriptor = MachineCommandRegistry[input.type];
+  const requestId = createMachineRequestId(descriptor.requestIdPrefix);
+  const timeoutMs = input.timeoutMs ?? descriptor.defaultTimeoutMs;
+  return new Promise<RequestCommandResultMap[TType]>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      input.state.pendingRequests.delete(requestId);
+      reject(new Error(descriptor.timeoutMessage));
+    }, timeoutMs);
+    input.state.pendingRequests.set(requestId, {
+      machineId: input.machineId,
+      resolve: (value: unknown) => resolve(value as RequestCommandResultMap[TType]),
+      reject,
+      timer,
+    });
+    enqueueCommand(input.machineId, input.buildCommand(requestId));
+  });
 }
 
 export function registerMachineWsConnection(input: { machineId: string; userId: string; sender: MachineCommandSender }) {
@@ -374,116 +519,17 @@ export function submitMachineResult(result: MachineResult, context?: MachineResu
     state.governanceTickResultListener?.(result, context);
     return;
   }
-  if (result.type === "discover_runtimes") {
-    const pending = state.pendingDiscover.get(result.requestId);
+  if (isRequestMachineResult(result)) {
+    const pending = state.pendingRequests.get(result.requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
-    state.pendingDiscover.delete(result.requestId);
-    if (!result.ok || !result.items) {
-      pending.reject(new Error(result.error || "本机 Runtime 扫描失败"));
-      return;
+    state.pendingRequests.delete(result.requestId);
+    try {
+      const descriptor = MachineCommandRegistry[result.type] as MachineCommandDescriptor<typeof result.type>;
+      pending.resolve(descriptor.parseResult(result as never));
+    } catch (error) {
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
     }
-    pending.resolve({ items: result.items, workingDirectory: result.workingDirectory || "" });
-    return;
-  }
-  if (result.type === "check_runtime") {
-    const pending = state.pendingCheckRuntime.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingCheckRuntime.delete(result.requestId);
-    if (!result.result) {
-      pending.reject(new Error(result.error || "本机 Runtime 检测失败"));
-      return;
-    }
-    pending.resolve(result.result);
-    return;
-  }
-  if (result.type === "select_directory") {
-    const pending = state.pendingSelectDirectory.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingSelectDirectory.delete(result.requestId);
-    if (result.canceled) {
-      pending.resolve({ canceled: true });
-      return;
-    }
-    if (!result.ok || !result.path) {
-      pending.reject(new Error(result.error || "本机目录选择失败"));
-      return;
-    }
-    pending.resolve({ path: result.path });
-    return;
-  }
-  if (result.type === "skills_status") {
-    const pending = state.pendingSkillsStatus.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingSkillsStatus.delete(result.requestId);
-    if (!result.ok || !result.result) {
-      pending.reject(new Error(result.error || "本机 KiKi 默认 skills 状态获取失败"));
-      return;
-    }
-    pending.resolve(result.result);
-    return;
-  }
-  if (result.type === "skills_install") {
-    const pending = state.pendingSkillsInstall.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingSkillsInstall.delete(result.requestId);
-    if (!result.ok || !result.result) {
-      pending.reject(new Error(result.error || "本机 KiKi 默认 skills 安装失败"));
-      return;
-    }
-    pending.resolve(result.result);
-    return;
-  }
-  if (result.type === "daemon_service_status") {
-    const pending = state.pendingDaemonServiceStatus.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingDaemonServiceStatus.delete(result.requestId);
-    if (!result.ok || !result.result) {
-      pending.reject(new Error(result.error || "本机后台服务状态获取失败"));
-      return;
-    }
-    pending.resolve(result.result);
-    return;
-  }
-  if (result.type === "daemon_service_autostart") {
-    const pending = state.pendingDaemonServiceAutostart.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingDaemonServiceAutostart.delete(result.requestId);
-    if (!result.ok || !result.result) {
-      pending.reject(new Error(result.error || "本机后台服务设置失败"));
-      return;
-    }
-    pending.resolve(result.result);
-    return;
-  }
-  if (result.type === "run_prompt_json") {
-    const pending = state.pendingRunPromptJson.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingRunPromptJson.delete(result.requestId);
-    if (!result.ok || !result.result) {
-      pending.reject(new Error(result.error || "本机 Claude JSON 调用失败"));
-      return;
-    }
-    pending.resolve(result.result);
-    return;
-  }
-  if (result.type === "run_prompt_text") {
-    const pending = state.pendingRunPromptText.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pendingRunPromptText.delete(result.requestId);
-    if (!result.ok || !result.result) {
-      pending.reject(new Error(result.error || "本机 Claude 文本调用失败"));
-      return;
-    }
-    pending.resolve(result.result);
   }
 }
 
@@ -534,6 +580,12 @@ export function notifyMachineOffline(machineId: string) {
     state.pendingExecutes.delete(jobId);
     pending.reject(new Error(`machine ${machineId} 离线`));
   });
+  Array.from(state.pendingRequests.entries()).forEach(([requestId, pending]) => {
+    if (pending.machineId !== machineId) return;
+    clearTimeout(pending.timer);
+    state.pendingRequests.delete(requestId);
+    pending.reject(new Error(`machine ${machineId} 离线`));
+  });
   state.queues.delete(machineId);
   state.machineDisconnectListener?.(machineId);
 }
@@ -566,117 +618,88 @@ export function getTunnelHub() {
       enqueueCommand(input.machineId, input.command);
     },
     requestDiscoverRuntimes(input: { machineId: string; timeoutMs?: number }) {
-      const requestId = `discover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 60_000;
-      return new Promise<{ items: RuntimeDiscoveryItem[]; workingDirectory: string }>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingDiscover.delete(requestId);
-          reject(
-            new Error("本机扫描超时。请确认 daemon 已全局安装并更新到最新版（npm i -g @kiki_agent/daemon@latest）且保持在线。"),
-          );
-        }, timeoutMs);
-        state.pendingDiscover.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "discover_runtimes", requestId });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "discover_runtimes",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "discover_runtimes", requestId }),
       });
     },
     requestCheckRuntime(input: { machineId: string; payload: RuntimeEnvironmentCheckInput; timeoutMs?: number }) {
-      const requestId = `check-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 90_000;
-      return new Promise<RuntimeEnvironmentCheckResult>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingCheckRuntime.delete(requestId);
-          reject(new Error("本机 Runtime 检测超时，请确认 daemon 在线且为最新版"));
-        }, timeoutMs);
-        state.pendingCheckRuntime.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "check_runtime", requestId, payload: input.payload });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "check_runtime",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "check_runtime", requestId, payload: input.payload }),
       });
     },
     requestSelectDirectory(input: { machineId: string; timeoutMs?: number }) {
-      const requestId = `select-dir-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 6 * 60 * 1000;
-      return new Promise<{ path: string } | { canceled: true }>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingSelectDirectory.delete(requestId);
-          reject(new Error("本机目录选择超时。请确认 daemon 已更新到最新版并保持在线。"));
-        }, timeoutMs);
-        state.pendingSelectDirectory.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "select_directory", requestId });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "select_directory",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "select_directory", requestId }),
       });
     },
     requestKikiSkillsStatus(input: { machineId: string; timeoutMs?: number }) {
-      const requestId = `skills-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 60_000;
-      return new Promise<KikiSkillsStatusPayload>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingSkillsStatus.delete(requestId);
-          reject(new Error("本机 KiKi 默认 skills 状态获取超时，请确认 daemon 已更新到最新版并保持在线"));
-        }, timeoutMs);
-        state.pendingSkillsStatus.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "skills_status", requestId });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "skills_status",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "skills_status", requestId }),
       });
     },
     requestInstallKikiSkills(input: { machineId: string; timeoutMs?: number }) {
-      const requestId = `skills-install-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 90_000;
-      return new Promise<KikiSkillsInstallPayload>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingSkillsInstall.delete(requestId);
-          reject(new Error("本机 KiKi 默认 skills 安装超时，请确认 daemon 已更新到最新版并保持在线"));
-        }, timeoutMs);
-        state.pendingSkillsInstall.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "skills_install", requestId });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "skills_install",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "skills_install", requestId }),
       });
     },
     requestDaemonServiceStatus(input: { machineId: string; timeoutMs?: number }) {
-      const requestId = `daemon-service-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 15_000;
-      return new Promise<RemoteDaemonServiceStatus>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingDaemonServiceStatus.delete(requestId);
-          reject(new Error("本机后台服务状态获取超时，请确认 daemon 已更新到最新版并保持在线"));
-        }, timeoutMs);
-        state.pendingDaemonServiceStatus.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "daemon_service_status", requestId });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "daemon_service_status",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "daemon_service_status", requestId }),
       });
     },
     requestDaemonServiceAutostart(input: { machineId: string; enabled: boolean; timeoutMs?: number }) {
-      const requestId = `daemon-service-autostart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 25_000;
-      return new Promise<RemoteDaemonServiceStatus>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingDaemonServiceAutostart.delete(requestId);
-          reject(new Error("本机后台服务设置超时，请确认 daemon 已更新到最新版并保持在线"));
-        }, timeoutMs);
-        state.pendingDaemonServiceAutostart.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, {
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "daemon_service_autostart",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({
           type: "daemon_service_autostart",
           requestId,
           enabled: input.enabled,
-        });
+        }),
       });
     },
     requestRunPromptJson(input: { machineId: string; payload: RemotePromptJsonPayload; timeoutMs?: number }) {
-      const requestId = `json-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 10 * 60 * 1000;
-      return new Promise<ClaudePromptJsonResult>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingRunPromptJson.delete(requestId);
-          reject(new Error("本机 Claude JSON 调用超时，请确认 daemon 在线且为最新版"));
-        }, timeoutMs);
-        state.pendingRunPromptJson.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "run_prompt_json", requestId, payload: input.payload });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "run_prompt_json",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "run_prompt_json", requestId, payload: input.payload }),
       });
     },
     requestRunPromptText(input: { machineId: string; payload: RemotePromptJsonPayload; timeoutMs?: number }) {
-      const requestId = `text-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const timeoutMs = input.timeoutMs ?? 10 * 60 * 1000;
-      return new Promise<ClaudePromptJsonResult>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          state.pendingRunPromptText.delete(requestId);
-          reject(new Error("本机 Claude 文本调用超时，请确认 daemon 在线且为最新版"));
-        }, timeoutMs);
-        state.pendingRunPromptText.set(requestId, { machineId: input.machineId, resolve, reject, timer });
-        enqueueCommand(input.machineId, { type: "run_prompt_text", requestId, payload: input.payload });
+      return requestMachineCommand({
+        state,
+        machineId: input.machineId,
+        type: "run_prompt_text",
+        timeoutMs: input.timeoutMs,
+        buildCommand: (requestId) => ({ type: "run_prompt_text", requestId, payload: input.payload }),
       });
     },
     sendStreamPrompt(input: { machineId: string; sessionId: string; payload: RemoteStreamPromptPayload }) {
