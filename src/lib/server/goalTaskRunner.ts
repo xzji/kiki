@@ -107,6 +107,7 @@ import {
   tryParseTaskRunnerResult,
   type TaskParserContext,
 } from "./taskResultParser";
+import type { TaskClaudePort } from "./taskClaudePort";
 
 type RunGoalTaskInput = {
   requestId: string;
@@ -1172,6 +1173,18 @@ async function runClaudePrompt(input: RunGoalTaskInput, message: string, permiss
   return result.finalMessage;
 }
 
+/**
+ * 把 runClaudePromptWithFallback 包成 TaskClaudePort。执行配置(runtimeEnv / 工作目录
+ * / signal / agentRunId)与副作用(telemetry / agent event / tool-permission blocker)
+ * 都被闭包绑定在 input 上，编排层只见 runClaude(message, permissionMode)。
+ * Task #3 提升 repair/acceptance 链时由顶层构造并注入。
+ */
+function createTaskClaudePort(input: RunGoalTaskInput): TaskClaudePort {
+  return {
+    runClaude: (message, permissionMode) => runClaudePromptWithFallback(input, message, permissionMode),
+  };
+}
+
 function buildUnfinishedResult(input: RunGoalTaskInput, options: {
   currentResult: ParsedTaskRunnerResult | null;
   reason: string;
@@ -1443,7 +1456,7 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   parseError?: string;
   runtime: TaskAcceptanceRuntimeState;
   appendTrajectory: (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => ExecutionTrajectoryStep[];
-}) {
+}, port: TaskClaudePort) {
   let rawOutput = state.rawOutput;
   let parsedResult = state.parsedResult;
   let parseError = state.parseError;
@@ -1496,7 +1509,7 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
           parsedResult,
           report: lastReport,
         });
-    const repairedOutput = await runClaudePromptWithFallback(input, repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
+    const repairedOutput = await port.runClaude(repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
     rawOutput = repairedOutput.finalMessage;
     let parsed = tryParseTaskRunnerResult(taskParserCtx(input), rawOutput, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
     if (!parsed.result && repairedOutput.fallbackMessage.trim()) {
@@ -1541,14 +1554,14 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
   parseError?: string;
   trajectory: ExecutionTrajectoryStep[];
   appendTrajectory: (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => ExecutionTrajectoryStep[];
-}): Promise<TaskRunAttemptResult> {
+}, port: TaskClaudePort): Promise<TaskRunAttemptResult> {
   const runtime: TaskAcceptanceRuntimeState = {
     localValidationReports: [],
     acceptanceReports: [],
     repairAttempts: [],
   };
 
-  let local = await runLocalRepairCycle(input, { ...state, runtime });
+  let local = await runLocalRepairCycle(input, { ...state, runtime }, port);
   if (!local.localValidationReport.passed || !local.parsedResult) {
     const recovered = buildWorkspaceArtifactRecoveryResult(input, {
       reason: "本地校验失败，任务结果 JSON 未通过解析，但检测到本地文件产物。",
@@ -1623,7 +1636,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       localValidationReport: local.localValidationReport,
       currentResult,
     });
-    const judgeRaw = await runClaudePrompt(input, judgePrompt, "readonly");
+    const judgeRaw = (await port.runClaude(judgePrompt, "readonly")).finalMessage;
     const acceptanceReport = parseAcceptanceReport(judgeRaw);
     runtime.acceptanceReports.push(acceptanceReport);
     appendGoalTaskAgentEvent(input, "decision", {
@@ -1689,7 +1702,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       currentResult,
       acceptanceReport,
     });
-    const repairedOutput = await runClaudePromptWithFallback(input, repairPrompt, acceptanceReport.repairStrategy.allowNewToolCalls ? input.runtimeEnv.permissionMode : "readonly");
+    const repairedOutput = await port.runClaude(repairPrompt, acceptanceReport.repairStrategy.allowNewToolCalls ? input.runtimeEnv.permissionMode : "readonly");
     let repairedRaw = repairedOutput.finalMessage;
     let repaired = tryParseTaskRunnerResult(taskParserCtx(input), repairedRaw, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
     if (!repaired.result && repairedOutput.fallbackMessage.trim()) {
@@ -1715,7 +1728,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
       parseError: repaired.error,
       runtime,
       appendTrajectory: state.appendTrajectory,
-    });
+    }, port);
     const runtimeAttempt = runtime.repairAttempts.findLast((item) => item.type === "semantic_repair" && item.attempt === attempt);
     if (runtimeAttempt) {
       runtimeAttempt.finishedAt = new Date().toISOString();
@@ -2300,7 +2313,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     parseError: parsed.error,
     trajectory,
     appendTrajectory,
-  });
+  }, createTaskClaudePort(input));
   result = attachAgentRunPlan(result, agentRunPlan);
   const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
   const webapp = extractWebAppSpec(finalMessage);
