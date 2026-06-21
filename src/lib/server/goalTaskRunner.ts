@@ -263,6 +263,7 @@ async function judgeMissingFieldsWithClaude(
   input: RunGoalTaskInput,
   candidates: TaskReadinessInfoItem[],
   feedback: string,
+  port: TaskClaudePort,
 ): Promise<ReadinessJudgeVerdict[]> {
   if (!candidates.length || !feedback) return [];
   const fieldsBlock = candidates
@@ -287,7 +288,7 @@ async function judgeMissingFieldsWithClaude(
   ].join("\n");
   let raw = "";
   try {
-    raw = await runClaudePrompt(input, judgePrompt, "readonly");
+    raw = (await port.runClaude(judgePrompt, "readonly")).finalMessage;
   } catch (error) {
     appendGoalLog({
       requestId: input.requestId,
@@ -317,7 +318,7 @@ async function judgeMissingFieldsWithClaude(
   }
 }
 
-async function buildTaskReadinessCheckWithJudge(input: RunGoalTaskInput): Promise<TaskReadinessCheck> {
+async function buildTaskReadinessCheckWithJudge(input: RunGoalTaskInput, port: TaskClaudePort): Promise<TaskReadinessCheck> {
   const dependencyContextText = input.executionContext ? renderDependencySection(input.executionContext) : "";
   const baseReadiness = buildTaskReadinessCheck({
     ...input,
@@ -333,7 +334,7 @@ async function buildTaskReadinessCheckWithJudge(input: RunGoalTaskInput): Promis
   // 规则未判 missing 或用户没有反馈，直接走规则结论，零额外成本。
   if (!ruleMissing.length || !feedback) return baseReadiness;
 
-  const verdicts = await judgeMissingFieldsWithClaude(input, ruleMissing, feedback);
+  const verdicts = await judgeMissingFieldsWithClaude(input, ruleMissing, feedback, port);
   if (!verdicts.length) return baseReadiness;
 
   const verdictMap = new Map(verdicts.map((v) => [v.fieldId, v]));
@@ -413,7 +414,7 @@ function buildReadinessBlockedTaskResult(input: RunGoalTaskInput, readiness: Tas
   };
 }
 
-async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck): Promise<ParsedTaskRunnerResult> {
+async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: TaskReadinessCheck, port: TaskClaudePort): Promise<ParsedTaskRunnerResult> {
   const firstMissing = readiness.missingUserInfo[0];
   const hasUserMissing = readiness.missingUserInfo.some((item) => item.source === "user");
   const question =
@@ -424,7 +425,7 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
       : `请补充以下必要信息：${readiness.missingUserInfo.map((item) => item.label).join("、")}。`;
   const shouldGenerateOptions = readiness.missingUserInfo.some((item) => item.source === "user");
   const readinessWithOptions = shouldGenerateOptions
-    ? await generateOptionsForReadinessItems(input, readiness, question)
+    ? await generateOptionsForReadinessItems(input, readiness, question, [], port)
     : readiness;
   const fields = compileMissingFieldQuestions({ readiness: readinessWithOptions, fallbackQuestion: question });
   const options = singleFieldOptions(fields);
@@ -548,10 +549,10 @@ function chooseReadinessOptions(input: {
   return input.generatedOptions;
 }
 
-async function runOptionGenerationPrompt(input: RunGoalTaskInput, context: UserConfirmationOptionsContext): Promise<UserConfirmationOptionsResult | null> {
+async function runOptionGenerationPrompt(input: RunGoalTaskInput, context: UserConfirmationOptionsContext, port: TaskClaudePort): Promise<UserConfirmationOptionsResult | null> {
   let raw = "";
   try {
-    raw = await runClaudePrompt(input, buildUserConfirmationOptionsPrompt(context), "readonly");
+    raw = (await port.runClaude(buildUserConfirmationOptionsPrompt(context), "readonly")).finalMessage;
     const result = parseUserConfirmationOptions(raw);
     appendGoalLog({
       requestId: input.requestId,
@@ -583,15 +584,14 @@ async function runOptionGenerationPrompt(input: RunGoalTaskInput, context: UserC
     });
     let repairRaw = "";
     try {
-      repairRaw = await runClaudePrompt(
-        input,
+      repairRaw = (await port.runClaude(
         buildUserConfirmationOptionsRepairPrompt({
           context,
           rawOutput: truncateForLog(raw),
           errorSummary: firstError,
         }),
         "readonly",
-      );
+      )).finalMessage;
       return parseUserConfirmationOptions(repairRaw);
     } catch (repairError) {
       appendGoalLog({
@@ -653,7 +653,7 @@ function applyGeneratedOptionsToReadiness(
   return refreshReadinessCollections(items, readiness.generatedAt, readiness.summary);
 }
 
-async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readiness: TaskReadinessCheck, question: string, seedOptions: string[] = []) {
+async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readiness: TaskReadinessCheck, question: string, seedOptions: string[], port: TaskClaudePort) {
   const result = await runOptionGenerationPrompt(
     input,
     buildOptionGenerationContext(input, {
@@ -661,6 +661,7 @@ async function generateOptionsForReadinessItems(input: RunGoalTaskInput, readine
       missingItems: readiness.missingUserInfo,
       seedOptions,
     }),
+    port,
   );
   return applyGeneratedOptionsToReadiness(readiness, result, { question, seedOptions });
 }
@@ -688,6 +689,7 @@ function readinessItemFromField(field: MissingFieldQuestion): TaskReadinessInfoI
 async function enrichAwaitingUserFieldOptions(
   input: RunGoalTaskInput,
   result: ParsedTaskRunnerResult,
+  port: TaskClaudePort,
 ): Promise<ParsedTaskRunnerResult> {
   if (!result.awaitingUser || !result.interactionRequirement.fields?.length) return result;
   const fields = result.interactionRequirement.fields;
@@ -701,6 +703,7 @@ async function enrichAwaitingUserFieldOptions(
       missingItems: fieldsToGenerate.map(readinessItemFromField),
       seedOptions: result.interactionRequirement.options ?? [],
     }),
+    port,
   );
   if (!generated) return result;
 
@@ -1168,11 +1171,6 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
   };
 }
 
-async function runClaudePrompt(input: RunGoalTaskInput, message: string, permissionMode: RuntimeEnvironment["permissionMode"]) {
-  const result = await runClaudePromptWithFallback(input, message, permissionMode);
-  return result.finalMessage;
-}
-
 /**
  * 把 runClaudePromptWithFallback 包成 TaskClaudePort。执行配置(runtimeEnv / 工作目录
  * / signal / agentRunId)与副作用(telemetry / agent event / tool-permission blocker)
@@ -1373,12 +1371,12 @@ function buildWorkspaceArtifactRecoveryResult(input: RunGoalTaskInput, options: 
   };
 }
 
-async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport, runtime: TaskAcceptanceRuntimeState) {
+async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: ParsedTaskRunnerResult, report: AcceptanceReport, runtime: TaskAcceptanceRuntimeState, port: TaskClaudePort) {
   const userBlockers = uniqueStrings(report.userBlockers.length ? report.userBlockers : [report.summary]);
   const reason = userBlockers.length ? userBlockers.join("；") : report.summary;
   const readiness = buildReadinessFromUserBlockers(userBlockers, reason);
   const question = userBlockers.length > 1 ? `请一次性补充以下信息：${userBlockers.map((item, index) => `${index + 1}. ${item}`).join("；")}` : reason;
-  const readinessWithOptions = readiness ? await generateOptionsForReadinessItems(input, readiness, question, userBlockers) : null;
+  const readinessWithOptions = readiness ? await generateOptionsForReadinessItems(input, readiness, question, userBlockers, port) : null;
   const fields = compileMissingFieldQuestions({ readiness: readinessWithOptions, fallbackQuestion: question });
   const options = singleFieldOptions(fields);
   const suggestedActions = fieldsSuggestedActions(fields);
@@ -1601,6 +1599,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
   let currentResult = await enrichAwaitingUserFieldOptions(
     input,
     resolveAwaitingUser(awaitingCtx(input), local.parsedResult),
+    port,
   );
   if (currentResult.awaitingUser) {
     return {
@@ -1665,7 +1664,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     }
 
     if (acceptanceReport.verdict === "needs_user") {
-      const userResult = await buildNeedsUserFromAcceptance(input, currentResult, acceptanceReport, runtime);
+      const userResult = await buildNeedsUserFromAcceptance(input, currentResult, acceptanceReport, runtime, port);
       return { ...userResult, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceReport, acceptanceRuntime: runtime };
     }
 
@@ -1753,6 +1752,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     currentResult = await enrichAwaitingUserFieldOptions(
       input,
       resolveAwaitingUser(awaitingCtx(input), local.parsedResult),
+      port,
     );
     if (currentResult.awaitingUser) {
       return {
@@ -1775,7 +1775,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
   return { ...failed, rawOutput: local.rawOutput, trajectory: state.trajectory, localValidationReport: local.localValidationReport, acceptanceRuntime: runtime };
 }
 
-async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
+async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, port: TaskClaudePort) {
   let finalMessage = "";
   let fallbackFinalMessage = "";
   let pendingAssistantProcessOutput = "";
@@ -2313,7 +2313,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     parseError: parsed.error,
     trajectory,
     appendTrajectory,
-  }, createTaskClaudePort(input));
+  }, port);
   result = attachAgentRunPlan(result, agentRunPlan);
   const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
   const webapp = extractWebAppSpec(finalMessage);
@@ -2574,11 +2574,14 @@ export async function runGoalTask(input: RunGoalTaskInput): Promise<GoalTaskOutc
     resumeContext: tracedInput.resumeContext,
   });
   const enhancedInput: RunGoalTaskInput = { ...tracedInput, executionContext };
+  // 顶层构造一次端口,贯穿 readiness / executeOnce / completeWithAcceptance / repair。
+  // 注入假端口即可端到端驱动编排链,不必碰真实 Claude。
+  const claudePort = createTaskClaudePort(enhancedInput);
   const contextReadiness = readinessFromContext(executionContext);
   const readiness =
     executionContext.readiness.state === "blocked"
       ? contextReadiness
-      : await buildTaskReadinessCheckWithJudge(enhancedInput);
+      : await buildTaskReadinessCheckWithJudge(enhancedInput, claudePort);
   if (readiness.status === "blocked") {
     const trajectory = [
       createTrajectoryStep({
@@ -2598,7 +2601,7 @@ export async function runGoalTask(input: RunGoalTaskInput): Promise<GoalTaskOutc
         endedAt: new Date().toISOString(),
       }),
     ];
-    const blockedResult = normalizeParsedAwaitingResult(await buildReadinessBlockedResult(enhancedInput, readiness));
+    const blockedResult = normalizeParsedAwaitingResult(await buildReadinessBlockedResult(enhancedInput, readiness, claudePort));
     const blocker = createExecutionBlocker(enhancedInput, blockedResult, trajectory);
     const result = {
       ...blockedResult,
@@ -2696,7 +2699,7 @@ export async function runGoalTask(input: RunGoalTaskInput): Promise<GoalTaskOutc
       throw new Error("任务已被中止（超时或 lease 失效），停止后续执行");
     }
     try {
-      const result = normalizeParsedAwaitingResult(await executeOnce({ ...enhancedInput, attemptCount }));
+      const result = normalizeParsedAwaitingResult(await executeOnce({ ...enhancedInput, attemptCount }, claudePort));
       const notificationDecision = judgeTaskResult({
         goal: input.goal,
         subGoal: input.subGoal,
