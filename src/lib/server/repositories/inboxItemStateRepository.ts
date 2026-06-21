@@ -8,7 +8,7 @@
 
 import { getDatabase } from "@/lib/server/db/client";
 import { formatMessageTime } from "@/lib/date";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import type { Goal, InboxItem, InboxItemState, InboxItemStatus } from "@/types/kiki";
 
 type InboxItemStateRow = {
@@ -115,7 +115,7 @@ export function listInboxItemStates(): InboxItemState[] {
 }
 
 export function listInboxItemsFromDeliveredEventsWithStats(limit = 1000): InboxDeliveredEventsResult {
-  const goals = readGoalsSnapshot([]);
+  const goals = readComposedGoalsSnapshot([]);
   const instancesById = buildInstanceIndex(goals);
   const rows = getDatabase()
     .prepare(

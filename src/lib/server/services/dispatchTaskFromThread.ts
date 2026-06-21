@@ -154,6 +154,7 @@ function buildTaskCommandInput(draft: TaskDraft, taskSpec?: TaskSpec) {
 
 function findTopicTitle(topicId: string) {
   const normalizedTopicId = normalizeGoalId(topicId);
+  // allow-raw-goals-snapshot: 仅读取 goal.title 结构字段，不读取 instance 执行态。
   return readGoalsSnapshot([]).find((goal) => normalizeGoalId(goal.id) === normalizedTopicId)?.title;
 }
 

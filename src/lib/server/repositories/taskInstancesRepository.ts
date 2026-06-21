@@ -18,7 +18,7 @@
  * service 走原 Goal 路径，envelope 双写策略覆盖。
  */
 
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 
 export type ListRecentByThreadIdOptions = {
@@ -55,7 +55,7 @@ export function listRecentByThreadId(
   const nowFn = options.now ?? (() => new Date());
   const cutoffMs = nowFn().getTime() - sinceDays * MS_PER_DAY;
 
-  const goals = readGoalsSnapshot([]);
+  const goals = readComposedGoalsSnapshot([]);
   const collected: TaskInstance[] = [];
 
   for (const goal of goals as Goal[]) {

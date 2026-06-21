@@ -6,6 +6,7 @@ import {
   cancelRuntimeJobByTaskRun,
   listRuntimeJobsByStatuses,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import { readGoalsSnapshot, readRuntimeEnvironmentsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { transitionTaskInstanceProjection } from "@/lib/server/services/goalRuntimeService";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
@@ -39,6 +40,18 @@ function selectLocalRuntimeEnv(): RuntimeEnvironment | null {
   );
 }
 
+/**
+ * 读取「以 runtime_jobs 为权威」的目标实例。
+ *
+ * 调用方必须传入 readComposedGoalsSnapshot 的结果而非裸读快照：goals 投影会滞后
+ * （job 已 completed 但投影里实例仍是 pending/paused）。readComposedGoalsSnapshot
+ * 用 runtime_jobs 的权威状态覆盖实例 status，与 scheduler / governance / feedback 等链路
+ * 统一到同一读取入口。
+ *
+ * 这样 collectInstances 直接信任合成后的 instance.status 即可：completed job 会被合成为
+ * status=completed，自然落在 ["pending","in_progress"] / ["paused"] 目标集之外，
+ * 不会被 pause-all / resume-all 误纳入（避免把已完成的一次性任务重新拉起）。
+ */
 function collectInstances(goals: Goal[], statuses: TaskInstance["status"][]): LocatedInstance[] {
   const result: LocatedInstance[] = [];
   for (const goal of goals) {
@@ -91,6 +104,7 @@ function pauseInstance(located: LocatedInstance) {
     },
   });
 
+  // allow-raw-goals-snapshot: pause 单实例投影写路径，用 raw projection 作为 transition 基准。
   const goals = readGoalsSnapshot([]);
   transitionTaskInstanceProjection({
     goals,
@@ -109,7 +123,7 @@ function pauseInstance(located: LocatedInstance) {
 
 export function pauseAllTaskExecution() {
   setDispatchPaused(true);
-  const goals = readGoalsSnapshot([]);
+  const goals = readComposedGoalsSnapshot([]);
   const targets = collectInstances(goals, ["pending", "in_progress"]);
   let pausedCount = 0;
   for (const located of targets) {
@@ -138,7 +152,7 @@ export function resumeAllTaskExecution() {
     return { resumedCount: 0, skippedCount: 0, dispatchPaused: false, reason: "当前本地 Runtime 离线" };
   }
 
-  const goals = readGoalsSnapshot([]);
+  const goals = readComposedGoalsSnapshot([]);
   const targets = collectInstances(goals, ["paused"]);
   let resumedCount = 0;
   let skippedCount = 0;

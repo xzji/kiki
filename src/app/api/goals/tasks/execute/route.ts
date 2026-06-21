@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshotMeta } from "@/lib/server/runtime/instanceComposition";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -44,7 +44,7 @@ async function POSTHandler(request: NextRequest) {
     if (result.outcome === "blocked_config") {
       return NextResponse.json({ outcome: result.outcome, reason: result.reason, taskInstanceId: result.taskInstanceId }, { status: 409 });
     }
-    const goalsSnapshot = readGoalsSnapshotMeta([]);
+    const goalsSnapshot = readComposedGoalsSnapshotMeta([]);
     const goals = goalsSnapshot.value;
 
     if (result.outcome === "awaiting_user") {
@@ -68,6 +68,17 @@ async function POSTHandler(request: NextRequest) {
         goals,
         revision: goalsSnapshot.revision,
         queued: true,
+      });
+    }
+
+    if (result.outcome === "already_completed") {
+      return NextResponse.json({
+        outcome: result.outcome,
+        requestId: result.requestId ?? requestId,
+        taskInstanceId: result.taskInstanceId,
+        goals,
+        revision: goalsSnapshot.revision,
+        queued: false,
       });
     }
 

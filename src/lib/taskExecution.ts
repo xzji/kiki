@@ -79,6 +79,12 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       return;
     }
 
+    if (run.outcome === "already_completed") {
+      useGoalStore.getState().removeOptimisticTaskRun(optimisticRun.overlay.id);
+      await syncGoalsFromRuntimeSnapshot();
+      return;
+    }
+
     if (run.outcome === "already_running" || run.taskInstanceId !== optimisticRun.serverInstance.id) {
       useGoalStore.getState().removeOptimisticTaskRun(optimisticRun.overlay.id);
       await syncGoalsFromRuntimeSnapshot();

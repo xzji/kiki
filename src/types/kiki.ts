@@ -303,6 +303,10 @@ export type TaskInstanceExecutionState = {
   phase: TaskExecutionPhase;
   status: TaskInstanceStatus;
   startedAt?: string;
+  /** 累计纯执行时长（不含暂停/排队），毫秒。 */
+  activeDurationMs?: number;
+  /** 当前执行片段开始时间；仅 status 为 in_progress 时有值。 */
+  activeSince?: string;
   finishedAt?: string;
   lastUpdatedAt?: string;
   waitingReason?: string;
@@ -665,6 +669,7 @@ export type ConversationMessage =
           } | null;
           patch?: unknown;
           revisionHint?: string;
+          applyMode?: "redo_now" | "next_time";
         };
         userMessage: string;
         quotedMessage?: ConversationMessageQuote;

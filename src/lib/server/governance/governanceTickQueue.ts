@@ -24,7 +24,7 @@ import {
   type GovernanceTickJobRecord,
   type GovernanceTickTargetKind,
 } from "@/lib/server/repositories/governanceTickJobsRepository";
-import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedTopicsSnapshot } from "@/lib/server/runtime/composedTopicsView";
 import { isThreadDue, selectDueThreads } from "@/lib/server/governance/threadScheduler";
 import { isTopicDue } from "@/lib/server/governance/topicScheduler";
 import {
@@ -114,7 +114,7 @@ export function enqueueManualGovernanceTickJob(input: {
   now?: Date;
 }) {
   const now = input.now ?? new Date();
-  const topics = readTopicsSnapshot([]);
+  const topics = readComposedTopicsSnapshot([]);
 
   if (input.targetKind === "topic") {
     const topic = topics.find((item) => item.id === input.entityId);
@@ -195,7 +195,7 @@ export function enqueueManualGovernanceTickJob(input: {
 
 export function enqueueDueGovernanceTickJobs(input: { now?: Date; userId?: string } = {}) {
   const now = input.now ?? new Date();
-  const topics = readTopicsSnapshot([]);
+  const topics = readComposedTopicsSnapshot([]);
   const jobs: GovernanceTickJobRecord[] = [];
 
   for (const topic of topics) {

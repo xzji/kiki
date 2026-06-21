@@ -33,6 +33,8 @@ export type TaskMonitorRow = {
   result?: "ok" | "fail";
   createdAt: string;
   startedAt?: string;
+  activeDurationMs?: number;
+  activeSince?: string;
   finishedAt?: string;
   /** 治理循环额外信息：积压 tick 数量。 */
   backlogCount?: number;
@@ -92,6 +94,8 @@ export function selectTaskMonitorRows(
             result: monitorResult(instance, group),
             createdAt: instance.createdAt,
             startedAt: instance.execution?.startedAt,
+            activeDurationMs: instance.execution?.activeDurationMs,
+            activeSince: instance.execution?.activeSince,
             finishedAt: instance.execution?.finishedAt,
           });
         }

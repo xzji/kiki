@@ -102,6 +102,40 @@ export function getGoalEventsSince(input: { fromId?: number; limit?: number }) {
   return rows.map((row) => mapRow(row));
 }
 
+const INSTANCE_DURATION_EVENT_KINDS = [
+  "instance.status_changed",
+  "instance.timeout_paused",
+  "job.status_changed",
+] as const satisfies readonly GoalEventKind[];
+
+export function getGoalEventsByInstanceIds(instanceIds: string[]) {
+  if (instanceIds.length === 0) return new Map<string, GoalEventRecord[]>();
+  const db = getDatabase();
+  const normalizedIds = Array.from(new Set(instanceIds.map((id) => normalizeInstanceId(id))));
+  const placeholders = normalizedIds.map(() => "?").join(", ");
+  const kindPlaceholders = INSTANCE_DURATION_EVENT_KINDS.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `
+        SELECT * FROM goal_event_log
+        WHERE instance_id IN (${placeholders})
+          AND kind IN (${kindPlaceholders})
+        ORDER BY id ASC
+      `,
+    )
+    .all(...normalizedIds, ...INSTANCE_DURATION_EVENT_KINDS) as GoalEventLogRow[];
+  const grouped = new Map<string, GoalEventRecord[]>();
+  for (const row of rows) {
+    if (!row.instance_id) continue;
+    const instanceId = normalizeInstanceId(row.instance_id);
+    const mapped = mapRow(row);
+    const bucket = grouped.get(instanceId);
+    if (bucket) bucket.push(mapped);
+    else grouped.set(instanceId, [mapped]);
+  }
+  return grouped;
+}
+
 export function getLatestGoalEventId(goalId: string) {
   const db = getDatabase();
   const normalizedGoalId = normalizeGoalId(goalId);

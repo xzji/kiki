@@ -28,6 +28,7 @@ import {
   type TaskMonitorRow,
 } from "@/lib/taskMonitor";
 import { runTaskExecutionAction } from "@/lib/taskExecution";
+import { formatDurationMs, resolveActiveExecutionMs } from "@/lib/taskExecutionDuration";
 import { cn } from "@/lib/utils";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
@@ -80,6 +81,7 @@ export function TaskMonitorDrawer() {
   const [dispatchPaused, setDispatchPaused] = useState(false);
   const [pendingGlobalAction, setPendingGlobalAction] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const wasOpenRef = useRef(false);
 
   const rows = useMemo(() => selectTaskMonitorRows(goals), [goals]);
@@ -117,6 +119,12 @@ export function TaskMonitorDrawer() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [closeMonitor, closeTaskDrawer, detailOpen, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -360,6 +368,7 @@ export function TaskMonitorDrawer() {
                       <TaskMonitorCard
                         key={row.rowKey}
                         row={row}
+                        nowMs={nowMs}
                         active={row.kind === "task" && activeInstanceId === row.instanceId}
                         maxConcurrentTasks={maxConcurrentTasks}
                         runningCount={taskRunningCount}
@@ -392,6 +401,7 @@ export function TaskMonitorDrawer() {
 
 function TaskMonitorCard({
   row,
+  nowMs,
   active,
   maxConcurrentTasks,
   runningCount,
@@ -401,6 +411,7 @@ function TaskMonitorCard({
   onAction,
 }: {
   row: TaskMonitorRow;
+  nowMs: number;
   active: boolean;
   maxConcurrentTasks: number;
   runningCount: number;
@@ -532,7 +543,7 @@ function TaskMonitorCard({
           <span className="text-[11px] text-[#8C9198]">系统自动执行</span>
         ) : null}
 
-        <span className="ml-auto text-[11px] text-[#8C9198]">{timeLabel(row)}</span>
+        <span className="ml-auto text-[11px] text-[#8C9198]">{timeLabel(row, nowMs)}</span>
       </div>
     </div>
   );
@@ -585,14 +596,23 @@ function taskTypeLabel(value: TaskMonitorRow["taskType"]) {
   return value === "repeat" ? "循环" : "单次";
 }
 
-function timeLabel(row: TaskMonitorRow) {
+function timeLabel(row: TaskMonitorRow, nowMs: number) {
   if (row.group === "queued") return `等待 ${relativeTime(row.createdAt)}`;
   if (row.group === "done") {
     const doneAt = row.finishedAt ?? row.createdAt;
     return `${relativeTime(doneAt)}完成`;
   }
+  if (row.kind === "task") {
+    const activeMs = resolveActiveExecutionMs({
+      activeDurationMs: row.activeDurationMs,
+      activeSince: row.activeSince,
+      isActive: row.group === "running",
+      nowMs,
+    });
+    return `已执行 ${formatDurationMs(activeMs)}`;
+  }
   const startedAt = row.startedAt ?? row.createdAt;
-  return `已执行 ${durationSince(startedAt)}`;
+  return `已执行 ${durationSince(startedAt, nowMs)}`;
 }
 
 function relativeTime(input: string) {
@@ -609,8 +629,8 @@ function relativeTime(input: string) {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function durationSince(input: string) {
-  const diffMs = Math.max(0, Date.now() - +new Date(input));
+function durationSince(input: string, nowMs = Date.now()) {
+  const diffMs = Math.max(0, nowMs - +new Date(input));
   if (!Number.isFinite(diffMs)) return "-";
   const totalSeconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);

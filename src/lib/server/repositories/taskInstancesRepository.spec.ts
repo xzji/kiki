@@ -18,8 +18,13 @@ import {
   readGoalsSnapshotMeta,
   upsertGoalsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
+import {
+  upsertRuntimeJob,
+  type RuntimeJobRecord,
+} from "@/lib/server/repositories/runtimeJobsRepository";
 import { deriveOpaqueId } from "@/lib/opaqueIds";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
+import type { RuntimeEnvironment } from "@/types/runtime";
 
 import { listRecentByThreadId } from "./taskInstancesRepository";
 
@@ -32,11 +37,14 @@ const THREAD_A = deriveOpaqueId("sg", "thread-A");
 const THREAD_B = deriveOpaqueId("sg", "thread-B");
 const THREAD_WINDOW = deriveOpaqueId("sg", "thread-window");
 const THREAD_BAD_TS = deriveOpaqueId("sg", "thread-bad-ts");
+const THREAD_COMPOSED = deriveOpaqueId("sg", "thread-composed");
 const TASK_A1 = deriveOpaqueId("task", "task-a1");
 const TASK_A2 = deriveOpaqueId("task", "task-a2");
 const TASK_B1 = deriveOpaqueId("task", "task-b1");
 const TASK_W = deriveOpaqueId("task", "task-w");
 const TASK_BAD = deriveOpaqueId("task", "task-bad");
+const TASK_COMPOSED = deriveOpaqueId("task", "task-composed");
+const INST_COMPOSED = deriveOpaqueId("inst", "inst-composed");
 
 function makeInstance(id: string, createdAt: string, taskId = "task-x"): TaskInstance {
   return {
@@ -73,6 +81,17 @@ function seedGoals(goals: Goal[]) {
   if (first.ok) return;
   const retry = upsertGoalsSnapshot(goals, first.revision);
   assert.equal(retry.ok, true, "seed goals ok");
+}
+
+function runtimeEnv(): RuntimeEnvironment {
+  return {
+    id: "runtime-task-instances-spec",
+    type: "local",
+    name: "local",
+    workingDirectory: "/tmp",
+    cliPath: "claude",
+    permissionMode: "execute",
+  };
 }
 
 export async function runTaskInstancesRepositorySpecs() {
@@ -218,5 +237,62 @@ export async function runTaskInstancesRepositorySpecs() {
     const filtered = listRecentByThreadId(THREAD_BAD_TS, { now: fixedNow });
     assert.equal(filtered.length, 1, "无效时间戳被过滤");
     assert.equal(filtered[0]?.createdAt, "2026-05-31T00:00:00.000Z");
+  }
+
+  // -----------------------------------------------------------------------
+  // 4. 回归：recent instances 读取必须以 runtime_jobs 为执行态权威
+  // -----------------------------------------------------------------------
+  {
+    const instance = makeInstance(INST_COMPOSED, "2026-05-31T00:00:00.000Z", TASK_COMPOSED);
+    const goal: Goal = {
+      id: GOAL_3,
+      title: "G",
+      deadline: "",
+      progress: 0,
+      createdAt: "2026-05-25T00:00:00.000Z",
+      conversationId: "conversation-task-instances-spec",
+      subGoals: [
+        {
+          id: THREAD_COMPOSED,
+          goalId: GOAL_3,
+          title: "C",
+          tasks: [makeTask(TASK_COMPOSED, THREAD_COMPOSED, [instance])],
+        },
+      ],
+    };
+    seedGoals([goal]);
+    const task = goal.subGoals[0]!.tasks[0]!;
+    const job: RuntimeJobRecord = {
+      id: `job-${INST_COMPOSED}`,
+      taskInstanceId: INST_COMPOSED,
+      taskId: TASK_COMPOSED,
+      goalId: GOAL_3,
+      conversationId: goal.conversationId,
+      userId: "user-task-instances-spec",
+      kind: "goal_task",
+      status: "completed",
+      requestId: "request-task-instances-spec",
+      runtimeTransport: "cloud_control_plane",
+      payload: {
+        goal,
+        subGoal: goal.subGoals[0]!,
+        task,
+        instance,
+        runtimeEnv: runtimeEnv(),
+      },
+      progress: null,
+      logs: [],
+      trajectory: [],
+      blocker: null,
+      result: { finalMessage: "已完成" },
+      createdAt: "2026-05-31T00:00:00.000Z",
+      updatedAt: "2026-05-31T00:01:00.000Z",
+      startedAt: "2026-05-31T00:00:00.000Z",
+      finishedAt: "2026-05-31T00:01:00.000Z",
+    };
+    upsertRuntimeJob(job);
+
+    const [composed] = listRecentByThreadId(THREAD_COMPOSED, { now: fixedNow });
+    assert.equal(composed?.status, "completed", "recent instances must compose status from runtime_jobs");
   }
 }

@@ -653,6 +653,18 @@ function truncateForLog(value: string, limit = 2000) {
   return value.length > limit ? `${value.slice(0, limit)}...` : value;
 }
 
+function redactSensitiveLogText(value: string, limit = 1000) {
+  return truncateForLog(value, limit)
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_KEY]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED_AWS_KEY]")
+    .replace(/\b(?:api[-_]?key|token|password|authorization|cookie|secret)\s*[:=]\s*["']?[^"'\s,;]+/gi, (match) => {
+      const separator = match.includes("=") ? "=" : ":";
+      return `${match.split(separator)[0]}${separator}[REDACTED]`;
+    })
+    .replace(/\b(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"'<>]+/gi, "[REDACTED_DATABASE_URL]");
+}
+
 function formatCollaborationSummary(task: Task) {
   const collaboration = task.collaboration;
   if (!collaboration) return "未声明协作要求";
@@ -2571,6 +2583,11 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   );
   let resumeNewToolCallCount = 0;
   let resumeDuplicateToolCallCount = 0;
+  // 工具层失败计数：infra（环境/网络策略拦截，如 WebFetch 域名校验失败）与业务失败分开统计，
+  // infra 失败不应被当成业务数据缺口抛给用户。
+  let infraToolFailureCount = 0;
+  let businessToolFailureCount = 0;
+  const infraToolFailureSamples: string[] = [];
   let agentRunPlan: AgentRunPlan | null = null;
   const appendTrajectory = (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => {
     trajectory.push(createTrajectoryStep({ ...step, index: trajectory.length }));
@@ -2817,6 +2834,66 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
             eventType: "tool_call_started",
             toolName: event.toolName,
             status: "running",
+            goalId: input.goal.id,
+            taskId: input.task.id,
+            taskInstanceId: input.instance.id,
+          });
+        }
+        if (event.type === "tool_result") {
+          const safeError = event.error ? redactSensitiveLogText(event.error) : undefined;
+          if (!event.ok) {
+            if (event.infraFailure) {
+              infraToolFailureCount += 1;
+              if (infraToolFailureSamples.length < 5 && event.summary) {
+                infraToolFailureSamples.push(
+                  event.toolName ? `${event.toolName}：${event.summary}` : event.summary,
+                );
+              }
+            } else {
+              businessToolFailureCount += 1;
+            }
+          }
+          appendGoalTaskAgentEvent(input, "tool_result", {
+            phase: "goal_task_main_execution",
+            toolName: event.toolName,
+            ok: event.ok,
+            summary: event.summary,
+            error: safeError,
+            infraFailure: event.infraFailure ?? false,
+          });
+          appendTrajectory({
+            type: "tool_result",
+            status: event.ok ? "completed" : "failed",
+            title: event.toolName
+              ? `${event.toolName} ${event.ok ? "返回结果" : event.infraFailure ? "被环境拦截" : "执行失败"}`
+              : event.ok
+                ? "工具返回结果"
+                : "工具执行失败",
+            toolCall: event.toolName ? { name: event.toolName, summary: event.summary } : undefined,
+            toolResult: {
+              ok: event.ok,
+              output: event.ok ? event.summary : undefined,
+              error: event.ok ? undefined : safeError ?? event.summary,
+            },
+            thought: event.infraFailure
+              ? "该失败属于运行环境/网络策略拦截（基础设施故障），不计入业务数据缺口。"
+              : undefined,
+            endedAt: new Date().toISOString(),
+          });
+          appendGoalLog({
+            requestId: input.requestId,
+            scope: "goal_task_execute",
+            level: event.ok ? "info" : "warn",
+            phase: "executing",
+            message: event.ok
+              ? event.summary
+              : event.infraFailure
+                ? `工具被环境拦截：${event.summary}`
+                : `工具执行失败：${event.summary}`,
+            details: safeError,
+            eventType: "tool_call_finished",
+            toolName: event.toolName ?? "Tool",
+            status: event.ok ? "completed" : "failed",
             goalId: input.goal.id,
             taskId: input.task.id,
             taskInstanceId: input.instance.id,
@@ -3208,12 +3285,43 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   if (blocker) {
     updateGoalRuntimeJobExecution(`job-${input.instance.id}`, { blocker });
   }
+  // infra 失败（环境/网络策略拦截）单独如实呈现，避免被当成业务数据缺口抛给用户。
+  if (infraToolFailureCount > 0) {
+    appendGoalLog({
+      requestId: input.requestId,
+      scope: "goal_task_execute",
+      level: "warn",
+      phase: "reviewing",
+      message: `本次执行有 ${infraToolFailureCount} 次工具调用被运行环境/网络策略拦截（基础设施故障），业务工具失败 ${businessToolFailureCount} 次。`,
+      details: infraToolFailureSamples.join("\n"),
+      eventType: "infra_tool_failure",
+      status: "completed",
+      goalId: input.goal.id,
+      taskId: input.task.id,
+      taskInstanceId: input.instance.id,
+    });
+    appendGoalTaskAgentEvent(input, "log", {
+      phase: "goal_task_infra_failure",
+      infraToolFailureCount,
+      businessToolFailureCount,
+      samples: infraToolFailureSamples,
+    });
+  }
+  const infraFailureSummary =
+    infraToolFailureCount > 0
+      ? {
+          infraToolFailureCount,
+          businessToolFailureCount,
+          samples: infraToolFailureSamples,
+        }
+      : undefined;
   return {
     ...result,
     blocker,
     structuredOutput: {
       ...(result.structuredOutput ?? {}),
       ...(blocker ? { blocker } : {}),
+      ...(infraFailureSummary ? { infraToolFailures: infraFailureSummary } : {}),
     },
     trajectory,
   };

@@ -1,17 +1,33 @@
-import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
+import { createIdempotencyKey, createOpaqueId, deriveOpaqueId } from "@/lib/opaqueIds";
 import { createGeneratedInstance } from "@/lib/goalFactory";
 import { mergeTaskPatch, type TaskPatch } from "@/lib/server/governance/taskPatchMerge";
-import type { GovernanceIntent, TaskRef } from "@/lib/server/governance/governanceIntent";
+import type { GovernanceApplyMode, GovernanceIntent, TaskRef } from "@/lib/server/governance/governanceIntent";
+import { logGovernanceApply } from "@/lib/server/governance/governanceApplyTelemetry";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
+import { appendGovernanceEvent } from "@/lib/server/repositories/governanceEventOutboxRepository";
 import {
+  cancelRuntimeJobByTaskRun,
+  getLatestOpenRuntimeJobByTaskId,
   getRuntimeJobByTaskInstanceId,
   type RuntimeJobStatus,
 } from "@/lib/server/repositories/runtimeJobsRepository";
-import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
-import { markGoalInstanceRunStarted, upsertGoalTaskInstanceSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
-import { readGoalsSnapshot, readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
+import {
+  findThreadById,
+  ThreadRevisionMismatchError,
+  updateThread,
+} from "@/lib/server/repositories/threadsRepository";
+import {
+  readComposedGoalsSnapshot,
+  readComposedGoalsSnapshotMeta,
+} from "@/lib/server/runtime/instanceComposition";
+import { markGoalInstanceRunStarted } from "@/lib/server/runtime/goalStateSnapshot";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { applyGoalCommand } from "@/lib/server/services/goalCommandService";
-import { updateGoalRuntimeJobExecution, writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
+import {
+  mutateGoalsProjection,
+  transitionTaskInstanceProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { ensureConversationWorkspace, ensureTaskWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import { buildTaskQuoteContent } from "@/lib/taskFeedback";
@@ -50,6 +66,31 @@ function findTaskRef(goals: Goal[], taskRef: TaskRef) {
   const instance = taskRef.instanceId ? task?.instances.find((item) => item.id === taskRef.instanceId) : undefined;
   if (!goal || !subGoal || !task) return null;
   return { goal, subGoal, task, instance };
+}
+
+function prependTaskInstance(goals: Goal[], taskRef: Pick<TaskRef, "goalId" | "subGoalId" | "taskId">, instance: TaskInstance) {
+  return goals.map((goal) =>
+    goal.id === taskRef.goalId
+      ? {
+          ...goal,
+          subGoals: goal.subGoals.map((subGoal) =>
+            subGoal.id === taskRef.subGoalId
+              ? {
+                  ...subGoal,
+                  tasks: subGoal.tasks.map((task) =>
+                    task.id === taskRef.taskId
+                      ? {
+                          ...task,
+                          instances: [instance, ...task.instances.filter((item) => item.id !== instance.id)],
+                        }
+                      : task,
+                  ),
+                }
+              : subGoal,
+          ),
+        }
+      : goal,
+  );
 }
 
 function latestInstance(task: Task, predicate: (instance: TaskInstance) => boolean) {
@@ -170,6 +211,45 @@ function buildRevisionContext(input: {
   ].join("\n");
 }
 
+/**
+ * §4.5-①：会话写桥要"边看边改"。目标任务若有 open job（queued/running/awaiting_user），
+ * startTaskAttempt 的任务级闸会直接 already_running 空操作、忽略用户。这里在重新入队前，
+ * 走与 /cancel 同一条真实终止路径（runtime job → cancelled + 实例 → terminated），
+ * 不为运行中任务伪造失败回执（project memory 教训）。返回是否实际抢占了一个 open job。
+ */
+function preemptOpenJobForTask(input: {
+  goal: Goal;
+  taskId: string;
+  exceptInstanceId?: string;
+  reason: string;
+}): boolean {
+  const openJob = getLatestOpenRuntimeJobByTaskId(input.taskId);
+  if (!openJob) return false;
+  if (input.exceptInstanceId && openJob.taskInstanceId === input.exceptInstanceId) return false;
+  const targetInstanceId = openJob.taskInstanceId;
+  if (targetInstanceId) {
+    transitionTaskInstanceProjection({
+      // allow-raw-goals-snapshot: 抢占旧实例的投影写路径，用 raw projection 作为 transition 基准。
+      goals: readGoalsSnapshot([]),
+      taskId: input.taskId,
+      instanceId: targetInstanceId,
+      status: "terminated",
+      reason: input.reason,
+    });
+  }
+  cancelRuntimeJobByTaskRun({
+    taskInstanceId: targetInstanceId ?? undefined,
+    requestId: openJob.requestId,
+    reason: input.reason,
+  });
+  logGovernanceApply("preempt", {
+    taskId: input.taskId,
+    preemptedInstanceId: targetInstanceId,
+    requestId: openJob.requestId,
+  });
+  return true;
+}
+
 function buildQueuedProgress(input: {
   requestId: string;
   goal: Goal;
@@ -209,8 +289,9 @@ async function applyRerun(input: {
   if (!input.taskRef.instanceId) {
     throw new Error("重跑当前结果需要 instanceId");
   }
+  // allow-raw-goals-snapshot: rerun 写路径需要 raw projection 作为 mutate fallback；定位/判断用 composedGoals。
   const rawGoals = readGoalsSnapshot([]);
-  const composedGoals = composeGoalsWithRuntimeJobs(rawGoals);
+  const composedGoals = readComposedGoalsSnapshot([]);
   const located = findTaskRef(composedGoals, input.taskRef);
   if (!located?.instance) throw new Error("未找到要重跑的任务结果");
   const createdAt = nowIso();
@@ -233,30 +314,35 @@ async function applyRerun(input: {
   };
   const requestId = `goal-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const workspace = ensureConversationWorkspace(input.conversationId);
+  // §4.5-①：旧 instance 可能仍在跑，任务级闸会让新 rerun 直接 already_running。
+  // 先按「Terminated > Paused」语义真实终止旧 open job，再入队新实例。
+  const preempted = preemptOpenJobForTask({
+    goal: located.goal,
+    taskId: located.task.id,
+    exceptInstanceId: nextInstance.id,
+    reason: "用户通过会话要求重新执行，已终止上一次执行。",
+  });
   const taskWorkspaceDir = ensureTaskWorkspace({
     conversationId: input.conversationId,
     taskId: located.task.id,
     instanceId: nextInstance.id,
   });
-  const taskWithInstance: Task = {
-    ...located.task,
-    instances: [nextInstance, ...located.task.instances],
-  };
-  const goalsWithInstance = upsertGoalTaskInstanceSnapshot(rawGoals, {
-    goal: located.goal,
-    subGoal: located.subGoal,
-    task: taskWithInstance,
-    instance: nextInstance,
-  });
-  const startedGoals = markGoalInstanceRunStarted(goalsWithInstance, {
-    taskId: located.task.id,
-    instanceId: nextInstance.id,
-    requestId,
-    runtimeEnvId: input.runtimeEnv.id,
-    permissionMode: input.runtimeEnv.permissionMode,
-    workingDirectory: taskWorkspaceDir,
-  });
-  writeGoalsProjection(startedGoals);
+  // 抢占已把旧 instance 改写为 terminated 并 bump 了快照 revision。
+  // 顶部的 rawGoals 仍是抢占前的 stale 快照，若以它为基准写回会把 terminated 覆盖回旧值，
+  // 因此抢占发生后必须基于最新快照重建写回基准。
+  // allow-raw-goals-snapshot: 抢占会先写 raw projection；若发生抢占，必须重读最新 raw 基准避免覆盖 terminated。
+  const baseGoals = preempted ? readGoalsSnapshot([]) : rawGoals;
+  mutateGoalsProjection((goals) => {
+      const goalsWithInstance = prependTaskInstance(goals, input.taskRef, nextInstance);
+    return markGoalInstanceRunStarted(goalsWithInstance, {
+      taskId: located.task.id,
+      instanceId: nextInstance.id,
+      requestId,
+      runtimeEnvId: input.runtimeEnv.id,
+      permissionMode: input.runtimeEnv.permissionMode,
+      workingDirectory: taskWorkspaceDir,
+    });
+  }, { fallbackGoals: baseGoals });
   const queuedTask = { ...located.task, instances: [nextInstance, ...located.task.instances] };
   const progress = buildQueuedProgress({
     requestId,
@@ -330,7 +416,7 @@ async function applyDispatch(input: {
   taskRef: TaskRef;
   runtimeEnv: RuntimeEnvironment;
 }): Promise<GovernanceApplyResult> {
-  const goals = composeGoalsWithRuntimeJobs(readGoalsSnapshot([]));
+  const goals = readComposedGoalsSnapshot([]);
   const located = findTaskRef(goals, input.taskRef);
   if (!located) throw new Error("未找到要执行的任务");
   const requestId = createRequestId();
@@ -346,7 +432,7 @@ async function applyDispatch(input: {
   if (attempt.outcome === "blocked_config") {
     throw new Error(attempt.reason);
   }
-  const snapshot = composeGoalsWithRuntimeJobs(readGoalsSnapshot([]));
+  const snapshot = readComposedGoalsSnapshot([]);
   const nextLocated = findTaskRef(snapshot, {
     ...input.taskRef,
     instanceId: attempt.taskInstanceId,
@@ -360,7 +446,9 @@ async function applyDispatch(input: {
         ? "已开始执行任务，但需要先补充必要信息。"
         : attempt.outcome === "already_running"
           ? "该任务已经在执行中。"
-          : "已开始执行该任务。",
+          : attempt.outcome === "already_completed"
+            ? "该任务已经执行完成，无需重复执行。"
+            : "已开始执行该任务。",
     taskInstanceId: attempt.taskInstanceId,
     taskCardMessage: instance
       ? {
@@ -386,7 +474,7 @@ async function applyPauseOrResume(input: {
   userMessage: string;
   idempotencyKey: string;
 }): Promise<GovernanceApplyResult> {
-  const goals = composeGoalsWithRuntimeJobs(readGoalsSnapshot([]));
+  const goals = readComposedGoalsSnapshot([]);
   const located = findTaskRef(goals, input.taskRef);
   if (!located) throw new Error("未找到目标任务");
   const message = input.userMessage.toLowerCase();
@@ -415,7 +503,12 @@ async function applyPauseOrResume(input: {
     if (attempt.outcome === "blocked_config") throw new Error(attempt.reason);
     return {
       intent: "pause_task",
-      assistantMessage: attempt.outcome === "already_running" ? "该任务已经在执行中。" : "已恢复该任务执行。",
+      assistantMessage:
+        attempt.outcome === "already_running"
+          ? "该任务已经在执行中。"
+          : attempt.outcome === "already_completed"
+            ? "该任务已经执行完成，无需重复执行。"
+            : "已恢复该任务执行。",
       taskInstanceId: attempt.taskInstanceId,
     };
   }
@@ -430,17 +523,17 @@ async function applyPauseOrResume(input: {
     reason: "用户通过会话暂停任务执行",
     idempotencyKey: input.idempotencyKey,
   });
-  const meta = readGoalsSnapshotMeta([]);
+  const meta = readComposedGoalsSnapshotMeta([]);
   return {
     intent: "pause_task",
     assistantMessage: "已暂停该任务执行。",
-    goals: composeGoalsWithRuntimeJobs(meta.value),
+    goals: meta.value,
     revision: meta.revision,
     taskInstanceId: target.id,
   };
 }
 
-export async function applyGovernanceCommand(input: {
+export type ApplyGovernanceCommandInput = {
   conversationId: string;
   intent: GovernanceIntent;
   taskRef: TaskRef;
@@ -449,8 +542,11 @@ export async function applyGovernanceCommand(input: {
   userMessage: string;
   runtimeEnv?: RuntimeEnvironment;
   quotedMessage?: QuotedConversationMessageContext | null;
+  applyMode?: GovernanceApplyMode;
   idempotencyKey: string;
-}): Promise<GovernanceApplyResult> {
+};
+
+async function applyGovernanceCommandCore(input: ApplyGovernanceCommandInput): Promise<GovernanceApplyResult> {
   if (input.intent === "dispatch_task") {
     if (!input.runtimeEnv) throw new Error("执行任务需要 Runtime 环境");
     return applyDispatch({ taskRef: input.taskRef, runtimeEnv: input.runtimeEnv });
@@ -474,6 +570,7 @@ export async function applyGovernanceCommand(input: {
       quotedMessage: input.quotedMessage,
     });
   }
+  // allow-raw-goals-snapshot: 结构性 command 写路径，用 raw projection 定位目标；执行态分支已提前走 composed。
   const goals = readGoalsSnapshot([]);
   const located = findTaskRef(goals, input.taskRef);
   if (!located) throw new Error("未找到目标任务");
@@ -526,6 +623,45 @@ export async function applyGovernanceCommand(input: {
         },
       });
     }
+    // §4.5-②：redo_now 表示用户盯着错误结果要"改完马上重做"。先改定义、再链式重跑，
+    // 复用抢占式 rerun 路径让新执行按新标准跑；next_time 则只改定义、下次执行生效。
+    if (input.applyMode === "redo_now") {
+      if (!input.runtimeEnv) throw new Error("重新执行任务需要 Runtime 环境");
+      const sourceInstanceId = input.taskRef.instanceId ?? latestInstance(located.task, () => true)?.id;
+      if (sourceInstanceId) {
+        const rerun = await applyRerun({
+          conversationId: input.conversationId,
+          taskRef: { ...input.taskRef, instanceId: sourceInstanceId },
+          runtimeEnv: input.runtimeEnv,
+          userMessage: input.userMessage,
+          revisionHint: input.revisionHint || input.userMessage,
+          quotedMessage: input.quotedMessage,
+        });
+        const meta = readComposedGoalsSnapshotMeta([]);
+        return {
+          ...rerun,
+          intent: input.intent,
+          assistantMessage:
+            input.intent === "amend_task"
+              ? "已更新任务标准，并按新要求重新执行中。"
+              : "已更新任务，并按新要求重新执行中。",
+          goals: meta.value,
+          revision: meta.revision,
+        };
+      }
+      const dispatch = await applyDispatch({ taskRef: input.taskRef, runtimeEnv: input.runtimeEnv });
+      const meta = readComposedGoalsSnapshotMeta([]);
+      return {
+        ...dispatch,
+        intent: input.intent,
+        assistantMessage:
+          input.intent === "amend_task"
+            ? "已更新任务标准，并按新要求开始执行。"
+            : "已更新任务，并按新要求开始执行。",
+        goals: meta.value,
+        revision: meta.revision,
+      };
+    }
     return {
       intent: input.intent,
       assistantMessage: input.intent === "amend_task" ? "已更新任务标准，后续执行将按新要求进行。" : "已更新任务。",
@@ -534,4 +670,144 @@ export async function applyGovernanceCommand(input: {
     };
   }
   return { intent: input.intent, assistantMessage: "这条消息不需要修改任务状态。" };
+}
+
+/**
+ * 哪些意图算作"用户通过会话改动了任务"，需要留痕 + 回写记忆 + 唤醒治理。qa/clarify/chitchat 不算。
+ * cancel_task 删除任务后再写 directive 会留下悬空 taskId 引用，故不在此列。
+ */
+const MUTATION_INTENTS = new Set<GovernanceIntent>([
+  "amend_task",
+  "rerun_current",
+  "create_task",
+  "update_task",
+  "dispatch_task",
+  "pause_task",
+]);
+
+function summarizeDirective(message: string, max = 280) {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
+}
+
+/**
+ * 层三·留痕闭环（best-effort，绝不阻断主流程）：
+ *  - directiveId：由幂等 key 确定性派生，串起"同一条用户指令"的事件/记忆/卡片。
+ *  - user_replied 治理事件携带 directiveId + intent + 摘要：让治理被唤醒时知道"用户说了什么"，
+ *    而不再是内容无关的纯唤醒（解决方案 §3 桥 3 / 缺口 4）。
+ *  - thread 记忆回写：把"用户为什么改"写进 threadMemory.conversationDirectives，
+ *    治理未来的 tick 能读到这次纠偏（解决"反馈不对称"）。
+ * 任一步失败都只告警、不抛出——写桥已经把任务改完了，留痕是增益而非前置条件。
+ */
+function recordConversationDirective(input: {
+  conversationId: string;
+  intent: GovernanceIntent;
+  taskRef: TaskRef;
+  userMessage: string;
+  idempotencyKey: string;
+}) {
+  const directiveId = deriveOpaqueId("idem", `conversation_directive:${input.idempotencyKey}`);
+  const summary = summarizeDirective(input.userMessage);
+  let eventOk = false;
+  let memoryStatus: "written" | "stale" | "skipped" | "error" = "skipped";
+  try {
+    appendGovernanceEvent({
+      eventType: "user_replied",
+      source: "user_reply",
+      topicId: input.taskRef.goalId,
+      threadId: input.taskRef.subGoalId,
+      taskId: input.taskRef.taskId,
+      instanceId: input.taskRef.instanceId,
+      idempotencyKey: createIdempotencyKey("governance.conversation_directive", directiveId),
+      payload: {
+        directiveId,
+        intent: input.intent,
+        summary,
+        source: "conversation_governance",
+      },
+    });
+    eventOk = true;
+  } catch (error) {
+    console.warn("[governance] failed to append user_replied directive event", error);
+  }
+  try {
+    const thread = findThreadById(input.taskRef.subGoalId);
+    if (thread) {
+      const previous = Array.isArray(thread.memory?.conversationDirectives)
+        ? (thread.memory.conversationDirectives as unknown[])
+        : [];
+      const nextEntry = {
+        directiveId,
+        intent: input.intent,
+        taskId: input.taskRef.taskId,
+        summary,
+        at: nowIso(),
+      };
+      updateThread(
+        input.taskRef.subGoalId,
+        { memory: { conversationDirectives: [nextEntry, ...previous].slice(0, 10) } },
+        thread.revision,
+      );
+      memoryStatus = "written";
+    }
+  } catch (error) {
+    if (error instanceof ThreadRevisionMismatchError) {
+      // 治理 tick 与会话写桥并发写 thread 是常态；记忆回写是增益，失配就让下一次指令补记，不重试不阻断。
+      memoryStatus = "stale";
+    } else {
+      memoryStatus = "error";
+      console.warn("[governance] failed to write conversation directive into thread memory", error);
+    }
+  }
+  logGovernanceApply("directive_recorded", {
+    directiveId,
+    intent: input.intent,
+    goalId: input.taskRef.goalId,
+    threadId: input.taskRef.subGoalId,
+    taskId: input.taskRef.taskId,
+    eventOk,
+    memory: memoryStatus,
+  });
+}
+
+export async function applyGovernanceCommand(input: ApplyGovernanceCommandInput): Promise<GovernanceApplyResult> {
+  const startedAt = Date.now();
+  logGovernanceApply("apply_start", {
+    conversationId: input.conversationId,
+    intent: input.intent,
+    goalId: input.taskRef.goalId,
+    threadId: input.taskRef.subGoalId,
+    taskId: input.taskRef.taskId,
+    hasPatch: Boolean(input.patch),
+    applyMode: input.applyMode,
+    msgLen: input.userMessage.length,
+  });
+  try {
+    const result = await applyGovernanceCommandCore(input);
+    logGovernanceApply("apply_done", {
+      intent: result.intent,
+      taskInstanceId: result.taskInstanceId,
+      hasCard: Boolean(result.taskCardMessage),
+      durationMs: Date.now() - startedAt,
+    });
+    if (MUTATION_INTENTS.has(input.intent)) {
+      recordConversationDirective({
+        conversationId: input.conversationId,
+        intent: input.intent,
+        taskRef: input.taskRef,
+        userMessage: input.userMessage,
+        idempotencyKey: input.idempotencyKey,
+      });
+    }
+    return result;
+  } catch (error) {
+    logGovernanceApply("apply_error", {
+      intent: input.intent,
+      goalId: input.taskRef.goalId,
+      taskId: input.taskRef.taskId,
+      durationMs: Date.now() - startedAt,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }

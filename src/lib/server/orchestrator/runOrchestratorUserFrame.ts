@@ -63,13 +63,14 @@ export async function runOrchestratorUserFrame(input: {
         : undefined,
     });
 
+    // allow-raw-goals-snapshot: 调度入口读取结构基准；runGoalSchedulerEngine / sideEffects 内部负责合成执行态。
     const goals = readGoalsSnapshot([]);
     const schedulerResult = runGoalSchedulerEngine({
       goals,
       runtimeEnv,
       config: schedulerConfig,
     });
-    runGoalDaemonSideEffects(readGoalsSnapshot(goals));
+    runGoalDaemonSideEffects(goals);
 
     const maxSlots = orchestratorConcurrencyBudget.availableSlots(input.userId, input.config);
     let dispatched = 0;

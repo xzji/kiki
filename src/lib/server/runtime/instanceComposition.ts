@@ -1,4 +1,5 @@
 import { normalizeInstanceId } from "@/lib/opaqueIds";
+import { getGoalEventsByInstanceIds } from "@/lib/server/repositories/goalEventLogRepository";
 import {
   listRuntimeJobsByInstanceIds,
   type RuntimeJobRecord,
@@ -7,6 +8,8 @@ import {
 import { listTaskNotificationStatesByInstanceIds } from "@/lib/server/repositories/taskNotificationStateRepository";
 import { deriveTaskInstanceFromProgress } from "@/lib/server/runtime/goalStateSnapshot";
 import { readGoalsSnapshotMeta } from "@/lib/server/runtime/stateSnapshot";
+import { computeActiveExecutionDuration } from "@/lib/taskExecutionDuration";
+import type { GoalEventRecord } from "@/types/goalEventLog";
 import type { Goal, Task, TaskExecutionPhase, TaskInstance, TaskInstanceStatus } from "@/types/kiki";
 
 function isTerminationReason(reason?: string) {
@@ -68,11 +71,45 @@ function indexJobsByInstanceId(jobs: RuntimeJobRecord[]) {
   return byInstanceId;
 }
 
+function enrichInstanceExecutionDuration(input: {
+  instance: TaskInstance;
+  status: TaskInstanceStatus;
+  durationEvents?: GoalEventRecord[];
+  startedAt?: string;
+  finishedAt?: string;
+  lastUpdatedAt?: string;
+}) {
+  const executionStartedAt =
+    input.startedAt ?? input.instance.execution?.startedAt ?? input.instance.createdAt;
+  const activeExecution = computeActiveExecutionDuration({
+    events: input.durationEvents ?? [],
+    currentStatus: input.status,
+    startedAt: executionStartedAt,
+    finishedAt: input.finishedAt ?? input.instance.execution?.finishedAt,
+    lastUpdatedAt: input.lastUpdatedAt ?? input.instance.execution?.lastUpdatedAt,
+  });
+  return {
+    ...input.instance,
+    status: input.status,
+    execution: {
+      ...input.instance.execution,
+      phase: executionPhaseFromStatus(input.status),
+      status: input.status,
+      startedAt: executionStartedAt,
+      activeDurationMs: activeExecution.activeDurationMs,
+      activeSince: activeExecution.activeSince,
+      finishedAt: input.finishedAt ?? input.instance.execution?.finishedAt,
+      lastUpdatedAt: input.lastUpdatedAt ?? input.instance.execution?.lastUpdatedAt,
+    },
+  } satisfies TaskInstance;
+}
+
 function composeInstanceFromJob(input: {
   task: Task;
   instance: TaskInstance;
   job: RuntimeJobRecord;
   notification?: TaskInstance["notification"];
+  durationEvents?: GoalEventRecord[];
 }) {
   const projectedStatus = runtimeJobStatusToTaskInstanceStatus(input.job.status, input.job.lastError);
   const nextStatus =
@@ -122,6 +159,14 @@ function composeInstanceFromJob(input: {
         trajectory: input.job.trajectory,
       })
     : baseInstance;
+  const executionStartedAt = derived.execution?.startedAt ?? input.job.startedAt ?? input.instance.createdAt;
+  const activeExecution = computeActiveExecutionDuration({
+    events: input.durationEvents ?? [],
+    currentStatus: nextStatus,
+    startedAt: executionStartedAt,
+    finishedAt: input.job.finishedAt ?? derived.execution?.finishedAt,
+    lastUpdatedAt: input.job.updatedAt,
+  });
   return {
     ...derived,
     status: nextStatus,
@@ -129,7 +174,9 @@ function composeInstanceFromJob(input: {
       ...derived.execution,
       phase: executionPhaseFromStatus(nextStatus),
       status: nextStatus,
-      startedAt: derived.execution?.startedAt ?? input.job.startedAt ?? input.instance.createdAt,
+      startedAt: executionStartedAt,
+      activeDurationMs: activeExecution.activeDurationMs,
+      activeSince: activeExecution.activeSince,
       finishedAt: input.job.finishedAt ?? derived.execution?.finishedAt,
       lastUpdatedAt: input.job.updatedAt,
       errorMessage: nextStatus === "error" ? input.job.lastError ?? derived.execution?.errorMessage : derived.execution?.errorMessage,
@@ -144,13 +191,16 @@ export function composeGoalsWithRuntimeJobs(goals: Goal[]) {
   const instanceIds = collectInstanceIds(goals);
   if (instanceIds.length === 0) return goals;
   const jobsByInstanceId = indexJobsByInstanceId(listRuntimeJobsByInstanceIds(instanceIds));
+  const eventsByInstanceId = getGoalEventsByInstanceIds(instanceIds);
   const notificationsByInstanceId = new Map(
     listTaskNotificationStatesByInstanceIds(instanceIds).map((record) => [
       normalizeInstanceId(record.instanceId),
       record.notification,
     ]),
   );
-  if (jobsByInstanceId.size === 0 && notificationsByInstanceId.size === 0) return goals;
+  if (jobsByInstanceId.size === 0 && notificationsByInstanceId.size === 0 && eventsByInstanceId.size === 0) {
+    return goals;
+  }
 
   return goals.map((goal) => ({
     ...goal,
@@ -162,14 +212,31 @@ export function composeGoalsWithRuntimeJobs(goals: Goal[]) {
           const instanceId = normalizeInstanceId(instance.id);
           const notification = notificationsByInstanceId.get(instanceId);
           const job = jobsByInstanceId.get(instanceId);
+          const durationEvents = eventsByInstanceId.get(instanceId);
           if (!job) {
-            return notification ? { ...instance, notification } : instance;
+            const enriched = enrichInstanceExecutionDuration({
+              instance: notification ? { ...instance, notification } : instance,
+              status: instance.status,
+              durationEvents,
+            });
+            return enriched;
           }
-          return composeInstanceFromJob({ task, instance, job, notification });
+          return composeInstanceFromJob({
+            task,
+            instance,
+            job,
+            notification,
+            durationEvents,
+          });
         }),
       })),
     })),
   }));
+}
+
+export function readComposedGoalsSnapshot(fallback: Goal[]) {
+  const meta = readGoalsSnapshotMeta(fallback);
+  return composeGoalsWithRuntimeJobs(meta.value);
 }
 
 export function readComposedGoalsSnapshotMeta(fallback: Goal[]) {

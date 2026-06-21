@@ -67,6 +67,7 @@ export function createTaskSchedulingRunner(
       // 内部任意 throw 会终止整个 daemon。这里维持同语义。
       while (true) {
         const runtimeEnv = wrapTick(() => selectLocalRuntimeEnv());
+        // allow-raw-goals-snapshot: 调度循环读取结构基准；scheduler/sideEffects 内部再合成 runtime_jobs 执行态。
         const goals = wrapTick(() => readGoalsSnapshot([]));
 
         const schedulerResult = wrapTick(() =>
@@ -77,7 +78,7 @@ export function createTaskSchedulingRunner(
           }),
         );
         const sideEffectsResult = wrapTick(() =>
-          runGoalDaemonSideEffects(readGoalsSnapshot(goals)),
+          runGoalDaemonSideEffects(goals),
         );
 
         // 调度后立即 dispatch（fire-and-forget），不等下一个 dispatch interval。

@@ -36,6 +36,7 @@ function inspectUserWork(userId: string): OrchestratorUserCandidate {
       .get(new Date().toISOString()) as { count: number };
     const pendingGovernanceJobs = countPendingGovernanceTickJobs();
     const pendingGovernanceEvents = countPendingGovernanceEventBridgeDeliveries();
+    // allow-raw-goals-snapshot: 这里只判断用户是否有 goal 结构用于纳入 orchestrator，不读取执行态。
     const goals = readGoalsSnapshot([]);
     return {
       userId,

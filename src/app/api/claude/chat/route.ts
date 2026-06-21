@@ -10,6 +10,7 @@ import {
   pickGoalForPrompt,
   sanitizeConversationMessages,
 } from "@/lib/server/workspace/contextPack";
+import { pickTaskResultDigestsForPrompt } from "@/lib/server/workspace/taskResultDigestForPrompt";
 import {
   ensureConversationWorkspace,
   getConversationContextFilePath,
@@ -123,13 +124,17 @@ async function POSTHandler(request: NextRequest) {
           const recentMessages = sanitizeConversationMessages(sourceMessages);
           const userMemory = readRelevantUserProfileMemoryForPrompt(body.message);
           const sessionMemory = readSessionMemoryForPrompt(body.conversationId);
+          const goalSnapshot = body.contextSnapshot?.goal;
           contextPack = buildConversationContextPack({
             conversation: pickConversationForPrompt(conversation),
-            goal: body.contextSnapshot?.goal ? pickGoalForPrompt(body.contextSnapshot.goal) : null,
+            goal: goalSnapshot ? pickGoalForPrompt(goalSnapshot) : null,
             recentMessages,
             userMemory: userMemory.content,
             sessionMemory,
             quotedMessage: body.quotedMessage,
+            taskResultDigests: goalSnapshot
+              ? pickTaskResultDigestsForPrompt({ conversationId: body.conversationId, goal: goalSnapshot })
+              : undefined,
           });
           writeJsonFileAtomic(getConversationMessagesFilePath(body.conversationId), recentMessages);
           writeTextFileAtomic(getConversationContextFilePath(body.conversationId), contextPack);

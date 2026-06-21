@@ -5,6 +5,7 @@ export type GoalTaskStepEventType =
   | "phase_started"
   | "tool_call_started"
   | "tool_call_finished"
+  | "infra_tool_failure"
   | "assistant_output"
   | "retry_scheduled"
   | "await_user"

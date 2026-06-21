@@ -866,6 +866,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         taskRef: payload.taskRef,
         patch: payload.patch,
         revisionHint: payload.revisionHint,
+        applyMode: payload.applyMode,
         userMessage: sourceMessage.governance.userMessage,
         runtimeEnv: activeRuntimeEnv ?? undefined,
         quotedMessage: sourceMessage.governance.quotedMessage,
@@ -1768,6 +1769,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 quotedMessage: quoted ?? undefined,
               })
             : null;
+        if (governance && !governance.shouldHandle && governance.notice) {
+          updateMessage(conversation.id, assistantId, (message) => ({
+            ...message,
+            content: governance.notice ?? "",
+            status: "done",
+          }));
+          setConversationStatus(conversation.id, "idle");
+          setQuotedMessage(null);
+          return;
+        }
         if (governance?.shouldHandle && governance.proposal) {
           if (
             governance.proposal.intent === "rerun_current" &&
@@ -1822,6 +1833,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             taskRef: payload.taskRef,
             patch: payload.patch,
             revisionHint: payload.revisionHint,
+            applyMode: payload.applyMode,
             userMessage: text,
             runtimeEnv: activeRuntimeEnv ?? undefined,
             quotedMessage: quoted ?? undefined,
@@ -2016,6 +2028,19 @@ export function ConversationView({ conversationId }: { conversationId: string })
         },
         quotedMessage: quoted,
       });
+      if (!governance.shouldHandle && governance.notice) {
+        updateMessage(conversation.id, assistantId, (message) => ({
+          ...message,
+          content: governance.notice ?? "",
+          status: "done",
+        }));
+        setConversationStatus(conversation.id, "idle");
+        streamAbortRef.current = null;
+        activeAssistantMessageIdRef.current = null;
+        setHasLocalActiveStream(false);
+        setQuotedMessage(null);
+        return;
+      }
       if (governance.shouldHandle && governance.proposal) {
         if (!governance.proposal.supported) {
           updateMessage(conversation.id, assistantId, (message) => ({
@@ -2065,6 +2090,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           taskRef: payload.taskRef,
           patch: payload.patch,
           revisionHint: payload.revisionHint,
+          applyMode: payload.applyMode,
           userMessage: text,
           runtimeEnv: activeRuntimeEnv,
           quotedMessage: quoted,
@@ -2213,6 +2239,22 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 subagentDescription: subagentInfo?.description || undefined,
                 subagentType: subagentInfo?.agentType || undefined,
                 subagentPrompt: subagentInfo?.prompt || undefined,
+              });
+              return;
+            }
+            if (event.type === "tool_result") {
+              appendProcessEvent("tool_result", {
+                title: event.toolName
+                  ? `${event.toolName} ${event.ok ? "返回结果" : event.infraFailure ? "被环境拦截" : "执行失败"}`
+                  : event.ok
+                    ? "工具返回结果"
+                    : "工具执行失败",
+                toolName: event.toolName,
+                summary: event.summary,
+                content: event.ok ? undefined : event.error,
+                ok: event.ok,
+                infraFailure: event.infraFailure,
+                subagentCallId: event.toolCallId,
               });
               return;
             }

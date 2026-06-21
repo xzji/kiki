@@ -42,6 +42,7 @@ async function POSTHandler(
   const command = mode === "pause" ? "pause" : "cancel";
   const reason = body.reason ?? (mode === "pause" ? "用户暂停任务执行" : "用户终止任务执行");
   const runtimeCancelReason = mode === "pause" ? reason : "用户终止任务执行";
+  // allow-raw-goals-snapshot: 用户取消命令写路径，用 raw projection 定位结构并写回状态；运行态取消另走 runtime_jobs。
   const goals = readGoalsSnapshot([]);
   const located = findInstance(goals, context.params.instanceId);
   if (!located) {

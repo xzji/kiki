@@ -44,6 +44,7 @@ async function POSTHandler(
   if (!responseId) {
     return NextResponse.json({ reason: "responseId 不能为空" }, { status: 400 });
   }
+  // allow-raw-goals-snapshot: 用户响应写路径，用 raw projection 定位结构；blocker/token 校验以 runtime_jobs 为准。
   const goals = readGoalsSnapshot([]);
   const located = findInstance(goals, context.params.instanceId);
   if (!located) {

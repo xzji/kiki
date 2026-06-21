@@ -64,12 +64,19 @@ export type StartTaskAttemptResult =
     }
   | {
       schemaVersion: 1;
+      outcome: "already_completed";
+      requestId?: string;
+      taskInstanceId: string;
+    }
+  | {
+      schemaVersion: 1;
       outcome: "blocked_config";
       taskInstanceId?: string;
       reason: string;
     };
 
 function locateLatestTask(input: StartTaskAttemptInput) {
+  // allow-raw-goals-snapshot: 启动写路径读取最新任务结构；执行态终态另以 runtime_jobs existing job 为权威护栏。
   const currentGoals = readGoalsSnapshot([input.goal]);
   const latestGoal = currentGoals.find((goal) => goal.id === input.goal.id) ?? input.goal;
   const latestSubGoal = latestGoal.subGoals.find((subGoal) => subGoal.id === input.subGoal.id) ?? input.subGoal;
@@ -97,6 +104,17 @@ function latestInstanceForAttempt(input: {
 
 function isOpenJob(job: RuntimeJobRecord | null) {
   return Boolean(job && (job.status === "queued" || job.status === "running" || job.status === "awaiting_user"));
+}
+
+/**
+ * 终态护栏判定：该实例对应的 runtime job 是否已 completed。
+ *
+ * 权威来源是 runtime_jobs（不是 goals 投影）——线上诊断发现投影里实例可能仍是
+ * pending/progress=0（投影滞后），而 job 早已 completed。pause-all/resume-all 与
+ * 调度器都不该把这种"已完成"的一次性任务重新拉起。
+ */
+function isCompletedJob(job: RuntimeJobRecord | null) {
+  return job?.status === "completed";
 }
 
 function persistInstanceSnapshot(input: {
@@ -221,6 +239,19 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     return {
       schemaVersion: 1,
       outcome: "already_running",
+      requestId: existing?.requestId,
+      taskInstanceId: instance.id,
+    };
+  }
+
+  // 终态护栏：目标实例的 job 已 completed 时直接空操作，不重建 blocker / 不重新 admit。
+  // feedback_rerun 始终传入全新实例（此时该实例尚无 job），天然豁免；
+  // 命中的是 resume-all / 调度器 / 手动重发把"同一个已完成实例"再拉起的场景——
+  // 线上 bug 正是 pause-all→resume-all 把已完成的一次性任务又拉起重新追问。
+  if (isCompletedJob(existing)) {
+    return {
+      schemaVersion: 1,
+      outcome: "already_completed",
       requestId: existing?.requestId,
       taskInstanceId: instance.id,
     };

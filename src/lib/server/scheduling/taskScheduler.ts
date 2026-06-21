@@ -149,7 +149,7 @@ export function runGoalSchedulerEngine(input: {
       createdJobs += 1;
       return;
     }
-    if (result.outcome === "awaiting_user" || result.outcome === "already_running" || result.outcome === "blocked_config") {
+    if (result.outcome === "awaiting_user" || result.outcome === "already_running" || result.outcome === "already_completed" || result.outcome === "blocked_config") {
       skipped += 1;
       return;
     }

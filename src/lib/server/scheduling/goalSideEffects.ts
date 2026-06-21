@@ -12,7 +12,7 @@ import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntime
 import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
 import { getConversation } from "@/lib/server/repositories/conversationsRepository";
-import { readGoalsSnapshot, readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readScheduleEventsSnapshot, upsertScheduleEventsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { buildAwaitingDisplayModel } from "@/lib/taskInstance/awaitingDisplayModel";
 import type { ConversationMessage, Goal, Task } from "@/types/kiki";
 import type { AgentEvent } from "@/types/schedule";
@@ -334,8 +334,9 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
 
 export function runGoalDaemonSideEffects(goals: Goal[]) {
   const schedule = runGoalScheduleSynthesisWorker(goals);
-  const watchdog = runGoalWatchdogWorker(readGoalsSnapshot(goals));
-  const notifications = runGoalNotificationDeliveryWorker(readGoalsSnapshot(goals));
+  const composedGoals = composeGoalsWithRuntimeJobs(goals);
+  const watchdog = runGoalWatchdogWorker(composedGoals);
+  const notifications = runGoalNotificationDeliveryWorker(composedGoals);
   return {
     schedule,
     watchdog,

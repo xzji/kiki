@@ -95,7 +95,7 @@ export async function startTaskRun(input: {
     signal: input.signal,
   });
   const data = await parseJsonResponse<{
-    outcome?: "queued" | "awaiting_user" | "already_running" | "blocked_config";
+    outcome?: "queued" | "awaiting_user" | "already_running" | "already_completed" | "blocked_config";
     requestId?: string;
     taskInstanceId?: string;
     workspacePath?: string;
@@ -129,6 +129,18 @@ export async function startTaskRun(input: {
   if (data.outcome === "already_running") {
     return {
       outcome: "already_running" as const,
+      requestId: data.requestId,
+      taskInstanceId,
+      goals: data.goals,
+      revision: data.revision,
+      workspacePath: data.workspacePath,
+      progress: data.progress ?? null,
+      waitingReason: data.waitingReason,
+    };
+  }
+  if (data.outcome === "already_completed") {
+    return {
+      outcome: "already_completed" as const,
       requestId: data.requestId,
       taskInstanceId,
       goals: data.goals,
@@ -340,6 +352,7 @@ export async function judgeConversationGovernance(input: {
     ok?: boolean;
     reason?: string;
     shouldHandle?: boolean;
+    notice?: string;
     proposal?: {
       intent: string;
       supported: boolean;
@@ -356,6 +369,7 @@ export async function judgeConversationGovernance(input: {
         } | null;
         patch?: unknown;
         revisionHint?: string;
+        applyMode?: "redo_now" | "next_time";
       };
     } | null;
   };
@@ -376,6 +390,7 @@ export async function applyConversationGovernance(input: {
   };
   patch?: unknown;
   revisionHint?: string;
+  applyMode?: "redo_now" | "next_time";
   userMessage: string;
   runtimeEnv?: RuntimeEnvironment;
   quotedMessage?: QuotedConversationMessageContext | null;

@@ -5,7 +5,7 @@ import path from "node:path";
 import { DEFAULT_LOCAL_USER_ID, runWithUserContext } from "../src/lib/server/context/userContext";
 import { normalizeGoalId, normalizeSubGoalId, normalizeTaskId } from "../src/lib/opaqueIds";
 import { getDatabase } from "../src/lib/server/db/client";
-import { readGoalsSnapshotMeta } from "../src/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshotMeta } from "../src/lib/server/runtime/instanceComposition";
 import { applyGoalCommand } from "../src/lib/server/services/goalCommandService";
 import type { Goal, TaskInstanceStatus } from "../src/types/kiki";
 
@@ -128,7 +128,7 @@ function countGoalEvents(goalId: string, kind: string) {
 
 function collectMetrics(runId: string): DogfoodMetrics {
   const goalId = normalizeGoalId(`dogfood-${runId}`);
-  const snapshot = readGoalsSnapshotMeta([]);
+  const snapshot = readComposedGoalsSnapshotMeta([]);
   const dogfoodGoals = snapshot.value.filter((goal) => goal.id === goalId);
   const { tasks, instances, counts } = countInstancesByStatus(dogfoodGoals);
   return {

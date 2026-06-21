@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { evaluateGovernanceGate } from "@/lib/server/governance/governanceGate";
 import { judgeGovernanceIntent } from "@/lib/server/governance/governanceJudge";
+import { logGovernanceApply } from "@/lib/server/governance/governanceApplyTelemetry";
 import { mergeTaskPatch } from "@/lib/server/governance/taskPatchMerge";
-import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import { ensureConversationWorkspace } from "@/lib/server/workspace/conversationWorkspace";
 import type {
   GovernanceJudgeResult,
@@ -108,6 +108,7 @@ function buildProposal(input: {
       taskRef: input.judge.targetRef,
       patch: input.judge.patch,
       revisionHint: input.judge.revisionHint,
+      applyMode: input.judge.applyMode,
     },
   };
 }
@@ -120,7 +121,7 @@ async function POSTHandler(request: NextRequest) {
       { status: 400 },
     );
   }
-  const goals = composeGoalsWithRuntimeJobs(readGoalsSnapshot([]));
+  const goals = readComposedGoalsSnapshot([]);
   const conversation = body.contextSnapshot?.conversation ?? null;
   const gate = evaluateGovernanceGate({
     message: body.message,
@@ -185,9 +186,22 @@ async function POSTHandler(request: NextRequest) {
     task: located?.task,
     instance: located?.instance,
   });
+  if (judge._downgradedFrom === "replan") {
+    logGovernanceApply("replan_downgraded", {
+      conversationId: body.conversationId,
+      goalId: goal.id,
+      confidence: judge.confidence,
+      hasRef: Boolean(judge.targetRef),
+      msgLen: body.message.length,
+    });
+  }
+  // 被降级的意图（如 replan→clarify）不会进 proposal（shouldHandle=false），
+  // 但其引导语应直接展示给用户、而非落回普通 LLM 流。用 notice 单独透出。
+  const notice = judge._downgradedFrom ? judge.assistantMessage : undefined;
   return NextResponse.json({
     ok: true,
     shouldHandle: Boolean(proposal),
+    notice,
     judge,
     proposal,
   });

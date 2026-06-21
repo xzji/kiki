@@ -8,6 +8,7 @@ export const GOVERNANCE_INTENTS = [
   "cancel_task",
   "dispatch_task",
   "pause_task",
+  "replan",
   "chitchat",
   "qa",
   "clarify",
@@ -22,15 +23,26 @@ export type TaskRef = {
   instanceId?: string;
 };
 
+/**
+ * §4.5-②：amend/update 改的是任务定义，本身不触发执行。判官据用户语气区分两类语义：
+ * - redo_now：用户盯着错误结果要求"改成 X"，改完应立刻按新定义重跑一次。
+ * - next_time：用户调整长期标准，仅改定义、下次执行生效，不重跑。
+ * 未指定时按 next_time 处理（保守：不擅自消耗执行）。
+ */
+export type GovernanceApplyMode = "redo_now" | "next_time";
+
 export type GovernanceJudgeResult = {
   intent: GovernanceIntent;
   targetRef: TaskRef | null;
   confidence: number;
   patch?: TaskPatch;
   revisionHint?: string;
+  applyMode?: GovernanceApplyMode;
   assistantMessage: string;
   reason?: string;
   _degraded?: boolean;
+  /** §4.5-④：原判官想要的意图，被归一化降级后保留原值，仅供埋点统计（如 replan→clarify）。 */
+  _downgradedFrom?: GovernanceIntent;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,6 +59,10 @@ function normalizeIntent(value: unknown): GovernanceIntent {
 
 function normalizeConfidence(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+function normalizeApplyMode(value: unknown): GovernanceApplyMode | undefined {
+  return value === "redo_now" || value === "next_time" ? value : undefined;
 }
 
 function normalizeTaskRef(value: unknown): TaskRef | null {
@@ -82,6 +98,7 @@ export function normalizeGovernanceJudgeResult(value: unknown, fallbackRef?: Tas
   const confidence = normalizeConfidence(value.confidence);
   const patch = isRecord(value.patch) ? (value.patch as TaskPatch) : undefined;
   const revisionHint = text(value.revisionHint) ?? text(value.revision_hint);
+  const applyMode = normalizeApplyMode(value.applyMode) ?? normalizeApplyMode(value.apply_mode);
   const assistantMessage =
     text(value.assistantMessage) ??
     text(value.assistant_message) ??
@@ -92,9 +109,22 @@ export function normalizeGovernanceJudgeResult(value: unknown, fallbackRef?: Tas
     confidence,
     patch,
     revisionHint,
+    applyMode,
     assistantMessage,
     reason: text(value.reason),
   };
+  // §4.5-④：整盘重规划（replan）会清空所有任务历史、且执行中目标直接 409，与「保留历史」初衷冲突。
+  // 按用户实际频率分布（绝大多数是单任务调整），这里把 replan 降级为 clarify 引导用户逐项调整，
+  // 不走破坏性整盘替换；_downgradedFrom 保留原意图供埋点统计「用户多久想要一次整盘 replan」。
+  if (intent === "replan") {
+    return {
+      ...result,
+      intent: "clarify",
+      _downgradedFrom: "replan",
+      assistantMessage:
+        "整盘重新规划暂不支持对进行中的目标直接整体替换（会丢失已有执行记录）。你具体想调整哪几个任务？告诉我，我可以逐个帮你改标准、重跑或新建。",
+    };
+  }
   if (confidence < 0.55 && intent !== "chitchat" && intent !== "qa") {
     return {
       ...result,

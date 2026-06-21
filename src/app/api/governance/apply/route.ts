@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { applyGovernanceCommand } from "@/lib/server/governance/governanceCommandService";
-import type { GovernanceIntent, TaskRef } from "@/lib/server/governance/governanceIntent";
+import type { GovernanceApplyMode, GovernanceIntent, TaskRef } from "@/lib/server/governance/governanceIntent";
 import type { TaskPatch } from "@/lib/server/governance/taskPatchMerge";
 import type { QuotedConversationMessageContext, RuntimeEnvironment } from "@/types/runtime";
 import { withAuth } from "@/lib/server/http/withAuth";
@@ -15,6 +15,7 @@ type RequestBody = {
   taskRef: TaskRef;
   patch?: TaskPatch;
   revisionHint?: string;
+  applyMode?: GovernanceApplyMode;
   userMessage: string;
   runtimeEnv?: RuntimeEnvironment;
   quotedMessage?: QuotedConversationMessageContext | null;
@@ -36,6 +37,7 @@ async function POSTHandler(request: NextRequest) {
       taskRef: body.taskRef,
       patch: body.patch,
       revisionHint: body.revisionHint,
+      applyMode: body.applyMode,
       userMessage: body.userMessage,
       runtimeEnv: body.runtimeEnv,
       quotedMessage: body.quotedMessage,

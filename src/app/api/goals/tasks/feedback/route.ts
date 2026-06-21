@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createOpaqueId } from "@/lib/opaqueIds";
 import { createGeneratedInstance } from "@/lib/goalFactory";
-import { markGoalInstanceRunStarted, upsertGoalTaskInstanceSnapshot } from "@/lib/server/runtime/goalStateSnapshot";
+import { markGoalInstanceRunStarted } from "@/lib/server/runtime/goalStateSnapshot";
 import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { updateGoalRuntimeJobExecution, writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
+import {
+  mutateGoalsProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import { judgeTaskFeedback } from "@/lib/server/taskFeedbackJudge";
 import { ensureConversationWorkspace, ensureTaskWorkspace } from "@/lib/server/workspace/conversationWorkspace";
@@ -63,6 +66,31 @@ function replaceTaskInstance(goals: Goal[], taskId: string, instance: TaskInstan
       ),
     })),
   }));
+}
+
+function prependTaskInstance(goals: Goal[], taskRef: Pick<TaskRef, "goalId" | "subGoalId" | "taskId">, instance: TaskInstance) {
+  return goals.map((goal) =>
+    goal.id === taskRef.goalId
+      ? {
+          ...goal,
+          subGoals: goal.subGoals.map((subGoal) =>
+            subGoal.id === taskRef.subGoalId
+              ? {
+                  ...subGoal,
+                  tasks: subGoal.tasks.map((task) =>
+                    task.id === taskRef.taskId
+                      ? {
+                          ...task,
+                          instances: [instance, ...task.instances.filter((item) => item.id !== instance.id)],
+                        }
+                      : task,
+                  ),
+                }
+              : subGoal,
+          ),
+        }
+      : goal,
+  );
 }
 
 function updateFeedbackRecord(goals: Goal[], taskId: string, instanceId: string, record: TaskFeedbackRecord) {
@@ -154,6 +182,7 @@ async function POSTHandler(request: NextRequest) {
     return NextResponse.json({ reason: "反馈参数不完整" }, { status: 400 });
   }
 
+  // allow-raw-goals-snapshot: feedback 写路径以 raw projection 为 mutate 基准；执行态判断使用下方 composedGoals。
   const goals = readGoalsSnapshot([]);
   // 任务执行结果（completed 状态与 taskResult）由 worker 写入 runtime_jobs，不回写权威 goals snapshot。
   // 这里用与 UI 任务卡片一致的合成视图来定位与判断实例，避免把 runtime job 已完成的结果误判为"未完成"。
@@ -212,10 +241,14 @@ async function POSTHandler(request: NextRequest) {
       assistantMessage: "我已收到你对任务结果的反馈。当前本地 Runtime 未连接，暂时不能自动重做；连接 Runtime 后可以再次引用这条结果让我按反馈修订。",
       createdAt: nowIso(),
     };
-    writeGoalsProjection(updateFeedbackRecord(goals, located.task.id, located.instance.id, record));
+    mutateGoalsProjection(
+      (currentGoals) => updateFeedbackRecord(currentGoals, located.task.id, located.instance.id, record),
+      { fallbackGoals: goals },
+    );
     return NextResponse.json({ decision: record.decision, assistantMessage: record.assistantMessage });
   }
 
+  const runtimeEnv = body.runtimeEnv;
   const workspace = ensureConversationWorkspace(body.conversationId);
   const judge = await judgeTaskFeedback({
     goal: located.goal,
@@ -224,7 +257,7 @@ async function POSTHandler(request: NextRequest) {
     instance: located.instance,
     userMessage: body.message,
     quotedMessage: body.quotedMessage,
-    runtimeEnv: body.runtimeEnv,
+    runtimeEnv,
     workingDirectory: workspace.workspaceDir,
   });
 
@@ -238,7 +271,10 @@ async function POSTHandler(request: NextRequest) {
       revisionContext: judge.revisionContext,
       createdAt: nowIso(),
     };
-    writeGoalsProjection(updateFeedbackRecord(goals, located.task.id, located.instance.id, record));
+    mutateGoalsProjection(
+      (currentGoals) => updateFeedbackRecord(currentGoals, located.task.id, located.instance.id, record),
+      { fallbackGoals: goals },
+    );
     return NextResponse.json({
       decision: judge.decision,
       assistantMessage: judge.assistantMessage,
@@ -281,20 +317,6 @@ async function POSTHandler(request: NextRequest) {
     ...located.task,
     instances: [nextInstance, ...located.task.instances],
   };
-  const goalsWithInstance = upsertGoalTaskInstanceSnapshot(goals, {
-    goal: located.goal,
-    subGoal: located.subGoal,
-    task: taskWithInstance,
-    instance: nextInstance,
-  });
-  const startedGoals = markGoalInstanceRunStarted(goalsWithInstance, {
-    taskId: located.task.id,
-    instanceId: nextInstance.id,
-    requestId,
-    runtimeEnvId: body.runtimeEnv.id,
-    permissionMode: body.runtimeEnv.permissionMode,
-    workingDirectory: taskWorkspaceDir,
-  });
   const record: TaskFeedbackRecord = {
     id: body.feedbackId || `feedback-${Date.now()}`,
     sourceMessageId: body.sourceMessageId,
@@ -305,8 +327,18 @@ async function POSTHandler(request: NextRequest) {
     createdAt,
     rerunInstanceId: nextInstance.id,
   };
-  const goalsWithFeedback = updateFeedbackRecord(startedGoals, located.task.id, located.instance.id, record);
-  writeGoalsProjection(goalsWithFeedback);
+  const goalsWithFeedback = mutateGoalsProjection((currentGoals) => {
+    const goalsWithInstance = prependTaskInstance(currentGoals, body.taskRef, nextInstance);
+    const startedGoals = markGoalInstanceRunStarted(goalsWithInstance, {
+      taskId: located.task.id,
+      instanceId: nextInstance.id,
+      requestId,
+      runtimeEnvId: runtimeEnv.id,
+      permissionMode: runtimeEnv.permissionMode,
+      workingDirectory: taskWorkspaceDir,
+    });
+    return updateFeedbackRecord(startedGoals, located.task.id, located.instance.id, record);
+  }, { fallbackGoals: goals });
   const latest = findTaskRef(goalsWithFeedback, {
     ...body.taskRef,
     instanceId: nextInstance.id,
@@ -325,7 +357,7 @@ async function POSTHandler(request: NextRequest) {
     subGoal: located.subGoal,
     task: queuedTask,
     instance: queuedInstance,
-    runtimeEnv: body.runtimeEnv,
+    runtimeEnv,
     triggerSource: "feedback_rerun",
     requestId,
     conversationWorkspaceDir: workspace.workspaceDir,
@@ -340,7 +372,9 @@ async function POSTHandler(request: NextRequest) {
           ? "已收到反馈，但重跑任务需要先补充关键信息。"
           : attempt.outcome === "already_running"
             ? "我已经在按这条任务结果的反馈进行修订执行，先继续跟进当前修订任务。"
-            : attempt.reason,
+            : "reason" in attempt
+              ? attempt.reason
+              : "该任务已经执行完成，无需重复执行。",
       reason: "reason" in attempt ? attempt.reason : undefined,
       progress: "progress" in attempt ? attempt.progress : undefined,
       taskInstanceId: attempt.taskInstanceId,

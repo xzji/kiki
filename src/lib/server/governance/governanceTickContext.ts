@@ -16,7 +16,7 @@
 
 import type { Task, TaskInstance } from "@/types/kiki";
 import { listRecentByThreadId } from "@/lib/server/repositories/taskInstancesRepository";
-import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedTopicsSnapshot } from "@/lib/server/runtime/composedTopicsView";
 import { goalsSnapshotThreadTaskView } from "@/lib/server/services/threadTaskView";
 import type { Thread, Topic } from "@/types/topic";
 
@@ -53,7 +53,7 @@ export function buildThreadTickContext(input: {
   topicId: string;
   threadId: string;
 }): BuildThreadTickContextResult {
-  const topics = readTopicsSnapshot([]);
+  const topics = readComposedTopicsSnapshot([]);
   const topic = topics.find((item) => item.id === input.topicId);
   if (!topic) {
     return { ok: false, reason: "topic_not_found" };

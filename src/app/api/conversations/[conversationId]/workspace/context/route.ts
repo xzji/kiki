@@ -5,6 +5,7 @@ import {
   pickConversationForPrompt,
   pickGoalForPrompt,
 } from "@/lib/server/workspace/contextPack";
+import { pickTaskResultDigestsForPrompt } from "@/lib/server/workspace/taskResultDigestForPrompt";
 import {
   ensureConversationWorkspace,
   getConversationContextFilePath,
@@ -47,6 +48,9 @@ async function POSTHandler(request: NextRequest, context: { params: Promise<{ co
         conversation: safeConversation,
         goal: safeGoal,
         recentMessages: safeConversation.messages,
+        taskResultDigests: body.goal
+          ? pickTaskResultDigestsForPrompt({ conversationId, goal: body.goal })
+          : undefined,
       }),
     );
 

@@ -514,6 +514,19 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
   if (!job) {
     return { status: 404, body: { reason: "当前任务没有等待恢复的阻塞点" } };
   }
+  if (job.status === "completed") {
+    return {
+      status: 200,
+      body: {
+        resumed: false,
+        completed: true,
+        alreadyResumed: true,
+        progress: job.progress,
+        logs: job.logs,
+        trajectory: job.trajectory,
+      },
+    };
+  }
   if (!job.blocker) {
     if (job.status === "queued" || job.status === "running") {
       return {
@@ -535,7 +548,7 @@ export async function resumeBlockedTask(body: ResumeTaskRequestBody): Promise<Re
       status: 200,
       body: {
         resumed: true,
-        completed: job.status === "completed",
+          completed: false,
         alreadyResumed: true,
         progress: job.progress,
         logs: job.logs,

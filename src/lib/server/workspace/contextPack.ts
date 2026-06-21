@@ -175,6 +175,20 @@ export type PromptSafeGoal = {
   subGoals: PromptSafeSubGoal[];
 };
 
+/**
+ * Class A 安全的任务结果摘要投影。只保留可向会话 Agent 展示的蒸馏内容
+ * （标题 / 状态 / summary / 关键结论 / 产物名），不含任何落盘正文或内部 ID。
+ */
+export type PromptSafeTaskResultDigest = {
+  taskTitle: string;
+  status: string;
+  dateLabel: string;
+  summary: string;
+  keyPoints: string[];
+  artifacts: string[];
+  blocker?: string;
+};
+
 export function pickConversationForPrompt(conversation: Conversation): PromptSafeConversation {
   return {
     title: conversation.title,
@@ -207,6 +221,7 @@ export function buildConversationContextPack(input: {
   userMemory?: string;
   sessionMemory?: string;
   quotedMessage?: QuotedConversationMessageContext | null;
+  taskResultDigests?: PromptSafeTaskResultDigest[];
 }) {
   const lines: string[] = [
     "# 当前会话上下文",
@@ -247,6 +262,23 @@ export function buildConversationContextPack(input: {
         `### 子目标：${subGoal.title}`,
         ...subGoal.tasks.slice(0, 8).map(formatTask),
       );
+    });
+  }
+
+  if (input.taskResultDigests?.length) {
+    lines.push(
+      "",
+      "## 任务结果摘要",
+      "- 以下为该目标下最近任务的执行结果摘要，你可以据此回答用户、判断结果是否符合预期，无需让用户复述。",
+      "- 这是经过裁剪的摘要而非全文；如需更细内容，可告知用户你看到的要点并请其确认。",
+    );
+    input.taskResultDigests.forEach((digest) => {
+      const statusLabel = ACTION_LABEL[digest.status] || digest.status;
+      lines.push("", `### 任务：${digest.taskTitle}（${digest.dateLabel} · ${statusLabel}）`);
+      if (digest.summary) lines.push(`- 摘要：${truncate(digest.summary, 600)}`);
+      digest.keyPoints.slice(0, 8).forEach((point) => lines.push(`- 关键结论：${truncate(point, 200)}`));
+      if (digest.artifacts.length) lines.push(`- 产物：${digest.artifacts.join("、")}`);
+      if (digest.blocker) lines.push(`- 待补充/受阻：${truncate(digest.blocker, 300)}`);
     });
   }
 

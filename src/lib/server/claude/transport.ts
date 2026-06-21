@@ -127,6 +127,8 @@ export type ClaudeCliPayload = {
       tool_use_id?: string;
       text?: string;
       thinking?: string;
+      is_error?: boolean;
+      content?: unknown;
     }>;
   };
 };
@@ -170,6 +172,16 @@ export type RuntimeStreamEvent =
   | { type: "delta"; text: string }
   | { type: "message"; content: string; fallbackContent?: string }
   | { type: "tool_call"; toolName: string; summary: string; input?: unknown; index?: number; toolCallId?: string }
+  | {
+      type: "tool_result";
+      toolName?: string;
+      toolCallId?: string;
+      ok: boolean;
+      summary: string;
+      error?: string;
+      /** infra 类失败（如域名安全校验被拦、网络受限），区别于业务层结果缺口。 */
+      infraFailure?: boolean;
+    }
   | {
       type: "subagent_event";
       agentId: string;
@@ -856,6 +868,60 @@ function summarizeSubagentToolResult(text: string) {
   return firstLine ? truncateMiddle(firstLine, 90) : "子代理收到工具结果";
 }
 
+/**
+ * tool_result 块的 content 可能是字符串，也可能是 [{type:"text", text}] 数组。
+ * 统一抽取为纯文本，供埋点摘要与 infra 判定使用。
+ */
+function readToolResultText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
+          return (part as { text: string }).text;
+        }
+        return "";
+      })
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
+function redactSensitiveToolText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_KEY]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED_AWS_KEY]")
+    .replace(/\b(?:api[-_]?key|token|password|authorization|cookie|secret)\s*[:=]\s*["']?[^"'\s,;]+/gi, (match) => {
+      const separator = match.includes("=") ? "=" : ":";
+      return `${match.split(separator)[0]}${separator}[REDACTED]`;
+    })
+    .replace(/\b(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"'<>]+/gi, "[REDACTED_DATABASE_URL]");
+}
+
+/**
+ * 识别「环境/网络策略」导致的工具失败（基础设施故障），区别于业务层结果缺口。
+ * 典型样本：WebFetch 的 "Unable to verify if domain ... is safe to fetch.
+ * This may be due to network restrictions or enterprise security policies blocking claude.ai."
+ */
+function isInfraToolFailure(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes("unable to verify if domain") ||
+    normalized.includes("safe to fetch") ||
+    normalized.includes("network restrictions") ||
+    normalized.includes("enterprise security policies") ||
+    normalized.includes("blocking claude.ai") ||
+    normalized.includes("econnrefused") ||
+    normalized.includes("enotfound") ||
+    normalized.includes("etimedout") ||
+    normalized.includes("network error") ||
+    normalized.includes("getaddrinfo")
+  );
+}
+
 function createSubagentEventFromLine(line: string): RuntimeStreamEvent | null {
   let payload: ClaudeCliPayload & {
     agentId?: string;
@@ -1204,6 +1270,8 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
     let settled = false;
     let canonicalSessionId = options.resumeSessionId;
     const toolUseBlocks = new Map<number, ToolUseBlockState>();
+    // tool_use_id -> toolName，用于把后续主流 tool_result 块关联回工具名（tool_result 只带 tool_use_id）。
+    const toolNamesByCallId = new Map<string, string>();
     const pendingFilePaths = new Set<string>();
     const activeToolPermissionRequestIds = new Set<string>();
     const pendingSubagentCalls: SubagentCallBinding[] = [];
@@ -1530,6 +1598,7 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
             const toolCallId = currentTool.id || `tool-${eventIndex}-${Date.now()}`;
             const subagentBinding = readSubagentCallBinding(currentTool.name, parsedInput, toolCallId);
             if (subagentBinding) pendingSubagentCalls.push(subagentBinding);
+            toolNamesByCallId.set(toolCallId, currentTool.name);
             if (!emitEvent({
               type: "tool_call",
               toolName: currentTool.name,
@@ -1551,6 +1620,39 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
             }
             toolUseBlocks.delete(eventIndex);
           }
+        }
+        return;
+      }
+
+      if (payload.type === "user") {
+        // 主 agent 流的工具返回结果以 user 消息形式回灌（content 内含 tool_result 块）。
+        // 子代理（sidechain）的 tool_result 由 subagentPoller 单独处理，这里跳过避免重复。
+        const sidechain = payload as ClaudeCliPayload & { agentId?: string; isSidechain?: boolean };
+        if (sidechain.agentId || sidechain.isSidechain) return;
+        const content = payload.message?.content;
+        if (!Array.isArray(content)) return;
+        for (const block of content) {
+          if (block.type !== "tool_result") continue;
+          const toolCallId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
+          const toolName = toolCallId ? toolNamesByCallId.get(toolCallId) : undefined;
+          const text = redactSensitiveToolText(readToolResultText(block.content));
+          const ok = block.is_error !== true;
+          const infraFailure = !ok && isInfraToolFailure(text);
+          const summary = text
+            ? truncateMiddle(text.split("\n").map((line) => line.trim()).find(Boolean) ?? text, 120)
+            : ok
+              ? "工具执行完成"
+              : "工具执行失败";
+          if (!emitEvent({
+            type: "tool_result",
+            toolName,
+            toolCallId,
+            ok,
+            summary,
+            error: ok ? undefined : text || "工具执行失败",
+            infraFailure: infraFailure || undefined,
+          })) return;
+          if (toolCallId) toolNamesByCallId.delete(toolCallId);
         }
         return;
       }

@@ -11,7 +11,7 @@ import {
   TopicRevisionMismatchError,
   updateTopic,
 } from "@/lib/server/repositories/topicsRepository";
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import {
   persistTaskInstanceProjection,
   wakeThreadGovernanceLoop,
@@ -130,7 +130,7 @@ export function createEventTriggeredTaskInstances(input: {
   event: GovernanceEventOutboxRecord;
   now?: Date;
 }) {
-  const goals = readGoalsSnapshot([]);
+  const goals = readComposedGoalsSnapshot([]);
   const now = input.now ?? new Date();
   const results: Array<{
     taskId: string;

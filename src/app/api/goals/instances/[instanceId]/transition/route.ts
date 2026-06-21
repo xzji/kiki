@@ -83,6 +83,7 @@ async function POSTHandler(
   if (!validStatuses.includes(body.status)) {
     return NextResponse.json({ reason: "非法任务实例状态" }, { status: 400 });
   }
+  // allow-raw-goals-snapshot: 用户显式状态变更写路径，需要 raw projection 记录 previousStatus 并更新投影。
   const goals = readGoalsSnapshot([]);
   const located = findInstance(goals, context.params.instanceId);
   if (!located) {

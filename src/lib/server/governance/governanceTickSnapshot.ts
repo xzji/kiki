@@ -22,7 +22,7 @@ import type {
 } from "@/lib/server/repositories/governanceTickJobsRepository";
 import { findThreadById } from "@/lib/server/repositories/threadsRepository";
 import { findTopicById } from "@/lib/server/repositories/topicsRepository";
-import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedTopicsSnapshot } from "@/lib/server/runtime/composedTopicsView";
 import { buildThreadTickContext } from "@/lib/server/governance/governanceTickContext";
 import type { Thread, Topic } from "@/types/topic";
 
@@ -77,7 +77,7 @@ export function buildTopicSnapshot(topic: Topic) {
  * 在派发前用 envelope 当前态刷新 payload.snapshot。
  *
  * 行为：
- *  - thread：重新从 readTopicsSnapshot 取最新 topic + thread + currentTasks +
+ *  - thread：重新从 readComposedTopicsSnapshot 取最新 topic + thread + currentTasks +
  *    recentTaskInstances；任何字段不可用就回退到原 payload 对应字段，
  *    并把新字段 `currentTasks` / `recentTaskInstances` / `threads` 默认为空数组，
  *    保证下游协议层（isGovernanceTickPayload）不会因为旧 payload 缺字段被拒。
@@ -88,7 +88,7 @@ export function buildTopicSnapshot(topic: Topic) {
  */
 export function refreshGovernancePayload(payload: GovernanceTickJobPayload): GovernanceTickJobPayload {
   try {
-    const topics = readTopicsSnapshot([]);
+    const topics = readComposedTopicsSnapshot([]);
     const topic = topics.find((item) => item.id === payload.topicId);
     if (!topic) return ensureSnapshotShape(payload);
     if (payload.targetKind === "topic") {

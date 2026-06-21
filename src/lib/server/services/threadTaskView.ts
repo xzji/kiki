@@ -8,7 +8,7 @@
  * 未来 topic/thread 与 goal/subGoal/task 模型统一时，只需要替换本 adapter 实现。
  */
 
-import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import type { Task } from "@/types/kiki";
 
 export type ThreadTaskViewQuery = {
@@ -22,7 +22,7 @@ export type ThreadTaskView = {
 
 export const goalsSnapshotThreadTaskView: ThreadTaskView = {
   listByThread({ topicId, threadId }) {
-    const goal = readGoalsSnapshot([]).find((candidate) => candidate.id === topicId);
+    const goal = readComposedGoalsSnapshot([]).find((candidate) => candidate.id === topicId);
     const subGoal = goal?.subGoals.find((candidate) => candidate.id === threadId);
     return subGoal?.tasks ?? [];
   },

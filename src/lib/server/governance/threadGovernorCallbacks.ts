@@ -25,7 +25,7 @@ import {
   cancelTaskFromThread,
   updateTaskFromThread,
 } from "@/lib/server/services/dispatchTaskFromThread";
-import { readTopicsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { readComposedTopicsSnapshot } from "@/lib/server/runtime/composedTopicsView";
 import { buildThreadTickContext } from "@/lib/server/governance/governanceTickContext";
 import { buildThreadActionDetails } from "@/lib/server/governance/governanceActionPresentation";
 import {
@@ -52,7 +52,7 @@ import type {
 // 1. collectActiveThreads — 读 topics envelope，过滤 active topic + active thread
 // ---------------------------------------------------------------------------
 export const collectActiveThreads: CollectActiveThreadsCallback = async () => {
-  const topics = readTopicsSnapshot([]);
+  const topics = readComposedTopicsSnapshot([]);
   const result: Awaited<ReturnType<CollectActiveThreadsCallback>> = [];
   for (const topic of topics) {
     if (topic.status !== "active") continue;
@@ -67,7 +67,7 @@ export const collectActiveThreads: CollectActiveThreadsCallback = async () => {
 
 // 备选实现：通过仓库 list — 当 topic-only 上下文足够时使用。
 export const collectActiveThreadsFromRepo: CollectActiveThreadsCallback = async () => {
-  const topics = readTopicsSnapshot([]);
+  const topics = readComposedTopicsSnapshot([]);
   const activeTopics = new Map(
     topics.filter((t) => t.status === "active").map((t) => [t.id, t]),
   );

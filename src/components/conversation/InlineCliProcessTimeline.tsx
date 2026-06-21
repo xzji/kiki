@@ -106,6 +106,9 @@ function eventTitle(event: CliProcessEvent) {
   }
   if (event.type === "thinking") return "思考";
   if (event.type === "tool_call") return `调用工具：${event.toolName || event.title || "Tool"}`;
+  if (event.type === "tool_result") {
+    return event.title || `工具结果：${event.toolName || "Tool"}`;
+  }
   if (event.type === "status") return event.title || "状态更新";
   if (event.type === "error") return event.title || "任务失败";
   if (event.type === "file_artifact") return event.title || "生成附件";
@@ -124,6 +127,9 @@ function eventSummary(event: CliProcessEvent) {
 }
 
 function eventBadge(event: CliProcessEvent) {
+  if (event.type === "tool_result" && event.ok === false) {
+    return event.infraFailure ? "环境拦截" : "失败";
+  }
   return event.type === "error" ? "失败" : null;
 }
 
