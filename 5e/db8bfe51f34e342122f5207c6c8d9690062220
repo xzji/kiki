@@ -1,0 +1,29 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5edb8bfe51f34e342122f5207c6c8d9690062220",
+  "prompts": {},
+  "humans": {
+    "h_61e8252a2f4075": {
+      "author": "xzji <u201317505@alumni.hust.edu.cn>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {
+    "s_5af2d94b67ba2b": {
+      "tool": "trae",
+      "conversation_id": "6a37ba24c2449c1ff16bd9b5",
+      "session_id": "6a37ba24c2449c1ff16bd9b5",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_5af2d94b67ba2b::t_16813c428d5258": {
+      "tool": "trae",
+      "conversation_id": "6a37ba24c2449c1ff16bd9b5",
+      "session_id": "6a37ba24c2449c1ff16bd9b5",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
