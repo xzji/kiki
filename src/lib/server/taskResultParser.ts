@@ -34,6 +34,26 @@ export type TaskParserContext = {
   requestId: string;
 };
 
+/**
+ * 从任意带这些字段的对象投影出 parser ctx。让 repair / executeOnce / 顶层
+ * 共用一条窄构造,无须各自重复字面量。
+ */
+export function taskParserCtxFrom(source: {
+  task: Task;
+  instance: TaskInstance;
+  conversationWorkspaceDir?: string;
+  taskWorkspaceDir?: string;
+  requestId: string;
+}): TaskParserContext {
+  return {
+    task: source.task,
+    instance: source.instance,
+    conversationWorkspaceDir: source.conversationWorkspaceDir,
+    taskWorkspaceDir: source.taskWorkspaceDir,
+    requestId: source.requestId,
+  };
+}
+
 function validateTaskRunnerPayload(value: unknown): RawTaskRunnerPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("任务执行结果不是 JSON 对象");

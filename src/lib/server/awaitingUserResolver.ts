@@ -40,6 +40,18 @@ export type AwaitingUserContext = {
   resumeContext?: string;
 };
 
+/**
+ * 从任意带 task/instance/resumeContext 的对象投影出 awaiting ctx。
+ * 让 repair / acceptance / 顶层调用方共用一条窄构造,无须各自重复字面量。
+ */
+export function awaitingCtxFrom(source: { task: Task; instance: TaskInstance; resumeContext?: string }): AwaitingUserContext {
+  return {
+    task: source.task,
+    instance: source.instance,
+    resumeContext: source.resumeContext,
+  };
+}
+
 function looksLikeMissingUserContext(result: ParsedTaskRunnerResult) {
   if (!result.awaitingUser) return false;
   const requirement = result.interactionRequirement;
