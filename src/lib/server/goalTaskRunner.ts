@@ -81,6 +81,33 @@ import { createAgentRun, updateAgentRun } from "@/lib/server/repositories/agentR
 import { upsertAgentSnapshot } from "@/lib/server/repositories/agentRuntime/agentSnapshotsRepository";
 import type { AgentEventType } from "@/types/agentRuntime";
 
+// 已抽出的纯簇层模块。本文件按非限定名引用这些绑定（指向新模块实现）。
+import type { ParsedTaskRunnerResult } from "./taskRunnerTypes";
+import {
+  buildFallbackDeliverableCheck,
+  buildReadinessFromUserBlockers,
+  normalizeFieldAnswerOptions,
+  normalizeParsedAwaitingResult,
+  refreshReadinessCollections,
+  textForUserInputDetection,
+  uniqueStrings,
+} from "./taskRunnerShared";
+import {
+  buildAwaitingConfirmationFromRaw,
+  coerceMissingUserContextBlocker,
+  resolveAwaitingUser,
+  type AwaitingUserContext,
+} from "./awaitingUserResolver";
+import {
+  extractExternalEmbedSpec,
+  extractFileWriteSpecs,
+  extractWebAppSpec,
+} from "./taskResultNormalizers";
+import {
+  tryParseTaskRunnerResult,
+  type TaskParserContext,
+} from "./taskResultParser";
+
 type RunGoalTaskInput = {
   requestId: string;
   goal: Goal;
@@ -101,6 +128,24 @@ type RunGoalTaskInput = {
   onSpawn?: (pid: number) => void;
 };
 
+function taskParserCtx(input: RunGoalTaskInput): TaskParserContext {
+  return {
+    task: input.task,
+    instance: input.instance,
+    conversationWorkspaceDir: input.conversationWorkspaceDir,
+    taskWorkspaceDir: input.taskWorkspaceDir,
+    requestId: input.requestId,
+  };
+}
+
+function awaitingCtx(input: RunGoalTaskInput): AwaitingUserContext {
+  return {
+    task: input.task,
+    instance: input.instance,
+    resumeContext: input.resumeContext,
+  };
+}
+
 /**
  * runGoalTask 的结构化终态。云端经 Tunnel 下发的 goal task 在本机执行完后，
  * 需要把真实终态（含 awaiting_user 的 blocker / result）回传给服务端，
@@ -114,36 +159,6 @@ export type GoalTaskOutcome = {
   error?: string;
 };
 
-type DeliverableCheckStatus = "passed" | "failed" | "unknown";
-
-type DeliverableCheck = {
-  matched: boolean;
-  confidence: "high" | "medium" | "low";
-  deliveredArtifacts: string[];
-  missingDeliverables: string[];
-  criteriaResults: Array<{
-    criterion: string;
-    status: DeliverableCheckStatus;
-    evidence?: string;
-  }>;
-  gapReason?: string;
-};
-
-type ParsedTaskRunnerResult = {
-  summary: string;
-  finalMessage: string;
-  resultViewKind: TaskResultViewKind;
-  awaitingUser: boolean;
-  awaitingReason?: string;
-  suggestedActions?: string[];
-  artifacts: TaskRunArtifact[];
-  taskResult: TaskResult | null;
-  deliverableCheck: DeliverableCheck | null;
-  interactionRequirement: InteractionRequirement;
-  blocker: ExecutionBlocker | null;
-  structuredOutput: Record<string, unknown> | null;
-};
-
 function readTaskRunnerMemoryContext(conversationId: string) {
   try {
     return {
@@ -154,45 +169,6 @@ function readTaskRunnerMemoryContext(conversationId: string) {
     return { userMemory: "", sessionMemory: "" };
   }
 }
-
-function normalizeParsedAwaitingResult<T extends ParsedTaskRunnerResult>(result: T): T {
-  if (!result.awaitingUser) return result;
-  const interactionRequirement =
-    normalizeServerInteractionRequirement(result.interactionRequirement) ?? result.interactionRequirement;
-  const blocker = result.blocker
-    ? {
-        ...result.blocker,
-        interactionRequirement:
-          normalizeServerInteractionRequirement(result.blocker.interactionRequirement) ??
-          result.blocker.interactionRequirement,
-      }
-    : result.blocker;
-  return {
-    ...result,
-    interactionRequirement,
-    blocker,
-    structuredOutput: {
-      ...(result.structuredOutput ?? {}),
-      interactionRequirement,
-      ...(blocker ? { blocker } : {}),
-    },
-  };
-}
-
-type WebAppSpec = {
-  title: string;
-  description?: string;
-  html: string;
-  initialState?: Record<string, unknown>;
-  networkPolicy?: "offline" | "internet";
-};
-
-type ExternalEmbedSpec = {
-  title: string;
-  description?: string;
-  url: string;
-  provider?: "youtube" | "generic";
-};
 
 function getGoalTaskRuntimeJobId(input: RunGoalTaskInput) {
   return `job-${input.instance.id}`;
@@ -250,24 +226,6 @@ function finishGoalTaskAgentRun(agentRunId: string | undefined, status: "complet
   });
 }
 
-type RawTaskRunnerPayload = {
-  summary?: string;
-  final_message?: string;
-  result_view_kind?: TaskResultViewKind;
-  awaiting_user?: boolean;
-  awaiting_reason?: string;
-  suggested_actions?: string[];
-  interaction_requirement?: unknown;
-  artifacts?: Array<{ label?: string; kind?: TaskRunArtifact["kind"]; content?: string; href?: string }>;
-  files?: unknown;
-  webapp?: unknown;
-  external_embed?: unknown;
-  task_result?: unknown;
-  taskResult?: unknown;
-  deliverable_check?: unknown;
-  structured_output?: Record<string, unknown> | null;
-};
-
 type TaskRunAttemptResult = ParsedTaskRunnerResult & {
   trajectory: ExecutionTrajectoryStep[];
   rawOutput: string;
@@ -275,16 +233,6 @@ type TaskRunAttemptResult = ParsedTaskRunnerResult & {
   acceptanceReport?: AcceptanceReport;
   acceptanceRuntime?: TaskAcceptanceRuntimeState;
 };
-
-function normalizeStringList(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
-    : [];
-}
-
-function uniqueStrings(items: Array<string | undefined>) {
-  return Array.from(new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))));
-}
 
 const FINAL_PROTOCOL_JSON_KEYS = [
   "summary",
@@ -491,7 +439,7 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
     suggestedActions,
     shouldNotifyUser: true,
   };
-  const deliverableCheck = buildFallbackDeliverableCheck(input, readiness.summary);
+  const deliverableCheck = buildFallbackDeliverableCheck(input.task, readiness.summary);
   return {
     summary: hasUserMissing ? "需要你补充关键信息后才能继续执行。" : "任务执行前置条件未满足。",
     finalMessage: readiness.summary,
@@ -515,138 +463,6 @@ async function buildReadinessBlockedResult(input: RunGoalTaskInput, readiness: T
       interactionRequirement,
     },
   };
-}
-
-function normalizeDeliverableCheck(value: unknown): DeliverableCheck | null {
-  if (!value || typeof value !== "object") return null;
-  const raw = value as {
-    matched?: unknown;
-    confidence?: unknown;
-    delivered_artifacts?: unknown;
-    deliveredArtifacts?: unknown;
-    missing_deliverables?: unknown;
-    missingDeliverables?: unknown;
-    criteria_results?: unknown;
-    criteriaResults?: unknown;
-    gap_reason?: unknown;
-    gapReason?: unknown;
-  };
-  const confidence = raw.confidence === "high" || raw.confidence === "medium" || raw.confidence === "low" ? raw.confidence : "low";
-  const rawCriteria = Array.isArray(raw.criteria_results)
-    ? raw.criteria_results
-    : Array.isArray(raw.criteriaResults)
-      ? raw.criteriaResults
-      : [];
-  const criteriaResults = rawCriteria
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-    .map((item) => {
-      const status: DeliverableCheckStatus =
-        item.status === "passed" || item.status === "failed" || item.status === "unknown" ? item.status : "unknown";
-      return {
-        criterion: typeof item.criterion === "string" && item.criterion.trim() ? item.criterion.trim() : "未命名验收标准",
-        status,
-        evidence: typeof item.evidence === "string" ? item.evidence.trim() : undefined,
-      };
-    });
-
-  return {
-    matched: raw.matched === true,
-    confidence,
-    deliveredArtifacts: normalizeStringList(raw.delivered_artifacts ?? raw.deliveredArtifacts),
-    missingDeliverables: normalizeStringList(raw.missing_deliverables ?? raw.missingDeliverables),
-    criteriaResults,
-    gapReason: typeof raw.gap_reason === "string" ? raw.gap_reason.trim() : typeof raw.gapReason === "string" ? raw.gapReason.trim() : undefined,
-  };
-}
-
-function normalizeInteractionRequirement(
-  value: unknown,
-  fallback?: Partial<InteractionRequirement>,
-): InteractionRequirement {
-  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const rawType = raw.type ?? fallback?.type;
-  const type =
-    rawType === "confirm" ||
-    rawType === "answer" ||
-    rawType === "provide_context" ||
-    rawType === "perform_offline_action" ||
-    rawType === "deliverable_gap" ||
-    rawType === "agent_revision_required"
-      ? rawType
-      : "none";
-  const rawTiming = raw.timing ?? fallback?.timing;
-  const timing =
-    rawTiming === "before_execution" ||
-    rawTiming === "during_execution" ||
-    rawTiming === "after_agent_output" ||
-    rawTiming === "core_task_step"
-      ? rawTiming
-      : undefined;
-  const suggestedActions = Array.isArray(raw.suggested_actions)
-    ? normalizeStringList(raw.suggested_actions)
-    : Array.isArray(raw.suggestedActions)
-      ? normalizeStringList(raw.suggestedActions)
-      : fallback?.suggestedActions;
-  const fields = Array.isArray(raw.fields)
-    ? normalizeMissingFieldQuestions(raw.fields)
-    : Array.isArray(raw.field_questions)
-      ? normalizeMissingFieldQuestions(raw.field_questions)
-      : fallback?.fields;
-  const requirement = inferInteractionRequirement({
-    interactionType: type,
-    timing,
-    reason:
-      typeof raw.reason === "string" && raw.reason.trim()
-        ? raw.reason.trim()
-        : fallback?.reason || "",
-    question: typeof raw.question === "string" && raw.question.trim() ? raw.question.trim() : fallback?.question,
-    options: Array.isArray(raw.options) ? normalizeStringList(raw.options) : fallback?.options,
-    fields,
-    suggestedActions,
-    shouldNotifyUser:
-      typeof raw.should_notify_user === "boolean"
-        ? raw.should_notify_user
-        : typeof raw.shouldNotifyUser === "boolean"
-          ? raw.shouldNotifyUser
-          : undefined,
-    fallbackShouldNotifyUser: fallback?.shouldNotifyUser,
-  });
-
-  return {
-    ...requirement,
-  };
-}
-
-function isNonBlockingInformationFeedback(input: RunGoalTaskInput, requirement: InteractionRequirement, taskResult: TaskResult | null) {
-  return (
-    input.task.expectedResult?.type === "information" &&
-    requirement.type === "confirm" &&
-    requirement.timing === "after_agent_output" &&
-    taskResult?.status === "done" &&
-    !requiresUserConfirmationToComplete(input.task, { includeUserCompletionOwner: true })
-  );
-}
-
-function textForUserInputDetection(result: ParsedTaskRunnerResult) {
-  return [
-    result.summary,
-    result.finalMessage,
-    result.awaitingReason,
-    result.interactionRequirement.reason,
-    result.interactionRequirement.question,
-    ...(result.suggestedActions ?? []),
-    ...(result.deliverableCheck?.missingDeliverables ?? []),
-    result.deliverableCheck?.gapReason,
-  ].filter(Boolean).join("\n");
-}
-
-function looksLikeMissingUserContext(result: ParsedTaskRunnerResult) {
-  if (!result.awaitingUser) return false;
-  const requirement = result.interactionRequirement;
-  if (requirement.type === "provide_context" || requirement.type === "answer") return true;
-  if (requirement.type === "confirm" && requirement.timing === "after_agent_output") return false;
-  const text = textForUserInputDetection(result);
-  return /需要用户|请用户|用户确认|用户补充|补充.*信息|提供.*信息|缺少.*信息|确认.*城市|出发城市|出发地|目的地|预算|偏好|账号|登录|授权|选择|作答/.test(text);
 }
 
 function truncateForLog(value: string, limit = 2000) {
@@ -708,48 +524,6 @@ function buildOptionGenerationContext(input: RunGoalTaskInput, options: {
   };
 }
 
-function isTaskReadinessInfoItem(value: unknown): value is TaskReadinessInfoItem {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Partial<TaskReadinessInfoItem>;
-  return (
-    typeof item.id === "string" &&
-    typeof item.label === "string" &&
-    typeof item.description === "string" &&
-    (item.source === "user" || item.source === "agent" || item.source === "system") &&
-    (item.status === "available" ||
-      item.status === "missing_user" ||
-      item.status === "agent_retrievable" ||
-      item.status === "not_required") &&
-    typeof item.reason === "string"
-  );
-}
-
-function isTaskReadinessCheck(value: unknown): value is TaskReadinessCheck {
-  if (!value || typeof value !== "object") return false;
-  const readiness = value as Partial<TaskReadinessCheck>;
-  return (
-    (readiness.status === "ready" || readiness.status === "blocked") &&
-    typeof readiness.generatedAt === "string" &&
-    typeof readiness.summary === "string" &&
-    Array.isArray(readiness.items) &&
-    readiness.items.every(isTaskReadinessInfoItem) &&
-    Array.isArray(readiness.missingUserInfo) &&
-    readiness.missingUserInfo.every(isTaskReadinessInfoItem) &&
-    Array.isArray(readiness.agentRetrievableInfo) &&
-    readiness.agentRetrievableInfo.every(isTaskReadinessInfoItem) &&
-    Array.isArray(readiness.availableInfo) &&
-    readiness.availableInfo.every(isTaskReadinessInfoItem)
-  );
-}
-
-function isActionLikeConfirmationOption(option: string) {
-  return /^(确认继续|需要修改|重新执行任务|调整任务完成标准|让\s*KiKi\s*修改后继续|提交答案并继续|提交信息并继续|我已完成，继续执行|确认并继续)$/.test(option.trim());
-}
-
-function normalizeFieldAnswerOptions(values: string[]) {
-  return normalizeConfirmationOptionLabels(values.filter((option) => !isActionLikeConfirmationOption(option)));
-}
-
 function asksForDestinationCities(text: string) {
   return /(游览|目的地|城市组合|选定城市|计划.*城市|哪些城市)/.test(text);
 }
@@ -771,18 +545,6 @@ function chooseReadinessOptions(input: {
   const contextText = [input.question, input.item.label, input.item.description, input.item.reason].filter(Boolean).join("\n");
   if (asksForDestinationCities(contextText) && optionsLookLikeDepartureCities(input.generatedOptions)) return [];
   return input.generatedOptions;
-}
-
-function refreshReadinessCollections(items: TaskReadinessInfoItem[], generatedAt: string, summary: string): TaskReadinessCheck {
-  return {
-    status: items.some((item) => item.status === "missing_user" && item.source === "user") ? "blocked" : "ready",
-    generatedAt,
-    summary,
-    items,
-    missingUserInfo: items.filter((item) => item.status === "missing_user" && item.source === "user"),
-    agentRetrievableInfo: items.filter((item) => item.status === "agent_retrievable"),
-    availableInfo: items.filter((item) => item.status === "available"),
-  };
 }
 
 async function runOptionGenerationPrompt(input: RunGoalTaskInput, context: UserConfirmationOptionsContext): Promise<UserConfirmationOptionsResult | null> {
@@ -986,473 +748,6 @@ async function enrichAwaitingUserFieldOptions(
   };
 }
 
-function applyInteractionOptionsToSingleMissingReadiness(
-  readiness: TaskReadinessCheck | null,
-  rawOptions: string[],
-  question: string,
-): TaskReadinessCheck | null {
-  if (!readiness) return null;
-  const options = normalizeFieldAnswerOptions(rawOptions);
-  if (!options.length || readiness.missingUserInfo.length !== 1) return readiness;
-  const missingId = readiness.missingUserInfo[0].id;
-  const items = readiness.items.map((item) =>
-    item.id === missingId
-      ? {
-          ...item,
-          options,
-          optionQuestion: question,
-        }
-      : item,
-  );
-  return refreshReadinessCollections(items, readiness.generatedAt, readiness.summary);
-}
-
-function normalizeBlockerLabel(value: string, index: number) {
-  return value
-    .replace(/^请(补充|确认|选择|提供)/, "")
-    .replace(/[。；;：:，,].*$/, "")
-    .trim()
-    .slice(0, 24) || `待补充信息 ${index + 1}`;
-}
-
-function buildReadinessFromUserBlockers(blockers: string[], summary: string): TaskReadinessCheck | null {
-  const uniqueBlockers = uniqueStrings(blockers);
-  if (!uniqueBlockers.length) return null;
-  const items = uniqueBlockers.map((blocker, index) => ({
-    id: `user_blocker_${index + 1}`,
-    label: normalizeBlockerLabel(blocker, index),
-    description: blocker,
-    source: "user" as const,
-    status: "missing_user" as const,
-    reason: blocker,
-  }));
-  return {
-    status: "blocked",
-    generatedAt: new Date().toISOString(),
-    summary: summary || `缺少 ${items.map((item) => item.label).join("、")}，需要用户一次性补充后才能执行。`,
-    items,
-    missingUserInfo: items,
-    agentRetrievableInfo: [],
-    availableInfo: [],
-  };
-}
-
-function shouldAutoResolveRepeatedResumeConfirmation(input: RunGoalTaskInput, result: ParsedTaskRunnerResult) {
-  if (!input.resumeContext || !/用户对上一次阻塞点的决定：确认继续/.test(input.resumeContext)) return false;
-  if (!result.awaitingUser || result.interactionRequirement.timing !== "after_agent_output") return false;
-  if (result.interactionRequirement.type !== "confirm" && result.interactionRequirement.type !== "provide_context") return false;
-  const text = [
-    result.awaitingReason,
-    result.interactionRequirement.reason,
-    result.interactionRequirement.question,
-    ...(result.deliverableCheck?.missingDeliverables ?? []),
-  ].filter(Boolean).join("\n");
-  return /确认|是否符合|是否满意|选择|行程安排/.test(text);
-}
-
-function resolveRepeatedResumeConfirmation(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): ParsedTaskRunnerResult {
-  if (!shouldAutoResolveRepeatedResumeConfirmation(input, result)) return result;
-  const missingDeliverables =
-    result.deliverableCheck?.missingDeliverables.filter((item) => !/用户确认|确认选择|确认行程|用户选择|行程安排是否符合/.test(item)) ?? [];
-  const deliverableCheck = result.deliverableCheck
-    ? {
-        ...result.deliverableCheck,
-        matched: missingDeliverables.length === 0 ? true : result.deliverableCheck.matched,
-        missingDeliverables,
-        gapReason: missingDeliverables.length === 0 ? "" : result.deliverableCheck.gapReason,
-      }
-    : result.deliverableCheck;
-  const interactionRequirement: InteractionRequirement = {
-    type: "none",
-    timing: "not_required",
-    reason: "",
-    question: "",
-    options: [],
-    suggestedActions: [],
-    shouldNotifyUser: false,
-  };
-  const taskResult = result.taskResult
-    ? {
-        ...result.taskResult,
-        status: result.taskResult.status === "pending_user" || result.taskResult.status === "blocked" ? "done" : result.taskResult.status,
-      }
-    : result.taskResult;
-  return {
-    ...result,
-    summary: result.summary || "已吸收用户确认并完成任务。",
-    awaitingUser: false,
-    awaitingReason: "",
-    interactionRequirement,
-    taskResult,
-    deliverableCheck,
-    blocker: null,
-    structuredOutput: {
-      ...(result.structuredOutput ?? {}),
-      interactionRequirement,
-      ...(taskResult ? { taskResult } : {}),
-      ...(deliverableCheck ? { deliverableCheck } : {}),
-      autoResolvedRepeatedResumeConfirmation: true,
-    },
-  };
-}
-
-function buildPendingUserTaskResult(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): TaskResult {
-  const question = result.interactionRequirement.question || result.awaitingReason || "请补充完成任务所需的关键信息。";
-  const missing = result.deliverableCheck?.missingDeliverables?.length
-    ? result.deliverableCheck.missingDeliverables
-    : [question];
-  return {
-    schemaVersion: 1,
-    taskId: input.task.id,
-    instanceId: input.instance.id,
-    title: "需要补充信息后继续",
-    status: "pending_user",
-    blocks: [
-      { kind: "callout", tone: "warn", text: "当前缺少用户才能提供的关键信息，KiKi 已暂停执行，未生成基于猜测的方案。" },
-      { kind: "heading", level: 2, text: "需要你补充" },
-      { kind: "paragraph", text: question },
-      { kind: "list", ordered: false, items: missing },
-    ],
-    meta: {
-      producedAt: new Date().toISOString(),
-      role: "pending_user_placeholder",
-    },
-  };
-}
-
-function coerceMissingUserContextBlocker(input: RunGoalTaskInput, result: ParsedTaskRunnerResult): ParsedTaskRunnerResult {
-  if (!looksLikeMissingUserContext(result)) return result;
-  const question = result.interactionRequirement.question || result.awaitingReason || "请补充完成任务所需的关键信息。";
-  const reason = result.awaitingReason || result.interactionRequirement.reason || question;
-  const rawOptions = result.interactionRequirement.options?.length
-    ? normalizeConfirmationOptionLabels(result.interactionRequirement.options)
-    : [];
-  const existingReadiness = isTaskReadinessCheck(result.structuredOutput?.taskReadiness) ? result.structuredOutput.taskReadiness : null;
-  const baseReadiness =
-    existingReadiness ??
-    buildReadinessFromUserBlockers(result.deliverableCheck?.missingDeliverables?.length ? result.deliverableCheck.missingDeliverables : [question], reason);
-  const readiness = applyInteractionOptionsToSingleMissingReadiness(baseReadiness, rawOptions, question);
-  const fields = compileMissingFieldQuestions({
-    readiness,
-    fields: result.interactionRequirement.fields,
-    options: rawOptions,
-    fallbackQuestion: question,
-  });
-  const options = fields.length ? singleFieldOptions(fields) : rawOptions;
-  const suggestedActions = uniqueStrings([
-    ...(fields.length ? fieldsSuggestedActions(fields) : options),
-    ...(result.suggestedActions ?? []),
-  ]).slice(0, 5);
-  const deliverableCheck = result.deliverableCheck ?? buildFallbackDeliverableCheck(input, reason);
-  const normalizedDeliverableCheck: DeliverableCheck = {
-    ...deliverableCheck,
-    matched: false,
-    confidence: "high",
-    missingDeliverables: deliverableCheck.missingDeliverables.length ? deliverableCheck.missingDeliverables : [question],
-    gapReason: deliverableCheck.gapReason || reason,
-  };
-  const interactionRequirement: InteractionRequirement = {
-    ...result.interactionRequirement,
-    type: "provide_context",
-    timing: result.interactionRequirement.timing === "not_required" ? "before_execution" : result.interactionRequirement.timing,
-    reason,
-    question: fields.length === 1 ? "" : question,
-    options,
-    fields,
-    suggestedActions,
-    shouldNotifyUser: true,
-  };
-  const taskResult = buildPendingUserTaskResult(input, { ...result, interactionRequirement, deliverableCheck: normalizedDeliverableCheck });
-  return {
-    ...result,
-    summary: "需要你补充关键信息后才能继续执行。",
-    finalMessage: reason,
-    awaitingUser: true,
-    awaitingReason: reason,
-    suggestedActions,
-    artifacts: [],
-    taskResult,
-    deliverableCheck: normalizedDeliverableCheck,
-    interactionRequirement,
-    structuredOutput: {
-      ...(result.structuredOutput ?? {}),
-      ...(readiness ? { taskReadiness: readiness } : {}),
-      taskResult,
-      deliverableCheck: normalizedDeliverableCheck,
-      interactionRequirement,
-      blockedByMissingUserContext: true,
-    },
-  };
-}
-
-function validateTaskRunnerPayload(value: unknown): RawTaskRunnerPayload {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("任务执行结果不是 JSON 对象");
-  }
-  const payload = value as Record<string, unknown>;
-  const hasProtocolSignal = [
-    "summary",
-    "final_message",
-    "result_view_kind",
-    "interaction_requirement",
-    "artifacts",
-    "files",
-    "webapp",
-    "external_embed",
-    "task_result",
-    "taskResult",
-    "deliverable_check",
-  ].some((key) => key in payload);
-  if (!hasProtocolSignal) {
-    throw new Error("JSON 对象不包含任务结果协议字段");
-  }
-  return value as RawTaskRunnerPayload;
-}
-
-function parseTaskRunnerPayload(raw: string) {
-  const candidates = buildJsonParseCandidates(raw);
-  const attempt = parseJsonWithCandidates(candidates, validateTaskRunnerPayload);
-  if (attempt.ok) {
-    return {
-      parsed: attempt.parsed,
-      strategy: attempt.strategy,
-    };
-  }
-  const message = attempt.error instanceof Error ? attempt.error.message : String(attempt.error ?? "未知解析错误");
-  throw new Error(`任务结果 JSON 解析失败：${message}`);
-}
-
-function parseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKind: TaskResultViewKind): ParsedTaskRunnerResult {
-  const { parsed } = parseTaskRunnerPayload(raw);
-  const parsedFiles = normalizeFileWriteSpecs(parsed.files);
-  const parsedWebApp = normalizeWebAppSpec(parsed.webapp);
-  const parsedExternalEmbed = normalizeExternalEmbedSpec(parsed.external_embed);
-  const normalizedTaskResult = normalizeTaskResult(parsed.task_result ?? parsed.taskResult, {
-    taskId: input.task.id,
-    instanceId: input.instance.id,
-    title: input.task.expectedOutcome || input.task.title,
-  });
-  const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
-  const expectsWebApp = input.task.expectedResult?.interactiveSurface?.kind === "webapp" || Boolean(parsedWebApp) || Boolean(parsedExternalEmbed);
-  const taskResult =
-    normalizedTaskResult ||
-    (expectedSurfaces.includes("interactive") && expectsWebApp && (parsedWebApp || parsedExternalEmbed)
-      ? {
-          schemaVersion: 1 as const,
-          taskId: input.task.id,
-          instanceId: input.instance.id,
-          title: parsedWebApp?.title || parsedExternalEmbed?.title || input.task.expectedOutcome || input.task.title,
-          status: "done" as const,
-          blocks: [],
-          meta: {
-            producedAt: new Date().toISOString(),
-            surfaces: ["interactive" as const],
-            interactiveSurfaceKind: "webapp" as const,
-            primaryFormat: "html" as const,
-            exportableFormats: input.task.expectedResult?.exportableFormats,
-          },
-        }
-      : null) ||
-    (expectedSurfaces.includes("files") && parsedFiles.length > 0
-      ? {
-          schemaVersion: 1 as const,
-          taskId: input.task.id,
-          instanceId: input.instance.id,
-          title: input.task.expectedOutcome || input.task.title,
-          status: "done" as const,
-          blocks: [],
-          meta: {
-            producedAt: new Date().toISOString(),
-            surfaces: ["files" as const],
-            fileSurfaceRequired: true,
-            primaryFormat: input.task.expectedResult?.primaryFormat,
-            exportableFormats: input.task.expectedResult?.exportableFormats,
-          },
-        }
-      : null);
-  const legacyFromBlocks = taskResult ? deriveLegacyTaskResult(taskResult) : null;
-  let suggestedActions = Array.isArray(parsed.suggested_actions)
-    ? parsed.suggested_actions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    : undefined;
-  const legacyInteractionType = parsed.awaiting_user ? "confirm" : "none";
-  let interactionRequirement = normalizeInteractionRequirement(parsed.interaction_requirement, {
-    type: legacyInteractionType,
-    reason: parsed.awaiting_reason?.trim() || "",
-    suggestedActions,
-    shouldNotifyUser: parsed.awaiting_user,
-  });
-  const isFeedbackOnly = isNonBlockingInformationFeedback(input, interactionRequirement, taskResult);
-  if (isFeedbackOnly) {
-    suggestedActions = uniqueStrings([
-      ...(suggestedActions ?? []),
-      ...(interactionRequirement.options ?? []),
-      ...(interactionRequirement.suggestedActions ?? []),
-    ]);
-    interactionRequirement = {
-      type: "none",
-      timing: "not_required",
-      reason: "",
-      question: "",
-      options: [],
-      suggestedActions,
-      shouldNotifyUser: false,
-    };
-  }
-  const awaitingUser =
-    !isFeedbackOnly &&
-    Boolean(parsed.awaiting_user) ||
-    (!isFeedbackOnly &&
-      interactionRequirement.type !== "none" &&
-      interactionRequirement.type !== "deliverable_gap" &&
-      interactionRequirement.type !== "agent_revision_required");
-  return {
-    summary: parsed.summary?.trim() || legacyFromBlocks?.summary || "任务执行完成。",
-    finalMessage: parsed.final_message?.trim() || legacyFromBlocks?.finalMessage || parsed.summary?.trim() || "任务执行完成。",
-    resultViewKind: normalizeTaskResultViewKind(parsed.result_view_kind ?? fallbackKind),
-    awaitingUser,
-    awaitingReason: parsed.awaiting_reason?.trim() || interactionRequirement.reason,
-    suggestedActions,
-    artifacts:
-      Array.isArray(parsed.artifacts) && parsed.artifacts.length > 0
-        ? parsed.artifacts
-            .filter((item) => item?.label)
-            .map((item, index) => ({
-              id: `artifact-${index + 1}`,
-              label: item.label!.trim(),
-              kind: item.kind || "other",
-              content: item.content,
-              href: item.href,
-            }))
-        : legacyFromBlocks?.artifacts ?? [],
-    taskResult,
-    deliverableCheck: normalizeDeliverableCheck(parsed.deliverable_check),
-    interactionRequirement,
-    blocker: null,
-    structuredOutput: {
-      ...(parsed.structured_output ?? {}),
-      ...(taskResult ? { taskResult } : {}),
-      ...(isFeedbackOnly
-        ? {
-            followUpSuggestion: {
-              reason: parsed.awaiting_reason?.trim() || normalizeInteractionRequirement(parsed.interaction_requirement).reason,
-              question: normalizeInteractionRequirement(parsed.interaction_requirement).question,
-              options: normalizeInteractionRequirement(parsed.interaction_requirement).options ?? [],
-            },
-          }
-        : {}),
-    },
-  };
-}
-
-function buildParseCandidateDiagnostics(raw: string) {
-  return buildJsonParseCandidates(raw).map((candidate) => {
-    try {
-      validateTaskRunnerPayload(JSON.parse(candidate.value));
-      return {
-        label: candidate.label,
-        value: candidate.value,
-      };
-    } catch (error) {
-      return {
-        label: candidate.label,
-        value: candidate.value,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  });
-}
-
-function buildTaskParseError(input: RunGoalTaskInput, raw: string, error: unknown) {
-  const context = extractParseFailureContext(raw, error);
-  let snapshotPath = "";
-  if (input.conversationWorkspaceDir && input.taskWorkspaceDir) {
-    try {
-      const snapshot = writeTaskParseFailureSnapshot({
-        workspaceDir: input.conversationWorkspaceDir,
-        taskWorkspaceDir: input.taskWorkspaceDir,
-        requestId: input.requestId,
-        taskId: input.task.id,
-        instanceId: input.instance.id,
-        errorMessage: context.message,
-        rawOutput: raw,
-        balancedSnippet: extractBalancedJsonSnippet(raw),
-        contextExcerpt: context.excerpt,
-        parseCandidates: buildParseCandidateDiagnostics(raw),
-      });
-      snapshotPath = snapshot.relativePath;
-    } catch {
-      snapshotPath = "";
-    }
-  }
-  return [context.formatted, snapshotPath ? `快照: ${snapshotPath}` : ""].filter(Boolean).join("\n");
-}
-
-function tryParseTaskRunnerResult(input: RunGoalTaskInput, raw: string, fallbackKind: TaskResultViewKind) {
-  try {
-    return {
-      result: parseTaskRunnerResult(input, raw, fallbackKind),
-      error: undefined,
-    };
-  } catch (error) {
-    return {
-      result: null,
-      error: buildTaskParseError(input, raw, error),
-    };
-  }
-}
-
-function extractFileWriteSpecs(raw: string) {
-  try {
-    const parsed = JSON.parse(extractJsonObject(raw)) as { files?: unknown };
-    return normalizeFileWriteSpecs(parsed.files);
-  } catch {
-    return [];
-  }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function normalizeWebAppSpec(value: unknown): WebAppSpec | null {
-  if (!isPlainRecord(value)) return null;
-  const title = typeof value.title === "string" && value.title.trim() ? value.title.trim() : "可执行小应用";
-  const description = typeof value.description === "string" && value.description.trim() ? value.description.trim() : undefined;
-  const html = typeof value.html === "string" ? value.html.trim() : "";
-  if (!html) return null;
-  const initialState = isPlainRecord(value.initialState) ? value.initialState : undefined;
-  const networkPolicy = value.networkPolicy === "internet" ? "internet" : "offline";
-  return { title, description, html, initialState, networkPolicy };
-}
-
-function normalizeExternalEmbedSpec(value: unknown): ExternalEmbedSpec | null {
-  if (!isPlainRecord(value)) return null;
-  const title = typeof value.title === "string" && value.title.trim() ? value.title.trim() : "外部嵌入";
-  const description = typeof value.description === "string" && value.description.trim() ? value.description.trim() : undefined;
-  const url = typeof value.url === "string" ? value.url.trim() : "";
-  if (!url) return null;
-  const provider = value.provider === "youtube" ? "youtube" : value.provider === "generic" ? "generic" : undefined;
-  return { title, description, url, provider };
-}
-
-function extractWebAppSpec(raw: string) {
-  try {
-    const parsed = JSON.parse(extractJsonObject(raw)) as { webapp?: unknown };
-    return normalizeWebAppSpec(parsed.webapp);
-  } catch {
-    return null;
-  }
-}
-
-function extractExternalEmbedSpec(raw: string) {
-  try {
-    const parsed = JSON.parse(extractJsonObject(raw)) as { external_embed?: unknown };
-    return normalizeExternalEmbedSpec(parsed.external_embed);
-  } catch {
-    return null;
-  }
-}
-
 function normalizeAcceptanceReport(value: unknown): AcceptanceReport {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const verdict =
@@ -1519,27 +814,6 @@ function normalizeAcceptanceReport(value: unknown): AcceptanceReport {
 
 function parseAcceptanceReport(raw: string) {
   return normalizeAcceptanceReport(JSON.parse(extractJsonObject(raw)));
-}
-
-function buildFallbackDeliverableCheck(input: RunGoalTaskInput, reason: string): DeliverableCheck {
-  const criteria = [
-    input.task.expectedOutcome,
-    input.task.expectedResult?.description,
-    input.task.expectedResult?.completionCriteria,
-  ].filter((item): item is string => Boolean(item?.trim()));
-
-  return {
-    matched: false,
-    confidence: "low",
-    deliveredArtifacts: [],
-    missingDeliverables: [input.task.expectedOutcome],
-    criteriaResults: criteria.map((criterion) => ({
-      criterion,
-      status: "unknown",
-      evidence: reason,
-    })),
-    gapReason: reason,
-  };
 }
 
 function shouldRetry(category: TaskRunErrorCategory, attemptCount: number) {
@@ -1905,7 +1179,7 @@ function buildUnfinishedResult(input: RunGoalTaskInput, options: {
   acceptanceReport?: AcceptanceReport;
   acceptanceRuntime: TaskAcceptanceRuntimeState;
 }): ParsedTaskRunnerResult {
-  const deliverableCheck = options.currentResult?.deliverableCheck ?? buildFallbackDeliverableCheck(input, options.reason);
+  const deliverableCheck = options.currentResult?.deliverableCheck ?? buildFallbackDeliverableCheck(input.task, options.reason);
   const interactionRequirement: InteractionRequirement = {
     type: "agent_revision_required",
     timing: "after_agent_output",
@@ -2051,7 +1325,7 @@ function buildWorkspaceArtifactRecoveryResult(input: RunGoalTaskInput, options: 
       exportableFormats: input.task.expectedResult?.exportableFormats,
     },
   };
-  const deliverableCheck = buildFallbackDeliverableCheck(input, options.reason);
+  const deliverableCheck = buildFallbackDeliverableCheck(input.task, options.reason);
   return {
     summary: "已恢复本地文件产物，等待系统继续验收。",
     finalMessage: "任务执行结果 JSON 未能解析，但已检测并保留本地文件产物。",
@@ -2105,7 +1379,7 @@ async function buildNeedsUserFromAcceptance(input: RunGoalTaskInput, result: Par
     suggestedActions,
     shouldNotifyUser: true,
   };
-  return coerceMissingUserContextBlocker(input, {
+  return coerceMissingUserContextBlocker(awaitingCtx(input), {
     ...result,
     summary: "需要你补充信息后才能继续。",
     finalMessage: reason,
@@ -2163,85 +1437,6 @@ function looksLikeUnstructuredConfirmationOutput(input: RunGoalTaskInput, rawOut
   return /用户确认|请用户确认|让用户确认|等待用户|确认选择|确认签证|选择.*方案|候选方案|对比分析|推荐方案/.test(rawOutput);
 }
 
-function buildAwaitingConfirmationFromRaw(input: RunGoalTaskInput, rawOutput: string): ParsedTaskRunnerResult {
-  const options: string[] = [];
-  const question =
-    input.task.collaboration?.userFacingActionLabel ||
-    `请确认「${input.task.title}」采用哪个方案？`;
-  const reason = "Agent 已产出候选方案/分析内容，需要你确认选择后继续后续任务。";
-  const finalMessage = rawOutput.trim();
-  const interactionRequirement: InteractionRequirement = {
-    type: "confirm",
-    timing: "after_agent_output",
-    reason,
-    question,
-    options,
-    suggestedActions: [],
-    shouldNotifyUser: true,
-  };
-  const taskResult: TaskResult = {
-    schemaVersion: 1,
-    taskId: input.task.id,
-    instanceId: input.instance.id,
-    title: input.task.expectedOutcome || input.task.title,
-    status: "pending_user",
-    blocks: [
-      { kind: "heading", text: input.task.title, level: 2 },
-      { kind: "markdown", content: finalMessage },
-      {
-        kind: "decision",
-        question,
-        options: options.map((label, index) => ({
-          id: `option-${index + 1}`,
-          label,
-          recommended: index === 0,
-        })),
-      },
-      { kind: "callout", tone: "info", text: reason },
-    ],
-    meta: {
-      producedAt: new Date().toISOString(),
-      presentation: "visual_report",
-      primaryFormat: "structured_blocks",
-      exportableFormats: ["markdown"],
-      role: "agent_deliverable",
-    },
-  };
-  const deliverableCheck: DeliverableCheck = {
-    matched: false,
-    confidence: "medium",
-    deliveredArtifacts: ["候选方案/分析内容"],
-    missingDeliverables: ["用户确认选择"],
-    criteriaResults: [
-      {
-        criterion: input.task.expectedResult?.completionCriteria || input.task.expectedOutcome,
-        status: "unknown",
-        evidence: "Agent 已产出候选内容，但协作要求要求用户确认后才能继续。",
-      },
-    ],
-    gapReason: reason,
-  };
-  return {
-    summary: "已产出候选方案，等待用户确认。",
-    finalMessage,
-    resultViewKind: normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
-    awaitingUser: true,
-    awaitingReason: reason,
-    suggestedActions: [],
-    artifacts: [],
-    taskResult,
-    deliverableCheck,
-    interactionRequirement,
-    blocker: null,
-    structuredOutput: {
-      taskResult,
-      deliverableCheck,
-      interactionRequirement,
-      recoveredFromUnstructuredConfirmation: true,
-    },
-  };
-}
-
 async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   rawOutput: string;
   parsedResult: ParsedTaskRunnerResult | null;
@@ -2253,7 +1448,7 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
   let parsedResult = state.parsedResult;
   let parseError = state.parseError;
   if (!parsedResult && looksLikeUnstructuredConfirmationOutput(input, rawOutput, parseError)) {
-    parsedResult = buildAwaitingConfirmationFromRaw(input, rawOutput);
+    parsedResult = buildAwaitingConfirmationFromRaw(awaitingCtx(input), rawOutput);
     parseError = undefined;
     state.appendTrajectory({
       type: "approval",
@@ -2303,10 +1498,10 @@ async function runLocalRepairCycle(input: RunGoalTaskInput, state: {
         });
     const repairedOutput = await runClaudePromptWithFallback(input, repairPrompt, lastReport.allowToolCalls ? input.runtimeEnv.permissionMode : "readonly");
     rawOutput = repairedOutput.finalMessage;
-    let parsed = tryParseTaskRunnerResult(input, rawOutput, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
+    let parsed = tryParseTaskRunnerResult(taskParserCtx(input), rawOutput, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
     if (!parsed.result && repairedOutput.fallbackMessage.trim()) {
       const fallbackParsed = tryParseTaskRunnerResult(
-        input,
+        taskParserCtx(input),
         repairedOutput.fallbackMessage,
         normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
       );
@@ -2392,7 +1587,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
 
   let currentResult = await enrichAwaitingUserFieldOptions(
     input,
-    resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult)),
+    resolveAwaitingUser(awaitingCtx(input), local.parsedResult),
   );
   if (currentResult.awaitingUser) {
     return {
@@ -2496,10 +1691,10 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     });
     const repairedOutput = await runClaudePromptWithFallback(input, repairPrompt, acceptanceReport.repairStrategy.allowNewToolCalls ? input.runtimeEnv.permissionMode : "readonly");
     let repairedRaw = repairedOutput.finalMessage;
-    let repaired = tryParseTaskRunnerResult(input, repairedRaw, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
+    let repaired = tryParseTaskRunnerResult(taskParserCtx(input), repairedRaw, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
     if (!repaired.result && repairedOutput.fallbackMessage.trim()) {
       const fallbackRepaired = tryParseTaskRunnerResult(
-        input,
+        taskParserCtx(input),
         repairedOutput.fallbackMessage,
         normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
       );
@@ -2544,7 +1739,7 @@ async function completeWithAcceptance(input: RunGoalTaskInput, state: {
     }
     currentResult = await enrichAwaitingUserFieldOptions(
       input,
-      resolveRepeatedResumeConfirmation(input, coerceMissingUserContextBlocker(input, local.parsedResult)),
+      resolveAwaitingUser(awaitingCtx(input), local.parsedResult),
     );
     if (currentResult.awaitingUser) {
       return {
@@ -3075,7 +2270,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
     taskInstanceId: input.instance.id,
   });
 
-  let parsed = tryParseTaskRunnerResult(input, finalMessage, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
+  let parsed = tryParseTaskRunnerResult(taskParserCtx(input), finalMessage, normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind));
   appendGoalTaskAgentEvent(input, "decision", {
     phase: "goal_task_parse",
     ok: Boolean(parsed.result),
@@ -3084,7 +2279,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }) {
   });
   if (!parsed.result && fallbackFinalMessage.trim()) {
     const fallbackParsed = tryParseTaskRunnerResult(
-      input,
+      taskParserCtx(input),
       fallbackFinalMessage,
       normalizeTaskResultViewKind(input.task.resultViewKind ?? input.task.executionKind),
     );
