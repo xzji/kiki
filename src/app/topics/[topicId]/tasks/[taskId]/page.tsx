@@ -99,7 +99,7 @@ export default function TaskDetailPage({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-2 py-2">
+      <div className="mx-auto w-full max-w-3xl px-3 py-2 md:px-2">
       <div className="mb-4 flex items-center gap-3">
         <TopicPlanBreadcrumb
           goalId={goal.id}
@@ -111,7 +111,7 @@ export default function TaskDetailPage({
           type="button"
           aria-label="收起为右侧边栏"
           onClick={() => router.push(topicTaskDrawerReturnPath(goal.id, task.id, searchParams?.instanceId))}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+            className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] md:flex"
         >
           <Minimize2 className="h-4 w-4" />
         </button>

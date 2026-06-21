@@ -123,14 +123,14 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <aside className="fixed right-0 top-0 z-50 flex h-screen w-[440px] flex-col border-l border-[#E5E7EB] bg-white">
+        <aside className="fixed inset-y-0 right-0 z-50 flex h-dvh w-full flex-col border-l border-[#E5E7EB] bg-white md:h-screen md:w-[440px]">
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-4">
           <h3 className="text-sm font-semibold text-[#1F2328]">添加任务</h3>
           <button type="button" className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]" onClick={onClose} aria-label="关闭">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-5 md:py-5">
           <Field label="任务标题" required>
             <input
               autoFocus
@@ -190,7 +190,7 @@ export function TaskCreateDrawer({ open, goalId, subGoalId, onClose }: Props) {
             </select>
           </Field>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-5 py-4">
+          <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 md:px-5 md:pb-4">
           <button type="button" className="rounded-lg border border-[#E5E7EB] bg-[#F5F6F8] px-3 py-1.5 text-sm text-[#1F2328]" onClick={onClose}>
             取消
           </button>

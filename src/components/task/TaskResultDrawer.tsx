@@ -50,7 +50,7 @@ export function TaskResultDrawer({
         onClick={onClose}
         className="fixed inset-0 z-30 bg-transparent"
       />
-      <aside className="fixed inset-y-0 right-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-[#E5E7EB] bg-white">
+        <aside className="fixed inset-y-0 right-0 z-40 flex w-full min-w-0 flex-col border-l border-[#E5E7EB] bg-white md:w-[60vw] md:min-w-[640px]">
         <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
           <div className="min-w-0 flex-1 text-[13px] font-medium text-[#1F2328]">
             {buildInstanceCardTitle(task, instance)}
@@ -73,7 +73,7 @@ export function TaskResultDrawer({
             </Link>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-5">
           <div className="mx-auto w-full max-w-3xl">
             <ExecutionResultBody goal={goal} task={task} instance={instance} mode="result" />
           </div>

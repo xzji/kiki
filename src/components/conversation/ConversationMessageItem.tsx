@@ -60,12 +60,10 @@ export function ConversationMessageItem({
   message,
   onQuote,
   onOpenResult,
-  onCollapseResult,
   onOpenTaskInfo,
   onOpenGoalPlan,
   onTaskOptionalFeedback,
   feedback,
-  shareQuestion,
   onSubmitFeedback,
   onGovernanceConfirm,
   onGovernanceCancel,
@@ -75,7 +73,6 @@ export function ConversationMessageItem({
   message: ConversationMessage;
   onQuote: (message: ConversationMessage) => void;
   onOpenResult?: (message: ConversationMessage) => void;
-  onCollapseResult?: () => void;
   onOpenTaskInfo?: (message: ConversationMessage) => void;
   onOpenGoalPlan?: (goalId: string) => void;
   onTaskOptionalFeedback?: (
@@ -83,7 +80,6 @@ export function ConversationMessageItem({
     feedback: string,
   ) => Promise<void> | void;
   feedback?: MessageFeedbackRecord | null;
-  shareQuestion?: string;
   onSubmitFeedback?: (
     message: ConversationMessage,
     input:
@@ -210,7 +206,7 @@ export function ConversationMessageItem({
                 content={message.quotedMessage.content}
               />
             ) : null}
-            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[#111] px-4 py-2.5 text-sm leading-6 text-white">
+            <div className="rounded-2xl rounded-br-sm bg-[#111] px-4 py-2.5 text-sm leading-6 text-white">
               {message.content}
             </div>
           </div>
@@ -230,10 +226,6 @@ export function ConversationMessageItem({
     message.status !== "error" &&
     message.content.trim().length > 0 &&
     Boolean(onSubmitFeedback);
-  const cliProcess =
-    (message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess?.events.length
-      ? message.cliProcess
-      : null;
 
   return (
     <div className="group relative flex items-start gap-3">
@@ -270,22 +262,6 @@ export function ConversationMessageItem({
             ) : null}
           </div>
         </div>
-
-        {cliProcess ? <InlineCliProcessTimeline process={cliProcess} /> : null}
-
-        {toolPermissionRequests.length > 0 ? (
-          <div className="mb-3 grid max-w-3xl gap-2">
-            {toolPermissionRequests.map((request) => (
-              <ToolPermissionRequestDialog
-                key={request.requestId}
-                request={request}
-                variant="inline"
-                onResolved={() => undefined}
-              />
-            ))}
-          </div>
-        ) : null}
-
         <div className="max-w-3xl">
           {isKikiLoading ? (
             <LoadingDots />
@@ -303,10 +279,26 @@ export function ConversationMessageItem({
           <MessageFeedbackControls
             feedback={feedback}
             content={message.content}
-            question={shareQuestion}
             onSubmit={(input) => onSubmitFeedback?.(message, input)}
             onClear={() => onSubmitFeedback?.(message, null)}
           />
+        ) : null}
+
+        {(message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess?.events.length ? (
+          <InlineCliProcessTimeline process={message.cliProcess} />
+        ) : null}
+
+        {toolPermissionRequests.length > 0 ? (
+          <div className="mt-3 grid max-w-3xl gap-2">
+            {toolPermissionRequests.map((request) => (
+              <ToolPermissionRequestDialog
+                key={request.requestId}
+                request={request}
+                variant="inline"
+                onResolved={() => undefined}
+              />
+            ))}
+          </div>
         ) : null}
 
         {sagaRequestId && (message.status === "streaming" || saga) ? (
@@ -318,7 +310,6 @@ export function ConversationMessageItem({
             task={taskInfo.task}
             instance={taskInfo.instance}
             onOpen={() => onOpenResult?.(message)}
-            onExpandStart={onCollapseResult}
             onOptionalFeedbackSelect={
               message.kind === "task_card" && onTaskOptionalFeedback
                 ? (feedback) => onTaskOptionalFeedback(message, feedback)
@@ -1234,8 +1225,6 @@ function MessageMenu({
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const openTaskInfoAction = canOpenTaskInfo ? onOpenTaskInfo : undefined;
-
   return (
     <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328] shadow-sm">
       <button
@@ -1248,18 +1237,22 @@ function MessageMenu({
       >
         引用
       </button>
-      {openTaskInfoAction ? (
-        <button
-          type="button"
-          onClick={() => {
-            openTaskInfoAction();
-            onClose();
-          }}
-          className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
-        >
-          查看任务信息
-        </button>
-      ) : null}
+      <button
+        type="button"
+        disabled={!canOpenTaskInfo}
+        onClick={() => {
+          if (!canOpenTaskInfo || !onOpenTaskInfo) return;
+          onOpenTaskInfo();
+          onClose();
+        }}
+        className={cn(
+          "block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]",
+          !canOpenTaskInfo &&
+            "cursor-not-allowed text-[#B0B6BE] hover:bg-white",
+        )}
+      >
+        查看任务信息
+      </button>
       <button
         type="button"
         onClick={() => {

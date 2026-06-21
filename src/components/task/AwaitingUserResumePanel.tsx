@@ -476,13 +476,13 @@ export function AwaitingUserResumePanel({
                           chooseCustom(item);
                         }
                       }}
-                      className={`${optionRowClass(customSelected)} grid cursor-pointer grid-cols-[8px_auto_minmax(0,1fr)]`}
+                        className={`${optionRowClass(customSelected)} grid cursor-pointer grid-cols-[8px_minmax(0,1fr)] md:grid-cols-[8px_auto_minmax(0,1fr)]`}
                     >
                       <span className={optionDotClass(customSelected)} />
                       <button
                         type="button"
                         onClick={() => chooseCustom(item)}
-                        className="shrink-0 text-left text-[13px] text-inherit"
+                          className="text-left text-[13px] text-inherit md:shrink-0"
                       >
                         {customActionLabelFor(item, itemOptions.length > 0)}
                       </button>
@@ -491,7 +491,7 @@ export function AwaitingUserResumePanel({
                         onFocus={() => chooseCustom(item)}
                         onChange={(event) => updateCustomValue(event.target.value, item)}
                         placeholder={inputPlaceholderFor(item)}
-                        className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
+                          className="col-start-2 min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328] md:col-start-auto"
                       />
                     </div>
                   ) : null}
@@ -528,13 +528,13 @@ export function AwaitingUserResumePanel({
                   chooseCustom();
                 }
               }}
-              className={`${optionRowClass(customMode)} grid cursor-pointer grid-cols-[8px_auto_minmax(0,1fr)]`}
+                className={`${optionRowClass(customMode)} grid cursor-pointer grid-cols-[8px_minmax(0,1fr)] md:grid-cols-[8px_auto_minmax(0,1fr)]`}
             >
               <span className={optionDotClass(customMode)} />
               <button
                 type="button"
                 onClick={() => chooseCustom()}
-                className="shrink-0 text-left text-[13px] text-inherit"
+                  className="text-left text-[13px] text-inherit md:shrink-0"
               >
                 {options.length ? "都不是，我自己描述" : "我来填写"}
               </button>
@@ -543,7 +543,7 @@ export function AwaitingUserResumePanel({
                 onFocus={() => chooseCustom()}
                 onChange={(event) => updateCustomValue(event.target.value)}
                 placeholder={options.length ? "请输入你的选择" : "请输入需要补充的信息"}
-                className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
+                  className="col-start-2 min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328] md:col-start-auto"
               />
             </div>
           </div>
@@ -552,12 +552,12 @@ export function AwaitingUserResumePanel({
       {blocker ? (
         <div className="mt-5 space-y-3">
           {error ? <div className="text-[12px] text-[#B42318]">{error}</div> : null}
-          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
             <button
               type="button"
               disabled={Boolean(pending) || Boolean(uploadingFieldId)}
               onClick={() => void submit(true)}
-              className="rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#2B2B2B] disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#2B2B2B] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {pending === "approve" ? "提交中..." : uploadingFieldId ? "上传中..." : primaryLabelFor(instance)}
             </button>
@@ -566,7 +566,7 @@ export function AwaitingUserResumePanel({
                 type="button"
                 disabled={Boolean(pending) || Boolean(uploadingFieldId)}
                 onClick={() => void submit(false)}
-                className="bg-transparent px-0 py-2 text-[13px] text-[#6B7280] hover:text-[#1F2933] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full bg-transparent px-0 py-2 text-left text-[13px] text-[#6B7280] hover:text-[#1F2933] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 {pending === "revise" ? "提交中..." : "让 KiKi 修改后继续"}
               </button>

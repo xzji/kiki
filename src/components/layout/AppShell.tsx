@@ -10,12 +10,14 @@ import {
   ConversationProcessSidebar,
 } from "@/components/conversation/ConversationProcessSidebar";
 import { DevPanel } from "@/components/layout/DevPanel";
+import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import {
   NAV_SIDEBAR_COLLAPSED_WIDTH,
   NAV_SIDEBAR_EXPANDED_WIDTH,
   Sidebar,
 } from "@/components/layout/Sidebar";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { TaskMonitorDrawer } from "@/components/task/TaskMonitorDrawer";
 import { TaskDetailDrawer } from "@/components/topic/TaskDetailDrawer";
 import { useTriggerEngine } from "@/hooks/useTriggerEngine";
@@ -55,6 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     /^\/inbox\/[^/]+\/result$/.test(pathname);
   const useImmersiveShell = isConversation || isFullscreenResult;
   const contentWidth = useImmersiveShell ? "" : isWide ? "max-w-[1600px]" : "max-w-5xl";
+  const isMobile = useIsMobileViewport();
 
   const { isOpen, hydrated, hydrate } = useAssistantStore();
   useEffect(() => {
@@ -84,12 +87,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [pathname, closeTaskDrawer, closeTaskMonitor]);
 
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
-  const leftPadding = navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
+  const leftPadding = isMobile ? 0 : navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
   // 任务侧栏改为覆盖式，不再挤压主内容；只有 AssistantSidebar 挤压
-  const rightPadding = assistantOpen || conversationProcessOpen ? 416 : 0;
+  const rightPadding = !isMobile && (assistantOpen || conversationProcessOpen) ? 416 : 0;
   const mainClassName = useImmersiveShell
-    ? "h-screen overflow-hidden bg-white px-0 pb-0 pt-0"
-    : "h-screen overflow-y-auto overscroll-contain bg-white px-8 pb-24 pt-8";
+    ? "h-dvh overflow-hidden bg-white px-0 pb-0 pt-0 md:h-screen"
+    : "h-dvh overflow-y-auto overscroll-contain bg-white px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-3 md:h-screen md:px-8 md:pb-24 md:pt-8";
   const contentClassName = useImmersiveShell
     ? "h-full w-full"
     : `mx-auto w-full ${contentWidth}`;
@@ -99,7 +102,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-[#F5F6F8] text-[#1F2328]">
+    <div className="h-dvh overflow-hidden bg-[#F5F6F8] text-[#1F2328] md:h-screen">
       <Sidebar />
       <main
         className={mainClassName}
@@ -116,6 +119,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <TaskDetailDrawer />
       {isConversation ? <ConversationProcessSidebar /> : <AssistantSidebar />}
       {!taskDrawerOpen ? (isConversation ? <ConversationProcessFab /> : <AssistantFab />) : null}
+      <MobileBottomNav />
     </div>
   );
 }

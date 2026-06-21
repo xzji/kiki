@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createScheduleEventCommand,
   deleteScheduleEventCommand,
   updateScheduleEventCommand,
 } from "@/lib/api/schedule-commands";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useVirtualClock } from "@/hooks/useVirtualClock";
 import { useScheduleStore } from "@/stores/scheduleStore";
 import type { AgentEvent } from "@/types/schedule";
@@ -34,10 +35,19 @@ export function SchedulePage() {
   } = useScheduleStore();
 
   const { currentTime } = useVirtualClock();
+  const isMobile = useIsMobileViewport();
+  const mobileDefaultAppliedRef = useRef(false);
 
   useEffect(() => {
     if (!hydrated) hydrate();
   }, [hydrated, hydrate]);
+
+  useEffect(() => {
+    if (!mobileDefaultAppliedRef.current && hydrated && isMobile && viewMode === "week") {
+      mobileDefaultAppliedRef.current = true;
+      setViewMode("day");
+    }
+  }, [hydrated, isMobile, setViewMode, viewMode]);
 
   const [popoverEvent, setPopoverEvent] = useState<{ event: AgentEvent; anchor: DOMRect } | null>(null);
   const [formState, setFormState] = useState<{

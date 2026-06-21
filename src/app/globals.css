@@ -13,6 +13,13 @@ body {
   overflow-x: hidden;
 }
 
+@supports (height: 100dvh) {
+  html,
+  body {
+    min-height: 100dvh;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

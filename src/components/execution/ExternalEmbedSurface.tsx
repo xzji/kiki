@@ -48,7 +48,7 @@ export function ExternalEmbedSurface({ artifact }: { artifact: ArtifactRef }) {
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen={artifact.allowFullScreen !== false}
           referrerPolicy="strict-origin-when-cross-origin"
-          className="h-[420px] w-full rounded-xl border border-[#D0D7DE] bg-black"
+            className="h-[60dvh] max-h-[420px] w-full rounded-xl border border-[#D0D7DE] bg-black md:h-[420px]"
           title={artifact.label}
         />
       ) : (

@@ -114,9 +114,9 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/30 md:items-center" onClick={onClose}>
       <div
-        className="w-[440px] max-w-[90vw] rounded-xl border border-[#E5E7EB] bg-white"
+        className="flex h-dvh w-full flex-col overflow-hidden border border-[#E5E7EB] bg-white md:h-auto md:w-[440px] md:max-w-[90vw] md:rounded-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-3">
@@ -125,7 +125,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
             ✕
           </button>
         </div>
-        <div className="space-y-3 px-5 py-4 text-sm">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm md:px-5">
           <Field label="主题">
             <input
               className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
@@ -154,7 +154,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
             />
             全天
           </label>
-          <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <Field label="开始">
               <input
                 type={isAllDay ? "date" : "datetime-local"}
@@ -209,7 +209,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
           </Field>
           {error ? <div className="text-xs text-[#E5484D]">{error}</div> : null}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-5 py-3">
+          <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-5 md:pb-3">
           <button
             type="button"
             onClick={onClose}

@@ -379,11 +379,11 @@ export function TopicPlanContent({
   const canRevisePlan = isPlanPending || isRevisionStuck;
 
   return (
-    <div className="max-w-[920px] pb-12">
+        <div className="w-full max-w-[920px] pb-12">
       <section className="mb-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[28px] font-semibold tracking-[-0.02em] text-[#1F2328]">
+            <h1 className="text-[24px] font-semibold tracking-[-0.02em] text-[#1F2328] sm:text-[28px]">
               {goal.title}
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-[#6B7280]">
@@ -420,7 +420,7 @@ export function TopicPlanContent({
             ) : null}
           </div>
 
-          <div className="grid min-w-[260px] grid-cols-4 gap-3 border-t border-[#E5E7EB] pt-5 lg:min-w-[360px] lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+          <div className="grid min-w-0 grid-cols-2 gap-2 border-t border-[#E5E7EB] pt-5 sm:grid-cols-4 lg:min-w-[360px] lg:gap-3 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
             <SummaryStat label="已结束" value={summary.completedCount} />
             <SummaryStat label="待确认" value={summary.awaitingCount} />
             <SummaryStat label="进行中" value={summary.inProgressCount} />

@@ -586,14 +586,14 @@ export function RuntimeEnvironmentPanel() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4">
-        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="text-[15px] font-medium text-[#111]">连接 Runtime</div>
             <div className="mt-1 text-[13px] text-[#6B7280]">
               连接本机电脑作为执行节点，或添加本地 CLI 环境供会话使用。
             </div>
           </div>
-          <div className="flex flex-none flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-none flex-wrap items-center gap-2 md:justify-end">
             <button
               type="button"
               onClick={() => setConnectDialogOpen(true)}
@@ -1287,14 +1287,14 @@ function ToolPolicySection({
         </div>
       ) : null}
       <div className="mt-4 border-t border-[#E5E7EB] pt-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-between">
           <div>
             <div className="text-[12px] font-medium text-[#111]">额外允许的工具</div>
             <div className="mt-1 text-[11px] leading-5 text-[#6B7280]">
               运行时授权后沉淀的工具规则会显示在这里，可删除或修改。
             </div>
           </div>
-          <div className="flex min-w-[260px] flex-1 justify-end gap-2">
+            <div className="flex w-full min-w-0 flex-1 justify-end gap-2 md:min-w-[260px]">
             <input
               value={newRulePattern}
               onChange={(event) => setNewRulePattern(event.target.value)}

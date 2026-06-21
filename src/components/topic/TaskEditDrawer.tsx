@@ -50,8 +50,8 @@ export function TaskEditDrawer({
   if (!open || !task) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/10 backdrop-blur-[1px]">
-      <div className="absolute inset-y-0 right-0 w-[420px] overflow-y-auto border-l border-[#E5E7EB] bg-white p-6 shadow-xl">
+      <div className="fixed inset-0 z-50 bg-black/10 backdrop-blur-[1px]">
+        <div className="absolute inset-y-0 right-0 w-full overflow-y-auto border-l border-[#E5E7EB] bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl md:w-[420px] md:p-6">
         <h3 className="mb-6 text-lg font-semibold text-[#111]">编辑任务</h3>
         <div className="space-y-6">
           <Section title="任务基本信息">
@@ -72,7 +72,7 @@ export function TaskEditDrawer({
             <p className="rounded-lg border border-dashed border-[#D0D7DE] bg-[#F8FAFC] px-3 py-3 text-sm leading-6 text-[#6B7280]">这个任务适合保留每天 11:00 触发，因为它和你的托福训练节奏已经形成稳定习惯。若要进一步提升效率，可以把 payload 中的词汇组改成更聚焦的天文领域词汇。</p>
           </Section>
         </div>
-        <div className="mt-8 flex justify-end gap-3">
+          <div className="mt-8 flex justify-end gap-3">
           <button onClick={onClose} className="rounded-lg border border-[#D0D7DE] px-4 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]">取消</button>
           <button
             disabled={submitting}

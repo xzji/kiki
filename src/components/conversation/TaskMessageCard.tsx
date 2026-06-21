@@ -267,7 +267,7 @@ export function TaskMessageCard({
           onOpen();
         }
       }}
-      className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-6 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
+        className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-4 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE] md:p-6"
     >
       {meta}
       {interactionPanels}

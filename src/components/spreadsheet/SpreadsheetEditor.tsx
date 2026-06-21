@@ -106,6 +106,7 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
                 </button>
               ))}
             </div>
+            <div className="mt-1 text-[11px] text-[#8C9198] md:hidden">表格可左右滑动</div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -127,7 +128,7 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
               </button>
             </div>
           </div>
-          <div className="mt-3 overflow-x-auto rounded-xl border border-[#E5E7EB]">
+            <div className="mt-3 overflow-x-auto rounded-xl border border-[#E5E7EB] shadow-[inset_-12px_0_12px_-12px_rgba(15,23,42,0.25)]">
             <table className="min-w-full border-collapse text-left text-[13px]">
               <thead className="bg-[#F8F9FB] text-[#6B7280]">
                 <tr>

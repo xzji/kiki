@@ -90,7 +90,7 @@ export function Sidebar() {
   if (collapsed) {
     return (
       <aside
-        className="fixed inset-y-0 left-0 z-10 flex flex-col items-center border-r border-[#D8DDE4] bg-[#F5F6F8] py-4"
+        className="fixed inset-y-0 left-0 z-10 hidden flex-col items-center border-r border-[#D8DDE4] bg-[#F5F6F8] py-4 md:flex"
         style={{ width: NAV_SIDEBAR_COLLAPSED_WIDTH }}
       >
         <button
@@ -132,7 +132,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="fixed inset-y-0 left-0 z-10 flex flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5"
+      className="fixed inset-y-0 left-0 z-10 hidden flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5 md:flex"
       style={{ width: NAV_SIDEBAR_EXPANDED_WIDTH }}
     >
       <div className="mb-4 flex items-center justify-between px-3">

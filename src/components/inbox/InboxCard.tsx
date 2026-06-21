@@ -79,8 +79,8 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
 
   return (
     <>
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 transition hover:border-[#111]">
-        <div className="flex items-center gap-2 text-[#111]">
+        <div className="rounded-xl border border-[#E5E7EB] bg-white p-3 transition hover:border-[#111] md:p-4">
+          <div className="flex flex-wrap items-center gap-2 text-[#111]">
           <button
             type="button"
             onClick={() => {
@@ -88,14 +88,14 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
               setExpanded(nextExpanded);
               if (nextExpanded && unread) markRead(item.id);
             }}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              className="flex min-w-[70%] flex-1 items-center gap-2 text-left md:min-w-0"
           >
             <Icon className="h-4 w-4 shrink-0" />
             {item.favorite ? <Star className="h-3.5 w-3.5 shrink-0 fill-[#F5A623] text-[#F5A623]" /> : null}
             <h3 className="truncate text-sm font-semibold">{item.title}</h3>
           </button>
-          <span className="shrink-0 text-[11px] text-[#6B7280]">{timeLabel}</span>
-          <div className="relative shrink-0">
+            <span className="order-2 shrink-0 text-[11px] text-[#6B7280] md:order-none">{timeLabel}</span>
+            <div className="relative order-3 shrink-0 md:order-none">
             <button
               type="button"
               aria-label="更多操作"
@@ -103,7 +103,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
                 event.stopPropagation();
                 setMenuOpen((prev) => !prev);
               }}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-[#8C9198] transition hover:bg-[#F3F4F6] hover:text-[#111]"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-[#8C9198] transition hover:bg-[#F3F4F6] hover:text-[#111] md:h-6 md:w-6"
             >
               <MoreHorizontal className="h-4 w-4" />
             </button>
@@ -139,7 +139,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
               setExpanded(nextExpanded);
               if (nextExpanded && unread) markRead(item.id);
             }}
-            className="shrink-0"
+              className="order-4 flex h-9 w-9 shrink-0 items-center justify-center rounded-md md:order-none md:h-auto md:w-auto"
           >
             <ChevronDown
               className={cn(

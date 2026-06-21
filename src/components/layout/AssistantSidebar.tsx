@@ -55,7 +55,7 @@ export function AssistantSidebar() {
 
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-20 flex w-[400px] flex-col border-l border-[#E5E7EB] bg-white"
+        className="fixed inset-0 z-40 flex h-dvh w-full flex-col border-l border-[#E5E7EB] bg-white md:inset-y-0 md:left-auto md:z-20 md:h-screen md:w-[400px]"
       aria-label="KiKi 助手"
     >
       <div className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4">
@@ -75,7 +75,7 @@ export function AssistantSidebar() {
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? (
           <div className="mb-4 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
             <div>{error}</div>
@@ -112,8 +112,8 @@ export function AssistantSidebar() {
           <div className="flex flex-col gap-3">
             {messages.map((m) =>
               m.role === "user" ? (
-                <div key={m.id} className="flex justify-end">
-                  <div className="max-w-[280px] rounded-2xl rounded-br-sm bg-[#111] px-3 py-2 text-sm text-white">
+                  <div key={m.id} className="flex justify-end">
+                    <div className="max-w-[82vw] rounded-2xl rounded-br-sm bg-[#111] px-3 py-2 text-sm text-white md:max-w-[280px]">
                     {m.content}
                   </div>
                 </div>
@@ -124,7 +124,7 @@ export function AssistantSidebar() {
                   </div>
                   <div
                     className={cn(
-                      "max-w-[260px] rounded-2xl rounded-bl-sm border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2328]",
+                      "max-w-[76vw] rounded-2xl rounded-bl-sm border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2328] md:max-w-[260px]",
                       m.status === "streaming" && "after:ml-1 after:inline-block after:h-2 after:w-2 after:animate-pulse after:rounded-full after:bg-[#5B3DBE] after:align-middle after:content-['']",
                     )}
                   >
@@ -151,7 +151,7 @@ export function AssistantSidebar() {
         )}
       </div>
 
-      <div className="flex-none border-t border-[#E5E7EB] bg-[#F9FAFB] px-3 py-3">
+        <div className="flex-none border-t border-[#E5E7EB] bg-[#F9FAFB] px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:pb-3">
         {runtimeHydrated ? (
           activeRuntimeEnv?.type === "local" ? null : (
             <button

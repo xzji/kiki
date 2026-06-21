@@ -42,7 +42,7 @@ export default function ConversationResultPage({
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="ml-auto min-w-0 flex-1 truncate text-right text-[13px] font-medium text-[#1F2328]">
+          <div className="ml-3 min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[#1F2328] md:ml-auto md:text-right">
           {buildInstanceCardTitle(task, instance)}
         </div>
         <button
@@ -51,14 +51,14 @@ export default function ConversationResultPage({
           onClick={() =>
             router.push(`/conversations/${conversation.id}?resultMessageId=${encodeURIComponent(message.id)}`)
           }
-          className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+            className="ml-3 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] md:flex"
         >
           <Minimize2 className="h-4 w-4" />
         </button>
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <div className="mx-auto w-full max-w-3xl px-2 py-5">
+          <div className="mx-auto w-full max-w-3xl px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 md:px-2 md:py-5">
           <ExecutionResultBody goal={goal} task={task} instance={instance} mode="result" />
         </div>
       </main>

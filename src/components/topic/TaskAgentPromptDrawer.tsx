@@ -87,10 +87,10 @@ export function TaskAgentPromptDrawer({
   return (
     <div className="fixed inset-0 z-50 bg-black/10 backdrop-blur-[1px]" onClick={onClose}>
       <div
-        className="absolute inset-y-0 right-0 flex w-[620px] max-w-full flex-col overflow-hidden border-l border-[#E5E7EB] bg-white shadow-xl"
+          className="absolute inset-y-0 right-0 flex w-full max-w-full flex-col overflow-hidden border-l border-[#E5E7EB] bg-white shadow-xl md:w-[620px]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-[#E5E7EB] px-6 py-4">
+          <div className="flex flex-col gap-3 border-b border-[#E5E7EB] px-4 py-4 md:flex-row md:items-start md:justify-between md:px-6">
           <div className="min-w-0 flex-1">
             <div className="text-[12px] text-[#8C9198]">Agent 完整任务内容（实时根据当前任务字段生成）</div>
             <h3 className="mt-1 truncate text-[16px] font-semibold tracking-[-0.01em] text-[#1F2328]">
@@ -102,7 +102,7 @@ export function TaskAgentPromptDrawer({
               </div>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleCopy}
@@ -127,7 +127,7 @@ export function TaskAgentPromptDrawer({
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6">
           <pre className="whitespace-pre-wrap rounded-lg border border-[#E5E7EB] bg-[#FAFBFC] p-4 text-[12.5px] leading-6 text-[#1F2328]">
             {promptText}
           </pre>

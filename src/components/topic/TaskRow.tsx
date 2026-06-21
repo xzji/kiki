@@ -71,7 +71,7 @@ export function TaskRow({
         }
       }}
       className={cn(
-        "flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition",
+        "flex w-full items-start gap-3 rounded-xl px-2 py-3 text-left transition md:px-3",
         isPendingChange ? "cursor-default opacity-70" : "hover:bg-[#F8F9FB]",
       )}
     >
@@ -107,10 +107,10 @@ export function TaskRow({
         )}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2 md:gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className={cn("truncate text-sm font-medium", taskState === "completed" ? "text-[#9AA0A6] line-through" : "text-[#1F2328]")}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={cn("min-w-0 text-sm font-medium md:truncate", taskState === "completed" ? "text-[#9AA0A6] line-through" : "text-[#1F2328]")}>
                 {stripTaskPrefix(task.title)}
               </span>
               <span
@@ -132,7 +132,7 @@ export function TaskRow({
               {unreadCount > 0 ? <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#E5484D]" /> : null}
             </div>
           </div>
-          <span className="relative flex w-[96px] shrink-0 items-center justify-end gap-1">
+            <span className="relative flex shrink-0 items-center justify-end gap-1 md:w-[96px]">
             {executionAction ? (
               <button
                 type="button"
@@ -144,7 +144,7 @@ export function TaskRow({
                 }}
                 className={cn(
                   "inline-flex shrink-0 items-center rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-xs text-[#6B7280] transition hover:border-[#111]",
-                  hovered ? "opacity-100" : "pointer-events-none opacity-0",
+                    hovered ? "opacity-100" : "opacity-100 md:pointer-events-none md:opacity-0",
                 )}
               >
                 {executionAction.label}
@@ -160,7 +160,7 @@ export function TaskRow({
               }}
               className={cn(
                 "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#D0D7DE] bg-white text-[#6B7280] transition hover:border-[#111] hover:text-[#1F2328]",
-                hovered || menuOpen ? "opacity-100" : "pointer-events-none opacity-0",
+                  hovered || menuOpen ? "opacity-100" : "opacity-100 md:pointer-events-none md:opacity-0",
               )}
             >
               <Ellipsis className="h-4 w-4" />

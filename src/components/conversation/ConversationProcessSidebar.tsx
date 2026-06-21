@@ -150,7 +150,7 @@ export function ConversationProcessFab() {
       type="button"
       aria-label="打开 CLI 过程"
       onClick={open}
-      className="fixed bottom-6 right-6 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-[#222]/30 bg-white text-[#1F2328] transition hover:border-[#111] hover:bg-[#F5F6F8]"
+        className="fixed bottom-6 right-6 z-30 hidden h-12 w-12 items-center justify-center rounded-full border border-[#222]/30 bg-white text-[#1F2328] transition hover:border-[#111] hover:bg-[#F5F6F8] md:flex"
     >
       <Terminal className="h-5 w-5" />
     </button>
@@ -191,7 +191,7 @@ export function ConversationProcessSidebar() {
 
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-20 flex w-[400px] flex-col border-l border-[#E5E7EB] bg-[#F8F9FB]"
+        className="fixed inset-0 z-40 flex h-dvh w-full flex-col border-l border-[#E5E7EB] bg-[#F8F9FB] md:inset-y-0 md:left-auto md:z-20 md:h-screen md:w-[400px]"
       aria-label="CLI 过程"
     >
       <div className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] bg-white px-4">
@@ -211,7 +211,7 @@ export function ConversationProcessSidebar() {
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:pb-3">
         {!process ? (
           <div className="flex h-full flex-col items-center justify-center px-8 text-center">
             <Terminal className="mb-3 h-8 w-8 text-[#8C9198]" />

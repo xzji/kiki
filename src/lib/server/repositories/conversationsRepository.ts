@@ -132,6 +132,53 @@ function selectStrings(sql: string, ...params: unknown[]) {
   );
 }
 
+function stringField(value: unknown, key: string) {
+  if (!isRecord(value)) return undefined;
+  const field = value[key];
+  return typeof field === "string" && field ? field : undefined;
+}
+
+function collectRuntimeJobPayloadIds(conversationId: string, ids: RelatedConversationIds) {
+  const rows = getDatabase()
+    .prepare(`SELECT id, payload_json FROM runtime_jobs`)
+    .all() as Array<{ id: string; payload_json: string }>;
+
+  for (const row of rows) {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(row.payload_json) as unknown;
+    } catch {
+      continue;
+    }
+    if (!isRecord(payload)) continue;
+
+    const goal = payload.goal;
+    const subGoal = payload.subGoal;
+    const task = payload.task;
+    const instance = payload.instance;
+    const payloadConversationId = stringField(goal, "conversationId");
+    const goalId = stringField(goal, "id");
+    const subGoalId = stringField(subGoal, "id");
+    const taskId = stringField(task, "id");
+    const instanceId = stringField(instance, "id");
+
+    const isRelated =
+      payloadConversationId === conversationId ||
+      Boolean(goalId && (ids.goalIds.has(goalId) || ids.topicIds.has(goalId))) ||
+      Boolean(subGoalId && ids.threadIds.has(subGoalId)) ||
+      Boolean(taskId && ids.taskIds.has(taskId)) ||
+      Boolean(instanceId && ids.taskInstanceIds.has(instanceId));
+    if (!isRelated) continue;
+
+    addDefined(ids.runtimeJobIds, row.id);
+    addDefined(ids.goalIds, goalId);
+    addDefined(ids.topicIds, goalId);
+    addDefined(ids.threadIds, subGoalId);
+    addDefined(ids.taskIds, taskId);
+    addDefined(ids.taskInstanceIds, instanceId);
+  }
+}
+
 function setSize(ids: RelatedConversationIds) {
   return (
     ids.goalIds.size +
@@ -208,6 +255,7 @@ function collectRuntimeJobIds(conversationId: string, ids: RelatedConversationId
   for (const value of selectStrings(`SELECT id AS value FROM runtime_jobs WHERE conversation_id = ?`, conversationId)) {
     addDefined(ids.runtimeJobIds, value);
   }
+  collectRuntimeJobPayloadIds(conversationId, ids);
   for (const value of collectRowsBySet("runtime_jobs", "goal_id", ids.goalIds, "id")) {
     addDefined(ids.runtimeJobIds, value);
   }

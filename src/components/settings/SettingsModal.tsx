@@ -82,9 +82,9 @@ export function SettingsModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={onClose}>
+      <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/20 md:items-center" onClick={onClose}>
       <div
-        className="relative flex h-[88vh] max-h-[920px] w-[1080px] max-w-[96vw] overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white"
+          className="relative flex h-dvh w-full flex-col overflow-hidden border border-[#E5E7EB] bg-white md:h-[88vh] md:max-h-[920px] md:w-[1080px] md:max-w-[96vw] md:flex-row md:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -95,11 +95,11 @@ export function SettingsModal({
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="flex w-[148px] flex-none flex-col border-r border-[#E5E7EB] bg-[#FBFBFC] px-4 py-4">
-          <div className="mb-5 flex items-center px-2">
+        <div className="flex flex-none flex-col border-b border-[#E5E7EB] bg-[#FBFBFC] px-4 py-3 md:w-[148px] md:border-b-0 md:border-r md:py-4">
+          <div className="mb-3 flex items-center px-2 md:mb-5">
             <div className="text-[15px] font-medium text-[#111]">设置</div>
           </div>
-          <div className="space-y-1">
+          <div className="flex gap-1 overflow-x-auto md:block md:space-y-1">
             <SettingsNavItem
               active={activeTab === "account"}
               label="账号"
@@ -116,7 +116,7 @@ export function SettingsModal({
               onClick={() => setActiveTab("memory")}
             />
           </div>
-          <div className="mt-auto pt-4">
+          <div className="mt-2 shrink-0 pt-0 md:mt-auto md:pt-4">
             <button
               type="button"
               onClick={() => setActiveTab("easter-egg")}
@@ -133,7 +133,7 @@ export function SettingsModal({
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-14 flex-none items-center border-b border-[#E5E7EB] px-6">
+            <div className="flex h-12 flex-none items-center border-b border-[#E5E7EB] px-4 md:h-14 md:px-6">
             <div className="text-[15px] font-medium text-[#111]">
               {activeTab === "account"
                 ? "账号"
@@ -144,7 +144,7 @@ export function SettingsModal({
                     : "彩蛋设置"}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-6">
             {activeTab === "account" ? <AccountPanel user={user} onUserChange={onUserChange} /> : null}
             {activeTab === "runtime" ? <RuntimeEnvironmentPanel /> : null}
             {activeTab === "memory" ? <UserMemoryPanel /> : null}
@@ -494,7 +494,7 @@ function SettingsNavItem({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center rounded-xl px-3 py-2 text-left text-[13px] text-[#4B5563] hover:bg-white",
+          "flex w-auto shrink-0 items-center rounded-xl px-3 py-2 text-left text-[13px] text-[#4B5563] hover:bg-white md:w-full",
         active && "bg-white font-medium text-[#111]",
       )}
     >

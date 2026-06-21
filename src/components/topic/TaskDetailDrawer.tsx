@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 
 import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { appendRouteQuery, topicTaskDetailPath } from "@/lib/routes";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
@@ -17,6 +18,7 @@ export function TaskDetailDrawer() {
   const goals = useGoalStore(selectVisibleGoals);
   const assistantOpen = useAssistantStore((state) => state.isOpen);
   const openAssistant = useAssistantStore((state) => state.open);
+    const isMobile = useIsMobileViewport();
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
   const setNavCollapsed = useNavSidebarStore((state) => state.setCollapsed);
 
@@ -51,11 +53,11 @@ export function TaskDetailDrawer() {
 
   if (!open || !goal || !task) return null;
 
-  const rightOffset = assistantOpen ? 400 : 0;
+    const rightOffset = !isMobile && assistantOpen ? 400 : 0;
 
   return (
     <aside
-      className="fixed inset-y-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200"
+        className="fixed inset-y-0 z-40 flex w-full min-w-0 flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-[60vw] md:min-w-[640px]"
       style={{ right: rightOffset }}
       aria-label="任务详情"
     >
@@ -89,7 +91,7 @@ export function TaskDetailDrawer() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-5">
         <TaskDetailBody
           goal={goal}
           task={task}
@@ -98,7 +100,7 @@ export function TaskDetailDrawer() {
         />
       </div>
 
-      {!assistantOpen ? (
+        {!assistantOpen && !isMobile ? (
         <button
           type="button"
           aria-label="打开对话"

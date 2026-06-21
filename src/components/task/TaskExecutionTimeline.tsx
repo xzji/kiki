@@ -275,7 +275,7 @@ function ToolActionBadge({ tool }: { tool: NonNullable<ProcessStep["tool"]> }) {
         ) : null}
       </div>
       {hasPaths ? (
-        <details className="group/path mt-1.5 pl-[54px]">
+          <details className="group/path mt-1.5 pl-0 md:pl-[54px]">
           <summary className="cursor-pointer list-none text-[12px] text-[#6B7280] select-none marker:hidden hover:text-[#1F2328] [&::-webkit-details-marker]:hidden">
             <span className="group-open/path:hidden">展开路径详情</span>
             <span className="hidden group-open/path:inline">收起路径详情</span>
@@ -300,20 +300,20 @@ function AgentMessage({ group, verdict }: { group: TimelineGroup; verdict?: Verd
   const time = getGroupTime(group);
 
   return (
-    <article className="group relative grid grid-cols-[42px_minmax(0,1fr)] gap-3 md:grid-cols-[42px_minmax(0,1fr)]">
-      <div className="grid h-[42px] w-[42px] place-items-center rounded-full border border-[#E5E7EB] bg-white text-[13px] font-bold text-[#64748B]">
+    <article className="group relative grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[42px_minmax(0,1fr)] md:gap-3">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-[#E5E7EB] bg-white text-[12px] font-bold text-[#64748B] md:h-[42px] md:w-[42px] md:text-[13px]">
         {getGroupAvatar(group)}
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-bold text-[#1F2328]">{getGroupName(group)}</span>
-          {time ? <span className="text-[12px] text-[#8C9198] opacity-0 transition-opacity duration-150 group-hover:opacity-100">{time}</span> : null}
+          {time ? <span className="text-[12px] text-[#8C9198] opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
         </div>
         <div className="flex max-w-[820px] flex-col gap-2.5 bg-transparent py-0.5">
           <details className="group/process text-[13px] text-[#374151]">
             <summary className="flex cursor-pointer list-none items-center gap-1 text-[12px] text-[#8C9198] select-none marker:hidden [&::-webkit-details-marker]:hidden">
               <span className="font-normal text-[#6B7280]">过程({processSteps.length})</span>
-              <span className="inline-block h-[7px] w-[7px] -rotate-45 border-r-[1.5px] border-b-[1.5px] border-current text-[#8C9198] opacity-0 transition duration-150 group-hover:opacity-100 group-open/process:rotate-45" />
+              <span className="inline-block h-[7px] w-[7px] -rotate-45 border-r-[1.5px] border-b-[1.5px] border-current text-[#8C9198] opacity-100 transition duration-150 md:opacity-0 md:group-hover:opacity-100 group-open/process:rotate-45" />
             </summary>
             <div className="mt-3 flex flex-col gap-3.5 border-l border-dashed border-[#E5E7EB] pl-3.5">
               {processSteps.length ? processSteps.map((step, index) => (
@@ -345,14 +345,14 @@ function AgentMessage({ group, verdict }: { group: TimelineGroup; verdict?: Verd
 
 function InteractionMessage({ children, time }: { children: ReactNode; time?: string }) {
   return (
-    <article className="group relative grid grid-cols-[42px_minmax(0,1fr)] gap-3 md:grid-cols-[42px_minmax(0,1fr)]">
-      <div className="grid h-[42px] w-[42px] place-items-center rounded-full border border-[#E5E7EB] bg-white text-[13px] font-bold text-[#64748B]">
+    <article className="group relative grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[42px_minmax(0,1fr)] md:gap-3">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-[#E5E7EB] bg-white text-[12px] font-bold text-[#64748B] md:h-[42px] md:w-[42px] md:text-[13px]">
         K
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-bold text-[#1F2328]">KiKi</span>
-          {time ? <span className="text-[12px] text-[#8C9198] opacity-0 transition-opacity duration-150 group-hover:opacity-100">{time}</span> : null}
+          {time ? <span className="text-[12px] text-[#8C9198] opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
         </div>
         <div className="max-w-[820px] py-0.5">{children}</div>
       </div>
@@ -362,14 +362,14 @@ function InteractionMessage({ children, time }: { children: ReactNode; time?: st
 
 function UserSubmittedMessage({ text, time }: { text: string; time?: string }) {
   return (
-    <article className="group relative grid grid-cols-[42px_minmax(0,1fr)] gap-3 md:grid-cols-[42px_minmax(0,1fr)]">
-      <div className="grid h-[42px] w-[42px] place-items-center rounded-full border border-[#E5E7EB] bg-white text-[12px] font-bold text-[#64748B]">
+    <article className="group relative grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[42px_minmax(0,1fr)] md:gap-3">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-[#E5E7EB] bg-white text-[11px] font-bold text-[#64748B] md:h-[42px] md:w-[42px] md:text-[12px]">
         你
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-bold text-[#1F2328]">你</span>
-          {time ? <span className="text-[12px] text-[#8C9198] opacity-0 transition-opacity duration-150 group-hover:opacity-100">{time}</span> : null}
+          {time ? <span className="text-[12px] text-[#8C9198] opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
         </div>
         <p className="max-w-[720px] whitespace-pre-wrap text-[13px] leading-6 text-[#374151]">{text}</p>
       </div>

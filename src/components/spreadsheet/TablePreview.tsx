@@ -53,9 +53,9 @@ export function TablePreview({
             <Download className="h-3.5 w-3.5" />
             {isDownloading ? "导出中" : "下载 Excel"}
           </button>
-        </div>
+          </div>
       ) : null}
-      <div className="overflow-x-auto rounded-xl border border-[#E5E7EB]">
+        <div className="overflow-x-auto rounded-xl border border-[#E5E7EB] shadow-[inset_-12px_0_12px_-12px_rgba(15,23,42,0.25)]">
         <table className="min-w-full border-collapse text-left text-[13px]">
           <thead className="bg-[#F8F9FB] text-[#6B7280]">
             <tr>
@@ -82,6 +82,7 @@ export function TablePreview({
           </tbody>
         </table>
       </div>
+        <div className="mt-1 text-[11px] text-[#8C9198] md:hidden">表格可左右滑动</div>
       {error ? <div className="mt-1 text-[12px] text-[#B42318]">{error}</div> : null}
     </div>
   );

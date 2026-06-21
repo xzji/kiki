@@ -63,8 +63,8 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
 
   const card = (
     <div
-      className="fixed z-40 rounded-xl border border-[#E5E7EB] bg-white"
-      style={{ width: POPOVER_WIDTH, ...style }}
+        className="fixed z-40 w-[calc(100vw-24px)] rounded-xl border border-[#E5E7EB] bg-white md:w-[340px]"
+        style={style}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-start justify-between px-4 pt-4">

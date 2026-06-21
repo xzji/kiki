@@ -1,0 +1,100 @@
+"use client";
+
+import { CalendarDays, Inbox, MessageCircle, Sparkles, Terminal } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useMemo } from "react";
+
+import { cn } from "@/lib/utils";
+import { getConversationUnreadCount, useConversationStore } from "@/stores/conversationStore";
+import { useConversationProcessSidebarStore } from "@/stores/conversationProcessSidebarStore";
+import { useAssistantStore } from "@/stores/assistantStore";
+import { useInboxStore } from "@/stores/inboxStore";
+
+export function MobileBottomNav() {
+  const pathname = usePathname() ?? "";
+  const inboxItems = useInboxStore((state) => state.items);
+  const conversations = useConversationStore((state) => state.conversations);
+  const openAssistant = useAssistantStore((state) => state.open);
+  const openProcess = useConversationProcessSidebarStore((state) => state.open);
+  const isConversation = pathname.startsWith("/conversations");
+
+  const inboxUnread = useMemo(
+    () => inboxItems.reduce((sum, item) => sum + item.unreadCount, 0),
+    [inboxItems],
+  );
+  const conversationUnread = useMemo(
+    () => conversations.reduce((sum, item) => sum + getConversationUnreadCount(item), 0),
+    [conversations],
+  );
+
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-[#D8DDE4] bg-white/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
+      aria-label="移动端主导航"
+    >
+      <div className="grid grid-cols-4 gap-1">
+        <MobileNavLink
+          href="/"
+          active={pathname === "/"}
+          label="收件箱"
+          icon={<Inbox className="h-4 w-4" />}
+          badge={inboxUnread}
+        />
+        <MobileNavLink
+          href="/conversations"
+          active={pathname.startsWith("/conversations")}
+          label="会话"
+          icon={<MessageCircle className="h-4 w-4" />}
+          badge={conversationUnread}
+        />
+        <MobileNavLink
+          href="/schedule"
+          active={pathname.startsWith("/schedule")}
+          label="日程"
+          icon={<CalendarDays className="h-4 w-4" />}
+        />
+        <button
+          type="button"
+          onClick={isConversation ? openProcess : openAssistant}
+          className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium text-[#475467] active:bg-[#F5F6F8]"
+        >
+          {isConversation ? <Terminal className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+          <span>{isConversation ? "过程" : "助手"}</span>
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function MobileNavLink({
+  href,
+  active,
+  label,
+  icon,
+  badge = 0,
+}: {
+  href: string;
+  active: boolean;
+  label: string;
+  icon: React.ReactNode;
+  badge?: number;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "relative flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium",
+        active ? "bg-[#F5F6F8] text-[#1F2328]" : "text-[#475467] active:bg-[#F5F6F8]",
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+      {badge > 0 ? (
+        <span className="absolute right-4 top-1 rounded-full bg-[#E5484D] px-1.5 text-[10px] font-semibold leading-4 text-white">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
+    </Link>
+  );
+}

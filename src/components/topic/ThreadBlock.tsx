@@ -61,18 +61,18 @@ export function ThreadBlock({
 
   return (
     <section
-      className={`rounded-[18px] border bg-white px-6 py-5 ${
+        className={`rounded-[18px] border bg-white px-4 py-4 md:px-6 md:py-5 ${
         highlighted ? "border-[#1F2328]" : "border-[#E5E7EB]"
       }`}
     >
-      <div className="mb-5 flex items-start justify-between gap-4">
+      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F5F6F8] text-[11px] font-semibold text-[#1F2328]">
               {index}
             </div>
-            <div className="min-w-0 flex items-center gap-2">
-              <h2 className="truncate text-[15px] font-semibold text-[#1F2328]">
+            <div className="min-w-0 flex flex-wrap items-center gap-2">
+              <h2 className="min-w-0 text-[15px] font-semibold text-[#1F2328] md:truncate">
                 {stripPrefix(subGoal.title)}
               </h2>
               {isPendingCreate ? (
@@ -137,7 +137,7 @@ export function ThreadBlock({
             </div>
           ) : null}
         </div>
-        <div className="shrink-0 text-[12px] font-medium tabular-nums text-[#8C9198]">
+        <div className="shrink-0 text-[12px] font-medium tabular-nums text-[#8C9198] md:text-right">
           {completedCount} / {displayTasks.length}
         </div>
       </div>
@@ -211,7 +211,7 @@ function DetailGroup({ label, items, ordered = false }: { label: string; items: 
 
   return (
     <li className="pl-0.5">
-      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-1">
+        <div className="grid grid-cols-1 items-start gap-1 md:grid-cols-[5.5rem_minmax(0,1fr)]">
         <span className="font-medium text-[#6B7280]">{label}</span>
         {ordered || displayItems.length > 1 ? (
           <ol className="list-decimal space-y-1 pl-5 text-[#1F2328]">

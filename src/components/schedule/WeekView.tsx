@@ -48,7 +48,8 @@ export function WeekView({ focusDate, today, events, onClickEvent, onCreateAt }:
   };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col overflow-x-auto">
+      <div className="min-w-[980px] md:min-w-0">
       <div className="flex border-b border-[#E5E7EB]">
         <div
           className="flex-none border-r border-[#E5E7EB] px-2 py-2 text-[11px] text-[#6B7280]"
@@ -107,6 +108,7 @@ export function WeekView({ focusDate, today, events, onClickEvent, onCreateAt }:
             {isWithinWeek(today, days) ? <CurrentTimeLine now={today} labelVariant="text" /> : null}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

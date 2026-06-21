@@ -57,7 +57,7 @@ export function UserMenu() {
   const displayName = user?.displayName || "用户";
   const email = user?.email || "";
   const initial = displayName.trim().charAt(0).toUpperCase() || "U";
-  const leftOffset = navCollapsed ? 14 : 28;
+    const leftOffset = navCollapsed ? 14 : 28;
 
   async function handleLogout() {
     setOpen(false);
@@ -67,9 +67,13 @@ export function UserMenu() {
   }
 
   return (
-    <div ref={menuRef} className="fixed bottom-6 z-20" style={{ left: leftOffset }}>
+      <div
+        ref={menuRef}
+        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 md:bottom-6"
+        style={{ left: leftOffset }}
+      >
       {open ? (
-        <div className="absolute bottom-14 left-0 w-40 rounded-xl border border-[#222]/40 bg-white p-3 shadow-sm">
+          <div className="absolute bottom-14 left-0 w-52 rounded-xl border border-[#222]/40 bg-white p-3 shadow-sm md:w-40">
           <div className="mb-3 flex items-center gap-3 border-b border-[#EEF1F4] pb-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[#D0D7DE] bg-[#F3EEFF] text-sm font-medium text-[#111]">
               {initial}
@@ -106,7 +110,7 @@ export function UserMenu() {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex h-7 w-7 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-xs text-[#5F5AA2]"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-xs text-[#5F5AA2] md:h-7 md:w-7"
         aria-label="打开用户菜单"
       >
         {initial}

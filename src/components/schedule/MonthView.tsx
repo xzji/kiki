@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { cn } from "@/lib/utils";
 import type { AgentEvent } from "@/types/schedule";
 
@@ -18,11 +19,12 @@ type Props = {
 
 export function MonthView({ focusDate, today, events, onClickEvent, onSelectDay }: Props) {
   const days = useMemo(() => eachDayOfMonthGrid(focusDate), [focusDate]);
+  const isMobile = useIsMobileViewport();
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center justify-between px-4 py-4">
-        <div className="text-[28px] font-semibold text-[#1F2328]">{formatMonthTitle(focusDate)}</div>
+        <div className="flex items-center justify-between px-3 py-3 md:px-4 md:py-4">
+          <div className="text-[22px] font-semibold text-[#1F2328] md:text-[28px]">{formatMonthTitle(focusDate)}</div>
       </div>
       <div className="grid grid-cols-7 border-t border-[#E5E7EB] text-[11px] text-[#6B7280]">
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
@@ -36,7 +38,7 @@ export function MonthView({ focusDate, today, events, onClickEvent, onSelectDay 
           const inMonth = day.getMonth() === focusDate.getMonth();
           const isToday = isSameYmd(day, today);
           const cellEvents = events.filter((event) => isEventOnDay(event.startTime, event.endTime, day));
-          const visibleEvents = cellEvents.slice(0, 3);
+            const visibleEvents = cellEvents.slice(0, isMobile ? 1 : 3);
           const overflow = cellEvents.length - visibleEvents.length;
           return (
             <button
@@ -45,7 +47,7 @@ export function MonthView({ focusDate, today, events, onClickEvent, onSelectDay 
               onClick={() => onSelectDay(day)}
               className={cn(
                 "group flex flex-col items-stretch border-l border-t border-[#E5E7EB] px-2 py-2 text-left",
-                "min-h-[calc((100vh-320px)/6)]",
+                "min-h-[72px] md:min-h-[calc((100vh-320px)/6)]",
                 index % 7 === 0 && "border-l-0",
                 !inMonth && "bg-[#F5F6F8]"
               )}

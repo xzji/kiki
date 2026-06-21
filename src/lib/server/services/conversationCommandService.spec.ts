@@ -306,6 +306,8 @@ export function runConversationCommandServiceSpecs() {
   const agentRunId = "agent-run-command-cascade-spec";
   const runtimeOnlyAgentRunId = "agent-run-runtime-only-command-cascade-spec";
   const runtimeJobId = "runtime-job-command-cascade-spec";
+  const payloadOnlyQueuedRuntimeJobId = "runtime-job-payload-only-queued-command-cascade-spec";
+  const payloadOnlyPausedRuntimeJobId = "runtime-job-payload-only-paused-command-cascade-spec";
   const now = new Date().toISOString();
   const db = getDatabase();
 
@@ -392,6 +394,30 @@ export function runConversationCommandServiceSpecs() {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'local-user', 'goal_task', 'queued', 'local_daemon', '{}', ?, ?)
     `,
   ).run(runtimeJobId, instanceId, taskId, goalId, goalId, threadId, sagaId, cascadeConversationId, now, now);
+  for (const [jobId, status, payloadTaskId, payloadInstanceId] of [
+    [payloadOnlyQueuedRuntimeJobId, "queued", "task-payload-only-queued-command-cascade-spec", "instance-payload-only-queued-command-cascade-spec"],
+    [payloadOnlyPausedRuntimeJobId, "cancelled", "task-payload-only-paused-command-cascade-spec", "instance-payload-only-paused-command-cascade-spec"],
+  ] as const) {
+    db.prepare(
+      `
+        INSERT INTO runtime_jobs (
+          id, user_id, kind, status, runtime_transport, payload_json, created_at, updated_at
+        ) VALUES (?, 'local-user', 'goal_task', ?, 'local_daemon', ?, ?, ?)
+      `,
+    ).run(
+      jobId,
+      status,
+      JSON.stringify({
+        goal: { id: goalId, title: "payload-only 目标", conversationId: cascadeConversationId, subGoals: [] },
+        subGoal: { id: threadId, goalId, title: "Thread", tasks: [] },
+        task: { id: payloadTaskId, subGoalId: threadId, title: "payload-only task", instances: [] },
+        instance: { id: payloadInstanceId, taskId: payloadTaskId, status: status === "queued" ? "pending" : "paused", createdAt: now },
+        runtimeEnv: { id: "runtime-env-payload-only-command-cascade-spec", label: "local", kind: "local" },
+      }),
+      now,
+      now,
+    );
+  }
   db.prepare(
     `
       INSERT INTO artifacts (
@@ -694,6 +720,20 @@ export function runConversationCommandServiceSpecs() {
     ).count,
     0,
     "agent_snapshots linked only by runtime_job_id should be deleted",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count FROM runtime_jobs
+            WHERE id IN (?, ?)
+          `,
+        )
+        .get(payloadOnlyQueuedRuntimeJobId, payloadOnlyPausedRuntimeJobId) as { count: number }
+    ).count,
+    0,
+    "payload-only queued/paused runtime_jobs linked to deleted conversation should be deleted",
   );
 
   const topics = db.prepare(`SELECT value_json FROM runtime_state_snapshots WHERE key = 'topics'`).get() as {

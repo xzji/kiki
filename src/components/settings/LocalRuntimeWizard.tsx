@@ -205,9 +205,9 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
   const canSave = Boolean(result?.ok) && !isSelectingDirectory;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/25" onClick={handleClose}>
+    <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/25 md:items-center" onClick={handleClose}>
       <div
-        className="flex max-h-[78vh] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white"
+        className="flex h-dvh w-full flex-col overflow-hidden border border-[#E5E7EB] bg-white md:h-auto md:max-h-[78vh] md:w-[720px] md:max-w-[92vw] md:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex h-14 flex-none items-center justify-between border-b border-[#E5E7EB] px-5">
@@ -227,15 +227,16 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
           </button>
         </div>
 
-        <div className="flex-none border-b border-[#E5E7EB] px-5 py-4">
-          <div className="grid grid-cols-4 gap-2">
+        <div className="flex-none border-b border-[#E5E7EB] px-4 py-3 md:px-5 md:py-4">
+          <div className="flex gap-2 overflow-x-auto md:grid md:grid-cols-4">
             {steps.map((item, index) => {
               const active = item.key === step;
               const done = steps.findIndex((entry) => entry.key === step) > index;
               return (
                 <div
                   key={item.key}
-                  className={cn(
+                    className={cn(
+                      "min-w-[132px] md:min-w-0",
                     "rounded-xl border px-3 py-2 text-[12px]",
                     active && "border-[#111] bg-white text-[#111]",
                     done && "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]",

@@ -18,6 +18,7 @@ import {
   setRuntimeDaemonDispatchPaused,
   setRuntimeDaemonMaxConcurrentTasks,
 } from "@/lib/api/runtime-daemon";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { cancelGoalInstance, transitionGoalInstance } from "@/lib/api/goal-commands";
 import {
   groupTaskMonitorRows,
@@ -62,7 +63,8 @@ function rowBadgeClass(row: TaskMonitorRow) {
 export function TaskMonitorDrawer() {
   const goals = useGoalStore(selectVisibleGoals);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
-  const assistantOpen = useAssistantStore((state) => state.isOpen);
+    const assistantOpen = useAssistantStore((state) => state.isOpen);
+    const isMobile = useIsMobileViewport();
   const open = useTaskMonitorStore((state) => state.open);
   const width = useTaskMonitorStore((state) => state.width);
   const closeMonitor = useTaskMonitorStore((state) => state.closeMonitor);
@@ -87,9 +89,9 @@ export function TaskMonitorDrawer() {
   const rows = useMemo(() => selectTaskMonitorRows(goals), [goals]);
   const groups = useMemo(() => groupTaskMonitorRows(rows), [rows]);
   const taskRunningCount = groups.running.filter((row) => row.kind === "task").length;
-  const detailOpen = Boolean(activeTaskId);
-  const assistantOffset = assistantOpen ? ASSISTANT_WIDTH : 0;
-  const rightOffset = detailOpen ? detailWidth + assistantOffset : assistantOffset;
+    const detailOpen = Boolean(activeTaskId);
+    const assistantOffset = !isMobile && assistantOpen ? ASSISTANT_WIDTH : 0;
+    const rightOffset = isMobile ? 0 : detailOpen ? detailWidth + assistantOffset : assistantOffset;
   const concurrencyRatio = maxConcurrentTasks > 0 ? Math.min(100, (taskRunningCount / maxConcurrentTasks) * 100) : 0;
 
   useEffect(() => {
@@ -239,17 +241,19 @@ export function TaskMonitorDrawer() {
         className="fixed inset-0 z-20 bg-transparent"
       />
       <aside
-        aria-label="任务执行情况"
-        className="fixed inset-y-0 z-30 flex flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200"
-        style={{ width, right: rightOffset }}
+          aria-label="任务执行情况"
+          className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
+          style={{ width: isMobile ? undefined : width, right: rightOffset }}
       >
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          title="拖拽调整宽度"
-          onMouseDown={onDragStart}
-          className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-[#D0D7DE]"
-        />
+          {!isMobile ? (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              title="拖拽调整宽度"
+              onMouseDown={onDragStart}
+              className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-[#D0D7DE]"
+            />
+          ) : null}
         <div className="flex h-12 flex-none items-center gap-3 border-b border-[#E5E7EB] px-4">
           <Activity className="h-4 w-4 text-[#6B7280]" />
           <h2 className="min-w-0 flex-1 text-[13px] font-semibold text-[#1F2328]">任务执行情况</h2>
@@ -263,13 +267,13 @@ export function TaskMonitorDrawer() {
           </button>
         </div>
 
-        <div className="border-b border-[#E5E7EB] px-4 py-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="border-b border-[#E5E7EB] px-4 py-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-[13px] font-medium text-[#1F2328]">最多同时执行</div>
               <div className="mt-0.5 text-[12px] text-[#8C9198]">超出上限的任务进入等待队列</div>
             </div>
-            <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
               {dispatchPaused ? (
                 <button
                   type="button"

@@ -57,7 +57,6 @@ import type {
   CliProcessEvent,
   ConversationCliProcess,
   QuotedConversationMessageContext,
-  RuntimeInputAttachment,
 } from "@/types/runtime";
 
 function isAbortError(error: unknown) {
@@ -66,37 +65,6 @@ function isAbortError(error: unknown) {
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
-}
-
-function asPlainRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function readTrimmedString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function readFirstTrimmedString(record: Record<string, unknown> | null, keys: string[]) {
-  if (!record) return "";
-  for (const key of keys) {
-    const value = readTrimmedString(record[key]);
-    if (value) return value;
-  }
-  return "";
-}
-
-function isSubagentToolName(toolName: string) {
-  const normalized = toolName.trim().toLowerCase();
-  return normalized === "task" || normalized === "agent";
-}
-
-function readSubagentCallInfo(input: unknown) {
-  const record = asPlainRecord(input);
-  return {
-    description: readFirstTrimmedString(record, ["description", "task", "title", "name"]),
-    agentType: readFirstTrimmedString(record, ["subagent_type", "agentType", "agent_type"]),
-    prompt: readFirstTrimmedString(record, ["prompt", "query", "message"]),
-  };
 }
 
 function createCliProcess(runId: string, startedAt: string): ConversationCliProcess {
@@ -291,33 +259,25 @@ function appendTerminalNotice(content: string, notice: string, emptyContent: str
 }
 
 function resolveTaskCardInfo(message: ConversationMessage | null, goals: Goal[]) {
-  if (!message || (message.kind !== "task_card" && message.kind !== "task_interaction_request")) return null;
+  if (!message || message.kind !== "task_card") return null;
   const goal = goals.find((item) => item.id === message.taskRef.goalId) ?? null;
   const subGoal = goal?.subGoals.find((item) => item.id === message.taskRef.subGoalId) ?? null;
   const storeTask = subGoal?.tasks.find((item) => item.id === message.taskRef.taskId) ?? null;
-  const task = storeTask ?? (message.kind === "task_card" ? message.taskSnapshot?.task : null) ?? null;
+  const task = storeTask ?? message.taskSnapshot?.task ?? null;
   const instance =
     storeTask?.instances.find((item) => item.id === message.taskRef.instanceId) ??
-    (message.kind === "task_card" ? message.taskSnapshot?.instance : null) ??
+    message.taskSnapshot?.instance ??
     null;
   if (!goal || !task || !instance) return null;
   return { goal, subGoal, task, instance, message };
 }
 
 function buildQuotedMessageContext(message: ConversationMessage, goals: Goal[]): QuotedConversationMessageContext {
-  if (message.kind === "task_card" || message.kind === "task_interaction_request") {
+  if (message.kind === "task_card") {
     const taskInfo = resolveTaskCardInfo(message, goals);
-    const interactionContent = message.kind === "task_interaction_request"
-      ? [
-          message.interactionSnapshot.headline || message.interactionSnapshot.reason,
-          message.interactionSnapshot.submitted?.feedback
-            ? `已提交：${message.interactionSnapshot.submitted.feedback}`
-            : undefined,
-        ].filter(Boolean).join("\n")
-      : undefined;
     return {
       roleLabel: "KiKi",
-      content: interactionContent ?? (taskInfo ? buildTaskQuoteContent(taskInfo.task, taskInfo.instance) : message.content),
+      content: taskInfo ? buildTaskQuoteContent(taskInfo.task, taskInfo.instance) : message.content,
       messageId: message.id,
       messageKind: message.kind,
       taskRef: message.taskRef,
@@ -502,20 +462,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
     if (!conversation) return [] as ConversationMessage[];
     return [...conversation.messages].sort(compareConversationMessagesForDisplay);
   }, [conversation]);
-  const previousUserQuestionByMessageId = useMemo(() => {
-    const result: Record<string, string> = {};
-    let latestUserQuestion = "";
-    for (const message of sortedMessages) {
-      if (message.role === "user") {
-        latestUserQuestion = message.content;
-        continue;
-      }
-      if (message.role === "kiki" && message.kind === "text") {
-        result[message.id] = latestUserQuestion;
-      }
-    }
-    return result;
-  }, [sortedMessages]);
 
   // 默认定位到最新消息
   useEffect(() => {
@@ -866,7 +812,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
         taskRef: payload.taskRef,
         patch: payload.patch,
         revisionHint: payload.revisionHint,
-        applyMode: payload.applyMode,
         userMessage: sourceMessage.governance.userMessage,
         runtimeEnv: activeRuntimeEnv ?? undefined,
         quotedMessage: sourceMessage.governance.quotedMessage,
@@ -930,29 +875,27 @@ export function ConversationView({ conversationId }: { conversationId: string })
 
   const onSubmitRuntimeMessageFeedback = async (
     sourceMessage: ConversationMessage,
-    input:
-      | {
-          rating: MessageFeedbackRating;
-          reasonCodes?: MessageFeedbackReasonCode[];
-          comment?: string;
-        }
-      | null,
+      input: {
+        rating: MessageFeedbackRating;
+        reasonCodes?: MessageFeedbackReasonCode[];
+        comment?: string;
+      } | null,
   ) => {
     if (!conversation) return;
     try {
-      if (!input) {
-        await deleteMessageFeedback({
-          conversationId: conversation.id,
-          messageId: sourceMessage.id,
-        });
-        setMessageFeedbackById((current) => {
-          const next = { ...current };
-          delete next[sourceMessage.id];
-          return next;
-        });
-        setMessageFeedbackError(null);
-        return;
-      }
+        if (!input) {
+          await deleteMessageFeedback({
+            conversationId: conversation.id,
+            messageId: sourceMessage.id,
+          });
+          setMessageFeedbackById((current) => {
+            const next = { ...current };
+            delete next[sourceMessage.id];
+            return next;
+          });
+          setMessageFeedbackError(null);
+          return;
+        }
       const feedback = await submitMessageFeedback({
         conversationId: conversation.id,
         messageId: sourceMessage.id,
@@ -1066,7 +1009,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
   const onSend = async (
     text: string,
     quoted?: QuotedConversationMessageContext | null,
-    attachments: RuntimeInputAttachment[] = [],
   ) => {
     const parsedCommand = parseSlashCommand(text);
     const canResumePlanning = parsedCommand.kind === "plain" && shouldResumePlanningFromMessage(text);
@@ -1769,16 +1711,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 quotedMessage: quoted ?? undefined,
               })
             : null;
-        if (governance && !governance.shouldHandle && governance.notice) {
-          updateMessage(conversation.id, assistantId, (message) => ({
-            ...message,
-            content: governance.notice ?? "",
-            status: "done",
-          }));
-          setConversationStatus(conversation.id, "idle");
-          setQuotedMessage(null);
-          return;
-        }
         if (governance?.shouldHandle && governance.proposal) {
           if (
             governance.proposal.intent === "rerun_current" &&
@@ -1833,7 +1765,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
             taskRef: payload.taskRef,
             patch: payload.patch,
             revisionHint: payload.revisionHint,
-            applyMode: payload.applyMode,
             userMessage: text,
             runtimeEnv: activeRuntimeEnv ?? undefined,
             quotedMessage: quoted ?? undefined,
@@ -2028,19 +1959,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
         },
         quotedMessage: quoted,
       });
-      if (!governance.shouldHandle && governance.notice) {
-        updateMessage(conversation.id, assistantId, (message) => ({
-          ...message,
-          content: governance.notice ?? "",
-          status: "done",
-        }));
-        setConversationStatus(conversation.id, "idle");
-        streamAbortRef.current = null;
-        activeAssistantMessageIdRef.current = null;
-        setHasLocalActiveStream(false);
-        setQuotedMessage(null);
-        return;
-      }
       if (governance.shouldHandle && governance.proposal) {
         if (!governance.proposal.supported) {
           updateMessage(conversation.id, assistantId, (message) => ({
@@ -2090,7 +2008,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
           taskRef: payload.taskRef,
           patch: payload.patch,
           revisionHint: payload.revisionHint,
-          applyMode: payload.applyMode,
           userMessage: text,
           runtimeEnv: activeRuntimeEnv,
           quotedMessage: quoted,
@@ -2168,7 +2085,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
             goal: contextGoal,
           },
           quotedMessage: quoted,
-          attachments,
         },
         {
           onEvent: (event) => {
@@ -2228,33 +2144,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
               return;
             }
             if (event.type === "tool_call") {
-              const isSubagentTool = isSubagentToolName(event.toolName);
-              const subagentInfo = isSubagentTool ? readSubagentCallInfo(event.input) : null;
               appendProcessEvent("tool_call", {
                 title: event.toolName,
                 toolName: event.toolName,
                 summary: event.summary,
                 input: event.input,
-                subagentCallId: event.toolCallId,
-                subagentDescription: subagentInfo?.description || undefined,
-                subagentType: subagentInfo?.agentType || undefined,
-                subagentPrompt: subagentInfo?.prompt || undefined,
-              });
-              return;
-            }
-            if (event.type === "tool_result") {
-              appendProcessEvent("tool_result", {
-                title: event.toolName
-                  ? `${event.toolName} ${event.ok ? "返回结果" : event.infraFailure ? "被环境拦截" : "执行失败"}`
-                  : event.ok
-                    ? "工具返回结果"
-                    : "工具执行失败",
-                toolName: event.toolName,
-                summary: event.summary,
-                content: event.ok ? undefined : event.error,
-                ok: event.ok,
-                infraFailure: event.infraFailure,
-                subagentCallId: event.toolCallId,
               });
               return;
             }
@@ -2266,9 +2160,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 input: event.input,
                 agentId: event.agentId,
                 eventKind: event.eventKind,
-                subagentCallId: event.subagentCallId,
-                subagentDescription: event.subagentDescription,
-                subagentType: event.subagentType,
               });
               return;
             }
@@ -2469,7 +2360,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
-          className="h-full overflow-x-hidden overflow-y-auto overscroll-contain"
+          className="h-full overflow-y-auto overscroll-contain"
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pb-5 pt-3 sm:px-6 lg:px-8">
             {streamErrorUi?.kind === "runtime" ? (
@@ -2541,7 +2432,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                       </div>
                     ) : null}
                     <ConversationMessageItem
-                      conversationId={conversation.id}
+                        conversationId={conversation.id}
                       message={msg}
                       onQuote={(message) => setQuotedMessage(message)}
                       onOpenResult={(message) => {
@@ -2549,7 +2440,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
                         setPlanOpen(false);
                         setResultMessage(message);
                       }}
-                      onCollapseResult={() => setResultMessage(null)}
                       onOpenTaskInfo={(message) => {
                         setResultMessage(null);
                         setTaskInfoMessage(message);
@@ -2563,7 +2453,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
                       }}
                       onTaskOptionalFeedback={onTaskOptionalFeedback}
                       feedback={messageFeedbackById[msg.id] ?? null}
-                      shareQuestion={previousUserQuestionByMessageId[msg.id] ?? ""}
                       onSubmitFeedback={onSubmitRuntimeMessageFeedback}
                       onGovernanceConfirm={onGovernanceConfirm}
                       onGovernanceCancel={onGovernanceCancel}
@@ -2689,7 +2578,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   setTaskInfoMessage(null);
                   setActivePlanGoalId(taskInfo.goal.id);
                   setPlanFocus(
-                    taskInfoMessage?.kind === "task_card" || taskInfoMessage?.kind === "task_interaction_request"
+                    taskInfoMessage?.kind === "task_card"
                       ? taskInfoMessage.taskRef.subGoalId
                       : null,
                   );

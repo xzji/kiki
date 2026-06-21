@@ -31,16 +31,17 @@ export default function HomePage() {
   );
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="text-[32px] font-semibold tracking-tight text-[#111]">{formatChineseDate(currentTime)}</h1>
+      <div>
+        <div className="mb-5 flex flex-col gap-3 md:mb-6 md:flex-row md:items-center md:justify-between md:gap-4">
+          <h1 className="text-[26px] font-semibold tracking-tight text-[#111] md:text-[32px]">{formatChineseDate(currentTime)}</h1>
         <button
           type="button"
           onClick={openTaskMonitor}
-          className="inline-flex items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] font-medium text-[#1F2328] transition hover:border-[#111]"
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] font-medium text-[#1F2328] transition hover:border-[#111]"
         >
           <Activity className="h-4 w-4 text-[#6B7280]" />
-          <span>任务执行情况</span>
+            <span className="md:hidden">任务</span>
+            <span className="hidden md:inline">任务执行情况</span>
           {runningCount > 0 ? (
             <span className="rounded-full bg-[#E6F4EA] px-2 py-0.5 text-[12px] font-semibold text-[#137333]">
               {runningCount}

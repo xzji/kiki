@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import type { ArtifactRef } from "@/types/artifact";
 
 type SaveStatus = "idle" | "loading" | "saving" | "saved" | "failed";
@@ -45,6 +46,7 @@ function statusText(status: SaveStatus, savedAt?: string) {
 }
 
 export function SandboxedWebAppSurface({ artifact }: { artifact: ArtifactRef }) {
+  const isMobile = useIsMobileViewport();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const stateRef = useRef<Record<string, unknown>>({});
   const pendingEventRef = useRef<WebAppEvent | undefined>(undefined);
@@ -220,7 +222,7 @@ export function SandboxedWebAppSurface({ artifact }: { artifact: ArtifactRef }) 
         sandbox="allow-scripts"
         src={previewUrl}
         className="w-full rounded-xl border border-[#D0D7DE] bg-white"
-        style={{ height }}
+          style={{ height: isMobile ? `min(${height}px, 60dvh)` : height }}
         title={artifact.label}
         referrerPolicy="strict-origin-when-cross-origin"
       />
