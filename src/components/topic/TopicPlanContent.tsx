@@ -318,7 +318,7 @@ export function TopicPlanContent({
       return;
     }
     if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
-      window.alert("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
+      window.alert("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI、Pi CLI、Cursor CLI 或 Codex CLI。");
       return;
     }
     const overlayId = createOpaqueId("idem");

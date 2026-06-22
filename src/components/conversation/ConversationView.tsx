@@ -1072,7 +1072,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
             throw new Error("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
           }
           if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
-            throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
+            throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI、Pi CLI、Cursor CLI 或 Codex CLI。");
           }
           appendPlanningProgress(controller, assistantId, {
             message: recovery.failedStep
@@ -1438,7 +1438,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           throw new Error("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
         }
         if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
-          throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
+          throw new Error("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI、Pi CLI、Cursor CLI 或 Codex CLI。");
         }
         appendPlanningProcessEvent(controller, assistantId, "status", {
           title: "Interviewer",
@@ -1898,7 +1898,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (!SUPPORTED_RUNTIME_KINDS.includes(activeRuntimeEnv.runtimeKind || "claude")) {
-      setStreamError("当前会话对话链路暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI 或 Pi CLI。");
+      setStreamError("当前会话对话链路暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI、Pi CLI、Cursor CLI 或 Codex CLI。");
       return;
     }
 

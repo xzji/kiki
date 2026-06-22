@@ -47,6 +47,8 @@ function removeSlashFragment(input: string, start: number, end: number) {
 
 function runtimeKindLabel(runtime: RuntimeEnvironment) {
   if ((runtime.runtimeKind || "claude") === "pi") return "Pi CLI";
+  if ((runtime.runtimeKind || "claude") === "codex") return "Codex CLI";
+  if ((runtime.runtimeKind || "claude") === "cursor") return "Cursor CLI";
   if ((runtime.runtimeKind || "claude") === "claude") return "Claude CLI";
   return runtime.runtimeKind || "Runtime";
 }

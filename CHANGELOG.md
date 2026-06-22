@@ -2,6 +2,27 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-06-22
+
+### Changed
+- Runtime 适配层扩展到 Claude / Pi / Cursor / Codex：注册表、运行环境向导、设置页、会话与目标规划入口统一识别四类本地 CLI。
+- Cursor 运行时切换为 `cursor agent acp` JSON-RPC 通道，支持会话恢复、流式事件解析、工具调用映射、`session/request_permission` 审批桥接和 `.cursor/cli.json` 权限 overlay。
+- Codex 运行时接入 `codex exec --json`，按权限模式映射 read-only / workspace-write sandbox；首版显式禁用 KiKi 手动确认弹窗，并在 UI 中提示限制。
+- 项目概览和 daemon README 更新为多 Runtime 说明，避免继续把本地执行节点描述为 Claude-only。
+
+### Added
+- 新增 Cursor ACP client、parser、permission resolver、tool policy 与环境清洗模块，并补充 Cursor/Codex adapter 规格测试。
+- 规划规格入口纳入 Cursor ACP 权限解析、Cursor adapter 与 Codex adapter 覆盖，防止 runtime registry 与协议解析回退。
+
+### Removed
+- 过滤本地 Cursor ACP 探测脚本和个人工作目录 fixture，避免临时测试流程与本机路径进入提交。
+
+### Verification
+- 通过 `pnpm test:planning`。
+- 通过 `pnpm build`。
+- 通过 `pnpm tsc --noEmit`。
+- 通过 `pnpm lint`。
+
 ## 2026-06-21
 
 ### Changed

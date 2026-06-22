@@ -8,7 +8,7 @@ KiKi 是一个面向长期目标管理与自主执行的本地 Agent 产品原�
 - 任务级自主执行与结果回流
 - 收件箱、会话、目标、任务、日程之间的统一编排
 
-当前项目基于 `Next.js 14 + TypeScript + Tailwind CSS + Zustand` 构建，AI 运行时默认接入本地 `Claude CLI`，并围绕本地运行环境、会话续接、任务调度、执行 telemetry、SQLite 状态快照建立了一套完整闭环。
+当前项目基于 `Next.js 14 + TypeScript + Tailwind CSS + Zustand` 构建，AI 运行时通过可插拔 **Runtime 适配层** 接入本地 CLI（Claude / Pi / Cursor 等），并围绕本地运行环境、会话续接、任务调度、执行 telemetry、SQLite 状态快照建立了一套完整闭环。
 
 ---
 
@@ -338,6 +338,15 @@ src/
 - 是否为当前默认环境
 
 这是 Claude 对话、`/goal` 规划、任务执行的共同基础。
+
+**Runtime 适配层**（`src/lib/server/runtime/adapters/`）将 KiKi 统一任务请求翻译为各 CLI 协议：
+
+- `claudeAdapter` — Claude Code CLI（`claude`）
+- `piAdapter` — Pi CLI（`pi`）
+- `cursorAdapter` — Cursor Agent CLI（`cursor agent acp`，JSON-RPC 双向通道 + `session/request_permission` 审批）
+- 注册表见 `registry.ts`，发现与健康检查经 `runtimeEnvValidation.ts` 自动扫描已注册适配器
+
+Cursor 运行时额外支持：按 KiKi 工具策略写入工作目录 `.cursor/cli.json` overlay（confirm 模式）、`buildCursorEnv()` 环境清洗、以及 `runtimeSessions[cursor]` 分键 session 续接。
 
 ### 9.3 干净环境变量
 

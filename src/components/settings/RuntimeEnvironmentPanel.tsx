@@ -52,6 +52,7 @@ const runtimeKindLabels: Record<LocalRuntimeKind, string> = {
   codex: "Codex CLI",
   gemini: "Gemini CLI",
   pi: "Pi CLI",
+  cursor: "Cursor CLI",
 };
 
 const filePolicyModeLabels: Record<RuntimeFilePolicyMode, string> = {
@@ -806,24 +807,38 @@ export function RuntimeEnvironmentPanel() {
               </div>
               {environment.type === "local" ? (
                 <div className="ml-auto flex items-center gap-2">
-                  {(["readonly", "confirm", "execute"] as RuntimePermissionMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => void handlePermissionModeChange(environment, mode)}
-                      className={cn(
-                        "rounded-full border px-3 py-1.5 text-[12px] transition",
-                        mode === environment.permissionMode
-                          ? "border-[#111] bg-white text-[#111]"
-                          : "border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#111]",
-                      )}
-                    >
-                      {permissionLabels[mode]}
-                    </button>
-                  ))}
+                  {(["readonly", "confirm", "execute"] as RuntimePermissionMode[]).map((mode) => {
+                    const disabled = environment.runtimeKind === "codex" && mode === "confirm";
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        disabled={disabled}
+                        title={disabled ? "Codex exec 首版不支持 KiKi 弹窗确认" : undefined}
+                        onClick={() => {
+                          if (!disabled) void handlePermissionModeChange(environment, mode);
+                        }}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-[12px] transition",
+                          disabled && "cursor-not-allowed opacity-45",
+                          mode === environment.permissionMode
+                            ? "border-[#111] bg-white text-[#111]"
+                            : "border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#111]",
+                        )}
+                      >
+                        {permissionLabels[mode]}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : null}
             </div>
+
+            {environment.runtimeKind === "codex" && environment.permissionMode === "confirm" ? (
+              <div className="mt-3 rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#92400E]">
+                Codex exec 首版不支持 KiKi 手动确认。请切换为“只读聊天”或“项目内可执行”；后端会把历史 confirm 配置按只读处理。
+              </div>
+            ) : null}
 
             {environment.type === "local" ? (
               <ToolPolicySection
@@ -1207,6 +1222,31 @@ function ToolPolicySection({
   const removeAllowedRule = (rule: RuntimeToolPermissionRule) => {
     onAllowedToolRulesChange(allowedToolRules.filter((item) => item.id !== rule.id));
   };
+
+  if (environment.runtimeKind === "codex") {
+    return (
+      <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
+        <div className="text-[12px] font-medium text-[#111]">Codex sandbox 权限</div>
+        <div className="mt-1 max-w-[620px] text-[12px] leading-5 text-[#6B7280]">
+          Codex exec 首版不支持 Claude 式工具白名单，也不接 KiKi 手动确认弹窗；权限由 Codex sandbox 和执行权限模式控制。
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <div className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
+            <div className="text-[12px] font-medium text-[#111]">只读聊天</div>
+            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">使用 read-only sandbox，可读项目，不写文件。</div>
+          </div>
+          <div className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
+            <div className="text-[12px] font-medium text-[#111]">项目内可执行</div>
+            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">使用 workspace-write sandbox，只允许在项目范围内执行和写入。</div>
+          </div>
+          <div className="rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
+            <div className="text-[12px] font-medium text-[#92400E]">手动确认不可用</div>
+            <div className="mt-1 text-[12px] leading-5 text-[#92400E]">弹窗确认将在后续 app-server 阶段接入。</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">

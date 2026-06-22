@@ -1,5 +1,5 @@
 import { buildJsonParseCandidates, parseJsonWithCandidates } from "@/lib/server/claude/jsonRepair";
-import { extractBalancedJsonSnippet, extractJsonObject, extractParseFailureContext } from "@/lib/server/jsonExtraction";
+import { extractBalancedJsonSnippet, extractParseFailureContext } from "@/lib/server/jsonExtraction";
 import { writeTaskParseFailureSnapshot } from "@/lib/server/workspace/conversationWorkspace";
 import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
 import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";

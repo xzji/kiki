@@ -1,8 +1,8 @@
 import type { ArtifactRef } from "@/types/artifact";
 
 export type RuntimePermissionMode = "readonly" | "confirm" | "execute";
-export type LocalRuntimeKind = "claude" | "codex" | "gemini" | "pi";
-export const SUPPORTED_RUNTIME_KINDS: LocalRuntimeKind[] = ["claude", "pi"];
+export type LocalRuntimeKind = "claude" | "codex" | "gemini" | "pi" | "cursor";
+export const SUPPORTED_RUNTIME_KINDS: LocalRuntimeKind[] = ["claude", "pi", "cursor", "codex"];
 export type RuntimeToolCapability =
   | "web"
   | "fileRead"

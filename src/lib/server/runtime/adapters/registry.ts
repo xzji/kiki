@@ -1,11 +1,15 @@
 import { SUPPORTED_RUNTIME_KINDS, type LocalRuntimeKind } from "@/types/runtime";
+import { codexAdapter } from "@/lib/server/runtime/adapters/codexAdapter";
 import { claudeAdapter } from "@/lib/server/runtime/adapters/claudeAdapter";
+import { cursorAdapter } from "@/lib/server/runtime/adapters/cursorAdapter";
 import { piAdapter } from "@/lib/server/runtime/adapters/piAdapter";
 import type { RuntimeAdapter } from "@/lib/server/runtime/adapters/types";
 
 const adapters: Partial<Record<LocalRuntimeKind, RuntimeAdapter>> = {
   claude: claudeAdapter,
   pi: piAdapter,
+  cursor: cursorAdapter,
+  codex: codexAdapter,
 };
 
 export function getRuntimeAdapter(kind: LocalRuntimeKind = "claude"): RuntimeAdapter {

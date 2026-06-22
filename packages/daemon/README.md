@@ -1,11 +1,11 @@
 # @kiki_agent/daemon
 
-Kiki 本地执行节点。把你的电脑注册成 Kiki 云端的执行机：云端编排器通过反向隧道把任务派发到本机，由本机的 Claude CLI 实际执行。
+Kiki 本地执行节点。把你的电脑注册成 Kiki 云端的执行机：云端编排器通过反向隧道把任务派发到本机，由本机的 Claude / Pi / Cursor CLI 实际执行。
 
 ## 依赖
 
 - **Node.js >= 20**（这是一段 Node 程序，必须有 JS 运行时；`npx` 本身也来自 Node）。
-- 本机已配置可用的 **Claude CLI**。
+- 本机已配置可用的 **Claude CLI**、**Pi CLI** 或 **Cursor CLI**（`cursor agent login`）。
 
 > 没装 Node？macOS 用 `brew install node`，或访问 https://nodejs.org 下载安装包。
 

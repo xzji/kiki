@@ -1,6 +1,6 @@
 "use client";
 
-import { Atom, Bot, CheckCircle2, Code2, FolderOpen, Loader2, Sparkles, X } from "lucide-react";
+import { Atom, Bot, CheckCircle2, Code2, FolderOpen, Loader2, MousePointer2, Sparkles, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -23,7 +23,7 @@ type Props = {
 
 const permissionOptions: { value: RuntimePermissionMode; label: string; description: string }[] = [
   { value: "readonly", label: "只读聊天", description: "只用于问答，不允许 Runtime 改动项目" },
-  { value: "confirm", label: "手动确认", description: "遇到需要工具权限的操作时交给 Claude CLI 确认" },
+  { value: "confirm", label: "手动确认", description: "遇到需要工具权限的操作时在 KiKi 中确认，并同步写入 Cursor CLI 权限配置" },
   { value: "execute", label: "项目内可执行", description: "默认模式，允许 Runtime 在当前项目目录内执行工具能力" },
 ];
 
@@ -32,12 +32,14 @@ const runtimeMeta: Record<LocalRuntimeKind, { accent: string; icon: ReactNode }>
   codex: { accent: "bg-[#EEF6FF] text-[#2563EB]", icon: <Code2 className="h-4 w-4" /> },
   gemini: { accent: "bg-[#ECFDF3] text-[#067647]", icon: <Bot className="h-4 w-4" /> },
   pi: { accent: "bg-[#FFF1F2] text-[#BE123C]", icon: <Atom className="h-4 w-4" /> },
+  cursor: { accent: "bg-[#EEF2FF] text-[#3730A3]", icon: <MousePointer2 className="h-4 w-4" /> },
 };
 
 const runtimeIconByName: Record<string, ReactNode> = {
   Atom: <Atom className="h-4 w-4" />,
   Bot: <Bot className="h-4 w-4" />,
   Code2: <Code2 className="h-4 w-4" />,
+  MousePointer2: <MousePointer2 className="h-4 w-4" />,
   Sparkles: <Sparkles className="h-4 w-4" />,
 };
 
@@ -76,6 +78,13 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
   );
 
   const installedRuntimes = runtimes.filter((item) => item.installed);
+
+  const selectRuntime = (runtime: RuntimeDiscoveryItem) => {
+    setSelectedRuntime(runtime);
+    if (runtime.runtimeKind === "codex" && permissionMode === "confirm") {
+      setPermissionMode("readonly");
+    }
+  };
 
   const reset = () => {
     setStep("scan");
@@ -270,12 +279,13 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
             <SelectRuntimeStep
               runtimes={runtimes}
               selectedRuntime={selectedRuntime}
-              onSelect={setSelectedRuntime}
+              onSelect={selectRuntime}
             />
           ) : null}
 
           {step === "permission" ? (
             <PermissionStep
+              runtimeKind={selectedRuntime?.runtimeKind}
               permissionMode={permissionMode}
               onChange={setPermissionMode}
             />
@@ -462,7 +472,7 @@ function SelectRuntimeStep({
     <div>
       <div className="text-[14px] font-medium text-[#111]">选择要添加的 Runtime</div>
       <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
-        这里只展示已安装并可执行的 Runtime。当前聊天链路支持 Claude CLI 与 Pi CLI。
+        这里只展示已安装并可执行的 Runtime。当前聊天链路支持 Claude CLI、Pi CLI、Cursor CLI 与 Codex CLI。
       </div>
       <div className="mt-4 grid gap-3">
         {runtimes.filter((runtime) => runtime.installed).map((runtime) => (
@@ -479,35 +489,50 @@ function SelectRuntimeStep({
 }
 
 function PermissionStep({
+  runtimeKind,
   permissionMode,
   onChange,
 }: {
+  runtimeKind?: LocalRuntimeKind;
   permissionMode: RuntimePermissionMode;
   onChange: (mode: RuntimePermissionMode) => void;
 }) {
+  const isCodex = runtimeKind === "codex";
   return (
     <div>
       <div className="text-[14px] font-medium text-[#111]">确认权限模式</div>
       <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
-        默认推荐“手动确认”。后续也可以在运行环境列表里随时切换。
+        {isCodex
+          ? "Codex exec 首版不支持 KiKi 手动确认，请选择只读聊天或项目内可执行。"
+          : "默认推荐“手动确认”。后续也可以在运行环境列表里随时切换。"}
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {permissionOptions.map((option) => (
+        {permissionOptions.map((option) => {
+          const disabled = isCodex && option.value === "confirm";
+          const description = disabled
+            ? "Codex exec 首版暂不支持 KiKi 手动确认"
+            : option.description;
+          return (
           <button
             key={option.value}
             type="button"
-            onClick={() => onChange(option.value)}
+            onClick={() => {
+              if (!disabled) onChange(option.value);
+            }}
+            disabled={disabled}
             className={cn(
               "rounded-2xl border px-4 py-3 text-left transition",
+              disabled && "cursor-not-allowed opacity-50",
               option.value === permissionMode
                 ? "border-[#111] bg-white"
                 : "border-[#E5E7EB] bg-[#FAFAFB] hover:bg-white",
             )}
           >
             <div className="text-[13px] font-medium text-[#111]">{option.label}</div>
-            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{option.description}</div>
+            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{description}</div>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
