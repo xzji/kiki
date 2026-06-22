@@ -6,6 +6,7 @@ import {
   resumeAllTaskExecution,
 } from "@/lib/server/scheduling/dispatchPauseService";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { applyUserRuntimeSettingsToDaemonConfig } from "@/lib/server/runtime/userRuntimeConfig";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ async function POSTHandler(request: NextRequest) {
     }
 
     const result = body.paused ? pauseAllTaskExecution() : resumeAllTaskExecution();
-    const config = readRuntimeDaemonConfig();
+    const config = applyUserRuntimeSettingsToDaemonConfig(readRuntimeDaemonConfig());
 
     return NextResponse.json({
       ok: true,
@@ -31,7 +32,7 @@ async function POSTHandler(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "任务调度暂停设置失败";
     return NextResponse.json(
-      { ok: false, message, config: readRuntimeDaemonConfig() },
+      { ok: false, message, config: applyUserRuntimeSettingsToDaemonConfig(readRuntimeDaemonConfig()) },
       { status: 500 },
     );
   }

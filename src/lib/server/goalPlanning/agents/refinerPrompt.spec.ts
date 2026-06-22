@@ -12,7 +12,7 @@ export function runRefinerPromptSpecs() {
       currentPlan: { subGoals: [{ id: 1, name: "旧板块" }] },
       criticDecision: { verdict: "needs_refinement", notes: "任务不可执行" },
       conversationContext: "需要每天更新",
-      userContext: { command: "/saga" },
+      userContext: { command: "/topic" },
     });
 
     assert.ok(prompt.includes("Refiner"), "prompt includes Refiner role");

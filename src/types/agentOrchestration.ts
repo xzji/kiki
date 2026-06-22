@@ -25,6 +25,13 @@ export type AgentRoleRun = {
   filesTouched?: string[];
 };
 
+export type AgentUserDecisionRequest = {
+  question: string;
+  options: string[];
+  reason: string;
+  partialSummary?: string;
+};
+
 export type AgentHandoffClaim = {
   text: string;
   confidence: "low" | "medium" | "high";
@@ -56,6 +63,7 @@ export type AgentReviewDecision = {
     suggestedFix?: string;
   }>;
   decisionReason: string;
+  needsUserDecision?: AgentUserDecisionRequest;
 };
 
 export type AgentRunPlan = {
@@ -66,4 +74,5 @@ export type AgentRunPlan = {
   handoffs: AgentHandoff[];
   review?: AgentReviewDecision;
   finalRole: AgentRole;
+  writtenFiles?: string[];
 };

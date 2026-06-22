@@ -138,6 +138,7 @@ B. 如果 协作模式=agent_autonomous：
    1. 只检查是否存在无法靠检索、推理或执行补齐的硬缺口（例如：用户从未设定目标方向、凭证缺失）。
    2. 没有硬缺口：直接进入正常执行，按“输出模板 A”产出。
    3. 有硬缺口：才允许走“输出模板 B”，且 interaction_requirement.type 应为 deliverable_gap。
+   4. 例外：如果执行过程中出现 Agent 无法靠检索、推理或执行消解的真实决策分叉或矛盾前提（例如两条互斥路线都会改变主交付方向、继续执行会产生不可逆副作用且方向不唯一），允许设置 awaiting_user=true，并使用 interaction_requirement.type=confirm|answer|provide_context、timing=during_execution 主动请用户拍板。可自行推进、偏好微调、是否满意、下游反馈不属于真实阻塞，必须继续完成并放入 suggested_actions。
 
 C. 如果 用户介入时机 ∈ {during_execution, after_agent_output}：
    1. Agent 应先产出候选方案、对比或候选集，填入 task_result.blocks。
@@ -281,7 +282,8 @@ ${buildStepZeroPrompt(isResume)}
    - deliverable_check.matched 必须为 false，missing_deliverables 必须包含本轮全部缺失用户输入。
    - artifacts 必须为空数组；如果 awaiting_user=true，顶层 suggested_actions 默认也应为空数组，除非确有必要给出补充行动建议。
 6. 禁止猜测或幻想关键事实。可以说明“缺少信息，无法继续”，但不能用默认城市、默认预算、默认偏好代替用户输入。
-7. 最终输出必须是一个 JSON 对象，不要加代码块，不要输出额外解释。
+7. 真实阻塞点优先于硬完成：如果继续执行会改变主交付物的方向或正确性，必须按 awaiting_user=true 结构化抛给用户确认；如果只是结果反馈、偏好微调、是否满意或下游选择，不得阻塞当前任务，应写入 suggested_actions。
+8. 最终输出必须是一个 JSON 对象，不要加代码块，不要输出额外解释。
 ${renderDependencyReuseInstruction(context)}
 
 ${TASK_RESULT_PROMPT_FRAGMENT}

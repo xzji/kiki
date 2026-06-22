@@ -6,6 +6,7 @@ import {
   NAV_SIDEBAR_COLLAPSED_WIDTH,
   NAV_SIDEBAR_EXPANDED_WIDTH,
 } from "@/components/layout/Sidebar";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { useConversationProcessSidebarStore } from "@/stores/conversationProcessSidebarStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
@@ -16,11 +17,14 @@ export const MAIN_CONTENT_RIGHT_INSET = 416;
 export function useMainContentInsets() {
   const pathname = usePathname() ?? "";
   const isConversation = pathname.startsWith("/conversations");
+  const isMobile = useIsMobileViewport();
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
   const assistantHydrated = useAssistantStore((state) => state.hydrated);
   const assistantOpen = useAssistantStore((state) => state.isOpen);
   const processHydrated = useConversationProcessSidebarStore((state) => state.hydrated);
   const processOpen = useConversationProcessSidebarStore((state) => state.isOpen);
+
+  if (isMobile) return { leftInset: 0, rightInset: 0 };
 
   const leftInset = navCollapsed ? NAV_SIDEBAR_COLLAPSED_WIDTH : NAV_SIDEBAR_EXPANDED_WIDTH;
   const rightInset =

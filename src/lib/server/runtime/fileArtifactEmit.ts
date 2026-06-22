@@ -5,13 +5,13 @@ import type { RuntimeStreamEvent } from "@/lib/server/claude/transport";
 
 const MAX_STREAM_FILE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
-function isPathInsideDirectory(parentDir: string, targetPath: string) {
+export function isPathInsideDirectory(parentDir: string, targetPath: string) {
   const parent = path.resolve(parentDir);
   const target = path.resolve(targetPath);
   return target === parent || target.startsWith(`${parent}${path.sep}`);
 }
 
-function inferMimeFromFilename(filename: string) {
+export function inferMimeFromFilename(filename: string) {
   const ext = path.extname(filename).toLowerCase();
   const mimeByExt: Record<string, string> = {
     ".csv": "text/csv; charset=utf-8",

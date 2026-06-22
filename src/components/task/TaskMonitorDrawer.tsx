@@ -131,11 +131,16 @@ export function TaskMonitorDrawer() {
   useEffect(() => {
     if (!open) return;
     void fetchRuntimeDaemonStatus()
-      .then((status) => setDispatchPaused(status.config?.dispatchPaused === true))
+      .then((status) => {
+        setDispatchPaused(status.config?.dispatchPaused === true);
+        if (typeof status.config?.maxConcurrentTasks === "number") {
+          updateNumericSetting("maxConcurrentTasks", status.config.maxConcurrentTasks);
+        }
+      })
       .catch(() => {
         // 守护进程未就绪时忽略，默认视为未暂停。
       });
-  }, [open]);
+  }, [open, updateNumericSetting]);
 
   if (!open) return null;
 
@@ -185,7 +190,10 @@ export function TaskMonitorDrawer() {
     // 先更新本地 store 让 UI 立即响应，再把权威值同步给服务端 daemon 配置。
     updateNumericSetting("maxConcurrentTasks", clamped);
     try {
-      await setRuntimeDaemonMaxConcurrentTasks(clamped);
+      const config = await setRuntimeDaemonMaxConcurrentTasks(clamped);
+      if (typeof config?.maxConcurrentTasks === "number") {
+        updateNumericSetting("maxConcurrentTasks", config.maxConcurrentTasks);
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "并发上限设置失败");
     }

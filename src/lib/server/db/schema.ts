@@ -1,4 +1,4 @@
-export const KIKI_DB_SCHEMA_VERSION = 20;
+export const KIKI_DB_SCHEMA_VERSION = 22;
 
 export const KIKI_DB_BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS runtime_state_snapshots (
 );
 -- v12 注：本表 envelope key 含 "goals"（旧）与 "topics"（新），双写期同时存在；
 -- value_json 内部的 Goal/SubGoal → Topic/Thread 形态映射由读路径完成。
+
+CREATE TABLE IF NOT EXISTS user_runtime_settings (
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
@@ -940,6 +946,16 @@ export const KIKI_DB_MIGRATIONS: Array<{
     sql: `
       ALTER TABLE governance_tick_jobs
       ADD COLUMN partial_attempt_count INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    version: 22,
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_runtime_settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `,
   },
 ];

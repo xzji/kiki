@@ -251,7 +251,7 @@ export function ExecutionResultBody(props: {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-6">
+      <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 md:p-6">
         <div className="mb-3 text-[13px] font-medium text-[#1F2328]">任务信息</div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -282,12 +282,12 @@ export function ExecutionResultBody(props: {
             ) : null}
           </div>
         </div>
-        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3">
+        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3 md:px-4">
           <div className="text-[12px] text-[#8C9198]">预期产出</div>
           <div className="mt-1 text-[13px] leading-6 text-[#1F2328]">{task.expectedOutcome}</div>
         </div>
         {dependencyViews.length ? (
-          <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3">
+          <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3 md:px-4">
             <div className="text-[12px] text-[#8C9198]">依赖任务</div>
             <div className="mt-2 space-y-2">
               {dependencyViews.map((dependency) => (
@@ -320,7 +320,7 @@ export function ExecutionResultBody(props: {
             </div>
           </div>
         ) : null}
-        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3 text-[12px] text-[#6B7280]">
+        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3 text-[12px] text-[#6B7280] md:px-4">
           {instance.execution?.lastUpdatedAt ? `最近更新：${new Date(instance.execution.lastUpdatedAt).toLocaleString("zh-CN")}` : "等待调度器同步执行状态"}
         </div>
       </div>

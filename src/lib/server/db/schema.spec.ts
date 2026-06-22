@@ -106,7 +106,7 @@ function rerunAllMigrations(db: Database.Database) {
 
 export function runSchemaSpecs() {
   // 0. 确保 schema_version 常量已经升到最新迁移版本
-  assert.equal(KIKI_DB_SCHEMA_VERSION, 20);
+  assert.equal(KIKI_DB_SCHEMA_VERSION, 22);
 
   const dbA = bootstrapPathA();
   const dbB = bootstrapPathB();
@@ -134,6 +134,7 @@ export function runSchemaSpecs() {
       "governance_event_outbox",
       "governance_event_outbox_consumption",
       "governance_tick_jobs",
+      "user_runtime_settings",
     ];
     for (const table of keyTables) {
       const colsA = listColumns(dbA, table).map((c) => c.name);

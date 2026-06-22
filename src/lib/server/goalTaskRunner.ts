@@ -16,6 +16,7 @@ import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
 import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
+import { inferMimeFromFilename, isPathInsideDirectory } from "@/lib/server/runtime/fileArtifactEmit";
 import { writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
 import { markdownToWorkbook } from "@/lib/spreadsheet/adapters/markdownTables";
 import { XLSX_MIME } from "@/lib/spreadsheet/constants";
@@ -1252,6 +1253,30 @@ function readGeneratedWorkspaceArtifacts(input: RunGoalTaskInput): TaskRunArtifa
   }
 }
 
+function readCapturedWrittenFiles(input: RunGoalTaskInput, filePaths: string[]) {
+  const baseDir = input.taskWorkspaceDir || input.task.recommendedWorkingDirectory || input.runtimeEnv.workingDirectory;
+  const items: Array<{ filename: string; mime: string; bytes: Buffer }> = [];
+  const seen = new Set<string>();
+  for (const rawPath of filePaths) {
+    const filePath = path.resolve(baseDir, rawPath);
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    if (!isPathInsideDirectory(baseDir, filePath)) continue;
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile() || stat.size > 10 * 1024 * 1024) continue;
+      items.push({
+        filename: path.basename(filePath),
+        mime: inferMimeFromFilename(filePath),
+        bytes: fs.readFileSync(filePath),
+      });
+    } catch {
+      // 已捕获的写盘路径可能来自失败/回滚工具调用，跳过不可读文件。
+    }
+  }
+  return items;
+}
+
 function buildRecoveryBlocks(input: RunGoalTaskInput, content: string): ResultBlock[] {
   const blocks: ResultBlock[] = [
     { kind: "heading", text: input.task.title, level: 2 },
@@ -1676,6 +1701,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, p
   let businessToolFailureCount = 0;
   const infraToolFailureSamples: string[] = [];
   let agentRunPlan: AgentRunPlan | null = null;
+  let orchestrationWrittenFiles: string[] = [];
   const appendTrajectory = (step: Omit<ExecutionTrajectoryStep, "id" | "index" | "startedAt"> & { startedAt?: string }) => {
     trajectory.push(createTrajectoryStep({ ...step, index: trajectory.length }));
     persistTrajectorySnapshot(input.requestId, trajectory);
@@ -1799,6 +1825,7 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, p
     });
     finalMessage = orchestration.rawOutput;
     agentRunPlan = orchestration.agentRunPlan;
+    orchestrationWrittenFiles = orchestration.writtenFiles ?? [];
     appendGoalTaskAgentEvent(input, "llm.response", {
       phase: "goal_task_multi_agent_orchestration",
       strategy: agentStrategy,
@@ -2194,6 +2221,12 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, p
     appendTrajectory,
   }, port);
   result = attachAgentRunPlan(result, agentRunPlan);
+  if (orchestrationWrittenFiles.length > 0) {
+    result.structuredOutput = {
+      ...(result.structuredOutput ?? {}),
+      writtenFiles: orchestrationWrittenFiles,
+    };
+  }
   const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
   const webapp = extractWebAppSpec(finalMessage);
   const externalEmbed = extractExternalEmbedSpec(finalMessage);
@@ -2348,6 +2381,52 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, p
         thought: `已生成 ${allArtifactRefs.length} 个文件产物。`,
         endedAt: new Date().toISOString(),
       });
+    } else if (orchestrationWrittenFiles.length > 0) {
+      const capturedFiles = readCapturedWrittenFiles(input, orchestrationWrittenFiles);
+      if (capturedFiles.length > 0) {
+        const conversationId = input.goal.conversationId ?? `goal-${input.goal.id}`;
+        appendTrajectory({
+          type: "system",
+          status: "running",
+          title: "正在接入角色写入的文件产物",
+          thought: capturedFiles.map((file) => file.filename).join("、"),
+        });
+        const artifactRefs = capturedFiles.map((file) => {
+          const artifact = persistFileArtifact({
+            conversationId,
+            taskId: input.task.id,
+            instanceId: input.instance.id,
+            runtimeJobId: `job-${input.instance.id}`,
+            label: file.filename,
+            summary: result.summary,
+            filename: file.filename,
+            mime: file.mime,
+            bytes: file.bytes,
+          });
+          return toArtifactRef(artifact);
+        });
+        result.taskResult = {
+          ...result.taskResult,
+          artifactRefs: [...(result.taskResult.artifactRefs ?? []), ...artifactRefs],
+        };
+        result.structuredOutput = {
+          ...(result.structuredOutput ?? {}),
+          artifactRefs: result.taskResult.artifactRefs,
+          writtenFiles: orchestrationWrittenFiles,
+        };
+        result.taskResult.meta = {
+          ...result.taskResult.meta,
+          surfaces: Array.from(new Set([...(result.taskResult.meta.surfaces ?? []), "files" as const])),
+          fileSurfaceRequired: true,
+        };
+        appendTrajectory({
+          type: "system",
+          status: "completed",
+          title: "已接入角色写入的文件产物",
+          thought: `已生成 ${artifactRefs.length} 个文件产物。`,
+          endedAt: new Date().toISOString(),
+        });
+      }
     }
   } else if (files.length > 0) {
     appendGoalLog({

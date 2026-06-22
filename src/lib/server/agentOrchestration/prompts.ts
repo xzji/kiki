@@ -1,4 +1,3 @@
-import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
 import { renderDependencySection } from "@/lib/server/taskExecution/contextRenderer";
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
 import type { AgentHandoff, AgentReviewDecision, AgentRole } from "@/types/agentOrchestration";
@@ -39,7 +38,7 @@ function handoffContext(handoffs: AgentHandoff[]) {
 
 function outputContext(outputs: PromptInput["previousOutputs"]) {
   if (!outputs.length) return "暂无前序角色输出。";
-  return outputs.map((item) => `## ${item.role}\n${item.output.slice(0, 3000)}`).join("\n\n");
+  return outputs.map((item) => `## ${item.role}\n${item.output}`).join("\n\n");
 }
 
 function taskContext(input: PromptInput) {
@@ -139,15 +138,20 @@ ${outputs}
 ${input.review ? `上一轮审阅意见：\n${JSON.stringify(input.review, null, 2)}\n` : ""}
 # Role-Specific Instructions
 1. 你是唯一默认允许写业务产物的角色。
-2. 如果需要文件区域，最终候选必须包含 files 信息或足以让 Presenter 输出 files。
+2. 如果需要文件区域，最终候选必须包含 files 信息或足以让 Presenter 输出 files；如果任务未声明文件区域，不要写文件，也不要在候选正文描述落盘状态。
 3. 如果需要 webapp，必须准备 title、html、initialState、networkPolicy 等必要信息。
 4. 工具调用过程、输入和输出应留在执行轨迹，不要写进候选交付物正文。
 5. 只输出候选交付物 JSON，不要输出最终 KiKi 任务 JSON。
+6. 如果执行中发现无法靠检索、推理或执行消解的真实决策分叉，可在 openQuestions 中明确提出；可自行推进的问题不得停下来询问。
 
 # Output Format
 {
   "summary": "候选交付物摘要",
   "candidateResult": { "description": "候选结果内容或结构化摘要" },
+  "candidateBlocks": [
+    { "kind": "heading", "text": "候选交付物标题", "level": 2 },
+    { "kind": "paragraph", "text": "完整候选正文。每个 block 可带可选 id 字段供 Presenter 装配。" }
+  ],
   "decisions": ["本轮生成时做出的决策"],
   "openQuestions": ["需要 Reviewer 或后续角色关注的问题"],
   "risks": ["候选交付物风险"],
@@ -179,6 +183,7 @@ ${outputs}
 3. 对 mixed 模式必须检查 blocks 和 files 是否都满足。
 4. 对 webapp 必须检查是否具备可预览的 webapp 信息。
 5. 如果 mixed 模式缺少 files 或 blocks 任一区域，必须判定为不通过。
+6. 如果候选产物或 openQuestions 暴露出必须用户拍板才能继续的真实分叉，设置 needsUserDecision；偏好微调、是否满意、下游反馈不属于真实阻塞。
 
 # Output Format
 {
@@ -194,6 +199,12 @@ ${outputs}
       "suggestedFix": "建议修复方式"
     }
   ],
+  "needsUserDecision": {
+    "question": "必须由用户决定的问题；没有则省略本字段",
+    "options": ["互斥答案 A", "互斥答案 B"],
+    "reason": "为什么无法由 Agent 自行消解",
+    "partialSummary": "已完成候选稿/已掌握事实的简短摘要"
+  },
   "decisionReason": "审阅结论"
 }
 
@@ -221,28 +232,11 @@ ${outputs}
 3. 只能输出 JSON，不要输出 Markdown 代码块。`;
   }
 
-  const finalPrompt = buildGoalTaskRunnerPrompt({
-    context: input.context ?? {
-      identity: {
-        conversationId: input.goal.conversationId ?? "",
-        goalId: input.goal.id,
-        subGoalId: input.subGoal.id,
-        taskId: input.task.id,
-        instanceId: input.instance.id,
-      },
-      readiness: { state: "ready", blockers: [], summary: "" },
-      dependencies: [],
-      inputs: { goal: input.goal, subGoal: input.subGoal, task: input.task, instance: input.instance },
-      budget: { maxPromptBytes: 8192, maxKeyPoints: 8, maxArtifacts: 5 },
-    },
-    resumeContext: input.resumeContext,
-    initialTrajectory: input.initialTrajectory,
-    webAppInteractionContext: input.webAppInteractionContext,
-  });
-  return `${finalPrompt}
+  return `# Role
+你是 KiKi 多角色协同中的 Presenter。你的职责不是重写候选正文，而是基于 Executor 的 candidateBlocks 输出装配计划。
 
-【多角色协同上下文】
-你是 Presenter。你必须基于前序角色输出和审阅意见，输出唯一最终 KiKi 任务 JSON。
+# Dynamic Context
+${base}
 
 前序移交：
 ${handoffs}
@@ -253,13 +247,28 @@ ${outputs}
 审阅结果：
 ${input.review ? JSON.stringify(input.review, null, 2) : "无"}
 
-额外要求：
+已落盘事实（权威，禁止矛盾）：
+${input.handoffs.flatMap((handoff) => handoff.filesTouched ?? []).length ? input.handoffs.flatMap((handoff) => handoff.filesTouched ?? []).join("\n") : "无"}
+
+# Role-Specific Instructions
 1. 不要重新搜索，不要重新规划。
 2. 吸收 Reviewer 的 blocking/warning 问题。
-3. 前序角色输出、审阅意见和移交关系只作为生成最终结果的依据，不要作为最终结果内容直接展示。
-4. task_result.blocks 只能包含用户真正需要的最终交付内容，例如报告、结论、对比表、建议、清单、文件说明或可交互结果。
-5. 禁止在 task_result.blocks 中写“多 Agent 协同结果”、角色分工、Coordinator/Executor/Reviewer/Presenter 过程描述、审阅打回过程、复查过程、移交过程，或“角色 / 关键动作 / 状态”这类过程表。
-6. 如需保留多 Agent 过程信息，只能放在 structured_output.agentRunPlan、task_result.meta.agentRunPlan 或执行轨迹中，供“执行链路”展示。
-7. 工具输入输出、角色 thought、审阅 verdict 都只能作为执行链路信息，不要写入最终用户结果区。
-8. 最终仍只能输出一个完整 JSON 对象，不要输出 Markdown 代码块。`;
+3. 不要重写 Executor 的 candidateBlocks 正文；只输出 AssemblyPlan，由系统确定性装配最终 task_result。
+4. 严禁在 appendBlocks/prependBlocks 中写“多 Agent 协同结果”、角色分工、Coordinator/Executor/Reviewer/Presenter 过程描述、审阅打回过程、复查过程、移交过程、落盘状态、runtime 已禁用、待授权、sandbox、待用户确认事项。
+5. 若确有开放决策点，只能放入 suggestedActions；除非审阅结果已标记 needsUserDecision，否则不要构造等待用户确认。
+6. 只能输出 JSON，不要输出 Markdown 代码块。
+
+# Output Format
+{
+  "summary": "最终装配摘要",
+  "assemblyPlan": {
+    "order": ["可选，按 candidateBlocks 的 id 或 block-1/block-2 排序"],
+    "dropBlockIds": ["可选，需要删除的候选 block id"],
+    "prependBlocks": [],
+    "appendBlocks": [],
+    "titleOverride": "可选最终标题",
+    "metaOverrides": {}
+  },
+  "suggestedActions": ["可选后续建议"]
+}`;
 }

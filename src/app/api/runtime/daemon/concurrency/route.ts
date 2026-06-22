@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { readRuntimeDaemonConfig, writeRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { writeUserRuntimeSettings } from "@/lib/server/repositories/userRuntimeSettingsRepository";
+import { isServerLocalCliDisabled } from "@/lib/server/runtime/cloudExecutionPolicy";
+import { applyUserRuntimeSettingsToDaemonConfig } from "@/lib/server/runtime/userRuntimeConfig";
 
 export const runtime = "nodejs";
 
@@ -16,19 +19,24 @@ async function POSTHandler(request: NextRequest) {
       return NextResponse.json({ ok: false, message: "缺少 maxConcurrentTasks 参数" }, { status: 400 });
     }
 
-    const currentConfig = readRuntimeDaemonConfig();
-    // readRuntimeDaemonConfig 会对 maxConcurrentTasks 做 1~10 的边界保护后回读。
-    writeRuntimeDaemonConfig({
-      ...currentConfig,
+    const settings = writeUserRuntimeSettings({
       maxConcurrentTasks: body.maxConcurrentTasks,
     });
-    const nextConfig = readRuntimeDaemonConfig();
+    if (!isServerLocalCliDisabled()) {
+      const currentConfig = readRuntimeDaemonConfig();
+      // 本地模式同步写 daemon 配置文件；云端调度以账号级 settings 为权威来源。
+      writeRuntimeDaemonConfig({
+        ...currentConfig,
+        maxConcurrentTasks: settings.maxConcurrentTasks,
+      });
+    }
+    const nextConfig = applyUserRuntimeSettingsToDaemonConfig(readRuntimeDaemonConfig());
 
     return NextResponse.json({ ok: true, config: nextConfig });
   } catch (error) {
     const message = error instanceof Error ? error.message : "并发上限设置失败";
     return NextResponse.json(
-      { ok: false, message, config: readRuntimeDaemonConfig() },
+      { ok: false, message, config: applyUserRuntimeSettingsToDaemonConfig(readRuntimeDaemonConfig()) },
       { status: 500 },
     );
   }

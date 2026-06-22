@@ -55,6 +55,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isFullscreenResult =
     /^\/conversations\/[^/]+\/results\/[^/]+$/.test(pathname) ||
     /^\/inbox\/[^/]+\/result$/.test(pathname);
+  const hideUserMenu = isConversation || isWide || isFullscreenResult;
+  const hideMobileBottomNav = isFullscreenResult;
   const useImmersiveShell = isConversation || isFullscreenResult;
   const contentWidth = useImmersiveShell ? "" : isWide ? "max-w-[1600px]" : "max-w-5xl";
   const isMobile = useIsMobileViewport();
@@ -110,7 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <div className={contentClassName}>{children}</div>
       </main>
-      <UserMenu />
+      {!hideUserMenu ? <UserMenu /> : null}
       {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
       <Suspense fallback={null}>
         <DrawerTaskIdSyncer />
@@ -119,7 +121,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <TaskDetailDrawer />
       {isConversation ? <ConversationProcessSidebar /> : <AssistantSidebar />}
       {!taskDrawerOpen ? (isConversation ? <ConversationProcessFab /> : <AssistantFab />) : null}
-      <MobileBottomNav />
+      {!hideMobileBottomNav ? <MobileBottomNav /> : null}
     </div>
   );
 }

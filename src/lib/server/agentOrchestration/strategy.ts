@@ -25,7 +25,10 @@ export function selectAgentCollaborationStrategy(input: AgentStrategyInput): Age
   if (hasInteractive && interactiveKind === "webapp") return "build_then_review";
   if (hasFiles && hasInteractive) return "quality_review";
   if (needsResearch && (isHighValue || presentation === "comparison_table")) return "research_then_write";
-  if (hasFiles || presentation === "dashboard" || presentation === "handoff_package" || presentation === "visual_report") {
+  if (hasFiles) {
+    return "quality_review";
+  }
+  if ((presentation === "dashboard" || presentation === "handoff_package") && (isHighValue || needsResearch)) {
     return "quality_review";
   }
   return "single_agent";

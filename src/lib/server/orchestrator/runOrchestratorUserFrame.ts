@@ -7,6 +7,7 @@ import { dispatchReadyTasksToMachines } from "@/lib/server/scheduling/taskDispat
 import { orchestratorConcurrencyBudget } from "@/lib/server/orchestrator/concurrencyBudget";
 import type { OrchestratorConfig } from "@/lib/server/orchestrator/orchestratorConfig";
 import { getDefaultRuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
+import { readUserRuntimeSettings } from "@/lib/server/repositories/userRuntimeSettingsRepository";
 import {
   TaskEventBridge,
   ThreadEventBridge,
@@ -42,7 +43,15 @@ export async function runOrchestratorUserFrame(input: {
       runtimeEnvironments.find((environment) => environment.type === "local") ??
       runtimeEnvironments[0] ??
       null;
-    const schedulerConfig = getDefaultRuntimeDaemonConfig();
+    const userRuntimeSettings = readUserRuntimeSettings();
+    const schedulerConfig = {
+      ...getDefaultRuntimeDaemonConfig(),
+      maxConcurrentTasks: userRuntimeSettings.maxConcurrentTasks,
+    };
+    const userConfig: OrchestratorConfig = {
+      ...input.config,
+      maxConcurrentPerUser: userRuntimeSettings.maxConcurrentTasks,
+    };
 
     registerGovernanceTickTunnelCallbacks();
     const governanceEventResults = [
@@ -53,7 +62,7 @@ export async function runOrchestratorUserFrame(input: {
     const governanceJobs = enqueueDueGovernanceTickJobs({ userId: input.userId });
     const governanceDispatchResult = dispatchReadyGovernanceTickJobsToMachines({
       leaseOwner: input.leaseOwner,
-      limit: input.config.maxConcurrentPerUser,
+      limit: userConfig.maxConcurrentPerUser,
       llm: runtimeEnv
         ? {
             runtimeEnv,
@@ -72,7 +81,7 @@ export async function runOrchestratorUserFrame(input: {
     });
     runGoalDaemonSideEffects(goals);
 
-    const maxSlots = orchestratorConcurrencyBudget.availableSlots(input.userId, input.config);
+    const maxSlots = orchestratorConcurrencyBudget.availableSlots(input.userId, userConfig);
     let dispatched = 0;
     let skippedOffline = false;
 

@@ -1,23 +1,18 @@
 "use client";
 
-import { CalendarDays, Inbox, MessageCircle, Sparkles, Terminal } from "lucide-react";
+import { CalendarDays, Inbox, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 import { getConversationUnreadCount, useConversationStore } from "@/stores/conversationStore";
-import { useConversationProcessSidebarStore } from "@/stores/conversationProcessSidebarStore";
-import { useAssistantStore } from "@/stores/assistantStore";
 import { useInboxStore } from "@/stores/inboxStore";
 
 export function MobileBottomNav() {
   const pathname = usePathname() ?? "";
   const inboxItems = useInboxStore((state) => state.items);
   const conversations = useConversationStore((state) => state.conversations);
-  const openAssistant = useAssistantStore((state) => state.open);
-  const openProcess = useConversationProcessSidebarStore((state) => state.open);
-  const isConversation = pathname.startsWith("/conversations");
 
   const inboxUnread = useMemo(
     () => inboxItems.reduce((sum, item) => sum + item.unreadCount, 0),
@@ -33,7 +28,7 @@ export function MobileBottomNav() {
       className="fixed inset-x-0 bottom-0 z-30 border-t border-[#D8DDE4] bg-white/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
       aria-label="移动端主导航"
     >
-      <div className="grid grid-cols-4 gap-1">
+      <div className="grid grid-cols-3 gap-1">
         <MobileNavLink
           href="/"
           active={pathname === "/"}
@@ -54,14 +49,6 @@ export function MobileBottomNav() {
           label="日程"
           icon={<CalendarDays className="h-4 w-4" />}
         />
-        <button
-          type="button"
-          onClick={isConversation ? openProcess : openAssistant}
-          className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium text-[#475467] active:bg-[#F5F6F8]"
-        >
-          {isConversation ? <Terminal className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-          <span>{isConversation ? "过程" : "助手"}</span>
-        </button>
       </div>
     </nav>
   );

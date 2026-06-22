@@ -1389,11 +1389,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (parsedCommand.kind === "unknown") {
-      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以使用 /goal 或 /saga 发起规划。`);
+      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以使用 /goal 或 /topic 发起规划。`);
       return;
     }
 
-    if (parsedCommand.kind === "command" && parsedCommand.command === "saga") {
+    if (parsedCommand.kind === "command" && parsedCommand.command === "topic") {
       const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;

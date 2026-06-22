@@ -109,7 +109,7 @@ export function ExpandableContentCard({
       style={expanded ? { left: leftInset, right: rightInset } : undefined}
     >
       {expanded ? (
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-[#E5E7EB] px-4">
+        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-[#E5E7EB] px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:h-12 md:px-4 md:py-0">
           <div id={titleId} className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#1F2328]">
             {title}
           </div>
@@ -132,7 +132,7 @@ export function ExpandableContentCard({
           expanded && "min-h-0 flex-1 overflow-auto overscroll-contain",
         )}
       >
-        <div className={cn(expanded && "w-full px-6 py-6")}>{content}</div>
+        <div className={cn(expanded && "w-full px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 md:px-6 md:py-6")}>{content}</div>
       </div>
     </div>
   );

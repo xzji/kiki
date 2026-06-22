@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  buildWorkspaceSystemPrompt,
   classifyResultError,
   classifySessionFromInitPayload,
   type ClaudeCliPayload,
@@ -129,4 +130,22 @@ export function runClaudeTransportSessionSpecs() {
     sessionId: "stale-resume-session",
     message: "No conversation found with session ID: stale-resume-session",
   });
+
+  // 13) task 模式不应要求 Agent 向交付物复述工具禁用状态。
+  const taskPrompt = buildWorkspaceSystemPrompt({
+    workspaceDir: "/tmp/workspace",
+    workspacePolicy: "task",
+    redactionMode: "passthrough",
+    toolSummary: { allowed: ["读取文件"], disabled: ["写入文件"] },
+  });
+  assert.match(taskPrompt, /严禁在交付结果中描述工具/);
+  assert.doesNotMatch(taskPrompt, /请直接说明“当前运行环境已禁用对应工具”/);
+
+  // 14) 会话模式保留直接说明工具禁用状态的用户沟通规则。
+  const conversationPrompt = buildWorkspaceSystemPrompt({
+    workspaceDir: "/tmp/workspace",
+    redactionMode: "strict",
+    toolSummary: { allowed: ["读取文件"], disabled: ["写入文件"] },
+  });
+  assert.match(conversationPrompt, /请直接说明“当前运行环境已禁用对应工具”/);
 }

@@ -24,8 +24,8 @@ export function DeliverableArticle({
     <article
       className={
         clipMaxHeight
-          ? "flex flex-col rounded-xl border border-[#E5E7EB] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]"
-          : "rounded-xl border border-[#E5E7EB] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]"
+          ? "flex flex-col rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:p-5"
+          : "rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:p-5"
       }
       style={clipMaxHeight ? { maxHeight: clipMaxHeight } : undefined}
     >

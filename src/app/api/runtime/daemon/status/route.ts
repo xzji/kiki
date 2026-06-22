@@ -8,6 +8,7 @@ import { getDatabase, getDatabaseRuntimeInfo } from "@/lib/server/db/client";
 import { getLaunchAgentPlistPath } from "@/lib/server/storage/paths";
 import { withAuth } from "@/lib/server/http/withAuth";
 import { isServerLocalCliDisabled } from "@/lib/server/runtime/cloudExecutionPolicy";
+import { applyUserRuntimeSettingsToDaemonConfig } from "@/lib/server/runtime/userRuntimeConfig";
 import { getRuntimeDaemonServiceStatusForUser } from "@/lib/server/tunnel/remoteRuntimeProxy";
 import { listMachinesForUser, type MachineRecord } from "@/lib/server/services/machineService";
 import type { RemoteDaemonServiceStatus } from "@/lib/server/tunnel/tunnelHub";
@@ -69,7 +70,7 @@ function withMachineHeartbeat(
 }
 
 function buildBasePayload() {
-  const config = readRuntimeDaemonConfig();
+  const config = applyUserRuntimeSettingsToDaemonConfig(readRuntimeDaemonConfig());
   const state = readRuntimeDaemonState();
   const device = readRuntimeDaemonDeviceState();
 

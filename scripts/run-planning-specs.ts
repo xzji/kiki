@@ -58,6 +58,7 @@ import { runThreadsRepositorySpecs } from "../src/lib/server/repositories/thread
 import { runTopicsRepositorySpecs } from "../src/lib/server/repositories/topicsRepository.spec";
 import { runTaskInstancesRepositorySpecs } from "../src/lib/server/repositories/taskInstancesRepository.spec";
 import { runRuntimeJobsRepositorySpecs } from "../src/lib/server/repositories/runtimeJobsRepository.spec";
+import { runUserRuntimeSettingsRepositorySpecs } from "../src/lib/server/repositories/userRuntimeSettingsRepository.spec";
 import { runGovernanceEventOutboxRepositorySpecs } from "../src/lib/server/repositories/governanceEventOutboxRepository.spec";
 import { runGovernanceTickJobsRepositorySpecs } from "../src/lib/server/repositories/governanceTickJobsRepository.spec";
 import { runInboxRepositorySpecs } from "../src/lib/server/repositories/inboxRepository.spec";
@@ -92,6 +93,7 @@ import { runLocalRepairCycleSpecs } from "../src/lib/server/localRepairCycle.spe
 import { runCursorAdapterSpecs } from "../src/lib/server/runtime/adapters/cursorAdapter.spec";
 import { runCursorAcpParserSpecs } from "../src/lib/server/runtime/adapters/cursorAcpParser.spec";
 import { runCursorAcpPermissionSpecs } from "../src/lib/server/runtime/adapters/cursorAcpPermission.spec";
+import { runAgentOrchestrationSpecs } from "../src/lib/server/agentOrchestration/agentOrchestration.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -128,6 +130,7 @@ runCodexAdapterSpecs();
 runCursorAdapterSpecs();
 runCursorAcpParserSpecs();
 runCursorAcpPermissionSpecs();
+runAgentOrchestrationSpecs();
 runRuntimeRegistrySpecs();
 runClaudeTraceStoreSpecs();
 runContextPackBoundarySpecs();
@@ -144,6 +147,7 @@ runTaskPatchMergeSpecs();
 runCadenceTunerSpecs();
 runGoalRuntimeServiceSpecs();
 runRuntimeJobsRepositorySpecs();
+runUserRuntimeSettingsRepositorySpecs();
 runGovernanceEventOutboxRepositorySpecs();
 runGovernanceTickJobsRepositorySpecs();
 runMachineServiceSpecs();

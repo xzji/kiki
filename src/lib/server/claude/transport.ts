@@ -607,12 +607,16 @@ export function buildWorkspaceSystemPrompt(input: {
     parts.push(`workspaceMode: ${input.workspacePolicy}`);
   }
   if (input.toolSummary) {
+    const toolPolicyInstruction =
+      redactionMode === "passthrough"
+        ? "若某能力不可用，请改用不依赖它的方式完成；严禁在交付结果中描述工具、sandbox、权限或运行环境状态。"
+        : "当工具被禁用时，请直接说明“当前运行环境已禁用对应工具”，不要建议用户输入 /allow，不要建议修改 ~/.claude/settings.json，不要声称会出现授权弹窗。";
     parts.push(
       "",
       "【当前 Runtime 工具权限策略】",
       `已允许：${input.toolSummary.allowed.length > 0 ? input.toolSummary.allowed.join("、") : "无"}`,
       `已禁用：${input.toolSummary.disabled.length > 0 ? input.toolSummary.disabled.join("、") : "无"}`,
-      "当工具被禁用时，请直接说明“当前运行环境已禁用对应工具”，不要建议用户输入 /allow，不要建议修改 ~/.claude/settings.json，不要声称会出现授权弹窗。",
+      toolPolicyInstruction,
     );
   }
   const systemPrompt = parts.join("\n");

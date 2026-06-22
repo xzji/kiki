@@ -4,6 +4,7 @@ import { Brain, Lock, RotateCcw, SlidersHorizontal, Sparkles, X } from "lucide-r
 import { type FormEvent, useEffect, useState } from "react";
 
 import {
+  DEFAULT_EASTER_EGG_SETTINGS,
   EASTER_EGG_SETTING_META,
   type EasterEggSettings,
   type GoalDrivenLogMode,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/goalSystemConfig";
 import { cn } from "@/lib/utils";
 import type { SettingsTab } from "@/lib/settings";
-import { setRuntimeDaemonMaxConcurrentTasks } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeDaemonStatus, setRuntimeDaemonMaxConcurrentTasks } from "@/lib/api/runtime-daemon";
 import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { MemoryEditor } from "@/components/memory/MemoryEditor";
 
@@ -47,14 +48,27 @@ export function SettingsModal({
   const updateUiLogLevel = useEasterEggSettingsStore((state) => state.updateUiLogLevel);
   const resetToDefaults = useEasterEggSettingsStore((state) => state.resetToDefaults);
 
-  // maxConcurrentTasks 是 daemon 执行并发的权威配置，改动后需同步到服务端。
+  // maxConcurrentTasks 是账号级运行配置，服务端持久化后再回填浏览器展示缓存。
   const handleNumericChange = (key: NumericSettingKey, value: number) => {
     updateNumericSetting(key, value);
     if (key === "maxConcurrentTasks") {
-      void setRuntimeDaemonMaxConcurrentTasks(Math.round(value)).catch(() => {
-        // 同步失败不阻断本地设置；TaskMonitor 抽屉会兜底再次同步。
-      });
+      void setRuntimeDaemonMaxConcurrentTasks(Math.round(value))
+        .then((config) => {
+          if (typeof config?.maxConcurrentTasks === "number") {
+            updateNumericSetting("maxConcurrentTasks", config.maxConcurrentTasks);
+          }
+        })
+        .catch(() => {
+          // 同步失败不阻断本地设置；TaskMonitor 抽屉会从服务端权威配置回填。
+        });
     }
+  };
+
+  const handleResetToDefaults = () => {
+    resetToDefaults();
+    void setRuntimeDaemonMaxConcurrentTasks(DEFAULT_EASTER_EGG_SETTINGS.maxConcurrentTasks).catch(() => {
+      // 下次从服务端读取账号配置时会纠正展示缓存。
+    });
   };
 
   useEffect(() => {
@@ -65,6 +79,19 @@ export function SettingsModal({
   useEffect(() => {
     hydrateSettings();
   }, [hydrateSettings]);
+
+  useEffect(() => {
+    if (!open) return;
+    void fetchRuntimeDaemonStatus()
+      .then((status) => {
+        if (typeof status.config?.maxConcurrentTasks === "number") {
+          updateNumericSetting("maxConcurrentTasks", status.config.maxConcurrentTasks);
+        }
+      })
+      .catch(() => {
+        // 设置页仍可编辑其它本地实验配置；并发配置下次打开会重新拉取。
+      });
+  }, [open, updateNumericSetting]);
 
   useEffect(() => {
     if (!open) return;
@@ -155,7 +182,7 @@ export function SettingsModal({
                 onNumericChange={handleNumericChange}
                 onLogModeChange={updateLogMode}
                 onUiLogLevelChange={updateUiLogLevel}
-                onReset={resetToDefaults}
+                onReset={handleResetToDefaults}
               />
             ) : null}
           </div>

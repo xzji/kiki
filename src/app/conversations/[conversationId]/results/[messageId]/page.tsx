@@ -33,7 +33,7 @@ export default function ConversationResultPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <header className="flex h-12 shrink-0 items-center border-b border-[#E5E7EB] bg-white px-4">
+      <header className="flex min-h-12 shrink-0 items-center border-b border-[#E5E7EB] bg-white px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:h-12 md:px-4 md:py-0">
         <button
           type="button"
           aria-label="关闭"
@@ -58,7 +58,7 @@ export default function ConversationResultPage({
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="mx-auto w-full max-w-3xl px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 md:px-2 md:py-5">
+        <div className="mx-auto w-full max-w-3xl px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 md:px-2 md:py-5">
           <ExecutionResultBody goal={goal} task={task} instance={instance} mode="result" />
         </div>
       </main>

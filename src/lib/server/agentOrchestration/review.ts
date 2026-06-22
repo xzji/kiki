@@ -43,6 +43,23 @@ export function normalizeReviewDecision(value: unknown, fallbackReason: string):
         : passed
           ? "info"
           : "warning";
+  const decisionRecord = asRecord(record.needsUserDecision);
+  const options = Array.isArray(decisionRecord?.options)
+    ? decisionRecord.options.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+    : [];
+  const needsUserDecision =
+    decisionRecord &&
+    typeof decisionRecord.question === "string" &&
+    decisionRecord.question.trim() &&
+    typeof decisionRecord.reason === "string" &&
+    decisionRecord.reason.trim()
+      ? {
+          question: decisionRecord.question.trim(),
+          options,
+          reason: decisionRecord.reason.trim(),
+          partialSummary: typeof decisionRecord.partialSummary === "string" ? decisionRecord.partialSummary.trim() : undefined,
+        }
+      : undefined;
 
   return {
     passed,
@@ -52,5 +69,6 @@ export function normalizeReviewDecision(value: unknown, fallbackReason: string):
       typeof record.decisionReason === "string" && record.decisionReason.trim()
         ? record.decisionReason.trim()
         : fallbackReason,
+    needsUserDecision,
   };
 }

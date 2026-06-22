@@ -44,7 +44,7 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
       return (
         <div className="grid gap-2">
           {block.entries.map((entry) => (
-            <div key={entry.label} className="grid grid-cols-[96px_1fr] gap-3 rounded-lg bg-[#F8F9FB] px-3 py-2 text-[13px]">
+            <div key={entry.label} className="grid gap-1 rounded-lg bg-[#F8F9FB] px-3 py-2 text-[13px] md:grid-cols-[96px_1fr] md:gap-3">
               <div className="text-[#8C9198]">{entry.label}</div>
               <div className={entry.emphasis ? "font-medium text-[#1F2328]" : "text-[#374151]"}>{cellText(entry.value)}</div>
             </div>

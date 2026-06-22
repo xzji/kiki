@@ -4,8 +4,10 @@ import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interacti
 import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
 import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
+import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
 import type {
   AgentHandoff,
+  AgentUserDecisionRequest,
   AgentReviewDecision,
   AgentRole,
   AgentRoleRun,
@@ -15,10 +17,13 @@ import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
+import type { ResultBlock, TaskResult } from "@/types/taskResult";
 
+import { assembleFinalTaskResult, extractCandidateBlocks, normalizeAssemblyPlan } from "./assemble";
 import { normalizeHandoff } from "./handoff";
 import { buildRolePrompt } from "./prompts";
 import { normalizeReviewDecision } from "./review";
+import { sanitizeDeliverableMetaNarration } from "./sanitize";
 import { rolesForStrategy, selectAgentCollaborationStrategy, type AgentStrategyInput } from "./strategy";
 
 type AppendTrajectory = (
@@ -83,6 +88,9 @@ export type MultiAgentOrchestratorInput = AgentStrategyInput & {
 export type MultiAgentOrchestratorResult = {
   rawOutput: string;
   agentRunPlan: AgentRunPlan;
+  writtenFiles?: string[];
+  userDecisionRequest?: AgentUserDecisionRequest;
+  unresolvedBlockingReview?: AgentReviewDecision;
 };
 
 function nowIso() {
@@ -100,8 +108,19 @@ function roleTitle(role: AgentRole) {
   return labels[role];
 }
 
-function rolePermission(role: AgentRole, runtimeEnv: RuntimeEnvironment) {
-  return role === "executor" ? runtimeEnv.permissionMode : "readonly";
+function roleNeedsWriteAccess(role: AgentRole, task: Task) {
+  if (role !== "executor" && role !== "synthesizer") return false;
+  const expectedSurfaces = resolveExpectedSurfaces(task.expectedResult);
+  return (
+    expectedSurfaces.includes("files") ||
+    task.expectedResult?.fileSurface?.required === true ||
+    task.expectedResult?.interactiveSurface?.kind === "webapp"
+  );
+}
+
+function rolePermission(role: AgentRole, task: Task, runtimeEnv: RuntimeEnvironment) {
+  if (!roleNeedsWriteAccess(role, task)) return "readonly";
+  return runtimeEnv.permissionMode;
 }
 
 function asRecord(value: unknown) {
@@ -111,6 +130,173 @@ function asRecord(value: unknown) {
 function stringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+}
+
+function readWritablePath(input: unknown): string | null {
+  const record = asRecord(input);
+  if (!record) return null;
+  for (const key of ["file_path", "path", "target_file", "file"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const nested = asRecord(record.input);
+  if (nested) {
+    for (const key of ["file_path", "path", "target_file", "file"]) {
+      const value = nested[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return null;
+}
+
+function isWriteTool(toolName: string) {
+  return /^(Write|Edit|MultiEdit|NotebookEdit)$/i.test(toolName);
+}
+
+function uniqueOrdered(items: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items) {
+    if (seen.has(item)) continue;
+    seen.add(item);
+    result.push(item);
+  }
+  return result;
+}
+
+function buildTaskResultFromCandidate(input: MultiAgentOrchestratorInput, candidateBlocks: ResultBlock[], planSource: unknown): TaskResult {
+  const expectedSurfaces = resolveExpectedSurfaces(input.task.expectedResult);
+  const presentation = input.task.expectedResult?.presentation;
+  const primaryFormat = input.task.expectedResult?.primaryFormat;
+  return sanitizeDeliverableMetaNarration(assembleFinalTaskResult({
+    base: {
+      schemaVersion: 1,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      title: input.task.expectedOutcome || input.task.title,
+      status: "done",
+      blocks: candidateBlocks,
+      meta: {
+        producedAt: new Date().toISOString(),
+        surfaces: expectedSurfaces,
+        interactiveSurfaceKind: expectedSurfaces.includes("interactive")
+          ? input.task.expectedResult?.interactiveSurface?.kind ?? "blocks"
+          : undefined,
+        fileSurfaceRequired: expectedSurfaces.includes("files"),
+        presentation,
+        primaryFormat,
+        exportableFormats: input.task.expectedResult?.exportableFormats,
+      },
+    },
+    candidateBlocks,
+    plan: normalizeAssemblyPlan(planSource),
+  }));
+}
+
+function buildFinalJsonFromCandidate(input: MultiAgentOrchestratorInput, options: {
+  taskResult: TaskResult;
+  writtenFiles: string[];
+  review?: AgentReviewDecision;
+  unresolvedBlockingReview?: AgentReviewDecision;
+}) {
+  const missingDeliverables = options.unresolvedBlockingReview
+    ? options.unresolvedBlockingReview.issues.map((issue) => issue.message)
+    : [];
+  return JSON.stringify({
+    summary: options.unresolvedBlockingReview ? "候选产物仍有未解决的审阅问题。" : "已完成最终结果装配。",
+    final_message: options.unresolvedBlockingReview
+      ? options.unresolvedBlockingReview.decisionReason
+      : "已根据候选产物和审阅意见完成最终结果装配。",
+    result_view_kind: input.task.resultViewKind ?? input.task.executionKind,
+    awaiting_user: false,
+    awaiting_reason: "",
+    interaction_requirement: {
+      type: "none",
+      timing: "not_required",
+      reason: "",
+      question: "",
+      options: [],
+      fields: [],
+      suggested_actions: [],
+      should_notify_user: false,
+    },
+    suggested_actions: [],
+    artifacts: [],
+    task_result: options.taskResult,
+    deliverable_check: {
+      matched: !options.unresolvedBlockingReview,
+      confidence: options.unresolvedBlockingReview ? "low" : "medium",
+      delivered_artifacts: ["task_result.blocks"],
+      missing_deliverables: missingDeliverables,
+      criteria_results: [
+        {
+          criterion: input.task.expectedResult?.completionCriteria || input.task.expectedOutcome,
+          status: options.unresolvedBlockingReview ? "unknown" : "passed",
+          evidence: options.unresolvedBlockingReview?.decisionReason || "已由候选产物确定性装配。",
+        },
+      ],
+      gap_reason: options.unresolvedBlockingReview?.decisionReason || "",
+    },
+    structured_output: {
+      writtenFiles: options.writtenFiles,
+      ...(options.review ? { qualityReview: options.review } : {}),
+      ...(options.unresolvedBlockingReview ? { unresolvedBlockingReview: options.unresolvedBlockingReview } : {}),
+    },
+  });
+}
+
+function buildAwaitingJsonFromUserDecision(input: MultiAgentOrchestratorInput, decision: AgentUserDecisionRequest) {
+  return JSON.stringify({
+    summary: "执行中发现需要用户确认的关键分叉。",
+    final_message: decision.partialSummary || decision.reason,
+    result_view_kind: input.task.resultViewKind ?? input.task.executionKind,
+    awaiting_user: true,
+    awaiting_reason: decision.reason,
+    interaction_requirement: {
+      type: "confirm",
+      timing: "during_execution",
+      reason: decision.reason,
+      question: decision.question,
+      options: decision.options,
+      fields: [],
+      suggested_actions: [],
+      should_notify_user: true,
+    },
+    suggested_actions: [],
+    artifacts: [],
+    task_result: {
+      schemaVersion: 1,
+      taskId: input.task.id,
+      instanceId: input.instance.id,
+      title: "需要你确认后继续",
+      status: "pending_user",
+      blocks: [
+        { kind: "callout", tone: "warn", text: decision.reason },
+        { kind: "paragraph", text: decision.question },
+      ],
+      meta: {
+        producedAt: new Date().toISOString(),
+        role: "pending_user_placeholder",
+      },
+    },
+    deliverable_check: {
+      matched: false,
+      confidence: "high",
+      delivered_artifacts: decision.partialSummary ? ["已完成候选稿摘要"] : [],
+      missing_deliverables: [decision.question],
+      criteria_results: [
+        {
+          criterion: input.task.expectedResult?.completionCriteria || input.task.expectedOutcome,
+          status: "unknown",
+          evidence: decision.reason,
+        },
+      ],
+      gap_reason: decision.reason,
+    },
+    structured_output: {
+      userDecisionRequest: decision,
+    },
+  });
 }
 
 function parseJsonObject(rawOutput: string) {
@@ -155,7 +341,9 @@ function completeRoleRun(roleRun: AgentRoleRun, output: Awaited<ReturnType<typeo
   roleRun.status = "completed";
   roleRun.finishedAt = output.finishedAt;
   roleRun.outputSummary = output.rawOutput.slice(0, 500);
-  roleRun.filesTouched = stringArray(parsed?.filesTouched);
+  roleRun.rawOutput = output.rawOutput;
+  roleRun.parsedOutput = asRecord(output.parsedOutput) ?? undefined;
+  roleRun.filesTouched = uniqueOrdered([...stringArray(parsed?.filesTouched), ...output.writtenFiles]);
 }
 
 function failRoleRun(roleRun: AgentRoleRun, error: unknown) {
@@ -171,6 +359,7 @@ async function runRole(input: MultiAgentOrchestratorInput & {
   review?: AgentReviewDecision;
 }) {
   let finalMessage = "";
+  const writtenFiles: string[] = [];
   const startedAt = nowIso();
   const prompt = buildRolePrompt({
     goal: input.goal,
@@ -197,7 +386,7 @@ async function runRole(input: MultiAgentOrchestratorInput & {
   });
   appendRoleEvent(input, "llm.request", {
     role: input.role,
-    permissionMode: rolePermission(input.role, input.runtimeEnv),
+    permissionMode: rolePermission(input.role, input.task, input.runtimeEnv),
     workingDirectory,
     prompt,
   });
@@ -206,7 +395,7 @@ async function runRole(input: MultiAgentOrchestratorInput & {
       message: prompt,
       workingDirectory,
       cliPath: input.runtimeEnv.cliPath,
-      permissionMode: rolePermission(input.role, input.runtimeEnv),
+      permissionMode: rolePermission(input.role, input.task, input.runtimeEnv),
       runtimeKind: input.runtimeEnv.runtimeKind,
       runtimeEnvId: input.runtimeEnv.id,
       filePolicy: input.runtimeEnv.filePolicy,
@@ -222,6 +411,10 @@ async function runRole(input: MultiAgentOrchestratorInput & {
         input.onProgressPing?.(event.type);
         if (event.type === "message") finalMessage = event.content;
         if (event.type === "tool_call") {
+          if (isWriteTool(event.toolName)) {
+            const filePath = readWritablePath(event.input);
+            if (filePath) writtenFiles.push(filePath);
+          }
           appendRoleEvent(input, "tool_call", {
             role: input.role,
             toolName: event.toolName,
@@ -327,6 +520,7 @@ async function runRole(input: MultiAgentOrchestratorInput & {
   return {
     rawOutput: finalMessage,
     parsedOutput,
+    writtenFiles: uniqueOrdered(writtenFiles),
     startedAt,
     finishedAt: nowIso(),
   };
@@ -343,7 +537,21 @@ export async function runMultiAgentOrchestration(input: MultiAgentOrchestratorIn
   const handoffs: AgentHandoff[] = [];
   const previousOutputs: Array<{ role: AgentRole; output: string }> = [];
   let review: AgentReviewDecision | undefined;
+  let unresolvedBlockingReview: AgentReviewDecision | undefined;
+  let candidateBlocks: ResultBlock[] = [];
   let finalOutput = "";
+  const writtenFiles: string[] = [];
+
+  const buildAgentRunPlan = (finalRole: AgentRole): AgentRunPlan => ({
+    schemaVersion: 1,
+    mode: "role_collaboration",
+    strategy: agentStrategy,
+    roles: roleRuns,
+    handoffs,
+    review,
+    finalRole,
+    writtenFiles: uniqueOrdered(writtenFiles),
+  });
 
   for (const role of roles) {
     const roleRun = roleRuns.find((item) => item.role === role);
@@ -367,9 +575,25 @@ export async function runMultiAgentOrchestration(input: MultiAgentOrchestratorIn
     if (roleRun) {
       completeRoleRun(roleRun, output);
     }
+    writtenFiles.push(...output.writtenFiles);
+    if (role === "executor") {
+      const nextCandidateBlocks = extractCandidateBlocks(output.parsedOutput);
+      if (nextCandidateBlocks.length > 0) {
+        candidateBlocks = nextCandidateBlocks;
+      }
+    }
     previousOutputs.push({ role, output: output.rawOutput });
     if (role === "reviewer") {
       review = normalizeReviewDecision(output.parsedOutput, "Reviewer 已完成审阅。");
+      if (review.needsUserDecision) {
+        const rawOutput = buildAwaitingJsonFromUserDecision(input, review.needsUserDecision);
+        return {
+          rawOutput,
+          agentRunPlan: buildAgentRunPlan("reviewer"),
+          userDecisionRequest: review.needsUserDecision,
+          writtenFiles: uniqueOrdered(writtenFiles),
+        };
+      }
       if (!review.passed && review.severity === "blocking") {
         const revisionExecutorRun = createRoleRun({ requestId: input.requestId, role: "executor", taskTitle: input.task.title, attempt: 2 });
         revisionExecutorRun.status = "running";
@@ -389,6 +613,24 @@ export async function runMultiAgentOrchestration(input: MultiAgentOrchestratorIn
           throw error;
         }
         completeRoleRun(revisionExecutorRun, revision);
+        writtenFiles.push(...revision.writtenFiles);
+        // 修订轮 executor 不会新建 handoff，但其写盘事实必须并入 executor→reviewer handoff，
+        // 否则 Presenter 的「已落盘事实」会遗漏修订轮写入的文件。
+        if (revision.writtenFiles.length > 0) {
+          const executorHandoff = [...handoffs].reverse().find((handoff) => handoff.fromRole === "executor");
+          if (executorHandoff) {
+            executorHandoff.filesTouched = uniqueOrdered([
+              ...(executorHandoff.filesTouched ?? []),
+              ...revision.writtenFiles,
+            ]);
+          }
+        }
+        {
+          const revisedCandidateBlocks = extractCandidateBlocks(revision.parsedOutput);
+          if (revisedCandidateBlocks.length > 0) {
+            candidateBlocks = revisedCandidateBlocks;
+          }
+        }
         previousOutputs.push({ role: "executor", output: revision.rawOutput });
         const revisionReviewerRun = createRoleRun({ requestId: input.requestId, role: "reviewer", taskTitle: input.task.title, attempt: 2 });
         revisionReviewerRun.status = "running";
@@ -408,13 +650,33 @@ export async function runMultiAgentOrchestration(input: MultiAgentOrchestratorIn
           throw error;
         }
         completeRoleRun(revisionReviewerRun, secondReview);
+        writtenFiles.push(...secondReview.writtenFiles);
         previousOutputs.push({ role: "reviewer", output: secondReview.rawOutput });
         review = normalizeReviewDecision(secondReview.parsedOutput, "Reviewer 已完成复查。");
+        if (review.needsUserDecision) {
+          const rawOutput = buildAwaitingJsonFromUserDecision(input, review.needsUserDecision);
+          return {
+            rawOutput,
+            agentRunPlan: buildAgentRunPlan("reviewer"),
+            userDecisionRequest: review.needsUserDecision,
+            writtenFiles: uniqueOrdered(writtenFiles),
+          };
+        }
+        if (!review.passed && review.severity === "blocking") {
+          unresolvedBlockingReview = review;
+        }
       }
       continue;
     }
     if (role === "synthesizer") {
-      finalOutput = output.rawOutput;
+      finalOutput = candidateBlocks.length > 0
+        ? buildFinalJsonFromCandidate(input, {
+            taskResult: buildTaskResultFromCandidate(input, candidateBlocks, output.parsedOutput),
+            writtenFiles: uniqueOrdered(writtenFiles),
+            review,
+            unresolvedBlockingReview,
+          })
+        : output.rawOutput;
       continue;
     }
     const nextRole = roles[roles.indexOf(role) + 1];
@@ -425,6 +687,7 @@ export async function runMultiAgentOrchestration(input: MultiAgentOrchestratorIn
         value: output.parsedOutput,
         rawOutput: output.rawOutput,
       });
+      handoff.filesTouched = uniqueOrdered([...(handoff.filesTouched ?? []), ...output.writtenFiles]);
       handoffs.push(handoff);
       input.appendTrajectory({
         type: "system",
@@ -444,14 +707,8 @@ export async function runMultiAgentOrchestration(input: MultiAgentOrchestratorIn
 
   return {
     rawOutput: finalOutput,
-    agentRunPlan: {
-      schemaVersion: 1,
-      mode: "role_collaboration",
-      strategy: agentStrategy,
-      roles: roleRuns,
-      handoffs,
-      review,
-      finalRole: "synthesizer",
-    },
+    agentRunPlan: buildAgentRunPlan("synthesizer"),
+    writtenFiles: uniqueOrdered(writtenFiles),
+    unresolvedBlockingReview,
   };
 }

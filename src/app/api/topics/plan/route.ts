@@ -59,7 +59,7 @@ async function POSTHandler(request: NextRequest) {
         topicText,
         conversationContext: joinContextParts([body.conversationContext, revisionContext]) || undefined,
         userContext: {
-          command: revisionFeedback ? "/saga revision" : "/saga",
+          command: revisionFeedback ? "/topic revision" : "/topic",
           initialRequest: topicText,
           conversationId,
           revisionFeedback,
