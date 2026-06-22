@@ -246,7 +246,7 @@ export async function runLocalRepairCycleSpecs() {
       { finalMessage: "{}", fallbackMessage: "" },
     ]);
     await runLocalRepairCycle(
-      buildInput({ runtimeEnv: { permissionMode: "acceptEdits" } as RuntimeEnvironment }),
+      buildInput({ runtimeEnv: { permissionMode: "acceptEdits" } as unknown as RuntimeEnvironment }),
       buildState({
         parsedResult: null,
         rawOutput: "invalid",
@@ -255,10 +255,13 @@ export async function runLocalRepairCycleSpecs() {
       port,
     );
     assert.ok(port.calls.length >= 1);
-    // 至少应传 readonly 或 acceptEdits 之一
-    assert.ok(
-      port.calls[0].permissionMode === "readonly" || port.calls[0].permissionMode === "acceptEdits",
-      `permissionMode 应是 readonly 或 acceptEdits, 实际: ${port.calls[0].permissionMode}`,
+    // json_parse_failed 时 lastReport.allowToolCalls 强制为 false(见 localValidation.ts),
+    // 故 permissionMode 必须收窄成 "readonly"——不能透传 runtimeEnv.permissionMode (acceptEdits)。
+    // 若未来该收窄逻辑被反转,本断言会立刻报错。
+    assert.equal(
+      port.calls[0].permissionMode,
+      "readonly",
+      `parse 错误下 permissionMode 必须收窄为 readonly, 实际: ${port.calls[0].permissionMode}`,
     );
   }
 

@@ -110,7 +110,7 @@ export function refreshReadinessCollections(items: TaskReadinessInfoItem[], gene
     generatedAt,
     summary,
     items,
-    missingUserInfo: items.filter((item) => item.status === "missing_user"),
+    missingUserInfo: items.filter((item) => item.status === "missing_user" && item.source === "user"),
     agentRetrievableInfo: items.filter((item) => item.status === "agent_retrievable"),
     availableInfo: items.filter((item) => item.status === "available"),
   };

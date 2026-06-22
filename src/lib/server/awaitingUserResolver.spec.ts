@@ -171,5 +171,29 @@ export function runAwaitingUserResolverSpecs() {
     assert.equal(ctx.resumeContext, "...");
   }
 
+  // -------------- buildFromRaw + resolveAwaitingUser 边界(Code Review #1)--------------
+  // 8. 非结构化兜底产出的 confirm 不应被 resume 自动解决吞掉
+  //    场景:用户上轮选"确认继续",Agent 本轮返回非结构化候选方案 → buildAwaitingConfirmationFromRaw
+  //    兜底产物经 resolveAwaitingUser 应保留 awaiting,而不是被 resume 自动解决标完成。
+  {
+    const ctx = buildCtx({ resumeContext: "用户对上一次阻塞点的决定：确认继续" });
+    const raw = "我已生成两个签证方案,请用户确认选择哪一个。";
+    const fromRaw = buildAwaitingConfirmationFromRaw(ctx, raw);
+    // 验证兜底产物自身形状
+    assert.equal(fromRaw.awaitingUser, true);
+    assert.equal(fromRaw.interactionRequirement.type, "confirm");
+    assert.equal(fromRaw.interactionRequirement.timing, "after_agent_output");
+    assert.ok((fromRaw.structuredOutput as Record<string, unknown>)?.recoveredFromUnstructuredConfirmation);
+
+    // 关键:经 resolveAwaitingUser 后,awaitingUser 仍应为 true(不被 resume 自动解决吞掉)
+    const afterResolve = resolveAwaitingUser(ctx, fromRaw);
+    assert.equal(afterResolve.awaitingUser, true, "兜底产物不应被 resume 自动解决吞掉(用户必须看到新方案)");
+    assert.equal(afterResolve.interactionRequirement.type, "confirm");
+    assert.ok(
+      !(afterResolve.structuredOutput as Record<string, unknown>)?.autoResolvedRepeatedResumeConfirmation,
+      "兜底产物不应被标 autoResolved",
+    );
+  }
+
   console.log("awaitingUserResolver specs passed");
 }

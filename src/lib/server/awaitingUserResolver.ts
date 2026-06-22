@@ -65,6 +65,9 @@ function shouldAutoResolveRepeatedResumeConfirmation(ctx: AwaitingUserContext, r
   if (!ctx.resumeContext || !/用户对上一次阻塞点的决定：确认继续/.test(ctx.resumeContext)) return false;
   if (!result.awaitingUser || result.interactionRequirement.timing !== "after_agent_output") return false;
   if (result.interactionRequirement.type !== "confirm" && result.interactionRequirement.type !== "provide_context") return false;
+  // 非结构化兜底刚生成的 awaiting 不属于"重复的 resume 确认"——它是 Agent 这一轮新产出的候选方案,
+  // 不能被前一轮的"确认继续" resume 自动吞掉。否则用户根本看不到新方案(同 Q12 的姐妹边界)。
+  if ((result.structuredOutput as Record<string, unknown> | null)?.recoveredFromUnstructuredConfirmation) return false;
   const text = [
     result.awaitingReason,
     result.interactionRequirement.reason,

@@ -86,7 +86,9 @@ import { runGovernanceTickDispatcherSpecs } from "../src/lib/server/governance/g
 import { runGoalFactorySpecs } from "../src/lib/goalFactory.spec";
 import { runTaskReadinessPolicySpecs } from "../src/lib/server/taskReadinessPolicy.spec";
 import { runAwaitingUserResolverSpecs } from "../src/lib/server/awaitingUserResolver.spec";
-import { runLocalRepairCycleSpecs } from "../src/lib/server/localRepairCycle.spec";
+import { runTaskRunnerSharedSpecs } from "../src/lib/server/taskRunnerShared.spec";
+import { runCursorAdapterSpecs } from "../src/lib/server/runtime/adapters/cursorAdapter.spec";
+import { runCursorAcpParserSpecs } from "../src/lib/server/runtime/adapters/cursorAcpParser.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -98,6 +100,7 @@ runBlockProtocolSpecs();
 runTaskCompilerSpecs();
 runTaskReadinessPolicySpecs();
 runAwaitingUserResolverSpecs();
+runTaskRunnerSharedSpecs();
 runGoalNotificationWorkerSpecs();
 runAwaitingDisplayModelSpecs();
 runProtocolNormalizeSpecs();
@@ -118,6 +121,8 @@ runTaskDraftReviewSpecs();
 runRefinerPromptSpecs();
 runClaudeTransportSessionSpecs();
 runPiAdapterSpecs();
+runCursorAdapterSpecs();
+runCursorAcpParserSpecs();
 runRuntimeRegistrySpecs();
 runClaudeTraceStoreSpecs();
 runContextPackBoundarySpecs();
