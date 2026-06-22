@@ -85,6 +85,8 @@ import { runGovernanceEventBridgeSpecs } from "../src/lib/server/governance/even
 import { runGovernanceTickDispatcherSpecs } from "../src/lib/server/governance/governanceTickDispatcher.spec";
 import { runGoalFactorySpecs } from "../src/lib/goalFactory.spec";
 import { runTaskReadinessPolicySpecs } from "../src/lib/server/taskReadinessPolicy.spec";
+import { runAwaitingUserResolverSpecs } from "../src/lib/server/awaitingUserResolver.spec";
+import { runLocalRepairCycleSpecs } from "../src/lib/server/localRepairCycle.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -95,6 +97,7 @@ runDispatchPauseServiceSpecs();
 runBlockProtocolSpecs();
 runTaskCompilerSpecs();
 runTaskReadinessPolicySpecs();
+runAwaitingUserResolverSpecs();
 runGoalNotificationWorkerSpecs();
 runAwaitingDisplayModelSpecs();
 runProtocolNormalizeSpecs();
@@ -148,6 +151,7 @@ runContextResolverSpecs();
 
 (async () => {
   await runAgentExecutorSpecs();
+  await runLocalRepairCycleSpecs();
   await runClaudeJsonInvokeSpecs();
   await runSpecWriterSpecs();
   await runResumeBlockedTaskSpecs();
