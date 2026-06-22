@@ -1,5 +1,7 @@
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
+import { getStorageMaintenanceConfig } from "@/lib/server/db/storageMaintenanceConfig";
+import { runStorageMaintenanceTick } from "@/lib/server/db/storageMaintenanceRunner";
 import { runRecoveryWorker } from "@/lib/server/scheduling/recoveryWorker";
 import {
   reconcileRuntimeJobLeasesAndProjections,
@@ -27,6 +29,17 @@ function sleep(ms: number) {
 export async function runCloudOrchestratorScheduler() {
   const config = getOrchestratorConfig();
   process.env.KIKI_ORCHESTRATOR_MODE = "cloud";
+
+  setInterval(() => {
+    try {
+      runStorageMaintenanceTick();
+    } catch (error) {
+      logScheduling(
+        NAMESPACE.task.scheduler,
+        `storage maintenance error ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }, getStorageMaintenanceConfig().intervalMs);
 
   setInterval(() => {
     for (const candidate of listUsersForOrchestratorTick()) {

@@ -7,8 +7,11 @@ import {
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import type { RuntimeJobRecord } from "@/lib/server/repositories/runtimeJobsRepository";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
+import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { runGoalSchedulerEngine } from "@/lib/server/scheduling/taskScheduler";
+import { writeGoalsProjection } from "@/lib/server/services/goalRuntimeService";
 import { resolveAdmitDecision } from "@/lib/server/taskExecution/contextResolver";
+import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 import { DEFAULT_RUNTIME_FILE_POLICY, type RuntimeEnvironment } from "@/types/runtime";
@@ -229,12 +232,19 @@ const DESYNC_GOAL_ID = deriveOpaqueId("goal", "goal-scheduler-desync-spec");
 const DESYNC_UPSTREAM_TASK_ID = deriveOpaqueId("task", "task-desync-upstream-spec");
 const DESYNC_UPSTREAM_INSTANCE_ID = deriveOpaqueId("inst", "inst-desync-upstream-spec");
 const DESYNC_DOWNSTREAM_TASK_ID = deriveOpaqueId("task", "task-desync-downstream-spec");
+const DIRECT_DESYNC_GOAL_ID = deriveOpaqueId("goal", "goal-start-attempt-desync-spec");
+const DIRECT_DESYNC_UPSTREAM_TASK_ID = deriveOpaqueId("task", "task-start-attempt-desync-upstream-spec");
+const DIRECT_DESYNC_UPSTREAM_INSTANCE_ID = deriveOpaqueId("inst", "inst-start-attempt-desync-upstream-spec");
+const DIRECT_DESYNC_DOWNSTREAM_TASK_ID = deriveOpaqueId("task", "task-start-attempt-desync-downstream-spec");
 
-function desyncUpstreamInstance(): TaskInstance {
+function desyncUpstreamInstance(input: {
+  upstreamTaskId: string;
+  upstreamInstanceId: string;
+}): TaskInstance {
   const now = "2026-05-30T00:00:00.000Z";
   return {
-    id: DESYNC_UPSTREAM_INSTANCE_ID,
-    taskId: DESYNC_UPSTREAM_TASK_ID,
+    id: input.upstreamInstanceId,
+    taskId: input.upstreamTaskId,
     dateLabel: "05-30",
     status: "pending",
     intro: "等待执行",
@@ -244,10 +254,15 @@ function desyncUpstreamInstance(): TaskInstance {
   };
 }
 
-function goalWithDesyncedUpstream(): Goal {
+function goalWithDesyncedUpstream(input = {
+  goalId: DESYNC_GOAL_ID,
+  upstreamTaskId: DESYNC_UPSTREAM_TASK_ID,
+  upstreamInstanceId: DESYNC_UPSTREAM_INSTANCE_ID,
+  downstreamTaskId: DESYNC_DOWNSTREAM_TASK_ID,
+}): Goal {
   const now = "2026-05-30T00:00:00.000Z";
   return {
-    id: DESYNC_GOAL_ID,
+    id: input.goalId,
     title: "投影滞后目标",
     deadline: "2026-05-30T00:00:00.000Z",
     progress: 0,
@@ -262,20 +277,23 @@ function goalWithDesyncedUpstream(): Goal {
     subGoals: [
       {
         id: "sub-desync-upstream-spec",
-        goalId: DESYNC_GOAL_ID,
+        goalId: input.goalId,
         title: "上游板块",
         tasks: [
-          oneShotTask(DESYNC_UPSTREAM_TASK_ID, "sub-desync-upstream-spec", "上游产出", {
-            instances: [desyncUpstreamInstance()],
+          oneShotTask(input.upstreamTaskId, "sub-desync-upstream-spec", "上游产出", {
+            instances: [desyncUpstreamInstance({
+              upstreamTaskId: input.upstreamTaskId,
+              upstreamInstanceId: input.upstreamInstanceId,
+            })],
           }),
         ],
       },
       {
         id: "sub-desync-downstream-spec",
-        goalId: DESYNC_GOAL_ID,
+        goalId: input.goalId,
         title: "下游板块",
         dependencies: ["sub-desync-upstream-spec"],
-        tasks: [oneShotTask(DESYNC_DOWNSTREAM_TASK_ID, "sub-desync-downstream-spec", "下游执行")],
+        tasks: [oneShotTask(input.downstreamTaskId, "sub-desync-downstream-spec", "下游执行")],
       },
     ],
   };
@@ -287,10 +305,10 @@ function seedCompletedUpstreamJob(goal: Goal): void {
   const upstreamTask = upstreamSubGoal.tasks[0]!;
   const upstreamInstance = upstreamTask.instances[0]!;
   const job: RuntimeJobRecord = {
-    id: `job-${DESYNC_UPSTREAM_INSTANCE_ID}`,
-    taskInstanceId: DESYNC_UPSTREAM_INSTANCE_ID,
-    taskId: DESYNC_UPSTREAM_TASK_ID,
-    goalId: DESYNC_GOAL_ID,
+    id: `job-${upstreamInstance.id}`,
+    taskInstanceId: upstreamInstance.id,
+    taskId: upstreamTask.id,
+    goalId: goal.id,
     conversationId: goal.conversationId,
     userId: "user-scheduler-desync-spec",
     kind: "goal_task",
@@ -315,6 +333,15 @@ function seedCompletedUpstreamJob(goal: Goal): void {
     finishedAt: now,
   };
   upsertRuntimeJob(job);
+}
+
+function persistRawGoal(goal: Goal) {
+  const nextGoals = [
+    goal,
+    ...readGoalsSnapshot([]).filter((candidate) => candidate.id !== goal.id),
+  ];
+  const result = writeGoalsProjection(nextGoals);
+  assert.equal(result.ok, true);
 }
 
 function schedulerConfig(): RuntimeDaemonConfig {
@@ -399,11 +426,14 @@ export function runGoalSchedulerEngineSpecs() {
   assert.equal(monitoringResult.createdJobs, 2);
   assert.equal(monitoringResult.skipped, 0);
 
-  // 回归：上游 job=completed 但快照实例=pending 时，调度器应放行下游。
+  // 回归：上游 job=completed 但持久化 raw 快照实例=pending 时，调度器应放行下游。
+  // 这覆盖生产故障：scheduler 预筛使用 composed goals 判定 ready，但 startTaskAttempt
+  // 过去会重新裸读 raw snapshot 做二次准入，导致下游在真正建 job 前被 blocked_config 拦下。
   const desyncGoal = goalWithDesyncedUpstream();
+  persistRawGoal(desyncGoal);
   seedCompletedUpstreamJob(desyncGoal);
   const desyncResult = runGoalSchedulerEngine({
-    goals: [desyncGoal],
+    goals: readGoalsSnapshot([]),
     runtimeEnv: runtimeEnv(),
     config: schedulerConfig(),
   });
@@ -413,4 +443,24 @@ export function runGoalSchedulerEngineSpecs() {
     (job) => job.taskId && normalizeTaskId(job.taskId) === normalizeTaskId(DESYNC_DOWNSTREAM_TASK_ID),
   );
   assert.equal(downstreamOpenJobs.length, 1, "downstream task should be queued once upstream job completed");
+
+  const directDesyncGoal = goalWithDesyncedUpstream({
+    goalId: DIRECT_DESYNC_GOAL_ID,
+    upstreamTaskId: DIRECT_DESYNC_UPSTREAM_TASK_ID,
+    upstreamInstanceId: DIRECT_DESYNC_UPSTREAM_INSTANCE_ID,
+    downstreamTaskId: DIRECT_DESYNC_DOWNSTREAM_TASK_ID,
+  });
+  persistRawGoal(directDesyncGoal);
+  seedCompletedUpstreamJob(directDesyncGoal);
+  const directSubGoal = directDesyncGoal.subGoals[1]!;
+  const directTask = directSubGoal.tasks[0]!;
+  const directAttempt = startTaskAttempt({
+    goal: directDesyncGoal,
+    subGoal: directSubGoal,
+    task: directTask,
+    runtimeEnv: runtimeEnv(),
+    triggerSource: "scheduler",
+    requestId: "req-start-attempt-desync-spec",
+  });
+  assert.equal(directAttempt.outcome, "queued", "startTaskAttempt should compose runtime job state before admit");
 }

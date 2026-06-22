@@ -21,6 +21,10 @@ function listActiveUserIds() {
   return rows.map((row) => row.id);
 }
 
+export function listActiveUserIdsForMaintenance() {
+  return listActiveUserIds();
+}
+
 function inspectUserWork(userId: string): OrchestratorUserCandidate {
   return runWithUserContext(userId, () => {
     const db = getDatabase();

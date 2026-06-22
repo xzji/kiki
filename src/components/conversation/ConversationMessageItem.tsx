@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { KikiAvatar } from "@/components/layout/KikiAvatar";
-import { InlineCliProcessTimeline } from "@/components/conversation/InlineCliProcessTimeline";
 import { MessageFeedbackControls } from "@/components/conversation/MessageFeedbackControls";
 import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { TaskInteractionRequestMessage } from "@/components/conversation/TaskInteractionRequestMessage";
@@ -282,10 +281,6 @@ export function ConversationMessageItem({
             onSubmit={(input) => onSubmitFeedback?.(message, input)}
             onClear={() => onSubmitFeedback?.(message, null)}
           />
-        ) : null}
-
-        {(message.kind === "text" || message.kind === "goal_plan_card") && message.cliProcess?.events.length ? (
-          <InlineCliProcessTimeline process={message.cliProcess} />
         ) : null}
 
         {toolPermissionRequests.length > 0 ? (

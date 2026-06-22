@@ -1,4 +1,6 @@
 import { createGeneratedInstance } from "@/lib/goalFactory";
+import { normalizeGoalId, normalizeInstanceId, normalizeSubGoalId, normalizeTaskId } from "@/lib/opaqueIds";
+import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import {
   disableTaskAutoRunProjection,
@@ -76,12 +78,20 @@ export type StartTaskAttemptResult =
     };
 
 function locateLatestTask(input: StartTaskAttemptInput) {
-  // allow-raw-goals-snapshot: 启动写路径读取最新任务结构；执行态终态另以 runtime_jobs existing job 为权威护栏。
+  // allow-raw-goals-snapshot: 启动写路径仍读取 raw projection 作为 mutation 基准；执行态准入必须走
+  // composeGoalsWithRuntimeJobs，否则 raw 快照里的 pending/paused 会把已 completed 的上游依赖误判为未完成。
   const currentGoals = readGoalsSnapshot([input.goal]);
-  const latestGoal = currentGoals.find((goal) => goal.id === input.goal.id) ?? input.goal;
-  const latestSubGoal = latestGoal.subGoals.find((subGoal) => subGoal.id === input.subGoal.id) ?? input.subGoal;
-  const latestTask = latestSubGoal.tasks.find((task) => task.id === input.task.id) ?? input.task;
-  return { currentGoals, latestGoal, latestSubGoal, latestTask };
+  const goalId = normalizeGoalId(input.goal.id);
+  const subGoalId = normalizeSubGoalId(input.subGoal.id);
+  const taskId = normalizeTaskId(input.task.id);
+  const writeGoal = currentGoals.find((goal) => normalizeGoalId(goal.id) === goalId) ?? input.goal;
+  const writeSubGoal = writeGoal.subGoals.find((subGoal) => normalizeSubGoalId(subGoal.id) === subGoalId) ?? input.subGoal;
+  const writeTask = writeSubGoal.tasks.find((task) => normalizeTaskId(task.id) === taskId) ?? input.task;
+  const composedGoals = composeGoalsWithRuntimeJobs(currentGoals);
+  const latestGoal = composedGoals.find((goal) => normalizeGoalId(goal.id) === goalId) ?? input.goal;
+  const latestSubGoal = latestGoal.subGoals.find((subGoal) => normalizeSubGoalId(subGoal.id) === subGoalId) ?? input.subGoal;
+  const latestTask = latestSubGoal.tasks.find((task) => normalizeTaskId(task.id) === taskId) ?? input.task;
+  return { currentGoals, writeGoal, writeSubGoal, writeTask, latestGoal, latestSubGoal, latestTask };
 }
 
 function latestInstanceForAttempt(input: {
@@ -90,7 +100,8 @@ function latestInstanceForAttempt(input: {
   triggerSource: TriggerSource;
 }) {
   if (input.instance) {
-    return input.task.instances.find((candidate) => candidate.id === input.instance?.id) ?? input.instance;
+    const instanceId = normalizeInstanceId(input.instance.id);
+    return input.task.instances.find((candidate) => normalizeInstanceId(candidate.id) === instanceId) ?? input.instance;
   }
   const now = new Date().toISOString();
   const next = createGeneratedInstance(input.task, now);
@@ -179,7 +190,7 @@ function isMissingUserInputOnly(decision: ReturnType<typeof resolveAdmitDecision
 }
 
 export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttemptResult {
-  const { currentGoals, latestGoal, latestSubGoal, latestTask } = locateLatestTask(input);
+  const { currentGoals, writeGoal, writeSubGoal, writeTask, latestGoal, latestSubGoal, latestTask } = locateLatestTask(input);
   const conversationId = latestGoal.conversationId;
   if (!conversationId) {
     throw new Error("任务缺少 conversationId，无法创建隔离 workspace");
@@ -190,7 +201,10 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     triggerSource: input.triggerSource,
   });
   const taskLevelOpenJob = getLatestOpenRuntimeJobByTaskId(latestTask.id);
-  if (taskLevelOpenJob && taskLevelOpenJob.taskInstanceId !== instance.id) {
+  if (
+    taskLevelOpenJob &&
+    (!taskLevelOpenJob.taskInstanceId || normalizeInstanceId(taskLevelOpenJob.taskInstanceId) !== normalizeInstanceId(instance.id))
+  ) {
     if (taskLevelOpenJob.status === "awaiting_user" && taskLevelOpenJob.progress) {
       return {
         schemaVersion: 1,
@@ -265,7 +279,8 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     resumeContext: input.resumeContext,
   });
 
-  const createdNewInstance = !latestTask.instances.some((candidate) => candidate.id === instance.id);
+  const instanceId = normalizeInstanceId(instance.id);
+  const createdNewInstance = !latestTask.instances.some((candidate) => normalizeInstanceId(candidate.id) === instanceId);
 
   if (decision.readiness.state !== "ready") {
     const blockingKinds = new Set(decision.readiness.blockers.map((blocker) => blocker.kind));
@@ -314,9 +329,9 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
 
     persistInstanceSnapshot({
       goals: currentGoals,
-      goal: latestGoal,
-      subGoal: latestSubGoal,
-      task: latestTask,
+      goal: writeGoal,
+      subGoal: writeSubGoal,
+      task: writeTask,
       instance,
     });
 
@@ -362,9 +377,9 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
 
   persistInstanceSnapshot({
     goals: currentGoals,
-    goal: latestGoal,
-    subGoal: latestSubGoal,
-    task: latestTask,
+    goal: writeGoal,
+    subGoal: writeSubGoal,
+    task: writeTask,
     instance,
   });
 

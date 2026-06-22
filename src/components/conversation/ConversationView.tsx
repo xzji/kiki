@@ -2362,7 +2362,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
           ref={scrollRef}
           className="h-full overflow-y-auto overscroll-contain"
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pb-5 pt-3 sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pb-[calc(13rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 md:pb-5 lg:px-8">
             {streamErrorUi?.kind === "runtime" ? (
               <div className="rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
                 <div>{streamErrorUi.title}</div>
@@ -2498,7 +2498,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       </div>
 
       {/* 底部输入 */}
-      <div className="flex-none bg-white px-4 pb-3 pt-3 sm:px-6 lg:px-8">
+      <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 flex-none border-t border-[#E5E7EB] bg-white px-4 pb-3 pt-3 shadow-[0_-6px_18px_rgba(15,23,42,0.06)] sm:px-6 md:static md:border-t-0 md:shadow-none lg:px-8">
         <div className="mx-auto max-w-3xl">
           <AssistantComposer
             onSubmit={onSend}

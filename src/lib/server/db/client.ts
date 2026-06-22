@@ -63,6 +63,8 @@ function runMigrations(database: Database.Database) {
 }
 
 function bootstrap(database: Database.Database) {
+  // 必须在建表前设置才对新库生效
+  database.pragma("auto_vacuum = INCREMENTAL");
   database.pragma("journal_mode = WAL");
   database.pragma("busy_timeout = 5000");
   database.exec(KIKI_DB_BOOTSTRAP_SQL);

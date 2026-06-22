@@ -10,21 +10,28 @@
 - 任务执行并发上限改为账号级云端持久化配置：手机和 PC 都从服务端回填 `maxConcurrentTasks`，云端 orchestrator 按用户配置派发任务，本地浏览器缓存不再反向覆盖服务端。
 - Slash command 对外入口从 `/saga` 更名为 `/topic`，内部 Saga 实现命名保持不变，避免外部命令和内部架构概念混淆。
 - 会话列表与移动端主导航继续收敛窄屏布局：会话页自带滚动与底部安全区，移动端底部导航保留收件箱、会话、日程三个主入口。
+- 会话页移动端底部输入区改为固定在底部导航上方，并为消息列表增加安全区留白，避免输入框和最后一条消息被底部导航遮挡。
 - Runtime 适配层扩展到 Claude / Pi / Cursor / Codex：注册表、运行环境向导、设置页、会话与目标规划入口统一识别四类本地 CLI。
 - Cursor 运行时切换为 `cursor agent acp` JSON-RPC 通道，支持会话恢复、流式事件解析、工具调用映射、`session/request_permission` 审批桥接和 `.cursor/cli.json` 权限 overlay。
 - Codex 运行时接入 `codex exec --json`，按权限模式映射 read-only / workspace-write sandbox；首版显式禁用 KiKi 手动确认弹窗，并在 UI 中提示限制。
 - 项目概览和 daemon README 更新为多 Runtime 说明，避免继续把本地执行节点描述为 Claude-only。
+- SQLite 用户库默认启用 `auto_vacuum=INCREMENTAL`，云端控制面增加受低峰窗口、磁盘水位、freelist 阈值和单轮库数限制保护的轻量后台回收，降低 Railway Volume 存储浪费。
+- 任务执行二次准入改为基于 `composeGoalsWithRuntimeJobs` 的合成状态判断依赖完成度，避免 raw projection 滞后时把已完成上游误判为 pending。
 
 ### Added
 - 新增多角色编排装配与元叙述清洗规格测试，覆盖无 id block 重排删除、工具权限提示边界、真实用户决策上抛和安全清洗误伤边界。
 - 新增 `user_runtime_settings` 用户级运行配置表、仓储与规格测试，用于保存跟账号走的运行参数。
 - 新增 Cursor ACP client、parser、permission resolver、tool policy 与环境清洗模块，并补充 Cursor/Codex adapter 规格测试。
+- 新增 `reclaim:sqlite` 运维脚本和 SQLite 存储维护模块，支持只读扫描库体积、手动 `VACUUM INTO` 完整压缩、压缩后完整性校验、原子替换和结构化维护日志。
 - 规划规格入口纳入 Cursor ACP 权限解析、Cursor adapter 与 Codex adapter 覆盖，防止 runtime registry 与协议解析回退。
 
 ### Fixed
 - 修复多角色 Presenter 被只读降权后误把“当前 runtime 已禁用写入文件工具”写进最终报告的问题；任务模式下不再要求 Agent 复述工具禁用状态。
 - 修复多角色执行中 Executor 已写入文件但 Synthesizer 不知道真实落盘事实的问题；现在从写工具调用流捕获路径，files 任务会回读真实文件生成 artifact。
 - 修复手机端任务执行情况显示默认并发 `3`，而 PC 已设置为 `1` 时两端不一致的问题；新浏览器打开页面只会读取账号配置，不会把本地默认值写回云端。
+- 修复 SQLite 后台维护先截断 active 用户列表再判断是否需要回收，导致后续大库可能长期饥饿的问题；现在只限制实际执行回收的库数量。
+- 修复存量 SQLite 库完整压缩后未切换到 `auto_vacuum=INCREMENTAL` 的问题，确保压缩后的旧库也能参与后续增量回收。
+- 修复调度器预筛已通过但 `startTaskAttempt` 再次裸读 raw snapshot 造成下游任务被 `blocked_config` 拦截的问题。
 
 ### Removed
 - 过滤本地 Cursor ACP 探测脚本和个人工作目录 fixture，避免临时测试流程与本机路径进入提交。

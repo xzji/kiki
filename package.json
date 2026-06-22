@@ -13,6 +13,7 @@
     "daemon:remote": "tsx src/bin/kiki-runtime-daemon.ts --remote",
     "orchestrator": "KIKI_ORCHESTRATOR_MODE=cloud tsx src/bin/kiki-cloud-orchestrator.ts",
     "invite:create": "tsx scripts/create-invite-codes.ts",
+    "reclaim:sqlite": "tsx scripts/reclaim-sqlite.ts",
     "reconcile:goal-events": "tsx scripts/reconcile-goal-event-log.ts",
     "verify:architecture": "tsx scripts/verify-architecture.ts",
     "verify:goal-commands": "tsx scripts/verify-goal-command-service.ts",
