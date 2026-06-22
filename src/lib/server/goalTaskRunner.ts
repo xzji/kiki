@@ -1,7 +1,7 @@
 import { appendGoalLog, beginGoalTelemetry, failGoalTelemetry, finishGoalTelemetry, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
 import fs from "fs";
 import path from "path";
-import { buildAcceptanceJudgePrompt, buildLocalValidationRepairPrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
+import { buildAcceptanceJudgePrompt, buildSemanticRepairPrompt } from "@/lib/server/goalTaskAcceptancePrompt";
 import { buildGoalTaskRunnerPrompt } from "@/lib/server/goalTaskPrompt";
 import { readSessionMemoryForPrompt } from "@/lib/server/memory/conversationMemoryService";
 import { readRelevantUserProfileMemoryForPrompt } from "@/lib/server/memory/userMemoryService";
@@ -11,19 +11,12 @@ import { readinessFromContext } from "@/lib/server/taskExecution/readinessAdapte
 import type { TaskExecutionContext } from "@/lib/server/taskExecution/types";
 import { runMultiAgentOrchestration } from "@/lib/server/agentOrchestration/MultiAgentOrchestrator";
 import { selectAgentCollaborationStrategy } from "@/lib/server/agentOrchestration/strategy";
-import {
-  classifyTaskRunError,
-  inferInteractionRequirement,
-  requiresUserConfirmationToComplete,
-} from "@/lib/server/domain/taskPolicy";
-import { buildJsonParseCandidates, buildJsonRepairPrompt, parseJsonWithCandidates } from "@/lib/server/claude/jsonRepair";
-import { extractBalancedJsonSnippet, extractJsonObject, extractParseFailureContext } from "@/lib/server/jsonExtraction";
+import { classifyTaskRunError } from "@/lib/server/domain/taskPolicy";
+import { extractJsonObject } from "@/lib/server/jsonExtraction";
 import { judgeTaskResult } from "@/lib/server/resultNotificationJudge";
 import { buildWebAppInteractionContext } from "@/lib/server/taskResult/interactionContext";
-import { normalizeFileWriteSpecs } from "@/lib/server/fileWriteSpecs";
-import { normalizeInteractionRequirement as normalizeServerInteractionRequirement } from "@/lib/server/protocol/normalizeAwaitingInteraction";
 import { persistExternalEmbedArtifact, persistFileArtifact, persistWebAppArtifact, toArtifactRef } from "@/lib/server/workspace/artifactStorage";
-import { writeTaskParseFailureSnapshot, writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
+import { writeTaskPromptFile } from "@/lib/server/workspace/conversationWorkspace";
 import { markdownToWorkbook } from "@/lib/spreadsheet/adapters/markdownTables";
 import { XLSX_MIME } from "@/lib/spreadsheet/constants";
 import { buildXlsxBuffer } from "@/lib/spreadsheet/server/buildXlsx";
@@ -46,12 +39,9 @@ import {
 import {
   compileMissingFieldQuestions,
   fieldsSuggestedActions,
-  normalizeMissingFieldQuestions,
   singleFieldOptions,
 } from "@/lib/server/informationRequest/compileFields";
-import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
 import { validateTaskResultLocally } from "@/lib/taskResult/localValidation";
-import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";
 import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { AgentRunPlan } from "@/types/agentOrchestration";
@@ -63,7 +53,6 @@ import type {
   SubGoal,
   Task,
   TaskInstance,
-  TaskResultViewKind,
   TaskRunArtifact,
   TaskRunErrorCategory,
 } from "@/types/kiki";
@@ -94,7 +83,6 @@ import {
 } from "./taskRunnerShared";
 import {
   awaitingCtxFrom,
-  buildAwaitingConfirmationFromRaw,
   coerceMissingUserContextBlocker,
   resolveAwaitingUser,
   type AwaitingUserContext,
@@ -1171,6 +1159,13 @@ async function runClaudePromptWithFallback(input: RunGoalTaskInput, message: str
  * / signal / agentRunId)与副作用(telemetry / agent event / tool-permission blocker)
  * 都被闭包绑定在 input 上，编排层只见 runClaude(message, permissionMode)。
  * Task #3 提升 repair/acceptance 链时由顶层构造并注入。
+ *
+ * ⚠️ Hidden coupling 警告:本工厂在 runGoalTask 顶层一次性构造、绑定 input 快照。
+ * executeOnce 每次 attempt 传 `{ ...enhancedInput, attemptCount }` 是新对象,但
+ * port 内部仍看绑定时的 input——任何 attempt-scoped 字段(per-attempt signal /
+ * agentRunId / retry counter / 等)对 port-driven 的 Claude 调用都不可见。
+ * 若未来需要 attempt-scoped 行为,改造为接 `getInput: () => RunGoalTaskInput`
+ * 或在 executeOnce 内重建 port,不要直接给 input 加 attempt 字段——否则会静默劣化。
  */
 function createTaskClaudePort(input: RunGoalTaskInput): TaskClaudePort {
   return {
