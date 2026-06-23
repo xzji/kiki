@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { getConversationUnreadCount, useConversationStore } from "@/stores/conversationStore";
 import { useInboxStore } from "@/stores/inboxStore";
+import { UserMenu } from "./UserMenu";
 
 export function MobileBottomNav() {
   const pathname = usePathname() ?? "";
@@ -28,7 +29,7 @@ export function MobileBottomNav() {
       className="fixed inset-x-0 bottom-0 z-30 border-t border-[#D8DDE4] bg-white/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
       aria-label="移动端主导航"
     >
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-4 gap-1">
         <MobileNavLink
           href="/"
           active={pathname === "/"}
@@ -49,6 +50,7 @@ export function MobileBottomNav() {
           label="日程"
           icon={<CalendarDays className="h-4 w-4" />}
         />
+        <UserMenu placement="mobileNav" />
       </div>
     </nav>
   );

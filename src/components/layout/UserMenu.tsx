@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { SettingsModal } from "@/components/settings/SettingsModal";
 import { OPEN_SETTINGS_EVENT, type SettingsTab } from "@/lib/settings";
+import { cn } from "@/lib/utils";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 
 type AuthUser = {
@@ -14,7 +15,7 @@ type AuthUser = {
   displayName: string;
 };
 
-export function UserMenu() {
+export function UserMenu({ placement = "desktop" }: { placement?: "desktop" | "mobileNav" }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -57,7 +58,8 @@ export function UserMenu() {
   const displayName = user?.displayName || "用户";
   const email = user?.email || "";
   const initial = displayName.trim().charAt(0).toUpperCase() || "U";
-    const leftOffset = navCollapsed ? 14 : 28;
+  const leftOffset = navCollapsed ? 14 : 28;
+  const isMobileNav = placement === "mobileNav";
 
   async function handleLogout() {
     setOpen(false);
@@ -67,13 +69,20 @@ export function UserMenu() {
   }
 
   return (
-      <div
-        ref={menuRef}
-        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 md:bottom-6"
-        style={{ left: leftOffset }}
-      >
+    <div
+      ref={menuRef}
+      className={cn(
+        isMobileNav ? "relative md:hidden" : "fixed bottom-6 z-20 hidden md:block",
+      )}
+      style={isMobileNav ? undefined : { left: leftOffset }}
+    >
       {open ? (
-          <div className="absolute bottom-14 left-0 w-52 rounded-xl border border-[#222]/40 bg-white p-3 shadow-sm md:w-40">
+        <div
+          className={cn(
+            "absolute bottom-14 w-52 rounded-xl border border-[#222]/40 bg-white p-3 shadow-sm",
+            isMobileNav ? "right-0" : "left-0 md:w-40",
+          )}
+        >
           <div className="mb-3 flex items-center gap-3 border-b border-[#EEF1F4] pb-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[#D0D7DE] bg-[#F3EEFF] text-sm font-medium text-[#111]">
               {initial}
@@ -110,10 +119,23 @@ export function UserMenu() {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-xs text-[#5F5AA2] md:h-7 md:w-7"
+        className={cn(
+          isMobileNav
+            ? "relative flex min-h-11 w-full flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium text-[#475467] active:bg-[#F5F6F8]"
+            : "flex h-7 w-7 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-xs text-[#5F5AA2]",
+        )}
         aria-label="打开用户菜单"
       >
-        {initial}
+        {isMobileNav ? (
+          <>
+            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#D0D7DE] bg-[#E9E6FF] text-[9px] leading-none text-[#5F5AA2]">
+              {initial}
+            </span>
+            <span>我的</span>
+          </>
+        ) : (
+          initial
+        )}
       </button>
       <SettingsModal
         open={settingsOpen}

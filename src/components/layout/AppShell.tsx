@@ -55,7 +55,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isFullscreenResult =
     /^\/conversations\/[^/]+\/results\/[^/]+$/.test(pathname) ||
     /^\/inbox\/[^/]+\/result$/.test(pathname);
-  const hideUserMenu = isConversation || isWide || isFullscreenResult;
   const hideMobileBottomNav = isFullscreenResult;
   const useImmersiveShell = isConversation || isFullscreenResult;
   const contentWidth = useImmersiveShell ? "" : isWide ? "max-w-[1600px]" : "max-w-5xl";
@@ -112,7 +111,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <div className={contentClassName}>{children}</div>
       </main>
-      {!hideUserMenu ? <UserMenu /> : null}
+      <UserMenu placement="desktop" />
       {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
       <Suspense fallback={null}>
         <DrawerTaskIdSyncer />
