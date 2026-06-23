@@ -131,76 +131,78 @@ export function Sidebar() {
   }
 
   return (
-    <aside
-      className="fixed inset-y-0 left-0 z-10 hidden flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5 md:flex"
-      style={{ width: NAV_SIDEBAR_EXPANDED_WIDTH }}
-    >
-      <div className="mb-4 flex items-center justify-between px-3">
-        <ProductLogo />
-        <button
-          type="button"
-          aria-label="收起侧边栏"
-          onClick={() => setCollapsed(true)}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-white"
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
-      </div>
-      <nav className="space-y-1 text-sm text-[#475467]">
-        <NavLink
-          href="/"
-          active={pathname === "/"}
-          icon={<Inbox className="h-4 w-4" />}
-          label="收件箱"
-          badge={inboxUnread}
-        />
-        <NavLink
-          href="/schedule"
-          active={pathname.startsWith("/schedule")}
-          icon={<CalendarDays className="h-4 w-4" />}
-          label="日程"
-        />
-      </nav>
+    <>
+      <aside
+        className="fixed inset-y-0 left-0 z-10 hidden flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5 md:flex"
+        style={{ width: NAV_SIDEBAR_EXPANDED_WIDTH }}
+      >
+        <div className="mb-4 flex items-center justify-between px-3">
+          <ProductLogo />
+          <button
+            type="button"
+            aria-label="收起侧边栏"
+            onClick={() => setCollapsed(true)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-white"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
+        <nav className="space-y-1 text-sm text-[#475467]">
+          <NavLink
+            href="/"
+            active={pathname === "/"}
+            icon={<Inbox className="h-4 w-4" />}
+            label="收件箱"
+            badge={inboxUnread}
+          />
+          <NavLink
+            href="/schedule"
+            active={pathname.startsWith("/schedule")}
+            icon={<CalendarDays className="h-4 w-4" />}
+            label="日程"
+          />
+        </nav>
 
-      <div className="mt-6 flex items-center justify-between px-3 text-xs font-medium text-[#6B7280]">
-        <span className="flex items-center gap-2">
-          <MessageCircle className="h-3.5 w-3.5" />
-          会话
-        </span>
-        <button
-          type="button"
-          aria-label="新建会话"
-          onClick={onCreateConversation}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-[#6B7280] hover:bg-white hover:text-[#1F2328]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
+        <div className="mt-6 flex items-center justify-between px-3 text-xs font-medium text-[#6B7280]">
+          <span className="flex items-center gap-2">
+            <MessageCircle className="h-3.5 w-3.5" />
+            会话
+          </span>
+          <button
+            type="button"
+            aria-label="新建会话"
+            onClick={onCreateConversation}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-[#6B7280] hover:bg-white hover:text-[#1F2328]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
 
-      <div className="mt-2 flex-1 overflow-y-auto overscroll-contain pr-1">
-        {!conversationsHydrated && sortedConversations.length === 0 ? (
-          <ConversationListLoading />
-        ) : sortedConversations.length === 0 ? (
-          <div className="mt-3 px-[34px] py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
-        ) : (
-          <ul className="space-y-1">
-            {sortedConversations.map((conv) => {
-              return (
-                <ConversationListItem
-                  key={conv.id}
-                  conversation={conv}
-                  active={pathname.startsWith(`/conversations/${conv.id}`)}
-                  onTogglePinned={() => toggleConversationPinned(conv.id)}
-                  onRename={(title) => renameConversation(conv.id, title)}
-                  onMarkRead={() => markConversationRead(conv.id)}
-                  onMarkUnread={() => markConversationUnread(conv.id)}
-                  onDelete={() => setDeleteTarget(conv)}
-                />
-              );
-            })}
-          </ul>
-        )}
-      </div>
+        <div className="mt-2 flex-1 overflow-y-auto overscroll-contain pr-1">
+          {!conversationsHydrated && sortedConversations.length === 0 ? (
+            <ConversationListLoading />
+          ) : sortedConversations.length === 0 ? (
+            <div className="mt-3 px-[34px] py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
+          ) : (
+            <ul className="space-y-1">
+              {sortedConversations.map((conv) => {
+                return (
+                  <ConversationListItem
+                    key={conv.id}
+                    conversation={conv}
+                    active={pathname.startsWith(`/conversations/${conv.id}`)}
+                    onTogglePinned={() => toggleConversationPinned(conv.id)}
+                    onRename={(title) => renameConversation(conv.id, title)}
+                    onMarkRead={() => markConversationRead(conv.id)}
+                    onMarkUnread={() => markConversationUnread(conv.id)}
+                    onDelete={() => setDeleteTarget(conv)}
+                  />
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </aside>
       <DeleteConversationDialog
         conversation={deleteTarget}
         pending={deletePending}
@@ -210,7 +212,7 @@ export function Sidebar() {
         }}
         onConfirm={confirmDeleteConversation}
       />
-    </aside>
+    </>
   );
 }
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  computeTaskNextTriggerAt,
   computeNextTickAt,
   isTaskTriggerDue,
   parseTaskTriggerRule,
@@ -48,6 +49,10 @@ function buildThread(overrides: Partial<Thread> = {}): Thread {
 export function runTaskTriggerTimeSpecs() {
   assert.deepEqual(parseTaskTriggerRule("立即执行"), { kind: "immediate" });
   assert.equal(isTaskTriggerDue(oneShotTask("立即执行"), new Date("2026-05-30T03:00:00.000Z")), true);
+  assert.equal(
+    computeTaskNextTriggerAt(oneShotTask("立即执行"), new Date("2026-05-30T03:00:00.000Z"))?.toISOString(),
+    "2026-05-30T03:00:00.000Z",
+  );
 
   // 依赖驱动的自然语言触发（解析为 unsupported/condition）：尚无实例的 one_shot 应放行，
   // 把触发时机交给调度器的依赖就绪判定，而非被时间门永久拦死。
@@ -58,6 +63,37 @@ export function runTaskTriggerTimeSpecs() {
   const ranOnce = oneShotTask("1-1 完成后立即触发");
   ranOnce.instances = [{ id: "inst-x", taskId: ranOnce.id, status: "completed", createdAt: "2026-05-30T01:00:00.000Z" } as never];
   assert.equal(isTaskTriggerDue(ranOnce, new Date("2026-05-30T03:00:00.000Z")), false);
+  assert.equal(computeTaskNextTriggerAt(ranOnce, new Date("2026-05-30T03:00:00.000Z")), null);
+
+  const weeklyNext = computeTaskNextTriggerAt(oneShotTask("每周二 09:30 触发"), new Date("2026-06-01T00:00:00.000Z"));
+  assert.equal(weeklyNext?.getDay(), 2);
+  assert.equal(weeklyNext?.getHours(), 9);
+  assert.equal(weeklyNext?.getMinutes(), 30);
+
+  const dailyTask = oneShotTask("每天 07:30 触发");
+  dailyTask.taskType = "repeat";
+  dailyTask.instances = [
+    {
+      id: "inst-daily",
+      taskId: dailyTask.id,
+      status: "completed",
+      dateLabel: "06-01",
+      createdAt: "2026-06-01T00:30:00.000Z",
+    } as never,
+  ];
+  const dailyNext = computeTaskNextTriggerAt(dailyTask, new Date("2026-06-01T08:00:00.000Z"));
+  assert.equal(dailyNext?.getHours(), 7);
+  assert.equal(dailyNext?.getMinutes(), 30);
+
+  const intervalTask = oneShotTask("每 3 个小时触发");
+  intervalTask.taskType = "repeat";
+  intervalTask.instances = [
+    { id: "inst-interval", taskId: intervalTask.id, status: "completed", createdAt: "2026-06-01T01:00:00.000Z" } as never,
+  ];
+  assert.equal(
+    computeTaskNextTriggerAt(intervalTask, new Date("2026-06-01T02:00:00.000Z"))?.toISOString(),
+    "2026-06-01T04:00:00.000Z",
+  );
 
   // ---------- normalizeTriggerSpec ----------
   assert.deepEqual(normalizeTriggerSpec("hourly"), { kind: "hourly" });

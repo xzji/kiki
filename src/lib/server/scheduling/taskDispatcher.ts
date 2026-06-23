@@ -14,6 +14,7 @@ import {
 import {
   cancelToolPermissionRequest,
   createToolPermissionRequest,
+  detachToolPermissionRequest,
 } from "@/lib/server/toolPermission/toolPermissionBroker";
 import {
   claimQueuedRuntimeJobs,
@@ -44,12 +45,16 @@ const inFlightTunnelJobs = new Set<string>();
 const activeTunnelDispatches = new Map<string, ActiveTunnelDispatch>();
 const MAX_TUNNEL_PROGRESS_LOGS = 200;
 
-function finishTunnelDispatch(jobId: string) {
+function finishTunnelDispatch(jobId: string, options: { detachPendingToolPermissions?: boolean } = {}) {
   const active = activeTunnelDispatches.get(jobId);
   if (!active) return;
   clearInterval(active.renewTimer);
   for (const requestId of Array.from(active.pendingToolPermissionRequestIds)) {
-    cancelToolPermissionRequest(requestId);
+    if (options.detachPendingToolPermissions) {
+      detachToolPermissionRequest(requestId, "awaiting_user");
+    } else {
+      cancelToolPermissionRequest(requestId);
+    }
   }
   active.pendingToolPermissionRequestIds.clear();
   activeTunnelDispatches.delete(jobId);
@@ -155,7 +160,7 @@ function completeTunnelJob(input: {
       });
     }
   });
-  finishTunnelDispatch(input.jobId);
+  finishTunnelDispatch(input.jobId, { detachPendingToolPermissions: status === "awaiting_user" });
 }
 
 function mergeRuntimeJobLogs(existing: GoalServerLogEntry[], next?: GoalServerLogEntry) {

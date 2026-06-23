@@ -2,30 +2,49 @@
 
 import { ChevronsRight, Maximize2, MessageCircle } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { TopicPlanBreadcrumb } from "@/components/topic/TopicPlanContent";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { appendRouteQuery, topicTaskDetailPath } from "@/lib/routes";
+import { resolveTaskPanelLayout } from "@/lib/taskPanelLayout";
 import { useAssistantStore } from "@/stores/assistantStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useNavSidebarStore } from "@/stores/navSidebarStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
+import { useTaskMonitorStore } from "@/stores/taskMonitorStore";
 
 export function TaskDetailDrawer() {
   const { activeGoalId, activeTaskId, activeInstanceId, close } = useTaskDrawerStore();
   const goals = useGoalStore(selectVisibleGoals);
   const assistantOpen = useAssistantStore((state) => state.isOpen);
   const openAssistant = useAssistantStore((state) => state.open);
-    const isMobile = useIsMobileViewport();
+  const isMobile = useIsMobileViewport();
   const navCollapsed = useNavSidebarStore((state) => state.collapsed);
   const setNavCollapsed = useNavSidebarStore((state) => state.setCollapsed);
+  const taskMonitorOpen = useTaskMonitorStore((state) => state.open);
+  const taskMonitorWidth = useTaskMonitorStore((state) => state.width);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 0 : window.innerWidth,
+  );
 
   const goal = goals.find((item) => item.id === activeGoalId) ?? null;
   const task =
     goal?.subGoals.flatMap((sg) => sg.tasks).find((t) => t.id === activeTaskId) ?? null;
   const open = Boolean(activeTaskId && goal && task);
+  const panelLayout = useMemo(
+    () =>
+      resolveTaskPanelLayout({
+        viewportWidth,
+        assistantOpen,
+        isMobile,
+        monitorOpen: taskMonitorOpen,
+        detailOpen: open,
+        monitorWidth: taskMonitorWidth,
+      }),
+    [assistantOpen, isMobile, open, taskMonitorOpen, taskMonitorWidth, viewportWidth],
+  );
 
   // 打开任务侧栏时自动收起左侧栏，关闭时恢复打开前的状态
   const prevNavCollapsedRef = useRef<boolean | null>(null);
@@ -43,6 +62,16 @@ export function TaskDetailDrawer() {
   }, [open]);
 
   useEffect(() => {
+    const update = () => {
+      if (typeof window === "undefined") return;
+      setViewportWidth(window.innerWidth);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
@@ -53,12 +82,13 @@ export function TaskDetailDrawer() {
 
   if (!open || !goal || !task) return null;
 
-    const rightOffset = !isMobile && assistantOpen ? 400 : 0;
-
   return (
     <aside
-        className="fixed inset-y-0 z-40 flex w-full min-w-0 flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-[60vw] md:min-w-[640px]"
-      style={{ right: rightOffset }}
+      className="fixed inset-y-0 z-40 flex w-full min-w-0 flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
+      style={{
+        right: isMobile ? 0 : panelLayout.detailRightOffset,
+        width: isMobile ? undefined : panelLayout.detailWidth,
+      }}
       aria-label="任务详情"
     >
       <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
@@ -91,7 +121,7 @@ export function TaskDetailDrawer() {
         </div>
       </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-5">
         <TaskDetailBody
           goal={goal}
           task={task}
@@ -100,7 +130,7 @@ export function TaskDetailDrawer() {
         />
       </div>
 
-        {!assistantOpen && !isMobile ? (
+      {!assistantOpen && !isMobile ? (
         <button
           type="button"
           aria-label="打开对话"

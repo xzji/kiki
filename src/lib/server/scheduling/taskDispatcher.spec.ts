@@ -1,12 +1,27 @@
 import assert from "node:assert/strict";
 
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
+import { runWithUserContext } from "@/lib/server/context/userContext";
 import {
   getRuntimeJob,
   upsertRuntimeJob,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
-import { dispatchReadyTasksToMachines } from "@/lib/server/scheduling/taskDispatcher";
+import {
+  dispatchReadyTasksToMachines,
+  registerTunnelDispatchCallbacks,
+} from "@/lib/server/scheduling/taskDispatcher";
+import {
+  getPendingToolPermissionRequest,
+  getToolPermissionRequestState,
+} from "@/lib/server/toolPermission/toolPermissionBroker";
+import {
+  registerMachineWsConnection,
+  submitMachineResult,
+  unregisterMachineWsConnection,
+  type MachineCommand,
+} from "@/lib/server/tunnel/tunnelHub";
+import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -106,14 +121,100 @@ export async function runTaskDispatcherSpecs() {
   ensureIsolatedPlanningSpecDataDir();
 
   const job = seedQueuedCloudJob("job-task-dispatcher-no-machine");
-  const result = await dispatchReadyTasksToMachines({
-    leaseOwner: "cloud-orchestrator-spec",
-    limit: 1,
-  });
+  const result = await runWithUserContext("spec-test-user", () =>
+    dispatchReadyTasksToMachines({
+      leaseOwner: "cloud-orchestrator-spec",
+      limit: 1,
+    }),
+  );
 
   assert.equal(result.processed, 0);
   assert.equal(result.skippedOffline, true);
   assert.equal(getRuntimeJob(job.id)?.status, "queued", "machine 离线时不应 claim queued job");
+  upsertRuntimeJob({ ...job, status: "cancelled", updatedAt: new Date().toISOString() });
+
+  registerTunnelDispatchCallbacks();
+  const machineId = `machine-task-dispatcher-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const sent: MachineCommand[] = [];
+  const sender = (command: MachineCommand) => {
+    sent.push(command);
+    return true;
+  };
+  registerMachineWsConnection({ machineId, userId: "spec-test-user", sender });
+  try {
+    const awaitingJob = seedQueuedCloudJob("job-task-dispatcher-awaiting-tool-permission");
+    const dispatchResult = await runWithUserContext("spec-test-user", () =>
+      dispatchReadyTasksToMachines({
+        leaseOwner: "cloud-orchestrator-spec",
+        limit: 1,
+      }),
+    );
+    assert.equal(dispatchResult.processed, 1);
+    assert.equal(sent.at(-1)?.type, "execute");
+
+    const requestId = "tool-permission-task-dispatcher-spec";
+    const blocker: ExecutionBlocker = {
+      kind: "tool_permission",
+      executionId: awaitingJob.id,
+      taskId: awaitingJob.payload.task.id,
+      instanceId: awaitingJob.payload.instance.id,
+      blockedStepIndex: 0,
+      resumeToken: requestId,
+      interactionRequirement: {
+        type: "confirm",
+        timing: "during_execution",
+        reason: "需要授权工具 mcp__tavily__tavily_search",
+        fields: [],
+        shouldNotifyUser: true,
+      },
+      resumeStrategy: "rerun_with_feedback",
+      status: "waiting",
+      createdAt: new Date().toISOString(),
+      toolPermission: {
+        requestId,
+        runtimeEnvId: runtimeEnv().id,
+        toolName: "mcp__tavily__tavily_search",
+        suggestedRule: "mcp__tavily__*",
+      },
+    };
+
+    submitMachineResult({
+      type: "execute_progress",
+      jobId: awaitingJob.id,
+      progress: {
+        requestId: awaitingJob.requestId ?? `goal-task-${awaitingJob.id}`,
+        scope: "goal_task_execute",
+        status: "running",
+        phase: "reviewing",
+        message: "等待工具授权",
+        startedAt: awaitingJob.startedAt ?? awaitingJob.createdAt,
+        updatedAt: new Date().toISOString(),
+        resultPayload: {
+          runtimeJobStatus: "awaiting_user",
+          blocker,
+        },
+      },
+    });
+    assert.equal(getPendingToolPermissionRequest(requestId)?.id, requestId);
+
+    submitMachineResult({
+      type: "execute",
+      jobId: awaitingJob.id,
+      ok: true,
+      status: "awaiting_user",
+      blocker,
+      result: {
+        runtimeJobStatus: "awaiting_user",
+        blocker,
+      },
+    });
+
+    assert.equal(getRuntimeJob(awaitingJob.id)?.status, "awaiting_user");
+    assert.equal(getPendingToolPermissionRequest(requestId)?.id, requestId);
+    assert.equal(getToolPermissionRequestState(requestId), "detached");
+  } finally {
+    unregisterMachineWsConnection(machineId, sender);
+  }
 
   console.log("taskDispatcher specs passed");
 }

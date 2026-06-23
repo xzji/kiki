@@ -19,6 +19,7 @@ import { generateTopicSagaPlan } from "@/lib/api/topics";
 import { replaceGoalDraftInStores } from "@/lib/goalWorkflow";
 import { createIdempotencyKey, createOpaqueId } from "@/lib/opaqueIds";
 import { dependencySatisfied } from "@/lib/taskDependencies";
+import { computeTaskNextTriggerAt } from "@/lib/taskTriggerTime";
 import { deriveTaskDisplayState, stripTaskPrefix } from "@/lib/taskInstance";
 import { cn } from "@/lib/utils";
 import { BASE_DATE, formatDateInput } from "@/lib/date";
@@ -46,6 +47,7 @@ type TaskProgressItem = {
   statusLabel: string;
   blockedByUpstream: boolean;
   phaseText?: string;
+  scheduledStartLabel?: string;
   priorityRank: number;
   threadIndex: number;
   taskIndex: number;
@@ -653,6 +655,7 @@ function getTaskSummaryStatus(task: Task): TaskInstanceStatus | "pending" {
 
 function buildWorkflowProgress(subGoals: Goal["subGoals"]): WorkflowProgress {
   const taskMap = new Map(subGoals.flatMap((subGoal) => subGoal.tasks).map((task) => [task.id, task]));
+  const now = new Date();
   const runningTasks: TaskProgressItem[] = [];
   const upcomingTasks: TaskProgressItem[] = [];
   const attentionTasks: TaskProgressItem[] = [];
@@ -688,6 +691,7 @@ function buildWorkflowProgress(subGoals: Goal["subGoals"]): WorkflowProgress {
         statusLabel: workflowStatusLabel(task, state),
         blockedByUpstream: isBlockedByUpstream(task, taskMap),
         phaseText: workflowPhaseText(task, state),
+        scheduledStartLabel: state === "pending" ? formatScheduledStartLabel(computeTaskNextTriggerAt(task, now), now) : undefined,
         priorityRank: priorityRank(task),
         threadIndex,
         taskIndex,
@@ -717,6 +721,15 @@ function buildWorkflowProgress(subGoals: Goal["subGoals"]): WorkflowProgress {
 
 function classifyTaskProgress(task: Task): WorkflowTaskState {
   return deriveTaskDisplayState(task);
+}
+
+function formatScheduledStartLabel(date: Date | null, now: Date) {
+  if (!date) return undefined;
+  if (date.getTime() <= now.getTime() + 60_000) return "立即开始执行";
+  const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const hour = date.getHours();
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${weekdays[date.getDay()]} ${hour}:${minute} 开始执行`;
 }
 
 function isBlockedByUpstream(task: Task, taskMap: Map<string, Task>) {
@@ -900,6 +913,9 @@ function WorkflowTaskLine({
             >
               {item.statusLabel}
             </span>
+            {tone === "pending" && item.scheduledStartLabel ? (
+              <span className="text-[11px] font-medium text-[#6B7280]">{item.scheduledStartLabel}</span>
+            ) : null}
             {item.blockedByUpstream ? (
               <span className="rounded-md bg-[#FFF3CD] px-1.5 py-0.5 text-[11px] font-medium text-[#8A6D3B]">
                 等待上游

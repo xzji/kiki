@@ -2,6 +2,7 @@ import { buildJsonParseCandidates, parseJsonWithCandidates } from "@/lib/server/
 import { extractBalancedJsonSnippet, extractParseFailureContext } from "@/lib/server/jsonExtraction";
 import { writeTaskParseFailureSnapshot } from "@/lib/server/workspace/conversationWorkspace";
 import { deriveLegacyTaskResult } from "@/lib/taskResult/legacyAdapter";
+import { sanitizeTaskResultOutput } from "@/lib/taskResult/outputSanitizer";
 import { normalizeTaskResult } from "@/lib/taskResult/parseAndRepair";
 import { resolveExpectedSurfaces } from "@/lib/taskResult/surfaces";
 import { normalizeFileWriteSpecs } from "@/lib/server/fileWriteSpecs";
@@ -103,7 +104,9 @@ export function parseTaskRunnerResult(ctx: TaskParserContext, raw: string, fallb
   });
   const expectedSurfaces = resolveExpectedSurfaces(ctx.task.expectedResult);
   const expectsWebApp = ctx.task.expectedResult?.interactiveSurface?.kind === "webapp" || Boolean(parsedWebApp) || Boolean(parsedExternalEmbed);
-  const taskResult =
+  const parsedSummary = parsed.summary?.trim();
+  const parsedFinalMessage = parsed.final_message?.trim();
+  const rawTaskResult =
     normalizedTaskResult ||
     (expectedSurfaces.includes("interactive") && expectsWebApp && (parsedWebApp || parsedExternalEmbed)
       ? {
@@ -139,6 +142,16 @@ export function parseTaskRunnerResult(ctx: TaskParserContext, raw: string, fallb
           },
         }
       : null);
+  const taskResult = rawTaskResult
+    ? sanitizeTaskResultOutput(rawTaskResult, {
+        outerTexts: [
+          parsedSummary,
+          parsedFinalMessage,
+          ctx.instance.intro,
+          `用户手动发起执行“${ctx.task.title.replace(/^任务\d+：/, "")}”。`,
+        ],
+      })
+    : null;
   const legacyFromBlocks = taskResult ? deriveLegacyTaskResult(taskResult) : null;
   let suggestedActions = Array.isArray(parsed.suggested_actions)
     ? parsed.suggested_actions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
@@ -175,8 +188,8 @@ export function parseTaskRunnerResult(ctx: TaskParserContext, raw: string, fallb
       interactionRequirement.type !== "deliverable_gap" &&
       interactionRequirement.type !== "agent_revision_required");
   return {
-    summary: parsed.summary?.trim() || legacyFromBlocks?.summary || "任务执行完成。",
-    finalMessage: parsed.final_message?.trim() || legacyFromBlocks?.finalMessage || parsed.summary?.trim() || "任务执行完成。",
+    summary: parsedSummary || legacyFromBlocks?.summary || "任务执行完成。",
+    finalMessage: parsedFinalMessage || legacyFromBlocks?.finalMessage || parsedSummary || "任务执行完成。",
     resultViewKind: normalizeTaskResultViewKind(parsed.result_view_kind ?? fallbackKind),
     awaitingUser,
     awaitingReason: parsed.awaiting_reason?.trim() || interactionRequirement.reason,

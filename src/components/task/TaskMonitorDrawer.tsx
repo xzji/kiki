@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/runtime-daemon";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { cancelGoalInstance, transitionGoalInstance } from "@/lib/api/goal-commands";
+import { resolveTaskPanelLayout } from "@/lib/taskPanelLayout";
 import {
   groupTaskMonitorRows,
   selectTaskMonitorRows,
@@ -36,10 +37,6 @@ import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useTaskMonitorStore } from "@/stores/taskMonitorStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
-
-const ASSISTANT_WIDTH = 400;
-const DETAIL_MIN_WIDTH = 640;
-const DETAIL_WIDTH_RATIO = 0.6;
 
 const groupBadgeClass: Record<TaskMonitorGroup, string> = {
   queued: "bg-[#F5F6F8] text-[#6B7280]",
@@ -63,8 +60,8 @@ function rowBadgeClass(row: TaskMonitorRow) {
 export function TaskMonitorDrawer() {
   const goals = useGoalStore(selectVisibleGoals);
   const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
-    const assistantOpen = useAssistantStore((state) => state.isOpen);
-    const isMobile = useIsMobileViewport();
+  const assistantOpen = useAssistantStore((state) => state.isOpen);
+  const isMobile = useIsMobileViewport();
   const open = useTaskMonitorStore((state) => state.open);
   const width = useTaskMonitorStore((state) => state.width);
   const closeMonitor = useTaskMonitorStore((state) => state.closeMonitor);
@@ -78,7 +75,9 @@ export function TaskMonitorDrawer() {
   const maxConcurrentTasks = useEasterEggSettingsStore((state) => state.settings.maxConcurrentTasks);
   const updateNumericSetting = useEasterEggSettingsStore((state) => state.updateNumericSetting);
 
-  const [detailWidth, setDetailWidth] = useState(DETAIL_MIN_WIDTH);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 0 : window.innerWidth,
+  );
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [dispatchPaused, setDispatchPaused] = useState(false);
   const [pendingGlobalAction, setPendingGlobalAction] = useState(false);
@@ -89,15 +88,25 @@ export function TaskMonitorDrawer() {
   const rows = useMemo(() => selectTaskMonitorRows(goals), [goals]);
   const groups = useMemo(() => groupTaskMonitorRows(rows), [rows]);
   const taskRunningCount = groups.running.filter((row) => row.kind === "task").length;
-    const detailOpen = Boolean(activeTaskId);
-    const assistantOffset = !isMobile && assistantOpen ? ASSISTANT_WIDTH : 0;
-    const rightOffset = isMobile ? 0 : detailOpen ? detailWidth + assistantOffset : assistantOffset;
+  const detailOpen = Boolean(activeTaskId);
+  const panelLayout = useMemo(
+    () =>
+      resolveTaskPanelLayout({
+        viewportWidth,
+        assistantOpen,
+        isMobile,
+        monitorOpen: open,
+        detailOpen,
+        monitorWidth: width,
+      }),
+    [assistantOpen, detailOpen, isMobile, open, viewportWidth, width],
+  );
   const concurrencyRatio = maxConcurrentTasks > 0 ? Math.min(100, (taskRunningCount / maxConcurrentTasks) * 100) : 0;
 
   useEffect(() => {
     const update = () => {
       if (typeof window === "undefined") return;
-      setDetailWidth(Math.max(window.innerWidth * DETAIL_WIDTH_RATIO, DETAIL_MIN_WIDTH));
+      setViewportWidth(window.innerWidth);
     };
     update();
     window.addEventListener("resize", update);
@@ -249,19 +258,22 @@ export function TaskMonitorDrawer() {
         className="fixed inset-0 z-20 bg-transparent"
       />
       <aside
-          aria-label="任务执行情况"
-          className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
-          style={{ width: isMobile ? undefined : width, right: rightOffset }}
+        aria-label="任务执行情况"
+        className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
+        style={{
+          width: isMobile ? undefined : panelLayout.monitorWidth,
+          right: isMobile ? 0 : panelLayout.monitorRightOffset,
+        }}
       >
-          {!isMobile ? (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              title="拖拽调整宽度"
-              onMouseDown={onDragStart}
-              className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-[#D0D7DE]"
-            />
-          ) : null}
+        {!isMobile ? (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            title="拖拽调整宽度"
+            onMouseDown={onDragStart}
+            className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-[#D0D7DE]"
+          />
+        ) : null}
         <div className="flex h-12 flex-none items-center gap-3 border-b border-[#E5E7EB] px-4">
           <Activity className="h-4 w-4 text-[#6B7280]" />
           <h2 className="min-w-0 flex-1 text-[13px] font-semibold text-[#1F2328]">任务执行情况</h2>
@@ -275,13 +287,13 @@ export function TaskMonitorDrawer() {
           </button>
         </div>
 
-          <div className="border-b border-[#E5E7EB] px-4 py-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="border-b border-[#E5E7EB] px-4 py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-[13px] font-medium text-[#1F2328]">最多同时执行</div>
               <div className="mt-0.5 text-[12px] text-[#8C9198]">超出上限的任务进入等待队列</div>
             </div>
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {dispatchPaused ? (
                 <button
                   type="button"

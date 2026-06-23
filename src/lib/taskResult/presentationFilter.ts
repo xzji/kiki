@@ -1,3 +1,4 @@
+import { sanitizeTaskResultOutput } from "@/lib/taskResult/outputSanitizer";
 import type { ResultBlock, TaskResult } from "@/types/taskResult";
 
 const AGENT_ROLE_PATTERN = /\b(Coordinator|Executor|Reviewer|Synthesizer|Researcher)\b/gi;
@@ -60,12 +61,19 @@ function isProcessBlock(block: ResultBlock) {
   return false;
 }
 
-export function filterTaskResultForPresentation(taskResult: TaskResult): TaskResult {
+export function filterTaskResultForPresentation(
+  taskResult: TaskResult,
+  input: { outerTexts?: Array<string | null | undefined> } = {},
+): TaskResult {
   const filteredBlocks = taskResult.blocks.filter((block) => !isProcessBlock(block));
-  if (taskResult.blocks.length > 0 && filteredBlocks.length === 0) return taskResult;
-  if (filteredBlocks.length === taskResult.blocks.length) return taskResult;
-  return {
-    ...taskResult,
-    blocks: filteredBlocks,
-  };
+  const processFiltered =
+    taskResult.blocks.length > 0 && filteredBlocks.length === 0
+      ? taskResult
+      : filteredBlocks.length === taskResult.blocks.length
+        ? taskResult
+        : {
+            ...taskResult,
+            blocks: filteredBlocks,
+          };
+  return sanitizeTaskResultOutput(processFiltered, input);
 }

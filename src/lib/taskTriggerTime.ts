@@ -170,6 +170,11 @@ function latestInstanceTime(task: Task) {
   return times.length > 0 ? Math.max(...times) : undefined;
 }
 
+function latestInstanceDate(task: Task) {
+  const latest = latestInstanceTime(task);
+  return latest === undefined ? null : new Date(latest);
+}
+
 function hasInstanceOnDay(task: Task, date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -505,6 +510,66 @@ export function isTaskTriggerDue(task: Task, now: Date) {
     return now.getTime() >= due.getTime();
   }
   return false;
+}
+
+export function computeTaskNextTriggerAt(task: Task, after: Date): Date | null {
+  if (task.taskType === "one_shot" && task.instances.length > 0) return null;
+  if (isTaskTriggerDue(task, after)) return new Date(after.getTime());
+
+  const structuredTrigger = normalizeTriggerSpec(task.trigger);
+  if (structuredTrigger) {
+    const latest = latestInstanceDate(task);
+    if (!latest) return triggerNextAfter(structuredTrigger, after);
+    if (
+      structuredTrigger.kind === "realtime" ||
+      structuredTrigger.kind === "hourly" ||
+      structuredTrigger.kind === "interval"
+    ) {
+      return triggerNextAfter(structuredTrigger, latest);
+    }
+    return triggerNextAfter(structuredTrigger, after);
+  }
+
+  const parsed = parseTaskTriggerRule(task.triggerRule, after);
+  if (task.taskType === "one_shot") {
+    if (parsed.kind === "datetime") return parsed.at.getTime() > after.getTime() ? parsed.at : new Date(after.getTime());
+    if (parsed.kind === "time" || parsed.kind === "daily") return nextDailyTriggerAfter(parsed.time, after);
+    if (parsed.kind === "weekly") return nextWeeklyTriggerAfter(parsed.time, parsed.weekdays, after);
+    if (parsed.kind === "immediate" || parsed.kind === "condition" || parsed.kind === "unsupported") {
+      return new Date(after.getTime());
+    }
+    return null;
+  }
+
+  if (parsed.kind === "interval") {
+    const latest = latestInstanceDate(task);
+    return latest ? new Date(latest.getTime() + parsed.intervalMs) : new Date(after.getTime());
+  }
+  if (parsed.kind === "datetime") {
+    return task.instances.length === 0 && parsed.at.getTime() > after.getTime() ? parsed.at : null;
+  }
+  if (parsed.kind === "time" || parsed.kind === "daily") return nextDailyTriggerAfter(parsed.time, after);
+  if (parsed.kind === "weekly") return nextWeeklyTriggerAfter(parsed.time, parsed.weekdays, after);
+  return null;
+}
+
+function nextDailyTriggerAfter(time: ParsedTaskTriggerTime, after: Date) {
+  const candidate = new Date(after);
+  candidate.setHours(time.hour, time.minute, 0, 0);
+  if (candidate.getTime() <= after.getTime()) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+  return candidate;
+}
+
+function nextWeeklyTriggerAfter(time: ParsedTaskTriggerTime, weekdays: number[], after: Date) {
+  for (let dayOffset = 0; dayOffset < 8; dayOffset += 1) {
+    const candidate = new Date(after);
+    candidate.setDate(candidate.getDate() + dayOffset);
+    candidate.setHours(time.hour, time.minute, 0, 0);
+    if (candidate.getTime() > after.getTime() && weekdays.includes(candidate.getDay())) return candidate;
+  }
+  return null;
 }
 
 function isStructuredTaskTriggerDue(task: Task, spec: TriggerSpec, now: Date): boolean {

@@ -7,6 +7,7 @@ import { ToolPermissionRequestDialog } from "@/components/runtime/ToolPermission
 import { OptionalFeedbackSuggestions } from "@/components/task/OptionalFeedbackSuggestions";
 import { TaskInlineResultView, canRenderInlineAgentResult } from "@/components/task/TaskInlineResultView";
 import { buildAwaitingDisplayModel, stripNotificationPrefix } from "@/lib/taskInstance/awaitingDisplayModel";
+import { shouldShowTaskCardMeta } from "@/lib/taskMessagePresentation";
 import { getOptionalResultFeedbackRequirement, hasOptionalResultFeedback } from "@/lib/taskResult/optionalFeedback";
 import { normalizeTaskResultViewKind } from "@/types/kiki";
 import type { Task, TaskInstance } from "@/types/kiki";
@@ -203,9 +204,10 @@ export function TaskMessageCard({
     (instance.result?.taskResult?.blocks.length ?? 0) > 0 ||
     Boolean(instance.result?.taskResult?.artifactRefs?.some((ref) => ref.kind === "webapp"));
   const showInlineResult = canRenderInlineAgentResult(task, instance);
+  const showMeta = shouldShowTaskCardMeta({ inlineResultVisible: showInlineResult });
   const toolPermissionRequest = buildTaskToolPermissionRequest(instance);
 
-  const meta = (
+  const meta = showMeta ? (
     <TaskCardMeta
       task={task}
       instance={instance}
@@ -217,7 +219,7 @@ export function TaskMessageCard({
       interactive={showInlineResult}
       onOpen={onOpen}
     />
-  );
+  ) : null;
 
   const interactionPanels = (
     <>
@@ -249,7 +251,6 @@ export function TaskMessageCard({
   if (showInlineResult) {
     return (
       <div className="mt-3 w-full text-left">
-        {meta}
         {interactionPanels}
         {inlineResult}
       </div>

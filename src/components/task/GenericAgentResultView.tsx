@@ -95,16 +95,15 @@ export function GenericAgentResultView({
   hidePendingUserPlaceholder?: boolean;
   presentationClip?: ResultPresentationClip;
 }) {
-  void summary;
-  void finalMessage;
   void structuredOutput;
-  void notification;
   void hideSummaryCard;
   void artifacts;
 
   if (!taskResult) return null;
   if (hidePendingUserPlaceholder && isPendingUserPlaceholderTaskResult(taskResult)) return null;
-  const presentationTaskResult = filterTaskResultForPresentation(taskResult);
+  const presentationTaskResult = filterTaskResultForPresentation(taskResult, {
+    outerTexts: [summary, finalMessage, notification?.snippet],
+  });
   const interactive = (
     <InteractiveRenderSurface
       taskResult={presentationTaskResult}
