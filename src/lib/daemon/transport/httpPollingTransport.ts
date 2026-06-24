@@ -120,6 +120,7 @@ export async function runHttpPollingTransport(input: {
           body: JSON.stringify({
             fingerprint: input.fingerprint,
             daemonVersion: input.daemonVersion,
+            runningJobIds: input.getHelloState().runningJobIds,
             runningGovernanceJobIds: input.getHelloState().runningGovernanceJobIds,
           }),
         },

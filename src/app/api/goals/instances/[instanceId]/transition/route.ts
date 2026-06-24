@@ -7,10 +7,12 @@ import {
   type RuntimeJobStatus,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { cancelActiveTunnelDispatch } from "@/lib/server/scheduling/taskDispatcher";
 import {
   transitionTaskInstanceProjection,
   updateGoalRuntimeJobExecution,
 } from "@/lib/server/services/goalRuntimeService";
+import { buildPausedJobResumePatch } from "@/lib/server/taskExecution/pauseResumeCheckpoint";
 import type { Goal, TaskInstanceStatus } from "@/types/kiki";
 import { withAuth } from "@/lib/server/http/withAuth";
 
@@ -89,6 +91,13 @@ async function POSTHandler(
   if (!located) {
     return NextResponse.json({ reason: "未找到任务实例" }, { status: 404 });
   }
+  const reason =
+    body.reason ??
+    (body.status === "paused"
+      ? "用户暂停任务执行"
+      : body.status === "terminated" || body.status === "error"
+        ? "用户中止任务执行"
+        : undefined);
   const idempotencyKey =
     request.headers.get("Idempotency-Key") ??
     createIdempotencyKey("instance.status_changed", located.instance.id, located.instance.status, body.status);
@@ -102,7 +111,7 @@ async function POSTHandler(
     payload: {
       previousStatus: located.instance.status,
       nextStatus: body.status,
-      reason: body.reason,
+      reason,
     },
   });
   if (!statusEvent) {
@@ -117,7 +126,7 @@ async function POSTHandler(
     idempotencyKey: createIdempotencyKey("instance.user_command", idempotencyKey),
     payload: {
       command: toCommand(body.status),
-      reason: body.reason,
+      reason,
     },
   });
   const nextStatus = statusEvent.kind === "instance.status_changed" ? statusEvent.payload.nextStatus : body.status;
@@ -129,13 +138,14 @@ async function POSTHandler(
     taskId: located.task.id,
     instanceId: located.instance.id,
     status: nextStatus,
-    reason: body.reason,
+    reason,
   });
   const job = getRuntimeJobByTaskInstanceId(located.instance.id);
   if (job) {
+    const runtimeStatus = toRuntimeJobStatus(nextStatus);
     updateGoalRuntimeJobExecution(job.id, {
-      status: toRuntimeJobStatus(nextStatus),
-      lastError: body.reason,
+      status: runtimeStatus,
+      lastError: reason,
       finishedAt:
         nextStatus === "completed" || nextStatus === "error" || nextStatus === "paused" || nextStatus === "terminated"
           ? new Date().toISOString()
@@ -143,6 +153,21 @@ async function POSTHandler(
       leaseOwner: nextStatus === "in_progress" ? job.leaseOwner : undefined,
       leaseExpiresAt: nextStatus === "in_progress" ? job.leaseExpiresAt : undefined,
     });
+    if (runtimeStatus === "cancelled") {
+      if (nextStatus === "paused") {
+        const latestJob = getRuntimeJobByTaskInstanceId(located.instance.id) ?? job;
+        const checkpoint = buildPausedJobResumePatch(latestJob, { reason });
+        updateGoalRuntimeJobExecution(job.id, {
+          payload: {
+            ...latestJob.payload,
+            resumeContext: checkpoint.resumeContext,
+          },
+          trajectory: checkpoint.trajectory,
+          result: checkpoint.result,
+        });
+      }
+      cancelActiveTunnelDispatch(job.id, { reason });
+    }
   }
   return NextResponse.json({
     ok: true,

@@ -17,6 +17,10 @@ import {
   createPreExecutionTaskResult,
 } from "@/lib/server/taskExecution/preExecutionBlocker";
 import {
+  buildPausedJobResumePatch,
+  isPausedRuntimeJob,
+} from "@/lib/server/taskExecution/pauseResumeCheckpoint";
+import {
   getLatestOpenRuntimeJobByTaskId,
   getRuntimeJobByTaskInstanceId,
   type RuntimeJobRecord,
@@ -25,7 +29,7 @@ import type { GoalServerProgress } from "@/types/goalTelemetry";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
-type TriggerSource = "user" | "scheduler" | "feedback_rerun" | "resume_after_block";
+type TriggerSource = "user" | "scheduler" | "feedback_rerun" | "resume_after_block" | "resume_after_pause";
 
 type StartTaskAttemptInput = {
   goal: Goal;
@@ -151,7 +155,7 @@ function disableAutoRunIfNeeded(goals: Goal[], triggerSource: TriggerSource, tas
 
 function runtimeJobEventSource(triggerSource: TriggerSource) {
   if (triggerSource === "feedback_rerun") return "feedback";
-  if (triggerSource === "resume_after_block") return "resume";
+  if (triggerSource === "resume_after_block" || triggerSource === "resume_after_pause") return "resume";
   return triggerSource;
 }
 
@@ -257,6 +261,14 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       taskInstanceId: instance.id,
     };
   }
+  if (input.triggerSource === "resume_after_pause" && existing?.status === "cancelled" && !isPausedRuntimeJob(existing)) {
+    return {
+      schemaVersion: 1,
+      outcome: "blocked_config",
+      taskInstanceId: instance.id,
+      reason: "该任务实例已终止，请使用重新执行创建新实例。",
+    };
+  }
 
   // 终态护栏：目标实例的 job 已 completed 时直接空操作，不重建 blocker / 不重新 admit。
   // feedback_rerun 始终传入全新实例（此时该实例尚无 job），天然豁免；
@@ -270,13 +282,25 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       taskInstanceId: instance.id,
     };
   }
+  const pausedResumePatch = isPausedRuntimeJob(existing)
+    ? buildPausedJobResumePatch(existing, { reason: existing.lastError })
+    : null;
+  if (input.triggerSource === "resume_after_pause" && !pausedResumePatch) {
+    return {
+      schemaVersion: 1,
+      outcome: "blocked_config",
+      taskInstanceId: instance.id,
+      reason: "未找到可恢复的暂停执行上下文，请使用重新执行创建新实例。",
+    };
+  }
+  const resumeContext = input.resumeContext ?? pausedResumePatch?.resumeContext;
 
   const decision = resolveAdmitDecision({
     conversationId,
     goal: latestGoal,
     subGoal: latestSubGoal,
     task: latestTask,
-    resumeContext: input.resumeContext,
+    resumeContext,
   });
 
   const instanceId = normalizeInstanceId(instance.id);
@@ -324,7 +348,7 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       interactionRequirement,
       blocker,
       taskResult,
-      trajectory: [],
+      trajectory: pausedResumePatch?.trajectory ?? [],
     });
 
     persistInstanceSnapshot({
@@ -345,17 +369,20 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       requestId: input.requestId,
       conversationWorkspaceDir: input.conversationWorkspaceDir,
       taskWorkspaceDir: input.taskWorkspaceDir,
-      resumeContext: input.resumeContext,
+      resumeContext,
     });
     updateGoalRuntimeJobExecution(`job-${instance.id}`, {
       status: "awaiting_user",
       progress,
       logs: [],
-      trajectory: [],
+      trajectory: pausedResumePatch?.trajectory ?? [],
       blocker,
       result:
         progress.resultPayload && typeof progress.resultPayload === "object"
-          ? progress.resultPayload
+          ? {
+              ...progress.resultPayload,
+              ...(pausedResumePatch ? { pauseResumeCheckpoint: pausedResumePatch.result.pauseResumeCheckpoint } : {}),
+            }
           : null,
       finishedAt: undefined,
       leaseOwner: undefined,
@@ -383,7 +410,7 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     instance,
   });
 
-  enqueueRuntimeJob({
+  const queuedJob = enqueueRuntimeJob({
     goal: latestGoal,
     subGoal: latestSubGoal,
     task: latestTask,
@@ -393,8 +420,18 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     requestId: input.requestId,
     conversationWorkspaceDir: input.conversationWorkspaceDir,
     taskWorkspaceDir: input.taskWorkspaceDir,
-    resumeContext: input.resumeContext,
+    resumeContext,
   });
+  if (pausedResumePatch) {
+    updateGoalRuntimeJobExecution(queuedJob.id, {
+      payload: {
+        ...queuedJob.payload,
+        resumeContext,
+      },
+      trajectory: pausedResumePatch.trajectory,
+      result: pausedResumePatch.result,
+    });
+  }
 
   return {
     schemaVersion: 1,

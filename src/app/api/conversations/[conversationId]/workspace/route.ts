@@ -6,6 +6,7 @@ import {
   deleteRuntimeJobsByConversationId,
   releaseRuntimeJobLeasesByConversationId,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { cancelActiveTunnelDispatchesByConversationId } from "@/lib/server/scheduling/taskDispatcher";
 import {
   deleteConversationWorkspace,
   ensureConversationWorkspace,
@@ -29,6 +30,8 @@ async function DELETEHandler(request: NextRequest, context: { params: Promise<{ 
     const body = (await request.json().catch(() => ({}))) as { claudeSessionId?: string };
     const workspaceDir = getConversationWorkspaceDir(conversationId);
 
+    const cancelReason = "用户删除会话，终止关联任务执行";
+    const cancelledActiveTunnelJobs = cancelActiveTunnelDispatchesByConversationId(conversationId, cancelReason);
     const cancelledJobs = cancelRuntimeJobsByConversationId(conversationId);
     releaseRuntimeJobLeasesByConversationId(conversationId);
     const deletedJobs = deleteRuntimeJobsByConversationId(conversationId);
@@ -44,7 +47,7 @@ async function DELETEHandler(request: NextRequest, context: { params: Promise<{ 
 
     deleteConversationWorkspace(conversationId);
     await cleanupUserMemoryCandidatesForConversation(conversationId);
-    return NextResponse.json({ ok: true, cancelledJobs, deletedJobs, deletedClaudeSession });
+    return NextResponse.json({ ok: true, cancelledJobs, cancelledActiveTunnelJobs, deletedJobs, deletedClaudeSession });
   } catch (error) {
     return NextResponse.json(
       { ok: false, reason: error instanceof Error ? error.message : "清理会话 workspace 失败" },

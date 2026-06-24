@@ -156,8 +156,8 @@ async function executeRemoteJob(input: {
   requestId: string;
   payload: RuntimeJobPayload;
   initialTrajectory: ExecutionTrajectoryStep[];
+  signal: AbortSignal;
 }) {
-  const abortController = new AbortController();
   return runGoalTask({
     requestId: input.requestId,
     goal: input.payload.goal,
@@ -167,7 +167,7 @@ async function executeRemoteJob(input: {
     runtimeEnv: input.payload.runtimeEnv,
     resumeContext: input.payload.resumeContext,
     initialTrajectory: input.initialTrajectory,
-    signal: abortController.signal,
+    signal: input.signal,
   });
 }
 
@@ -219,6 +219,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
   const runningJobs = new Set<string>();
   const runningGovernanceJobs = new Set<string>();
   const requestIdToRunningJob = new Map<string, string>();
+  const runningJobControllers = new Map<string, AbortController>();
   const commandStartedAtByRequestId = new Map<string, number>();
   const commandStartedAtByJobId = new Map<string, number>();
   // 进行中的流式会话数（stream_prompt 不进 runningJobs，需单独计数，避免交接退出打断实时流）。
@@ -640,7 +641,9 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     execute(command, startedAt) {
       if (command.type !== "execute") return;
       if (runningJobs.has(command.jobId)) return;
+      const abortController = new AbortController();
       runningJobs.add(command.jobId);
+      runningJobControllers.set(command.jobId, abortController);
       requestIdToRunningJob.set(command.requestId, command.jobId);
       logDaemonEvent("info", "exec", "start", {
         requestId: command.requestId,
@@ -666,7 +669,13 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           };
           const initialTrajectory = Array.isArray(raw.trajectory) ? raw.trajectory : [];
           const outcome = await runWithUserContext(boundUserId, () =>
-            executeRemoteJob({ jobId: command.jobId, requestId: command.requestId, payload, initialTrajectory }),
+            executeRemoteJob({
+              jobId: command.jobId,
+              requestId: command.requestId,
+              payload,
+              initialTrajectory,
+              signal: abortController.signal,
+            }),
           );
           logDaemonEvent("info", "exec", "done", {
             requestId: command.requestId,
@@ -689,37 +698,49 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             result: outcome.result ?? undefined,
           });
         } catch (error) {
-          trace?.finish("failed", error instanceof Error ? error.message : String(error));
-          logDaemonEvent("info", "err", "execute failed", {
+          const aborted = abortController.signal.aborted;
+          const message = aborted ? "用户终止任务执行" : error instanceof Error ? error.message : "执行失败";
+          trace?.finish("failed", message);
+          logDaemonEvent("info", aborted ? "exec" : "err", aborted ? "execute cancelled" : "execute failed", {
             requestId: command.requestId,
             jobId: command.jobId,
             durationMs: Date.now() - startedAt,
-            error: error instanceof Error ? error.message : "执行失败",
+            error: message,
           });
           await sendResult({
             type: "execute",
             jobId: command.jobId,
             ok: false,
             status: "failed",
-            error: error instanceof Error ? error.message : "执行失败",
+            error: message,
           });
         } finally {
           runningJobs.delete(command.jobId);
+          runningJobControllers.delete(command.jobId);
           requestIdToRunningJob.delete(command.requestId);
         }
       })();
     },
     cancel(command) {
       if (command.type !== "cancel") return;
-      // 暂未实现真正的远程取消：daemon 不会中断 runningJobs，对应的 execute 仍会跑到自然终态。
-      // 这里只做显式记录，避免静默缺席；不可伪造 execute/failed 结果，否则会提前 resolve
-      // pendingExecutes 并触发 executeResultListener 把仍在运行的任务标记为 failed，
-      // 随后真实结果回传又会产生同 jobId 的双重结果与状态竞争。
-      logDaemonEvent("info", "cmd", "cancel unsupported", {
+      const abortController = runningJobControllers.get(command.jobId);
+      const running = runningJobs.has(command.jobId);
+      if (!abortController || abortController.signal.aborted) {
+        logDaemonEvent("info", "cmd", "cancel ignored", {
+          requestId: command.requestId,
+          jobId: command.jobId,
+          running,
+          reason: command.reason,
+        });
+        return;
+      }
+      logDaemonEvent("info", "cmd", "cancel received", {
         requestId: command.requestId,
         jobId: command.jobId,
-        running: runningJobs.has(command.jobId),
+        running,
+        reason: command.reason,
       });
+      abortController.abort();
     },
   };
 

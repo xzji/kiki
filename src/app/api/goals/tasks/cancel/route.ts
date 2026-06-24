@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
+import { cancelActiveTunnelDispatch } from "@/lib/server/scheduling/taskDispatcher";
 import { projectRuntimeJobStatusProjection } from "@/lib/server/services/goalRuntimeService";
 import { withAuth } from "@/lib/server/http/withAuth";
 import { buildTaskRunView, toTaskRunResponse } from "@/lib/server/taskExecution/taskRunView";
@@ -31,6 +32,7 @@ async function POSTHandler(request: NextRequest) {
     );
   }
 
+  cancelActiveTunnelDispatch(job.id, { reason: "用户手动停止任务执行" });
   projectRuntimeJobStatusProjection({
     job,
     status: "cancelled",

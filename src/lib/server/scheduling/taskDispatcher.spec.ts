@@ -4,10 +4,12 @@ import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSna
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import {
   getRuntimeJob,
+  cancelRuntimeJobByTaskRun,
   upsertRuntimeJob,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import {
+  cancelActiveTunnelDispatch,
   dispatchReadyTasksToMachines,
   registerTunnelDispatchCallbacks,
 } from "@/lib/server/scheduling/taskDispatcher";
@@ -22,6 +24,7 @@ import {
   type MachineCommand,
 } from "@/lib/server/tunnel/tunnelHub";
 import type { ExecutionBlocker } from "@/types/executionBlocker";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -212,6 +215,78 @@ export async function runTaskDispatcherSpecs() {
     assert.equal(getRuntimeJob(awaitingJob.id)?.status, "awaiting_user");
     assert.equal(getPendingToolPermissionRequest(requestId)?.id, requestId);
     assert.equal(getToolPermissionRequestState(requestId), "detached");
+
+    const cancellableJob = seedQueuedCloudJob("job-task-dispatcher-cancel-active");
+    const cancellableDispatchResult = await runWithUserContext("spec-test-user", () =>
+      dispatchReadyTasksToMachines({
+        leaseOwner: "cloud-orchestrator-spec",
+        limit: 1,
+      }),
+    );
+    assert.equal(cancellableDispatchResult.processed, 1);
+    assert.equal(sent.at(-1)?.type, "execute");
+
+    const cancelledJob = cancelRuntimeJobByTaskRun({
+      requestId: cancellableJob.requestId,
+      reason: "用户终止任务执行",
+    });
+    assert.equal(cancelledJob?.status, "cancelled");
+    const cancelDispatch = cancelActiveTunnelDispatch(cancellableJob.id, { reason: "用户终止任务执行" });
+    assert.equal(cancelDispatch.sent, true);
+    const cancelCommand = sent.at(-1);
+    assert.equal(cancelCommand?.type, "cancel");
+    if (cancelCommand?.type !== "cancel") throw new Error("expected cancel command");
+    assert.equal(cancelCommand.jobId, cancellableJob.id);
+
+    submitMachineResult({
+      type: "execute",
+      jobId: cancellableJob.id,
+      ok: true,
+      status: "completed",
+      result: { finalMessage: "late result should be ignored" },
+    });
+    assert.equal(getRuntimeJob(cancellableJob.id)?.status, "cancelled", "cancelled job must ignore late daemon result");
+
+    const resumeTrajectory: ExecutionTrajectoryStep[] = [
+      {
+        id: "trajectory-task-dispatcher-resume",
+        index: 0,
+        type: "tool_call",
+        status: "completed",
+        title: "已完成上一轮搜索",
+        toolCall: { name: "mcp__tavily__tavily_search", summary: "搜索上轮资料" },
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      },
+    ];
+    const resumeJob = seedQueuedCloudJob("job-task-dispatcher-resume-context");
+    upsertRuntimeJob({
+      ...resumeJob,
+      payload: {
+        ...resumeJob.payload,
+        resumeContext: "用户暂停后恢复，请基于上一轮上下文继续执行。",
+      },
+      trajectory: resumeTrajectory,
+    });
+    const resumeDispatchResult = await runWithUserContext("spec-test-user", () =>
+      dispatchReadyTasksToMachines({
+        leaseOwner: "cloud-orchestrator-spec",
+        limit: 1,
+      }),
+    );
+    assert.equal(resumeDispatchResult.processed, 1);
+    const resumeExecuteCommand = sent.at(-1);
+    assert.equal(resumeExecuteCommand?.type, "execute");
+    if (resumeExecuteCommand?.type !== "execute") throw new Error("expected resume execute command");
+    assert.equal(
+      (resumeExecuteCommand.payload as { resumeContext?: string }).resumeContext,
+      "用户暂停后恢复，请基于上一轮上下文继续执行。",
+    );
+    assert.equal(
+      ((resumeExecuteCommand.payload as { trajectory?: unknown[] }).trajectory ?? []).length,
+      1,
+      "resume execute payload should carry checkpoint trajectory",
+    );
   } finally {
     unregisterMachineWsConnection(machineId, sender);
   }

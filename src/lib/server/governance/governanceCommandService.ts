@@ -23,6 +23,7 @@ import {
 import { markGoalInstanceRunStarted } from "@/lib/server/runtime/goalStateSnapshot";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { applyGoalCommand } from "@/lib/server/services/goalCommandService";
+import { cancelActiveTaskRuntimeJob } from "@/lib/server/services/dispatchTaskFromThread";
 import {
   mutateGoalsProjection,
   transitionTaskInstanceProjection,
@@ -237,11 +238,12 @@ function preemptOpenJobForTask(input: {
       reason: input.reason,
     });
   }
-  cancelRuntimeJobByTaskRun({
+  const cancelledJob = cancelRuntimeJobByTaskRun({
     taskInstanceId: targetInstanceId ?? undefined,
     requestId: openJob.requestId,
     reason: input.reason,
   });
+  if (cancelledJob) cancelActiveTaskRuntimeJob(cancelledJob.id, input.reason);
   logGovernanceApply("preempt", {
     taskId: input.taskId,
     preemptedInstanceId: targetInstanceId,

@@ -389,6 +389,17 @@ export function runGoalRuntimeServiceSpecs() {
     "terminated snapshot must not be overwritten by an older paused cancelled runtime job",
   );
 
+  seedGoals([buildGoal(), buildProjectionGoal()]);
+  upsertRuntimeJob({
+    ...projectionJob("cancelled"),
+    lastError: "用户手动停止任务执行",
+    finishedAt: "2026-06-03T00:00:07.000Z",
+  });
+  const stoppedComposedInstance = readComposedGoalsSnapshotMeta([])
+    .value.find((goal) => goal.id === PROJECTION_GOAL_ID)
+    ?.subGoals[0]?.tasks[0]?.instances[0];
+  assert.equal(stoppedComposedInstance?.status, "terminated", "停止语义必须合成为 terminated 而非 paused");
+
   seedGoals([buildGoal(), buildAwaitingProjectionGoal()]);
   const backfilled = backfillTaskNotificationStatesFromGoals(readGoalsSnapshot([]));
   assert.equal(backfilled.changed, 1);

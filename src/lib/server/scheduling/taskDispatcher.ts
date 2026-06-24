@@ -41,8 +41,29 @@ type ActiveTunnelDispatch = {
   pendingToolPermissionRequestIds: Set<string>;
 };
 
-const inFlightTunnelJobs = new Set<string>();
-const activeTunnelDispatches = new Map<string, ActiveTunnelDispatch>();
+type TaskDispatcherState = {
+  inFlightTunnelJobs: Set<string>;
+  activeTunnelDispatches: Map<string, ActiveTunnelDispatch>;
+};
+
+// 自定义 server 调度器与 Next API route 是两份 bundle；取消 API 需要访问调度器持有的
+// active dispatch 状态，必须挂到 globalThis，避免 API bundle 读到空 Map 后只改云端状态。
+const TASK_DISPATCHER_STATE_KEY = Symbol.for("kiki.server.taskDispatcher.state");
+
+function getTaskDispatcherState(): TaskDispatcherState {
+  const globalRef = globalThis as typeof globalThis & { [TASK_DISPATCHER_STATE_KEY]?: TaskDispatcherState };
+  if (!globalRef[TASK_DISPATCHER_STATE_KEY]) {
+    globalRef[TASK_DISPATCHER_STATE_KEY] = {
+      inFlightTunnelJobs: new Set<string>(),
+      activeTunnelDispatches: new Map<string, ActiveTunnelDispatch>(),
+    };
+  }
+  return globalRef[TASK_DISPATCHER_STATE_KEY];
+}
+
+const dispatcherState = getTaskDispatcherState();
+const inFlightTunnelJobs = dispatcherState.inFlightTunnelJobs;
+const activeTunnelDispatches = dispatcherState.activeTunnelDispatches;
 const MAX_TUNNEL_PROGRESS_LOGS = 200;
 
 function finishTunnelDispatch(jobId: string, options: { detachPendingToolPermissions?: boolean } = {}) {
@@ -78,6 +99,34 @@ function requeueTunnelJob(active: ActiveTunnelDispatch, reason: string) {
   });
 }
 
+export function cancelActiveTunnelDispatch(
+  jobId: string,
+  options: { reason?: string; requestId?: string } = {},
+) {
+  const active = activeTunnelDispatches.get(jobId);
+  if (!active) return { active: false, sent: false };
+  const requestId = options.requestId ?? `cancel-${active.job.requestId ?? jobId}-${Date.now()}`;
+  getTunnelHub().sendCancel({
+    machineId: active.machineId,
+    jobId,
+    requestId,
+    reason: options.reason,
+  });
+  finishTunnelDispatch(jobId);
+  return { active: true, sent: true, machineId: active.machineId, requestId };
+}
+
+export function cancelActiveTunnelDispatchesByConversationId(conversationId: string, reason: string) {
+  let sent = 0;
+  for (const [jobId, active] of Array.from(activeTunnelDispatches.entries())) {
+    const activeConversationId = active.job.conversationId ?? active.job.payload.goal.conversationId;
+    if (activeConversationId !== conversationId) continue;
+    const result = cancelActiveTunnelDispatch(jobId, { reason });
+    if (result.sent) sent += 1;
+  }
+  return sent;
+}
+
 function completeTunnelJob(input: {
   jobId: string;
   ok: boolean;
@@ -89,6 +138,11 @@ function completeTunnelJob(input: {
 }) {
   const active = activeTunnelDispatches.get(input.jobId);
   if (!active) return;
+  const latestJob = getRuntimeJob(input.jobId);
+  if (latestJob?.status === "cancelled") {
+    finishTunnelDispatch(input.jobId);
+    return;
+  }
 
   // 终态以 daemon 回传的结构化 status 为准；缺省（旧版 daemon 瘦回执）回退按 ok 推断。
   const status = input.status ?? (input.ok ? "completed" : "failed");
@@ -253,6 +307,10 @@ function handleTunnelJobProgress(input: {
   if (!active) return;
   runWithUserContext(active.userId, () => {
     const current = getRuntimeJob(input.jobId) ?? active.job;
+    if (current.status === "cancelled") {
+      finishTunnelDispatch(input.jobId);
+      return;
+    }
     const logs = input.log ? mergeRuntimeJobLogs(current.logs, input.log) : undefined;
     const trajectoryFromLog = input.log ? mergeRuntimeJobTrajectoryFromLog(current.trajectory, input.log) : undefined;
     const trajectory = input.trajectory && input.trajectory.length > 0 ? input.trajectory : trajectoryFromLog;

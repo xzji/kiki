@@ -84,6 +84,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
       instance: optimisticRun.serverInstance,
       runtimeEnv,
       requestId,
+      action,
     });
     if (run.goals) {
       useGoalStore.getState().applyGoalsProjection(run.goals, run.revision);

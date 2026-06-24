@@ -15,6 +15,7 @@ type RequestBody = {
   task: Task;
   instance?: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
+  action?: "start" | "resume" | "rerun";
 };
 
 async function POSTHandler(request: NextRequest) {
@@ -37,7 +38,7 @@ async function POSTHandler(request: NextRequest) {
       task: body.task,
       instance: body.instance,
       runtimeEnv: body.runtimeEnv,
-      triggerSource: "user",
+      triggerSource: body.action === "resume" ? "resume_after_pause" : "user",
       requestId,
     });
 

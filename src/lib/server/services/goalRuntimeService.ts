@@ -50,7 +50,7 @@ export class GoalsProjectionConflictError extends Error {
 }
 
 function isTerminationReason(reason?: string) {
-  return Boolean(reason && /终止|terminate/i.test(reason));
+  return Boolean(reason && /终止|中止|停止|terminate|stop/i.test(reason));
 }
 
 function runtimeJobStatusToTaskInstanceStatus(status: RuntimeJobStatus, reason?: string): TaskInstanceStatus {

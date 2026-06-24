@@ -27,7 +27,11 @@ import {
   upsertRuntimeEnvironmentsSnapshot,
 } from "@/lib/server/runtime/stateSnapshot";
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
-import { resumeAllTaskExecution } from "@/lib/server/scheduling/dispatchPauseService";
+import {
+  pauseAllTaskExecution,
+  resumeAllTaskExecution,
+} from "@/lib/server/scheduling/dispatchPauseService";
+import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
 
@@ -143,6 +147,106 @@ function seedCompletedJob(goal: Goal): void {
   upsertRuntimeJob(job);
 }
 
+function runningInstance(): TaskInstance {
+  const now = "2026-06-15T04:00:00.000Z";
+  return {
+    id: INSTANCE_ID,
+    taskId: TASK_ID,
+    dateLabel: "06-15",
+    status: "in_progress",
+    intro: "正在执行",
+    payload: { kind: "generic_result", summary: "" },
+    createdAt: now,
+    execution: { phase: "running", status: "in_progress", lastUpdatedAt: now },
+  };
+}
+
+function goalWithRunningTask(): Goal {
+  const goal = goalWithCompletedOneShot();
+  const task = goal.subGoals[0]!.tasks[0]!;
+  goal.subGoals[0] = {
+    ...goal.subGoals[0]!,
+    tasks: [
+      {
+        ...task,
+        instances: [runningInstance()],
+      },
+    ],
+  };
+  return goal;
+}
+
+function seedRunningJob(goal: Goal): void {
+  const now = "2026-06-15T04:00:00.000Z";
+  const subGoal = goal.subGoals[0]!;
+  const task = subGoal.tasks[0]!;
+  const instance = task.instances[0]!;
+  const trajectory: ExecutionTrajectoryStep[] = [
+    {
+      id: "trajectory-pause-resume-spec-1",
+      index: 0,
+      type: "tool_call",
+      status: "completed",
+      title: "已完成初步搜索",
+      toolCall: { name: "mcp__tavily__tavily_search", summary: "搜索目的地资料" },
+      startedAt: now,
+      endedAt: now,
+    },
+  ];
+  const job: RuntimeJobRecord = {
+    id: `job-${INSTANCE_ID}`,
+    taskInstanceId: INSTANCE_ID,
+    taskId: TASK_ID,
+    goalId: GOAL_ID,
+    conversationId: goal.conversationId,
+    userId: "user-pause-resume-spec",
+    kind: "goal_task",
+    status: "running",
+    requestId: "req-running-pause-resume-spec",
+    runtimeTransport: "cloud_control_plane",
+    payload: {
+      goal,
+      subGoal,
+      task,
+      instance,
+      runtimeEnv: localRuntimeEnv(),
+    },
+    progress: {
+      requestId: "req-running-pause-resume-spec",
+      scope: "goal_task_execute",
+      status: "running",
+      phase: "executing",
+      message: "已完成初步搜索，准备整理方案",
+      startedAt: now,
+      updatedAt: now,
+      goalId: GOAL_ID,
+      taskId: TASK_ID,
+      taskInstanceId: INSTANCE_ID,
+      resultPayload: { trajectory },
+    },
+    logs: [
+      {
+        id: "log-pause-resume-spec-1",
+        timestamp: now,
+        requestId: "req-running-pause-resume-spec",
+        scope: "goal_task_execute",
+        level: "info",
+        phase: "executing",
+        message: "搜索目的地资料完成",
+        toolName: "mcp__tavily__tavily_search",
+        status: "completed",
+      },
+    ],
+    trajectory,
+    blocker: null,
+    result: null,
+    createdAt: now,
+    updatedAt: now,
+    startedAt: now,
+  };
+  upsertRuntimeJob(job);
+}
+
 export function runDispatchPauseServiceSpecs() {
   ensureIsolatedPlanningSpecDataDir();
 
@@ -159,4 +263,30 @@ export function runDispatchPauseServiceSpecs() {
   // （修复前：resume-all → startTaskAttempt 会把 job 改写为 awaiting_user 并重新追问。）
   const jobAfter = getRuntimeJobByTaskInstanceId(INSTANCE_ID);
   assert.equal(jobAfter?.status, "completed", "已完成 job 的状态不应被 resume-all 改写");
+
+  ensureIsolatedPlanningSpecDataDir();
+  const runningGoal = goalWithRunningTask();
+  upsertGoalsSnapshot([runningGoal]);
+  upsertRuntimeEnvironmentsSnapshot([localRuntimeEnv()]);
+  seedRunningJob(runningGoal);
+
+  const pauseResult = pauseAllTaskExecution();
+  assert.equal(pauseResult.pausedCount, 1, "运行中的任务应被 pause-all 暂停");
+  const pausedJob = getRuntimeJobByTaskInstanceId(INSTANCE_ID);
+  assert.equal(pausedJob?.status, "cancelled", "暂停后 runtime job 应进入 cancelled/paused 权威状态");
+  assert.ok(pausedJob?.payload.resumeContext?.includes("用户暂停全部任务执行"), "暂停后应保存 resumeContext");
+  assert.equal(pausedJob?.trajectory.length, 1, "暂停后应保留上一轮 trajectory");
+
+  const resumeResult = resumeAllTaskExecution();
+  assert.equal(resumeResult.resumedCount, 1, "paused job 应被 resume-all 重新入队");
+  const resumedJob = getRuntimeJobByTaskInstanceId(INSTANCE_ID);
+  assert.equal(resumedJob?.status, "queued", "恢复后 runtime job 应重新 queued");
+  assert.ok(resumedJob?.payload.resumeContext?.includes("上下文继续"), "恢复后应继续携带 resumeContext");
+  assert.equal(resumedJob?.trajectory.length, 1, "恢复后 queued job 应保留 checkpoint trajectory");
+  assert.equal(
+    (resumedJob?.result?.pauseResumeCheckpoint as { previousTrajectorySteps?: number } | undefined)
+      ?.previousTrajectorySteps,
+    1,
+    "恢复后应保留 pauseResumeCheckpoint 元信息",
+  );
 }

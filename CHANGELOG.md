@@ -8,12 +8,18 @@
 - 账号/设置入口在桌面端恢复为侧边栏左下角头像；移动端改为底部导航中的“我的”入口，避免小屏幕左下角浮动头像难以点击。
 - 任务监控面板默认宽度调整为 340px，最大宽度限制为 420px；多面板并排时进一步收紧监控栏占比，保证 1024px 窄屏下单开详情抽屉依然有足够阅读空间。
 - 任务执行新增并发上限排队提示：达到账号最大并发数时新任务进入排队状态，UI 给出明确提示，不再直接失败或无反馈。
+- 任务暂停/恢复升级为上下文续跑：暂停时保存 runtime job 的 progress、logs、trajectory 与 resumeContext，恢复时复用同一实例并携带旧轨迹进入增量执行模式。
 
 ### Fixed
 - **[核心修复]** 彻底解决工具授权请求“立即点击依然提示过期”的问题：根因是 Next.js 自定义 Server（编排侧创建请求）与 API Routes（用户侧响应授权）是两份独立 Bundle，模块级 `const Map` 内存不共享；将 pending 授权请求和会话级授权规则挂载到 `globalThis` 通过 `Symbol.for` 共享，彻底消除跨 Bundle 状态隔离。
+- 修复任务停止/暂停只更新云端状态、未真正中止本地 daemon 执行的问题；现在云端会向 active machine 下发 `cancel`，daemon 通过 `AbortController` 中止正在运行的任务。
+- 修复 `停止/中止` 文案未被识别为终止语义，可能把 cancelled runtime job 合成为 `paused` 并被错误恢复的问题。
 - 修复任务监控抽屉操作（开始/暂停/恢复/重跑）缺少通知反馈的问题，增加行内 notice 提示区。
 - 修复会话页、日程页和结果页隐藏 `UserMenu` 后，头像入口消失且设置弹窗无法通过全局事件打开的问题。
 - 补齐任务面板布局在宽监控栏、仅开监控等场景的边界测试。
+
+### Added
+- 新增 pause/resume checkpoint 构建逻辑和回归测试，覆盖全局暂停恢复、Tunnel cancel 下发、迟到执行结果忽略和恢复 payload 携带旧轨迹。
 
 ### Verification
 - 通过 `pnpm test:planning`。

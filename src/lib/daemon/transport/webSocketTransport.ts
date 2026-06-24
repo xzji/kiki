@@ -143,6 +143,7 @@ export async function runWebSocketTransport(input: {
             "daemon_service",
             "run_prompt",
             "stream_prompt",
+            "cancel",
             "topic_governance_tick",
             "thread_governance_tick",
           ],

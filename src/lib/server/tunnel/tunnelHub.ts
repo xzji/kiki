@@ -108,7 +108,7 @@ export type MachineCommand =
   | { type: "run_prompt_text"; requestId: string; payload: RemotePromptJsonPayload }
   | { type: "stream_prompt"; sessionId: string; payload: RemoteStreamPromptPayload }
   | { type: "tool_permission_decision"; sessionId: string; decision: ToolPermissionDecision }
-  | { type: "cancel"; requestId: string; jobId: string };
+  | { type: "cancel"; requestId: string; jobId: string; reason?: string };
 
 /** goal task 执行终态：本机执行完后回传，云端据此落 completed/failed/awaiting_user */
 export type MachineExecuteStatus = "completed" | "failed" | "awaiting_user";
@@ -612,6 +612,14 @@ export function getTunnelHub() {
         jobId: input.jobId,
         requestId: input.requestId,
         payload: input.payload,
+      });
+    },
+    sendCancel(input: { machineId: string; jobId: string; requestId: string; reason?: string }) {
+      enqueueCommand(input.machineId, {
+        type: "cancel",
+        jobId: input.jobId,
+        requestId: input.requestId,
+        reason: input.reason,
       });
     },
     sendGovernanceTick(input: { machineId: string; command: GovernanceTickMachineCommand }) {

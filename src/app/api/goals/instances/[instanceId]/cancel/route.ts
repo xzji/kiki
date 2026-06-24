@@ -4,7 +4,12 @@ import { createIdempotencyKey } from "@/lib/opaqueIds";
 import { appendGoalEventOnce } from "@/lib/server/repositories/goalEventLogRepository";
 import { cancelRuntimeJobByTaskRun } from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { transitionTaskInstanceProjection } from "@/lib/server/services/goalRuntimeService";
+import { cancelActiveTunnelDispatch } from "@/lib/server/scheduling/taskDispatcher";
+import {
+  transitionTaskInstanceProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
+import { buildPausedJobResumePatch } from "@/lib/server/taskExecution/pauseResumeCheckpoint";
 import { buildTaskRunView, toTaskRunResponse } from "@/lib/server/taskExecution/taskRunView";
 import type { Goal } from "@/types/kiki";
 import { withAuth } from "@/lib/server/http/withAuth";
@@ -78,6 +83,20 @@ async function POSTHandler(
     requestId: located.instance.runner?.requestId,
     reason: runtimeCancelReason,
   });
+  if (job) {
+    if (mode === "pause") {
+      const checkpoint = buildPausedJobResumePatch(job, { reason: runtimeCancelReason });
+      updateGoalRuntimeJobExecution(job.id, {
+        payload: {
+          ...job.payload,
+          resumeContext: checkpoint.resumeContext,
+        },
+        trajectory: checkpoint.trajectory,
+        result: checkpoint.result,
+      });
+    }
+    cancelActiveTunnelDispatch(job.id, { reason: runtimeCancelReason });
+  }
   const event = appendGoalEventOnce({
     goalId: located.goal.id,
     taskId: located.task.id,

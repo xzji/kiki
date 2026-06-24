@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import { reconcileGovernanceTickMachineHello } from "@/lib/server/governance/governanceTickDispatcher";
+import { reconcileMachineTunnelHello } from "@/lib/server/scheduling/taskDispatcher";
 import { pollMachineCommands } from "@/lib/server/tunnel/tunnelHub";
 
 export const runtime = "nodejs";
@@ -25,6 +26,7 @@ export async function POST(request: NextRequest) {
   }
   const body = (await request.json().catch(() => ({}))) as {
     fingerprint?: string;
+    runningJobIds?: unknown;
     runningGovernanceJobIds?: unknown;
   };
   const outcome = await pollMachineCommands({
@@ -34,6 +36,18 @@ export async function POST(request: NextRequest) {
   });
   if ("error" in outcome) {
     return NextResponse.json({ ok: false, reason: outcome.error }, { status: 401 });
+  }
+  const runningJobIds = Array.isArray(body.runningJobIds)
+    ? body.runningJobIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  if (runningJobIds.length > 0) {
+    runWithUserContext(outcome.machine.userId, () =>
+      reconcileMachineTunnelHello({
+        machineId: outcome.machine.machineId,
+        userId: outcome.machine.userId,
+        runningJobIds,
+      }),
+    );
   }
   const runningGovernanceJobIds = Array.isArray(body.runningGovernanceJobIds)
     ? body.runningGovernanceJobIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0)

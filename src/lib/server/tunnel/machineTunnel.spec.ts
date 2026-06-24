@@ -35,6 +35,19 @@ export async function runMachineTunnelSpecs() {
     requestId: "request-ws",
     payload: { ok: true },
   });
+  getTunnelHub().sendCancel({
+    machineId,
+    jobId: "job-ws",
+    requestId: "cancel-request-ws",
+    reason: "用户终止任务执行",
+  });
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[1], {
+    type: "cancel",
+    jobId: "job-ws",
+    requestId: "cancel-request-ws",
+    reason: "用户终止任务执行",
+  });
   assert.deepEqual(await takeMachineCommands(machineId, 1), []);
 
   unregisterMachineWsConnection(machineId, sender);
@@ -63,7 +76,7 @@ export async function runMachineTunnelSpecs() {
     payload: { drain: true },
   });
   registerMachineWsConnection({ machineId, userId, sender });
-  assert.deepEqual(sent[1], {
+  assert.deepEqual(sent[2], {
     type: "execute",
     jobId: "job-drain",
     requestId: "request-drain",

@@ -41,7 +41,7 @@ function executionPhaseFromInstanceStatus(status: TaskInstanceStatus): TaskExecu
 }
 
 function isTerminationReason(reason?: string) {
-  return Boolean(reason && /终止|terminate/i.test(reason));
+  return Boolean(reason && /终止|中止|停止|terminate|stop/i.test(reason));
 }
 
 function normalizeTimelineFromLogs(logs: GoalServerLogEntry[] | undefined): TaskExecutionStep[] | undefined {

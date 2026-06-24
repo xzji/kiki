@@ -6,9 +6,14 @@ import {
   cancelRuntimeJobByTaskRun,
   listRuntimeJobsByStatuses,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { cancelActiveTunnelDispatch } from "@/lib/server/scheduling/taskDispatcher";
 import { readComposedGoalsSnapshot } from "@/lib/server/runtime/instanceComposition";
 import { readGoalsSnapshot, readRuntimeEnvironmentsSnapshot } from "@/lib/server/runtime/stateSnapshot";
-import { transitionTaskInstanceProjection } from "@/lib/server/services/goalRuntimeService";
+import {
+  transitionTaskInstanceProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
+import { buildPausedJobResumePatch } from "@/lib/server/taskExecution/pauseResumeCheckpoint";
 import { startTaskAttempt } from "@/lib/server/taskExecution/startTaskAttempt";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { RuntimeEnvironment } from "@/types/runtime";
@@ -68,6 +73,18 @@ function collectInstances(goals: Goal[], statuses: TaskInstance["status"][]): Lo
   return result;
 }
 
+function persistPauseCheckpoint(job: NonNullable<ReturnType<typeof cancelRuntimeJobByTaskRun>>, reason: string) {
+  const checkpoint = buildPausedJobResumePatch(job, { reason });
+  updateGoalRuntimeJobExecution(job.id, {
+    payload: {
+      ...job.payload,
+      resumeContext: checkpoint.resumeContext,
+    },
+    trajectory: checkpoint.trajectory,
+    result: checkpoint.result,
+  });
+}
+
 function pauseInstance(located: LocatedInstance) {
   const { goal, task, instance } = located;
   const previousStatus = instance.status;
@@ -113,11 +130,15 @@ function pauseInstance(located: LocatedInstance) {
     status: "paused",
     reason: GLOBAL_DISPATCH_PAUSE_REASON,
   });
-  cancelRuntimeJobByTaskRun({
+  const job = cancelRuntimeJobByTaskRun({
     taskInstanceId: instance.id,
     requestId: instance.runner?.requestId,
     reason: GLOBAL_DISPATCH_PAUSE_REASON,
   });
+  if (job) {
+    persistPauseCheckpoint(job, GLOBAL_DISPATCH_PAUSE_REASON);
+    cancelActiveTunnelDispatch(job.id, { reason: GLOBAL_DISPATCH_PAUSE_REASON });
+  }
   return true;
 }
 
@@ -132,11 +153,15 @@ export function pauseAllTaskExecution() {
 
   const openJobs = listRuntimeJobsByStatuses({ statuses: ["queued", "running"] });
   for (const job of openJobs) {
-    cancelRuntimeJobByTaskRun({
+    const cancelledJob = cancelRuntimeJobByTaskRun({
       taskInstanceId: job.taskInstanceId,
       requestId: job.requestId,
       reason: GLOBAL_DISPATCH_PAUSE_REASON,
     });
+    if (cancelledJob) {
+      persistPauseCheckpoint(cancelledJob, GLOBAL_DISPATCH_PAUSE_REASON);
+      cancelActiveTunnelDispatch(cancelledJob.id, { reason: GLOBAL_DISPATCH_PAUSE_REASON });
+    }
   }
 
   return { pausedCount, dispatchPaused: true };

@@ -76,6 +76,7 @@ export async function startTaskRun(input: {
   instance?: TaskInstance;
   runtimeEnv: RuntimeEnvironment;
   requestId?: string;
+  action?: "start" | "resume" | "rerun";
   signal?: AbortSignal;
 }) {
   const requestId = input.requestId ?? createTaskRequestId();
@@ -91,6 +92,7 @@ export async function startTaskRun(input: {
       task: input.task,
       instance: input.instance,
       runtimeEnv: input.runtimeEnv,
+      action: input.action,
     }),
     signal: input.signal,
   });

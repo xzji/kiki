@@ -20,7 +20,12 @@
 import { deriveOpaqueId, normalizeGoalId, normalizeSubGoalId } from "@/lib/opaqueIds";
 import type { LlmInvoke } from "@/lib/server/agentRuntime/agentExecutor";
 import { mergeTaskPatch } from "@/lib/server/governance/taskPatchMerge";
+import {
+  cancelRuntimeJobByTaskRun,
+  getLatestOpenRuntimeJobByTaskId,
+} from "@/lib/server/repositories/runtimeJobsRepository";
 import { readGoalsSnapshot } from "@/lib/server/runtime/stateSnapshot";
+import { cancelActiveTunnelDispatch } from "@/lib/server/scheduling/taskDispatcher";
 import { applyGoalCommand } from "@/lib/server/services/goalCommandService";
 import { runSpecWriter } from "@/lib/server/taskExecution/runSpecWriter";
 import { computeTaskSpecSourceRevision } from "@/lib/server/taskExecution/taskSpecRevision";
@@ -84,6 +89,10 @@ export type DispatchTaskFromThreadResult = {
   taskId: string;
   instanceId?: string;
 };
+
+export function cancelActiveTaskRuntimeJob(jobId: string, reason: string) {
+  return cancelActiveTunnelDispatch(jobId, { reason });
+}
 
 /**
  * 把 TaskDraft 翻译为 goalCommandService 期望的 TaskCommandInput。
@@ -289,6 +298,15 @@ export async function cancelTaskFromThread(
   request: CancelTaskRequest,
   options: { idempotencyKey: string },
 ) {
+  const openJob = getLatestOpenRuntimeJobByTaskId(request.taskId);
+  if (openJob) {
+    const cancelledJob = cancelRuntimeJobByTaskRun({
+      taskInstanceId: openJob.taskInstanceId,
+      requestId: openJob.requestId,
+      reason: request.reason,
+    });
+    if (cancelledJob) cancelActiveTaskRuntimeJob(cancelledJob.id, request.reason);
+  }
   applyGoalCommand({
     command: {
       type: "delete_task",
