@@ -1,7 +1,9 @@
 export const ASSISTANT_DRAWER_WIDTH = 400;
 export const TASK_DETAIL_MIN_WIDTH = 640;
 export const TASK_DETAIL_WIDTH_RATIO = 0.6;
-export const TASK_MONITOR_COMPACT_RATIO = 0.42;
+export const TASK_MONITOR_DEFAULT_WIDTH = 340;
+export const TASK_MONITOR_MAX_WIDTH = 420;
+export const TASK_MONITOR_COMPACT_RATIO = 0.34;
 
 type ResolveTaskPanelLayoutInput = {
   viewportWidth: number;
@@ -30,7 +32,7 @@ function defaultDetailWidth(viewportWidth: number, availableWidth: number) {
 function sideBySideMonitorWidth(availableWidth: number, preferredWidth: number) {
   if (availableWidth <= 0) return 0;
   const compactCap = Math.floor(availableWidth * TASK_MONITOR_COMPACT_RATIO);
-  return Math.max(0, Math.min(preferredWidth, compactCap));
+  return Math.max(0, Math.min(preferredWidth, TASK_MONITOR_MAX_WIDTH, compactCap));
 }
 
 export function resolveTaskPanelLayout(input: ResolveTaskPanelLayoutInput): TaskPanelLayout {
@@ -50,7 +52,9 @@ export function resolveTaskPanelLayout(input: ResolveTaskPanelLayoutInput): Task
   }
 
   if (!input.detailOpen) {
-    const monitorWidth = input.monitorOpen ? Math.min(input.monitorWidth, availableWidth) : 0;
+    const monitorWidth = input.monitorOpen
+      ? Math.min(input.monitorWidth, TASK_MONITOR_MAX_WIDTH, availableWidth)
+      : 0;
     return {
       assistantOffset,
       availableWidth,

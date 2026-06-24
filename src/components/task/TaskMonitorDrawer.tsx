@@ -82,6 +82,7 @@ export function TaskMonitorDrawer() {
   const [dispatchPaused, setDispatchPaused] = useState(false);
   const [pendingGlobalAction, setPendingGlobalAction] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const wasOpenRef = useRef(false);
 
@@ -169,6 +170,7 @@ export function TaskMonitorDrawer() {
     const actionKey = `${action}:${instanceId}`;
     setPendingAction(actionKey);
     setErrorMessage(null);
+    setNoticeMessage(null);
     try {
       if (action === "pause") {
         await transitionGoalInstance({
@@ -183,7 +185,10 @@ export function TaskMonitorDrawer() {
           reason: "用户终止任务执行",
         });
       } else {
-        await runTaskExecutionAction(taskId, action, { instanceId });
+        await runTaskExecutionAction(taskId, action, {
+          instanceId,
+          onNotice: setNoticeMessage,
+        });
       }
       await syncGoals();
     } catch (error) {
@@ -361,6 +366,15 @@ export function TaskMonitorDrawer() {
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="min-w-0 flex-1">{errorMessage}</span>
             <button type="button" onClick={() => setErrorMessage(null)} className="shrink-0 text-[#6B7280]">
+              关闭
+            </button>
+          </div>
+        ) : null}
+        {noticeMessage ? (
+          <div className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-[#FFF4CC] bg-[#FFFBEB] px-3 py-2 text-[12px] leading-5 text-[#7A5A00]">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1">{noticeMessage}</span>
+            <button type="button" onClick={() => setNoticeMessage(null)} className="shrink-0 text-[#6B7280]">
               关闭
             </button>
           </div>

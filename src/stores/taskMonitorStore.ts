@@ -3,9 +3,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-const DEFAULT_WIDTH = 400;
-const MIN_WIDTH = 320;
-const MAX_WIDTH = 640;
+const DEFAULT_WIDTH = 340;
+const MIN_WIDTH = 300;
+const MAX_WIDTH = 420;
 
 export type TaskMonitorSectionKey = "queued" | "running" | "paused" | "done";
 

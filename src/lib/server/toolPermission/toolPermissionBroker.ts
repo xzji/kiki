@@ -8,7 +8,22 @@ type PendingRequest = {
   state: "active" | "detached";
 };
 
-const pending = new Map<string, PendingRequest>();
+// 自定义 server 入口（云端编排器，创建授权请求）与 Next API route bundle（/api/tool-permissions
+// respond 路由，读取并消费授权请求）是两份模块实例，模块级 const 不共享。挂到 globalThis 才能
+// 保证创建侧与消费侧访问同一份 pending，避免点击授权时跨 bundle 查不到 requestId 误报「已过期」。
+const PENDING_STATE_KEY = Symbol.for("kiki.server.toolPermission.pending");
+
+function getPendingMap(): Map<string, PendingRequest> {
+  const globalRef = globalThis as typeof globalThis & {
+    [PENDING_STATE_KEY]?: Map<string, PendingRequest>;
+  };
+  if (!globalRef[PENDING_STATE_KEY]) {
+    globalRef[PENDING_STATE_KEY] = new Map<string, PendingRequest>();
+  }
+  return globalRef[PENDING_STATE_KEY];
+}
+
+const pending = getPendingMap();
 
 export function getPendingToolPermissionRequest(requestId: string) {
   return pending.get(requestId)?.request ?? null;

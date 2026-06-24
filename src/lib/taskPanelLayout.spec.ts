@@ -23,18 +23,33 @@ function assertFitsViewport(input: {
 }
 
 export function runTaskPanelLayoutSpecs() {
-  const screenshotWidth = assertFitsViewport({ viewportWidth: 1024, monitorWidth: 400 });
-  assert.equal(screenshotWidth.monitorWidth, 400);
-  assert.equal(screenshotWidth.detailWidth, 624);
-  assert.equal(screenshotWidth.monitorRightOffset, 624);
+  const screenshotWidth = assertFitsViewport({ viewportWidth: 1024, monitorWidth: 340 });
+  assert.equal(screenshotWidth.monitorWidth, 340);
+  assert.equal(screenshotWidth.detailWidth, 684);
+  assert.equal(screenshotWidth.monitorRightOffset, 684);
 
-  const compactWidth = assertFitsViewport({ viewportWidth: 800, monitorWidth: 400 });
-  assert.equal(compactWidth.monitorWidth, 336);
-  assert.equal(compactWidth.detailWidth, 464);
+  const compactWidth = assertFitsViewport({ viewportWidth: 800, monitorWidth: 340 });
+  assert.equal(compactWidth.monitorWidth, 272);
+  assert.equal(compactWidth.detailWidth, 528);
 
-  const withAssistant = assertFitsViewport({ viewportWidth: 1024, assistantOpen: true, monitorWidth: 400 });
+  const withAssistant = assertFitsViewport({ viewportWidth: 1024, assistantOpen: true, monitorWidth: 340 });
   assert.equal(withAssistant.assistantOffset, 400);
+  assert.equal(withAssistant.monitorWidth, 212);
   assert.equal(withAssistant.monitorWidth + withAssistant.detailWidth, 624);
+
+  const persistedWideWidth = assertFitsViewport({ viewportWidth: 1024, monitorWidth: 640 });
+  assert.equal(persistedWideWidth.monitorWidth, 348);
+  assert.equal(persistedWideWidth.detailWidth, 676);
+
+  const monitorOnlyWideWidth = resolveTaskPanelLayout({
+    viewportWidth: 1024,
+    assistantOpen: false,
+    isMobile: false,
+    monitorOpen: true,
+    detailOpen: false,
+    monitorWidth: 640,
+  });
+  assert.equal(monitorOnlyWideWidth.monitorWidth, 420);
 
   const detailOnly = resolveTaskPanelLayout({
     viewportWidth: 1024,

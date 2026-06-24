@@ -4,18 +4,25 @@ import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { createTaskRequestId, startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
 import { createOpaqueId } from "@/lib/opaqueIds";
+import { useEasterEggSettingsStore } from "@/stores/easterEggSettingsStore";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
 import type { RuntimeEnvironment } from "@/types/runtime";
 import type { Goal, Task, TaskInstance } from "@/types/kiki";
 
 type TaskExecutionAction = "start" | "pause" | "resume" | "rerun";
+type TaskExecutionActionOptions = {
+  instanceId?: string;
+  onNotice?: (message: string) => void;
+};
+
+const CONCURRENCY_LIMIT_QUEUED_NOTICE = "当前最大同时执行的任务数已达上限，排队中";
 
 export function canStopTaskInstance(instance: TaskInstance) {
   return instance.status === "in_progress" || instance.status === "awaiting_user" || Boolean(instance.awaitingUser);
 }
 
-export async function runTaskExecutionAction(taskId: string, action: TaskExecutionAction, options?: { instanceId?: string }) {
+export async function runTaskExecutionAction(taskId: string, action: TaskExecutionAction, options?: TaskExecutionActionOptions) {
   if (action === "pause") {
     const location = findTaskLocation(selectVisibleGoals(useGoalStore.getState()), taskId);
     if (!location) throw new Error("未找到对应任务。");
@@ -50,6 +57,13 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     throw new Error("未找到可继续执行的任务实例。");
   }
 
+  const visibleGoals = selectVisibleGoals(useGoalStore.getState());
+  const maxConcurrentTasks = useEasterEggSettingsStore.getState().getSettings().maxConcurrentTasks;
+  const concurrencyLimitReached = countRunningTaskInstances(visibleGoals) >= maxConcurrentTasks;
+  if (concurrencyLimitReached) {
+    notifyTaskExecutionNotice(options?.onNotice, CONCURRENCY_LIMIT_QUEUED_NOTICE);
+  }
+
   const requestId = createTaskRequestId();
   const optimisticRun = createOptimisticTaskRun({
     task: current.task,
@@ -57,6 +71,7 @@ export async function runTaskExecutionAction(taskId: string, action: TaskExecuti
     requestId,
     runtimeEnv,
     targetInstance,
+    optimisticState: concurrencyLimitReached ? "queued" : "running",
   });
   const goalStore = useGoalStore.getState();
   goalStore.addOptimisticTaskRun(optimisticRun.overlay);
@@ -150,25 +165,60 @@ function resolveTargetInstance(task: Task, action: TaskExecutionAction, instance
   return null;
 }
 
+function countRunningTaskInstances(goals: Goal[]) {
+  return goals.reduce(
+    (goalCount, goal) =>
+      goalCount +
+      goal.subGoals.reduce(
+        (subGoalCount, subGoal) =>
+          subGoalCount +
+          subGoal.tasks.reduce(
+            (taskCount, task) =>
+              taskCount +
+              task.instances.filter(
+                (instance) => instance.status === "in_progress" || instance.execution?.status === "in_progress",
+              ).length,
+            0,
+          ),
+        0,
+      ),
+    0,
+  );
+}
+
+function notifyTaskExecutionNotice(onNotice: TaskExecutionActionOptions["onNotice"], message: string) {
+  if (onNotice) {
+    onNotice(message);
+    return;
+  }
+  if (typeof window !== "undefined") {
+    window.alert(message);
+  }
+}
+
 function createOptimisticTaskRun(input: {
   task: Task;
   action: Exclude<TaskExecutionAction, "pause">;
   requestId: string;
   runtimeEnv: RuntimeEnvironment;
   targetInstance?: TaskInstance;
+  optimisticState: "queued" | "running";
 }) {
   const createdAt = new Date().toISOString();
   const baseInstance =
     input.action === "resume" && input.targetInstance
       ? input.targetInstance
       : createPendingManualInstance(input.task, createdAt, input.requestId, input.runtimeEnv.id);
-  const optimisticInstance = toOptimisticRunningInstance(
-    baseInstance,
-    input.task,
-    createdAt,
-    input.requestId,
-    input.runtimeEnv.id,
-  );
+  const optimisticInstance =
+    input.optimisticState === "queued"
+      ? toOptimisticQueuedInstance(baseInstance, input.task, createdAt, input.requestId, input.runtimeEnv.id)
+      : toOptimisticRunningInstance(
+          baseInstance,
+          input.task,
+          createdAt,
+          input.requestId,
+          input.runtimeEnv.id,
+        );
   return {
     serverInstance: baseInstance,
     overlay: {
@@ -178,6 +228,38 @@ function createOptimisticTaskRun(input: {
       requestId: input.requestId,
       createdAt,
     },
+  };
+}
+
+function toOptimisticQueuedInstance(
+  instance: TaskInstance,
+  task: Task,
+  queuedAt: string,
+  requestId: string,
+  runtimeEnvId?: string,
+): TaskInstance {
+  return {
+    ...instance,
+    status: "pending",
+    intro: `用户手动发起执行“${task.title.replace(/^任务\d+：/, "")}”。`,
+    runner: {
+      ...instance.runner,
+      requestId,
+      runtimeEnvId,
+      attemptCount: instance.runner?.attemptCount ?? 0,
+      lastAttemptAt: queuedAt,
+    },
+    execution: {
+      ...instance.execution,
+      phase: "queued",
+      status: "pending",
+      startedAt: undefined,
+      finishedAt: undefined,
+      lastUpdatedAt: queuedAt,
+    },
+    awaitingUser: undefined,
+    blocker: undefined,
+    timeline: buildManualRunTimeline(task.id, queuedAt, "pending"),
   };
 }
 

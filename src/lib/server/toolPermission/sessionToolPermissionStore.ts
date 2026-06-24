@@ -1,6 +1,20 @@
 import type { RuntimeToolPermissionRule } from "@/types/runtime";
 
-const sessionRules = new Map<string, RuntimeToolPermissionRule[]>();
+// 与 toolPermissionBroker 同理：respond 路由（API bundle）写入会话级授权规则，匹配侧在另一份
+// 模块实例读取，模块级 const 不共享。挂到 globalThis 保证「本会话内始终允许」跨 bundle 生效。
+const SESSION_RULES_STATE_KEY = Symbol.for("kiki.server.toolPermission.sessionRules");
+
+function getSessionRulesMap(): Map<string, RuntimeToolPermissionRule[]> {
+  const globalRef = globalThis as typeof globalThis & {
+    [SESSION_RULES_STATE_KEY]?: Map<string, RuntimeToolPermissionRule[]>;
+  };
+  if (!globalRef[SESSION_RULES_STATE_KEY]) {
+    globalRef[SESSION_RULES_STATE_KEY] = new Map<string, RuntimeToolPermissionRule[]>();
+  }
+  return globalRef[SESSION_RULES_STATE_KEY];
+}
+
+const sessionRules = getSessionRulesMap();
 
 export function getToolPermissionSessionKey(input: {
   conversationId?: string;
