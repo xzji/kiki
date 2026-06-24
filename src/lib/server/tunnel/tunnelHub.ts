@@ -19,6 +19,7 @@ import type {
   RuntimeFilePolicy,
   RuntimeInputAttachment,
   RuntimePermissionMode,
+  RuntimeToolPermissionRule,
 } from "@/types/runtime";
 import type { ToolPermissionDecision } from "@/lib/server/toolPermission/types";
 import type { KikiSkillsInstallPayload, KikiSkillsStatusPayload } from "@/lib/kikiSkills/types";
@@ -82,6 +83,7 @@ export type RemoteStreamPromptPayload = {
   attachments?: RuntimeInputAttachment[];
   filePolicy?: RuntimeFilePolicy;
   channelPolicy?: ToolChannelPolicy;
+  toolPermissionSessionRules?: RuntimeToolPermissionRule[];
 };
 
 /**

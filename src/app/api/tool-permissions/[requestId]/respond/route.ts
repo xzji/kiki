@@ -8,7 +8,11 @@ import {
   RuntimeEnvironmentCommandError,
 } from "@/lib/server/services/runtimeEnvironmentCommandService";
 import { withAuth } from "@/lib/server/http/withAuth";
-import { addSessionToolPermissionRule, getToolPermissionSessionKey } from "@/lib/server/toolPermission/sessionToolPermissionStore";
+import {
+  addSessionToolPermissionRule,
+  getSessionToolPermissionRules,
+  getToolPermissionSessionKey,
+} from "@/lib/server/toolPermission/sessionToolPermissionStore";
 import { appendToolPermissionAuditLog } from "@/lib/server/toolPermission/toolPermissionAuditLog";
 import {
   getPendingToolPermissionRequest,
@@ -64,13 +68,17 @@ async function POSTHandler(request: NextRequest, context: Params) {
   }
 
   try {
+    let persistedRuleScope: "conversation" | "runtime" | null = null;
+
     if (decision === "allow" && (scope === "conversation" || (isDetached && scope === "once" && pending.taskInstanceId))) {
+      const sessionKey = getToolPermissionSessionKey({
+        conversationId: pending.conversationId,
+        taskInstanceId: pending.taskInstanceId,
+        runtimeEnvId,
+      });
+      const existed = getSessionToolPermissionRules(sessionKey).some((item) => item.pattern === rule);
       addSessionToolPermissionRule(
-        getToolPermissionSessionKey({
-          conversationId: pending.conversationId,
-          taskInstanceId: pending.taskInstanceId,
-          runtimeEnvId,
-        }),
+        sessionKey,
         {
           id: makeId("tool-rule"),
           pattern: rule,
@@ -79,6 +87,7 @@ async function POSTHandler(request: NextRequest, context: Params) {
           createdAt: new Date().toISOString(),
         },
       );
+      if (!existed && scope === "conversation") persistedRuleScope = "conversation";
     }
 
     if (decision === "allow" && scope === "runtime") {
@@ -103,9 +112,13 @@ async function POSTHandler(request: NextRequest, context: Params) {
           id: runtimeEnvId,
           patch: { filePolicy },
         });
+        persistedRuleScope = "runtime";
       }
     }
 
+    // 用户授权回应分四类：本次允许(once)/本会话内始终允许(conversation)/
+    // 始终允许并写入 Runtime 策略(runtime)/拒绝(deny)。scope 字段即用于区分，
+    // 落审计日志后可凭 scope 回溯用户当时的具体选择。
     appendToolPermissionAuditLog({
       requestId,
       event: decision === "allow" ? "tool_permission.user_allowed" : "tool_permission.user_denied",
@@ -125,6 +138,29 @@ async function POSTHandler(request: NextRequest, context: Params) {
       decision,
       matchedBy: "user",
     });
+
+    // 仅在规则真正新增到对应作用域时再补一条 rule_persisted，明确区分「会话级」与「Runtime 级」两种沉淀，
+    // 便于排查“点了始终允许仍反复弹窗”这类问题——若无此条，说明规则没写进对应作用域。
+    if (persistedRuleScope) {
+      appendToolPermissionAuditLog({
+        requestId,
+        event: "tool_permission.rule_persisted",
+        runtimeEnvId,
+        runtimeKind: pending?.runtimeKind,
+        userId: context.userId,
+        conversationId: pending?.conversationId,
+        taskInstanceId: pending?.taskInstanceId,
+        taskId: pending?.taskId,
+        agentRunId: pending?.agentRunId,
+        daemonSessionId: pending?.daemonSessionId,
+        machineIdHash: pending?.machineIdHash,
+        toolName: pending?.toolName,
+        rule,
+        scope: persistedRuleScope,
+        decision: "allow",
+        matchedBy: "user",
+      });
+    }
 
     const resolvedDecision = {
       requestId,

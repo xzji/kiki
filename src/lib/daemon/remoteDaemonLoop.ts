@@ -22,7 +22,17 @@ import type { ClaudeStreamEvent } from "@/lib/server/claude/transport";
 import { normalizeClaudeJsonText } from "@/lib/server/claude/jsonRepair";
 import { runRuntimePromptJson, runRuntimePromptText, streamRuntimePrompt } from "@/lib/server/runtime/runtimeTransport";
 import { resolveLocalCliCwd } from "@/lib/server/runtime/resolveLocalCliCwd";
-import { resolveToolPermissionDecision } from "@/lib/server/toolPermission/toolPermissionBroker";
+import {
+  getPendingToolPermissionRequest,
+  resolveToolPermissionDecision,
+} from "@/lib/server/toolPermission/toolPermissionBroker";
+import {
+  addSessionToolPermissionRule,
+  getSessionToolPermissionRules,
+  getToolPermissionSessionKey,
+  seedSessionToolPermissionRules,
+} from "@/lib/server/toolPermission/sessionToolPermissionStore";
+import { makeId } from "@/lib/utils";
 import type {
   MachineCommand,
   MachineResult,
@@ -158,6 +168,12 @@ async function executeRemoteJob(input: {
   initialTrajectory: ExecutionTrajectoryStep[];
   signal: AbortSignal;
 }) {
+  seedSessionToolPermissionRules({
+    conversationId: input.payload.goal.conversationId,
+    taskInstanceId: input.payload.instance.id,
+    runtimeEnvId: input.payload.runtimeEnv.id,
+    rules: input.payload.toolPermissionSessionRules,
+  });
   return runGoalTask({
     requestId: input.requestId,
     goal: input.payload.goal,
@@ -169,6 +185,32 @@ async function executeRemoteJob(input: {
     initialTrajectory: input.initialTrajectory,
     signal: input.signal,
   });
+}
+
+function persistLiveToolPermissionDecision(decision: {
+  requestId: string;
+  decision: "allow" | "deny";
+  scope: "once" | "conversation" | "runtime" | "deny";
+  rule?: string;
+}) {
+  if (decision.decision !== "allow") return false;
+  if (!decision.rule || (decision.scope !== "conversation" && decision.scope !== "runtime")) return false;
+  const request = getPendingToolPermissionRequest(decision.requestId);
+  if (!request) return false;
+  const key = getToolPermissionSessionKey({
+    conversationId: request.conversationId,
+    taskInstanceId: request.taskInstanceId,
+    runtimeEnvId: request.runtimeEnvId,
+  });
+  const beforeCount = getSessionToolPermissionRules(key).length;
+  addSessionToolPermissionRule(key, {
+    id: makeId("tool-rule"),
+    pattern: decision.rule,
+    label: decision.rule,
+    source: "user",
+    createdAt: new Date().toISOString(),
+  });
+  return getSessionToolPermissionRules(key).length > beforeCount;
 }
 
 export async function handleGovernanceTickDaemonCommand(input: {
@@ -559,6 +601,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     },
     tool_permission_decision(command) {
       if (command.type !== "tool_permission_decision") return;
+      const persistedSessionRule = persistLiveToolPermissionDecision(command.decision);
       const resolved = resolveToolPermissionDecision(command.decision);
       logDaemonEvent(resolved ? "info" : "debug", "stream", "tool permission decision", {
         sessionId: command.sessionId,
@@ -566,6 +609,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
         decision: command.decision.decision,
         scope: command.decision.scope,
         resolved,
+        persistedSessionRule,
       });
     },
     stream_prompt(command, startedAt) {
@@ -590,6 +634,12 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
           conversationId: payload.workspacePolicy === "conversation" ? undefined : payload.conversationId,
         });
         try {
+          seedSessionToolPermissionRules({
+            conversationId: payload.conversationId,
+            taskInstanceId: payload.taskInstanceId,
+            runtimeEnvId: payload.runtimeEnvId,
+            rules: payload.toolPermissionSessionRules,
+          });
           await streamRuntimePrompt({
             message: payload.message,
             workingDirectory: cwd,
@@ -666,6 +716,7 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             instance: raw.instance,
             runtimeEnv: raw.runtimeEnv,
             resumeContext: raw.resumeContext,
+            toolPermissionSessionRules: raw.toolPermissionSessionRules,
           };
           const initialTrajectory = Array.isArray(raw.trajectory) ? raw.trajectory : [];
           const outcome = await runWithUserContext(boundUserId, () =>

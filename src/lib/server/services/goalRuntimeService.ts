@@ -29,6 +29,10 @@ import {
   upsertGoalsSnapshot,
   type SnapshotWriteResult,
 } from "@/lib/server/runtime/stateSnapshot";
+import {
+  getSessionToolPermissionRules,
+  getToolPermissionSessionKey,
+} from "@/lib/server/toolPermission/sessionToolPermissionStore";
 import type {
   RuntimeJobPayload,
   RuntimeJobRecord,
@@ -365,12 +369,21 @@ export function requeueBlockedGoalRuntimeJob(input: {
   trajectory: ExecutionTrajectoryStep[];
   result: Record<string, unknown>;
 }) {
+  const runtimeEnvId = input.job.payload.runtimeEnv.id;
+  const toolPermissionSessionRules = getSessionToolPermissionRules(
+    getToolPermissionSessionKey({
+      conversationId: input.job.conversationId ?? input.job.payload.goal.conversationId,
+      taskInstanceId: input.job.taskInstanceId ?? input.job.payload.instance.id,
+      runtimeEnvId,
+    }),
+  );
   return updateGoalRuntimeJobExecution(input.job.id, {
     status: "queued",
     payload: {
       ...input.job.payload,
       taskWorkspaceDir: input.taskWorkspaceDir,
       resumeContext: input.resumeContext,
+      toolPermissionSessionRules,
     },
     progress: input.progress,
     trajectory: input.trajectory,

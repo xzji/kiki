@@ -26,6 +26,8 @@ import {
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
 import { processSupervisor } from "@/lib/runtime/processSupervisor";
+import { refreshRuntimeEnvFilePolicy } from "@/lib/server/runtime/refreshRuntimeEnvPolicy";
+import { seedSessionToolPermissionRules } from "@/lib/server/toolPermission/sessionToolPermissionStore";
 import {
   RUNTIME_JOB_LEASE_RENEW_DURATION_MS as LEASE_RENEW_DURATION_MS,
   RUNTIME_JOB_LEASE_RENEW_INTERVAL_MS as LEASE_RENEW_INTERVAL_MS,
@@ -233,13 +235,21 @@ async function executeClaimedJob(params: {
     // 极端路径下（finally 未执行）由 supervisor 销账时统一清理，避免残留 interval 阻止进程退出。
     renewTimer.unref?.();
     processSupervisor.attachRenewTimer(requestId, renewTimer);
+    seedSessionToolPermissionRules({
+      conversationId,
+      taskInstanceId: job.taskInstanceId ?? job.payload.instance.id,
+      runtimeEnvId: job.payload.runtimeEnv.id,
+      rules: job.payload.toolPermissionSessionRules,
+    });
     await runGoalTask({
       requestId,
       goal: job.payload.goal,
       subGoal: job.payload.subGoal,
       task: job.payload.task,
       instance: job.payload.instance,
-      runtimeEnv: job.payload.runtimeEnv,
+      // 续跑前用户「始终允许并写入 Runtime 策略」写入的规则此刻才能生效，
+      // 否则仍按 payload 旧 filePolicy 匹配，对同一工具反复弹窗。
+      runtimeEnv: refreshRuntimeEnvFilePolicy(job.payload.runtimeEnv),
       conversationWorkspaceDir,
       taskWorkspaceDir,
       resumeContext: job.payload.resumeContext,

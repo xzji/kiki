@@ -22,6 +22,7 @@ import {
   renewRuntimeJobLease,
   type RuntimeJobRecord,
 } from "@/lib/server/repositories/runtimeJobsRepository";
+import { refreshRuntimeEnvFilePolicy } from "@/lib/server/runtime/refreshRuntimeEnvPolicy";
 import {
   RUNTIME_JOB_LEASE_RENEW_DURATION_MS as LEASE_RENEW_DURATION_MS,
   RUNTIME_JOB_LEASE_RENEW_INTERVAL_MS as LEASE_RENEW_INTERVAL_MS,
@@ -510,8 +511,11 @@ export async function dispatchReadyTasksToMachines(input: {
           subGoal: job.payload.subGoal,
           task: job.payload.task,
           instance: job.payload.instance,
-          runtimeEnv: job.payload.runtimeEnv,
+          // 用最新快照刷新 filePolicy：续跑前用户「始终允许并写入 Runtime 策略」写入的规则
+          // 此刻才能随下发生效，否则 daemon 仍按旧 payload 策略匹配，对同一工具反复弹窗。
+          runtimeEnv: refreshRuntimeEnvFilePolicy(job.payload.runtimeEnv),
           resumeContext: job.payload.resumeContext,
+          toolPermissionSessionRules: job.payload.toolPermissionSessionRules,
           trajectory: job.trajectory,
         },
       });

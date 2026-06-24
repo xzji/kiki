@@ -14,8 +14,13 @@ import {
 } from "@/lib/server/tunnel/machineStreamHub";
 import { getTunnelHub } from "@/lib/server/tunnel/tunnelHub";
 import type { ToolChannelPolicy } from "@/lib/runtime/toolPolicy";
+import { readLatestRuntimeFilePolicy } from "@/lib/server/runtime/refreshRuntimeEnvPolicy";
 import { appendToolPermissionAuditLog } from "@/lib/server/toolPermission/toolPermissionAuditLog";
 import { createToolPermissionRequest, detachToolPermissionRequest } from "@/lib/server/toolPermission/toolPermissionBroker";
+import {
+  getSessionToolPermissionRules,
+  getToolPermissionSessionKey,
+} from "@/lib/server/toolPermission/sessionToolPermissionStore";
 import type { RuntimeEnvironment, RuntimeFilePolicy, RuntimePermissionMode } from "@/types/runtime";
 
 type PromptJsonProxyInput = {
@@ -68,6 +73,15 @@ export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
   const { machineId, userId } = resolveMachine();
   const sessionId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const activeToolPermissionRequestIds = new Set<string>();
+  const toolPermissionSessionRules = options.runtimeEnvId
+    ? getSessionToolPermissionRules(
+        getToolPermissionSessionKey({
+          conversationId: options.conversationId,
+          taskInstanceId: options.taskInstanceId,
+          runtimeEnvId: options.runtimeEnvId,
+        }),
+      )
+    : [];
   openStreamSession(sessionId, {
     userId,
     conversationId: options.conversationId,
@@ -100,8 +114,9 @@ export async function proxyStreamPrompt(options: ClaudeStreamOptions) {
         systemPromptMode: options.systemPromptMode,
         quotedMessage: options.quotedMessage,
         attachments: options.attachments,
-        filePolicy: options.filePolicy,
+        filePolicy: readLatestRuntimeFilePolicy(options.runtimeEnvId, options.filePolicy),
         channelPolicy: options.channelPolicy,
+        toolPermissionSessionRules,
       },
     });
     await consumeStreamSession(sessionId, (event) => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { ensureIsolatedPlanningSpecDataDir } from "@/lib/server/runtime/stateSnapshot.spec";
+import { upsertRuntimeEnvironmentsSnapshot } from "@/lib/server/runtime/stateSnapshot";
 import { runWithUserContext } from "@/lib/server/context/userContext";
 import {
   getRuntimeJob,
@@ -26,7 +27,7 @@ import {
 import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import { DEFAULT_RUNTIME_FILE_POLICY, type RuntimeEnvironment } from "@/types/runtime";
 
 function runtimeEnv(): RuntimeEnvironment {
   return {
@@ -260,11 +261,36 @@ export async function runTaskDispatcherSpecs() {
       },
     ];
     const resumeJob = seedQueuedCloudJob("job-task-dispatcher-resume-context");
+    const sessionRule = {
+      id: "tool-rule-session-task-dispatcher-spec",
+      pattern: "mcp__session__*",
+      label: "mcp__session__*",
+      source: "user" as const,
+      createdAt: new Date().toISOString(),
+    };
+    const runtimeRule = {
+      id: "tool-rule-runtime-task-dispatcher-spec",
+      pattern: "mcp__runtime__*",
+      label: "mcp__runtime__*",
+      source: "user" as const,
+      createdAt: new Date().toISOString(),
+    };
+    upsertRuntimeEnvironmentsSnapshot([
+      {
+        ...runtimeEnv(),
+        filePolicy: {
+          ...DEFAULT_RUNTIME_FILE_POLICY,
+          custom: { ...DEFAULT_RUNTIME_FILE_POLICY.custom },
+          allowedToolRules: [runtimeRule],
+        },
+      },
+    ]);
     upsertRuntimeJob({
       ...resumeJob,
       payload: {
         ...resumeJob.payload,
         resumeContext: "用户暂停后恢复，请基于上一轮上下文继续执行。",
+        toolPermissionSessionRules: [sessionRule],
       },
       trajectory: resumeTrajectory,
     });
@@ -286,6 +312,19 @@ export async function runTaskDispatcherSpecs() {
       ((resumeExecuteCommand.payload as { trajectory?: unknown[] }).trajectory ?? []).length,
       1,
       "resume execute payload should carry checkpoint trajectory",
+    );
+    assert.equal(
+      ((resumeExecuteCommand.payload as { toolPermissionSessionRules?: typeof sessionRule[] }).toolPermissionSessionRules ?? [])[0]
+        ?.pattern,
+      sessionRule.pattern,
+      "execute payload should carry session-scoped tool permission rules across process boundary",
+    );
+    assert.equal(
+      (resumeExecuteCommand.payload as { runtimeEnv?: RuntimeEnvironment }).runtimeEnv?.filePolicy?.allowedToolRules?.some(
+        (rule) => rule.pattern === runtimeRule.pattern,
+      ),
+      true,
+      "execute payload should refresh latest runtime-scoped tool permission rules before dispatch",
     );
   } finally {
     unregisterMachineWsConnection(machineId, sender);

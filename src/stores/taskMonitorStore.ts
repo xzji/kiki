@@ -3,9 +3,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-const DEFAULT_WIDTH = 340;
-const MIN_WIDTH = 300;
-const MAX_WIDTH = 420;
+import {
+  TASK_MONITOR_DEFAULT_WIDTH,
+  TASK_MONITOR_MAX_WIDTH,
+  TASK_MONITOR_MIN_WIDTH,
+} from "@/lib/taskPanelLayout";
 
 export type TaskMonitorSectionKey = "queued" | "running" | "paused" | "done";
 
@@ -20,17 +22,22 @@ type TaskMonitorStore = {
 };
 
 function clampWidth(value: number) {
-  return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(value)));
+  return Math.max(TASK_MONITOR_MIN_WIDTH, Math.min(TASK_MONITOR_MAX_WIDTH, Math.round(value)));
 }
 
-export const TASK_MONITOR_MIN_WIDTH = MIN_WIDTH;
-export const TASK_MONITOR_MAX_WIDTH = MAX_WIDTH;
+function normalizePersistedWidth(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return TASK_MONITOR_DEFAULT_WIDTH;
+  if (value < TASK_MONITOR_MIN_WIDTH) return TASK_MONITOR_DEFAULT_WIDTH;
+  return clampWidth(value);
+}
+
+export { TASK_MONITOR_MIN_WIDTH, TASK_MONITOR_MAX_WIDTH };
 
 export const useTaskMonitorStore = create<TaskMonitorStore>()(
   persist(
     (set) => ({
       open: false,
-      width: DEFAULT_WIDTH,
+      width: TASK_MONITOR_DEFAULT_WIDTH,
       collapsedSections: {},
       openMonitor: () => set({ open: true }),
       closeMonitor: () => set({ open: false }),
@@ -49,6 +56,14 @@ export const useTaskMonitorStore = create<TaskMonitorStore>()(
         width: clampWidth(state.width),
         collapsedSections: state.collapsedSections,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<Pick<TaskMonitorStore, "width" | "collapsedSections">> | null;
+        return {
+          ...currentState,
+          collapsedSections: persisted?.collapsedSections ?? currentState.collapsedSections,
+          width: normalizePersistedWidth(persisted?.width),
+        };
+      },
     },
   ),
 );

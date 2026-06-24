@@ -1,9 +1,10 @@
 export const ASSISTANT_DRAWER_WIDTH = 400;
-export const TASK_DETAIL_MIN_WIDTH = 640;
+export const TASK_DETAIL_MIN_WIDTH = 450;
+export const TASK_DETAIL_MAX_WIDTH = 600;
 export const TASK_DETAIL_WIDTH_RATIO = 0.6;
-export const TASK_MONITOR_DEFAULT_WIDTH = 340;
-export const TASK_MONITOR_MAX_WIDTH = 420;
-export const TASK_MONITOR_COMPACT_RATIO = 0.34;
+export const TASK_MONITOR_DEFAULT_WIDTH = 400;
+export const TASK_MONITOR_MIN_WIDTH = 350;
+export const TASK_MONITOR_MAX_WIDTH = 500;
 
 type ResolveTaskPanelLayoutInput = {
   viewportWidth: number;
@@ -26,13 +27,46 @@ export type TaskPanelLayout = {
 function defaultDetailWidth(viewportWidth: number, availableWidth: number) {
   if (availableWidth <= 0) return TASK_DETAIL_MIN_WIDTH;
   const preferred = Math.max(viewportWidth * TASK_DETAIL_WIDTH_RATIO, TASK_DETAIL_MIN_WIDTH);
-  return Math.min(preferred, availableWidth);
+  return Math.min(preferred, TASK_DETAIL_MAX_WIDTH, availableWidth);
 }
 
-function sideBySideMonitorWidth(availableWidth: number, preferredWidth: number) {
+function defaultMonitorWidth(availableWidth: number, preferredWidth: number) {
   if (availableWidth <= 0) return 0;
-  const compactCap = Math.floor(availableWidth * TASK_MONITOR_COMPACT_RATIO);
-  return Math.max(0, Math.min(preferredWidth, TASK_MONITOR_MAX_WIDTH, compactCap));
+  return Math.min(Math.max(preferredWidth, TASK_MONITOR_MIN_WIDTH), TASK_MONITOR_MAX_WIDTH, availableWidth);
+}
+
+function sideBySidePanelWidths(input: {
+  viewportWidth: number;
+  availableWidth: number;
+  preferredMonitorWidth: number;
+}) {
+  const preferredMonitorWidth = defaultMonitorWidth(input.availableWidth, input.preferredMonitorWidth);
+  const preferredDetailWidth = defaultDetailWidth(input.viewportWidth, input.availableWidth);
+  const remainingForDetail = Math.max(0, input.availableWidth - preferredMonitorWidth);
+  const detailWidth = Math.min(preferredDetailWidth, remainingForDetail);
+
+  if (detailWidth >= TASK_DETAIL_MIN_WIDTH) {
+    return {
+      monitorWidth: preferredMonitorWidth,
+      detailWidth,
+    };
+  }
+
+  if (input.availableWidth >= TASK_MONITOR_MIN_WIDTH + TASK_DETAIL_MIN_WIDTH) {
+    return {
+      monitorWidth: input.availableWidth - TASK_DETAIL_MIN_WIDTH,
+      detailWidth: TASK_DETAIL_MIN_WIDTH,
+    };
+  }
+
+  const compactDetailWidth = Math.min(
+    TASK_DETAIL_MIN_WIDTH,
+    Math.floor(input.availableWidth * TASK_DETAIL_WIDTH_RATIO),
+  );
+  return {
+    monitorWidth: Math.max(0, input.availableWidth - compactDetailWidth),
+    detailWidth: compactDetailWidth,
+  };
 }
 
 export function resolveTaskPanelLayout(input: ResolveTaskPanelLayoutInput): TaskPanelLayout {
@@ -52,9 +86,7 @@ export function resolveTaskPanelLayout(input: ResolveTaskPanelLayoutInput): Task
   }
 
   if (!input.detailOpen) {
-    const monitorWidth = input.monitorOpen
-      ? Math.min(input.monitorWidth, TASK_MONITOR_MAX_WIDTH, availableWidth)
-      : 0;
+    const monitorWidth = input.monitorOpen ? defaultMonitorWidth(availableWidth, input.monitorWidth) : 0;
     return {
       assistantOffset,
       availableWidth,
@@ -76,8 +108,11 @@ export function resolveTaskPanelLayout(input: ResolveTaskPanelLayoutInput): Task
     };
   }
 
-  const monitorWidth = sideBySideMonitorWidth(availableWidth, input.monitorWidth);
-  const detailWidth = Math.max(0, availableWidth - monitorWidth);
+  const { monitorWidth, detailWidth } = sideBySidePanelWidths({
+    viewportWidth: input.viewportWidth,
+    availableWidth,
+    preferredMonitorWidth: input.monitorWidth,
+  });
   return {
     assistantOffset,
     availableWidth,

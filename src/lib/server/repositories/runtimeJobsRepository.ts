@@ -16,7 +16,7 @@ import type { ExecutionBlocker } from "@/types/executionBlocker";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 import type { Goal, SubGoal, Task, TaskInstance } from "@/types/kiki";
 import type { ExecutionTrajectoryStep } from "@/types/executionTrajectory";
-import type { RuntimeEnvironment } from "@/types/runtime";
+import type { RuntimeEnvironment, RuntimeToolPermissionRule } from "@/types/runtime";
 
 export type RuntimeJobStatus =
   | "queued"
@@ -37,6 +37,7 @@ export type RuntimeJobPayload = {
   conversationWorkspaceDir?: string;
   taskWorkspaceDir?: string;
   resumeContext?: string;
+  toolPermissionSessionRules?: RuntimeToolPermissionRule[];
 };
 
 export type RuntimeJobRecord = {

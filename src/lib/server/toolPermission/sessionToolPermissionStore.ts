@@ -38,6 +38,31 @@ export function addSessionToolPermissionRule(key: string, rule: RuntimeToolPermi
   return next;
 }
 
+export function addSessionToolPermissionRules(key: string, rules: RuntimeToolPermissionRule[] | undefined) {
+  let next = sessionRules.get(key) ?? [];
+  for (const rule of rules ?? []) {
+    if (!rule.pattern || next.some((item) => item.pattern === rule.pattern)) continue;
+    next = [...next, rule];
+  }
+  if (next.length > 0) sessionRules.set(key, next);
+  return next;
+}
+
+export function seedSessionToolPermissionRules(input: {
+  conversationId?: string;
+  taskInstanceId?: string;
+  runtimeEnvId?: string;
+  rules?: RuntimeToolPermissionRule[];
+}) {
+  if (!input.runtimeEnvId) return [];
+  const key = getToolPermissionSessionKey({
+    conversationId: input.conversationId,
+    taskInstanceId: input.taskInstanceId,
+    runtimeEnvId: input.runtimeEnvId,
+  });
+  return addSessionToolPermissionRules(key, input.rules);
+}
+
 export function clearSessionToolPermissionRules(key: string) {
   sessionRules.delete(key);
 }
