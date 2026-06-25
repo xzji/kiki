@@ -5,6 +5,7 @@
 ## 2026-06-25
 
 ### Changed
+- 本地 daemon 包版本升级到 `@kiki_agent/daemon@0.2.24`，发布 `kiki-daemon log/logs` 实时日志查看能力。
 - Runtime 状态快照接口增加 ETag/unchanged 返回，前端 RuntimeEventBridge 在 SSE 断线恢复、跨标签同步和批量事件收敛时复用已知 ETag，减少重复全量 `/api/runtime/state` 拉取。
 - SSE 空闲心跳改为注释帧并增加空闲退避，降低无事件会话的轮询与 DB 压力；生产自定义 server 增加文本/JSON 响应压缩，排除 SSE 流。
 - 机器 tunnel WebSocket 开启消息压缩，并对 daemon hello 做状态签名去重；存在运行中 job/治理 tick 时仍按周期续发 hello 以续租。
