@@ -231,6 +231,39 @@ export function runConversationCommandServiceSpecs() {
   assert.equal(summary?.lastMessage?.id, "msg-spec-2");
   assert.equal(summary?.lastMessageAt, summary?.lastMessage?.createdAt);
 
+  const heavySummaryConversationId = "conv-command-summary-heavy";
+  const heavyContent = "heavy output ".repeat(300);
+  applyConversationCommand({
+    command: {
+      type: "create_conversation",
+      conversation: { id: heavySummaryConversationId, title: "摘要负载测试" },
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.summary-heavy.create", heavySummaryConversationId),
+  });
+  applyConversationCommand({
+    command: {
+      type: "append_message",
+      conversationId: heavySummaryConversationId,
+      message: kikiRuntimeMessage("msg-summary-heavy", heavyContent),
+    },
+    idempotencyKey: createIdempotencyKey("conversation.spec.summary-heavy.message", heavySummaryConversationId),
+    producedBy: "system",
+  });
+  const heavySummaryState = readConversationState();
+  const heavySummary = heavySummaryState.conversations.find(
+    (conversation) => conversation.id === heavySummaryConversationId,
+  );
+  assert.equal(heavySummary?.messagesLoaded, false);
+  assert.ok(
+    (heavySummary?.lastMessage?.content.length ?? 0) <= 600,
+    "summary lastMessage 应只返回列表预览文本，避免首屏会话列表被大输出拖垮",
+  );
+  assert.equal(
+    heavySummary?.lastMessage?.kind === "text" && "cliProcess" in heavySummary.lastMessage,
+    false,
+    "summary lastMessage 不应携带 cliProcess 过程明细",
+  );
+
   const orderNewerConversationId = "conv-command-order-newer";
   const orderOlderConversationId = "conv-command-order-older";
   applyConversationCommand({

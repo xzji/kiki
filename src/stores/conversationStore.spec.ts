@@ -42,6 +42,7 @@ export async function runConversationStoreSpecs() {
     runSummaryHydrationDoesNotClearLoadedMessagesSpec();
     runSummaryHydrationKeepsLastMessageForListSpec();
     runSummaryHydrationOrdersByLastMessageAtSpec();
+    runSummaryHydrationPreservesServerLastMessageAtSpec();
     runAppendMessageMaintainsLastMessageAtSpec();
     runSummaryOnlyReadAndUnreadEventsSpec();
     await runSummaryOnlyDeleteLastMessageResyncsSpec();
@@ -361,6 +362,35 @@ function runSummaryHydrationOrdersByLastMessageAtSpec() {
     sortedIds,
     ["conv-newer-message", "conv-newer-metadata"],
     "summary hydrate 后应按 lastMessageAt 排序，而非按 updatedAt 排序",
+  );
+}
+
+function runSummaryHydrationPreservesServerLastMessageAtSpec() {
+  const conversationId = "conv-summary-server-last-message-at";
+  const summary: ConversationSummary = {
+    id: conversationId,
+    title: "Server lastMessageAt",
+    messagesLoaded: false,
+    messageCount: 2,
+    unreadCount: 0,
+    lastMessage: {
+      ...createTextMessage("msg-last-seq", "last seq but older"),
+      createdAt: "2026-06-09T01:00:00.000Z",
+    },
+    lastMessageAt: "2026-06-09T04:00:00.000Z",
+    createdAt: "2026-06-09T00:00:00.000Z",
+    updatedAt: "2026-06-09T05:00:00.000Z",
+    status: "idle",
+  };
+
+  useConversationStore.setState({ conversations: [], conversationsHydrated: false });
+  useConversationStore.getState().hydrateConversations([summary]);
+
+  const conversation = useConversationStore.getState().conversations.find((entry) => entry.id === conversationId);
+  assert.equal(
+    conversation?.lastMessageAt,
+    "2026-06-09T04:00:00.000Z",
+    "summary hydrate 应保留服务端按 MAX(created_at) 计算的 lastMessageAt",
   );
 }
 

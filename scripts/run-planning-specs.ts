@@ -28,6 +28,7 @@ import { runDispatchPauseServiceSpecs } from "../src/lib/server/scheduling/dispa
 import { runConversationCommandServiceSpecs } from "../src/lib/server/services/conversationCommandService.spec";
 import { runRuntimeEventsAggregationSpecs } from "../src/lib/api/runtime-events.spec";
 import { runRuntimeEventBridgeSnapshotApplySpecs } from "../src/components/providers/RuntimeEventBridge.spec";
+import { runGoalPlanDrawerSpecs } from "../src/components/conversation/GoalPlanDrawer.spec";
 import { runClaudeTransportSessionSpecs } from "../src/lib/server/claude/transport.spec";
 import { runClaudeTraceStoreSpecs } from "../src/lib/server/claude/traceStore.spec";
 import { runPiAdapterSpecs } from "../src/lib/server/runtime/adapters/piAdapter.spec";
@@ -109,6 +110,7 @@ import { runCursorAdapterSpecs } from "../src/lib/server/runtime/adapters/cursor
 import { runCursorAcpParserSpecs } from "../src/lib/server/runtime/adapters/cursorAcpParser.spec";
 import { runCursorAcpPermissionSpecs } from "../src/lib/server/runtime/adapters/cursorAcpPermission.spec";
 import { runAgentOrchestrationSpecs } from "../src/lib/server/agentOrchestration/agentOrchestration.spec";
+import { runResponseCompressionSpecs } from "../src/lib/server/http/responseCompression.spec";
 
 runStateSnapshotSpecs();
 runGoalStateSnapshotFailureReasonSpecs();
@@ -137,6 +139,7 @@ runRuntimeEnvironmentCommandServiceSpecs();
 runConversationCommandServiceSpecs();
 runRuntimeEventsAggregationSpecs();
 runRuntimeEventBridgeSnapshotApplySpecs();
+runGoalPlanDrawerSpecs();
 runStorageAdapterSpecs();
 runJsonRepairAutoCloseSpecs();
 runGoalFactorySpecs();
@@ -223,6 +226,7 @@ runContextResolverSpecs();
   await runInstantConversationEntrySpecs();
   await runMemorySpecs();
   await runMachineTunnelSpecs();
+  await runResponseCompressionSpecs();
   console.log("planning specs passed");
 })().catch((error) => {
   console.error(error);

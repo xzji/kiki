@@ -505,9 +505,79 @@ type ConversationMessageSummaryRow = {
   last_message_at: string | null;
 };
 
-type ConversationLastMessageRow = Parameters<typeof mapConversationMessageRow>[0] & {
+const SUMMARY_LAST_MESSAGE_CONTENT_MAX = 500;
+
+type ConversationLastMessageRow = Omit<
+  Parameters<typeof mapConversationMessageRow>[0],
+  "ref_json" | "snapshot_json"
+> & {
   conversation_id: string;
 };
+
+function mapConversationSummaryLastMessage(row: ConversationLastMessageRow): ConversationMessage {
+  const base = {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    createdAt: row.created_at,
+    ...(row.unread ? { unread: true } : {}),
+    ...(row.status ? { status: row.status } : {}),
+    ...(row.source ? { source: row.source } : {}),
+  };
+  if (row.kind === "goal_plan_card") {
+    return {
+      ...base,
+      kind: "goal_plan_card",
+      role: "kiki",
+      goalRef: { goalId: "", title: "", subGoalCount: 0, taskCount: 0 },
+    };
+  }
+  if (row.kind === "task_card") {
+    return {
+      ...base,
+      kind: "task_card",
+      role: "kiki",
+      taskRef: { goalId: "", subGoalId: "", taskId: "", instanceId: "" },
+    };
+  }
+  if (row.kind === "task_interaction_request") {
+    return {
+      ...base,
+      kind: "task_interaction_request",
+      role: "kiki",
+      taskRef: { goalId: "", subGoalId: "", taskId: "", instanceId: "" },
+      interactionSnapshot: {
+        panelTitle: "请补充任务所需信息",
+        headline: row.content,
+        statusLabel: "需填写",
+        fields: [],
+        hideFieldQuestions: [],
+        reason: row.content,
+        resumeToken: "",
+        requirementType: "provide_context",
+      },
+    };
+  }
+  if (row.kind === "governance_confirmation") {
+    return {
+      ...base,
+      kind: "governance_confirmation",
+      role: "kiki",
+      governance: {
+        status: "error",
+        summary: row.content,
+        payload: { intent: "" },
+        userMessage: "",
+        error: "列表摘要不包含治理卡详情，请打开会话查看。",
+      },
+    };
+  }
+  return {
+    ...base,
+    kind: "text",
+    role: row.role,
+  };
+}
 
 function mapConversationMetaRow(row: ConversationRow & { message_count: number; last_message_at: string | null }) {
   const conversation = mapConversationRow(row);
@@ -575,7 +645,19 @@ export function listConversationSummaries(): ConversationSummary[] {
   const lastMessageRows = db
     .prepare(
       `
-        SELECT m.*
+        SELECT
+          m.id,
+          m.conversation_id,
+          m.seq,
+          m.kind,
+          m.role,
+          m.source,
+          m.status,
+          substr(m.content, 1, ?) AS content,
+          m.unread,
+          m.version,
+          m.created_at,
+          m.updated_at
         FROM conversation_messages m
         JOIN (
           SELECT conversation_id, MAX(seq) AS last_seq
@@ -586,10 +668,10 @@ export function listConversationSummaries(): ConversationSummary[] {
          AND latest.last_seq = m.seq
       `,
     )
-    .all() as ConversationLastMessageRow[];
+    .all(SUMMARY_LAST_MESSAGE_CONTENT_MAX) as ConversationLastMessageRow[];
   const lastMessageByConversationId = new Map<string, ConversationMessage>();
   for (const row of lastMessageRows) {
-    lastMessageByConversationId.set(row.conversation_id, mapConversationMessageRow(row));
+    lastMessageByConversationId.set(row.conversation_id, mapConversationSummaryLastMessage(row));
   }
 
   return conversationRows.map((row) => {

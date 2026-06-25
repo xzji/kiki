@@ -73,9 +73,17 @@ export function handleWithResponseCompression(
   const originalWrite = res.write.bind(res);
   const originalEnd = res.end.bind(res);
   const originalWriteHead = res.writeHead.bind(res);
+  const originalOn = res.on.bind(res);
+  const originalOnce = res.once.bind(res);
+  const originalOff = (res.off ?? res.removeListener).bind(res);
   let compressor: ReturnType<typeof createBrotliCompress> | ReturnType<typeof createGzip> | null = null;
   let decided = false;
   let headersFlushed = false;
+  // Next's pipeToNodeResponse registers res.on("drain") up-front — before the
+  // first res.write(), i.e. before the compressor exists. Buffer those drain
+  // listeners so they can be re-targeted onto the compressor once it is created.
+  type DrainListener = { listener: (...args: unknown[]) => void; once: boolean };
+  const pendingDrainListeners: DrainListener[] = [];
 
   const flushHeaders = () => {
     if (headersFlushed || res.headersSent) return;
@@ -83,19 +91,51 @@ export function handleWithResponseCompression(
     originalWriteHead(res.statusCode);
   };
 
+  const attachDrainListener = (listener: (...args: unknown[]) => void, once: boolean) => {
+    if (compressor) {
+      if (once) compressor.once("drain", listener);
+      else compressor.on("drain", listener);
+      return;
+    }
+    if (decided) {
+      if (once) originalOnce("drain", listener);
+      else originalOn("drain", listener);
+      return;
+    }
+    pendingDrainListeners.push({ listener, once });
+  };
+
+  const flushPendingDrainListeners = (target: "compressor" | "socket") => {
+    for (const { listener, once } of pendingDrainListeners.splice(0)) {
+      if (target === "compressor" && compressor) {
+        if (once) compressor.once("drain", listener);
+        else compressor.on("drain", listener);
+      } else {
+        if (once) originalOnce("drain", listener);
+        else originalOn("drain", listener);
+      }
+    }
+  };
+
   const startCompressionIfEligible = () => {
     if (decided) return Boolean(compressor);
     decided = true;
-    if (!isCompressibleResponse(req, res)) return false;
+    if (!isCompressibleResponse(req, res)) {
+      // Pass-through response: route any buffered drain listeners to the socket.
+      flushPendingDrainListeners("socket");
+      return false;
+    }
 
     res.removeHeader("Content-Length");
     res.setHeader("Content-Encoding", encoding);
     appendVaryAcceptEncoding(res);
 
     compressor = encoding === "br" ? createBrotliCompress(BROTLI_OPTIONS) : createGzip(GZIP_OPTIONS);
+    // Output side (compressor -> socket): honor real socket backpressure so a
+    // slow client cannot make us buffer the whole compressed body in memory.
     compressor.on("data", (chunk: Buffer) => {
       flushHeaders();
-      originalWrite(chunk);
+      if (originalWrite(chunk) === false) compressor?.pause();
     });
     compressor.on("end", () => {
       originalEnd();
@@ -103,8 +143,21 @@ export function handleWithResponseCompression(
     compressor.on("error", (error) => {
       res.destroy(error);
     });
+    // The real socket draining resumes pumping compressor output downstream.
+    originalOn("drain", () => {
+      compressor?.resume();
+    });
+    flushPendingDrainListeners("compressor");
     return true;
   };
+
+  // On client abort the socket is destroyed mid-stream; without this the
+  // compressor keeps its buffered input alive (and its data/end/error listeners
+  // attached) since res.end()/compressor.end() is never reached. Destroy it to
+  // release memory and detach from the dead socket.
+  originalOnce("close", () => {
+    if (compressor && !compressor.destroyed) compressor.destroy();
+  });
 
   res.writeHead = ((statusCode: number, statusMessageOrHeaders?: unknown, headers?: unknown) => {
     const normalized = normalizeWriteHeadArgs(
@@ -156,6 +209,47 @@ export function handleWithResponseCompression(
       ...[chunk, chunkEncoding, callback].filter((value) => value !== undefined),
     );
   }) as typeof res.end;
+
+  // Input side (caller -> compressor): once compression is active, the caller's
+  // chunks are buffered inside the compressor, not the socket. A producer that
+  // awaits res 'drain' after a backpressured res.write() must therefore be
+  // released by the compressor's writable drain — otherwise the response (e.g.
+  // a large /api/runtime/state snapshot) deadlocks and never completes.
+  res.on = ((type: string | symbol, listener: (...args: unknown[]) => void) => {
+    if (type === "drain") {
+      attachDrainListener(listener, false);
+      return res;
+    }
+    originalOn(type, listener);
+    return res;
+  }) as typeof res.on;
+
+  res.once = ((type: string | symbol, listener: (...args: unknown[]) => void) => {
+    if (type === "drain") {
+      attachDrainListener(listener, true);
+      return res;
+    }
+    originalOnce(type, listener);
+    return res;
+  }) as typeof res.once;
+
+  const offDrainListener = (type: string | symbol, listener: (...args: unknown[]) => void) => {
+    if (type === "drain") {
+      const pendingIndex = pendingDrainListeners.findIndex((entry) => entry.listener === listener);
+      if (pendingIndex !== -1) {
+        pendingDrainListeners.splice(pendingIndex, 1);
+        return res;
+      }
+      if (compressor) {
+        compressor.off("drain", listener);
+        return res;
+      }
+    }
+    originalOff(type, listener);
+    return res;
+  };
+  res.off = offDrainListener as typeof res.off;
+  res.removeListener = offDrainListener as typeof res.removeListener;
 
   handler();
 }

@@ -2,11 +2,12 @@
 
 import { ChevronsRight, Maximize2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { TopicPlanBreadcrumb, TopicPlanContent } from "@/components/topic/TopicPlanContent";
 import { NAV_SIDEBAR_EXPANDED_WIDTH } from "@/components/layout/Sidebar";
 import { TaskDetailBody } from "@/components/topic/TaskDetailBody";
+import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { topicDetailPath, topicTaskDetailPath } from "@/lib/routes";
 import type { Task } from "@/types/kiki";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
@@ -87,6 +88,7 @@ export function GoalPlanDrawer({
   onClose: () => void;
 }) {
   const goals = useGoalStore(selectVisibleGoals);
+  const applyGoalsProjection = useGoalStore((state) => state.applyGoalsProjection);
   const setNavCollapsed = useNavSidebarStore((state) => state.setCollapsed);
   const prevNavRef = useRef<boolean | null>(null);
   const drawerWidthRef = useRef(getDefaultGoalPlanDrawerWidth(false));
@@ -94,9 +96,14 @@ export function GoalPlanDrawer({
   const isTaskDetailOpenRef = useRef(false);
   const [drawerWidth, setDrawerWidth] = useState(() => getDefaultGoalPlanDrawerWidth(false));
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [missingGoalRefresh, setMissingGoalRefresh] = useState<{
+    loading: boolean;
+    error: string | null;
+  }>({ loading: false, error: null });
+  const [refreshAttempt, setRefreshAttempt] = useState(0);
 
   const goal = goals.find((g) => g.id === goalId) ?? null;
-  const visible = Boolean(open && goal);
+  const visible = Boolean(open && goalId);
   const activeTask = useMemo(() => {
     if (!goal || !activeTaskId) return null;
     return goal.subGoals.flatMap((subGoal) => subGoal.tasks).find((task) => task.id === activeTaskId) ?? null;
@@ -200,10 +207,37 @@ export function GoalPlanDrawer({
     }
   }, [goalId, visible, focusSubGoalId]);
 
-  if (!visible || !goal) return null;
+  useEffect(() => {
+    if (!visible || goal || !goalId) {
+      if (goal) setMissingGoalRefresh({ loading: false, error: null });
+      return;
+    }
+
+    let cancelled = false;
+    setMissingGoalRefresh({ loading: true, error: null });
+    fetchRuntimeStateSnapshot()
+      .then((snapshot) => {
+        if (cancelled) return;
+        applyGoalsProjection(snapshot.goals, snapshot.meta?.revisions?.goals);
+        setMissingGoalRefresh({ loading: false, error: null });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMissingGoalRefresh({
+          loading: false,
+          error: error instanceof Error ? error.message : "目标规划加载失败",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyGoalsProjection, goal, goalId, refreshAttempt, visible]);
+
+  if (!visible) return null;
 
   const fullscreenHref =
-    activeTask != null ? topicTaskDetailPath(goal.id, activeTask.id) : topicDetailPath(goal.id);
+    goal && activeTask != null ? topicTaskDetailPath(goal.id, activeTask.id) : goal ? topicDetailPath(goal.id) : null;
 
   const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -252,15 +286,19 @@ export function GoalPlanDrawer({
           <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-[#8C9198]" />
         </div>
         <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
-          <TopicPlanBreadcrumb
-            goalId={goal.id}
-            goalTitle={goal.title}
-            taskTitle={activeTask?.title.replace(/^任务\d+：/, "")}
-            className="min-w-0 flex-1 justify-start text-left"
-            disableLinks
-            onGoalClick={activeTask ? () => setActiveTaskId(null) : undefined}
-            onGoalPlanClick={activeTask ? () => setActiveTaskId(null) : undefined}
-          />
+          {goal ? (
+            <TopicPlanBreadcrumb
+              goalId={goal.id}
+              goalTitle={goal.title}
+              taskTitle={activeTask?.title.replace(/^任务\d+：/, "")}
+              className="min-w-0 flex-1 justify-start text-left"
+              disableLinks
+              onGoalClick={activeTask ? () => setActiveTaskId(null) : undefined}
+              onGoalPlanClick={activeTask ? () => setActiveTaskId(null) : undefined}
+            />
+          ) : (
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-[#1F2328]">主题规划</div>
+          )}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <button
               type="button"
@@ -270,18 +308,40 @@ export function GoalPlanDrawer({
             >
               <ChevronsRight className="h-4 w-4" />
             </button>
-            <Link
-              href={fullscreenHref}
-              aria-label="全屏查看主题规划"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </Link>
+            {fullscreenHref ? (
+              <Link
+                href={fullscreenHref}
+                aria-label="全屏查看主题规划"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Link>
+            ) : null}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
-          {activeTask ? (
+          {!goal ? (
+            <div className="mx-auto flex min-h-[320px] w-full max-w-2xl flex-col items-center justify-center rounded-2xl border border-dashed border-[#D0D7DE] bg-[#F8F9FB] px-8 text-center">
+              <div className="text-[14px] font-semibold text-[#1F2328]">
+                {missingGoalRefresh.loading ? "正在加载目标规划..." : "暂时找不到这个目标规划"}
+              </div>
+              <div className="mt-2 text-[12px] leading-5 text-[#6B7280]">
+                {missingGoalRefresh.error
+                  ? missingGoalRefresh.error
+                  : "会话已经绑定目标，但本地目标投影尚未就绪。KiKi 正在重新同步运行时快照。"}
+              </div>
+              {!missingGoalRefresh.loading ? (
+                <button
+                  type="button"
+                  onClick={() => setRefreshAttempt((attempt) => attempt + 1)}
+                  className="mt-4 rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+                >
+                  重新加载
+                </button>
+              ) : null}
+            </div>
+          ) : activeTask ? (
             <div className="mx-auto w-full max-w-3xl px-2 py-2">
               <TaskDetailBody goal={goal} task={activeTask} onDeleted={() => setActiveTaskId(null)} />
             </div>

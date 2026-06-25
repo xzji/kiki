@@ -142,7 +142,7 @@ function normalizeConversationForStore(
       messageCount: localDerived?.messageCount ?? conversation.messageCount,
       unreadCount: localDerived?.unreadCount ?? conversation.unreadCount,
       lastMessage,
-      lastMessageAt: lastMessage?.createdAt ?? normalized.lastMessageAt,
+      lastMessageAt: localDerived?.lastMessage?.createdAt ?? normalized.lastMessageAt ?? lastMessage?.createdAt,
     };
   }
   const merged = local ? mergeConversationPreservingCliProcess(local, normalized) : normalized;

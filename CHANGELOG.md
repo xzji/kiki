@@ -10,15 +10,19 @@
 - SSE 空闲心跳改为注释帧并增加空闲退避，降低无事件会话的轮询与 DB 压力；生产自定义 server 增加文本/JSON 响应压缩，排除 SSE 流。
 - 机器 tunnel WebSocket 开启消息压缩，并对 daemon hello 做状态签名去重；存在运行中 job/治理 tick 时仍按周期续发 hello 以续租。
 - 后端日志面板在页面隐藏时暂停轮询，恢复可见后继续刷新，降低后台标签页负载。
+- 会话列表摘要只返回截断后的预览文本（最长 500 字），并剥离 `cliProcess` 等大字段，避免首屏会话列表被大输出拖垮；`lastMessageAt` 保留服务端按 `MAX(created_at)` 计算的结果。
 
 ### Fixed
 - 删除本地 Runtime 环境改为确认后立即从本地投影移除，服务端失败时回滚；检测刷新返回时若环境已删除则跳过持久化，避免“检测中”和删除互相抢 revision。
 - Runtime 命令遇到服务端 404 时会刷新快照，清理浏览器侧已不存在的陈旧 Runtime 投影。
 - 助手消息中的工具授权卡片按 CLI 事件时间线展示，避免最终回复先于授权卡片造成上下文顺序混乱。
+- **[核心修复]** 修复生产响应压缩在背压下死锁导致 `/api/runtime/state` 永不返回、“目标规划”侧栏一直卡在加载态的问题：根因是压缩包装器把数据缓冲在 compressor 而非 socket，而 Next 的 body pump 在首个 `res.write()` 前就注册了 `res.on("drain")`，导致等待的 drain 永不触发。修复改为缓冲早于 compressor 创建的 drain 监听并重定向到 compressor，双向打通背压（socket 满则暂停 compressor，compressor drain 唤醒生产者），并在客户端中断（socket close）时销毁 compressor 释放缓冲。
+- “目标规划”侧栏改为基于 `goalId` 存在即渲染，本地目标投影缺失时展示加载态并主动拉取 `/api/runtime/state` 重新同步，修复点击“目标规划”无响应。
 
 ### Added
 - `kiki-daemon log` / `kiki-daemon logs` 子命令：默认显示最近 200 行 `daemon.log` 并实时跟随，支持 `--lines`/`--tail` 和 `--no-follow`。
 - 新增 daemon log、Runtime 快照 ETag、Runtime 删除乐观投影、助手消息时间线和 RuntimeEventBridge 快照应用回归测试。
+- 新增响应压缩背压（忠实复刻 Next body pump 注册顺序的 br/gzip/identity 往返）与 GoalPlanDrawer 缺失目标加载态回归测试。
 
 ### Verification
 - 通过 `pnpm test:planning`。
