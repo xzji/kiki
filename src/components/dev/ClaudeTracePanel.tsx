@@ -3,6 +3,7 @@
 import { Copy, RefreshCcw, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { useDocumentVisible } from "@/hooks/useDocumentVisible";
 import { cn } from "@/lib/utils";
 
 type ClaudeTraceStatus = "running" | "completed" | "failed" | "aborted";
@@ -97,6 +98,7 @@ function contentForTab(trace: ClaudeTraceDetail | null, tab: TraceTab) {
 }
 
 export function ClaudeTracePanel() {
+  const documentVisible = useDocumentVisible();
   const [traces, setTraces] = useState<ClaudeTraceSummary[]>([]);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ClaudeTraceDetail | null>(null);
@@ -124,10 +126,11 @@ export function ClaudeTracePanel() {
   };
 
   useEffect(() => {
+    if (!documentVisible) return;
     void fetchTraces();
     const timer = window.setInterval(() => void fetchTraces(), 3000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [documentVisible]);
 
   useEffect(() => {
     if (!selectedTraceId) {

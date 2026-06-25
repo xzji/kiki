@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeStateSnapshot, isRuntimeStateUnchangedPayload } from "@/lib/api/runtime-daemon";
 import { INITIAL_RUNTIME_ENVIRONMENTS } from "@/lib/runtime/defaultRuntimeEnvironments";
 import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { makeId } from "@/lib/utils";
@@ -62,6 +62,7 @@ export const useRuntimeEnvStore = create<RuntimeEnvState>()((set, get) => ({
     if (get().hydrated) return;
     try {
       const snapshot = await fetchRuntimeStateSnapshot();
+      if (isRuntimeStateUnchangedPayload(snapshot)) return;
       const revision = snapshot.meta?.revisions?.runtimeEnvironments;
       get().replaceEnvironments(snapshot.runtimeEnvironments, null, revision);
       set({ hydrated: true });

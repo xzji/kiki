@@ -3,10 +3,12 @@
 import { RefreshCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useDocumentVisible } from "@/hooks/useDocumentVisible";
 import { cn } from "@/lib/utils";
 import type { GoalServerLogEntry, GoalServerProgress } from "@/types/goalTelemetry";
 
-function useBackendLogs() {
+function useBackendLogs(input?: { enabled?: boolean }) {
+  const enabled = input?.enabled ?? true;
   const [logs, setLogs] = useState<GoalServerLogEntry[]>([]);
   const [activeRequests, setActiveRequests] = useState<GoalServerProgress[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -15,7 +17,7 @@ function useBackendLogs() {
   const fetchLogs = async () => {
     setLogsLoading(true);
     try {
-      const response = await fetch("/api/system/logs?limit=150", {
+      const response = await fetch("/api/system/logs?limit=50", {
         method: "GET",
         cache: "no-store",
       });
@@ -52,12 +54,13 @@ function useBackendLogs() {
   };
 
   useEffect(() => {
+    if (!enabled) return;
     void fetchLogs();
     const timer = window.setInterval(() => {
       void fetchLogs();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [enabled]);
 
   return {
     logs,
@@ -83,7 +86,10 @@ function formatRealWorldTime(timestamp: string) {
 }
 
 export function BackendLogsPanel() {
-  const { logs, activeRequests, logsLoading, logsError, fetchLogs } = useBackendLogs();
+  const documentVisible = useDocumentVisible();
+  const { logs, activeRequests, logsLoading, logsError, fetchLogs } = useBackendLogs({
+    enabled: documentVisible,
+  });
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
   const orderedLogs = useMemo(() => [...logs].reverse(), [logs]);

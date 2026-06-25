@@ -27,6 +27,7 @@ import { reconcileGovernanceTickMachineHello } from "@/lib/server/governance/gov
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const INBOUND_WATCHDOG_MS = 70_000;
+const WS_COMPRESSION_OPTIONS = { threshold: 1024 };
 
 type WsConnection = {
   machineId: string;
@@ -171,7 +172,7 @@ export function initializeMachineTunnelWsServer(server: HttpServer) {
   if (state.initialized.has(server)) return;
   state.initialized.add(server);
 
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: WS_COMPRESSION_OPTIONS });
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://localhost");

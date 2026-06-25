@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 
 import { getConversationEvents } from "@/lib/server/repositories/conversationEventLogRepository";
-import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
+import { createSseHeaders, writeSseComment, writeSseEvent } from "@/lib/server/sse";
 import { bindUserContextTick } from "@/lib/server/sse/userContextTick";
 import { withAuth } from "@/lib/server/http/withAuth";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 // 长间隔，避免空闲会话增加无谓负载与 DB 压力。配合发送端 ~120ms 的持久化去抖合帧，
 // 观察方能较平滑地分段呈现，消除原先固定 2s "哐一大段"的卡顿体感。
 const ACTIVE_POLL_INTERVAL_MS = 400;
-const IDLE_POLL_INTERVAL_MS = 2000;
+const IDLE_POLL_INTERVAL_MS = 5000;
 const IDLE_TICKS_BEFORE_BACKOFF = 3;
 
 async function GETHandler(request: NextRequest, context: { userId: string }) {
@@ -52,7 +52,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
             writeSseEvent(controller, "events", { events, nextCursor: cursor });
           } else {
             idleTicks += 1;
-            writeSseEvent(controller, "heartbeat", { cursor });
+            writeSseComment(controller);
           }
         } catch (error) {
           writeSseEvent(controller, "error", {

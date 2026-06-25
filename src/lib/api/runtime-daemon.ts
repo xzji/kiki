@@ -5,20 +5,43 @@ import type { RuntimeDaemonConfig } from "@/lib/daemon/daemonConfig";
 import type { RuntimeDaemonDeviceState, RuntimeDaemonState } from "@/lib/daemon/daemonState";
 
 export type RuntimeStatePayload = {
+  unchanged?: false;
   goals: Goal[];
   runtimeEnvironments: RuntimeEnvironment[];
   scheduleEvents: AgentEvent[];
   meta?: {
     revisions?: RuntimeStateRevision;
+    etags?: RuntimeStateEtags;
     updatedAt?: Partial<Record<keyof RuntimeStateRevision, string>>;
   };
 };
+
+export type RuntimeStateUnchangedPayload = {
+  unchanged: true;
+  meta: {
+    revisions?: RuntimeStateRevision;
+    etags?: RuntimeStateEtags;
+    updatedAt?: Partial<Record<keyof RuntimeStateRevision, string>>;
+  };
+};
+
+export type RuntimeStateResponse = RuntimeStatePayload | RuntimeStateUnchangedPayload;
 
 export type RuntimeStateRevision = {
   goals: number;
   runtimeEnvironments: number;
   scheduleEvents: number;
 };
+
+export type RuntimeStateEtags = {
+  goals: string;
+  runtimeEnvironments: string;
+  scheduleEvents: string;
+};
+
+export function isRuntimeStateUnchangedPayload(payload: RuntimeStateResponse): payload is RuntimeStateUnchangedPayload {
+  return payload.unchanged === true;
+}
 
 export type RuntimeDaemonStatusPayload = {
   config: RuntimeDaemonConfig | null;
@@ -68,12 +91,26 @@ export type LocalDataResetPayload = {
   };
 };
 
-export async function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload> {
-  const response = await fetch("/api/runtime/state", { cache: "no-store" });
+export function fetchRuntimeStateSnapshot(): Promise<RuntimeStatePayload>;
+export function fetchRuntimeStateSnapshot(input: {
+  knownEtags?: Partial<RuntimeStateEtags>;
+}): Promise<RuntimeStateResponse>;
+export async function fetchRuntimeStateSnapshot(input?: {
+  knownEtags?: Partial<RuntimeStateEtags>;
+}): Promise<RuntimeStateResponse> {
+  const params = new URLSearchParams();
+  if (input?.knownEtags?.goals) params.set("goalsEtag", input.knownEtags.goals);
+  if (input?.knownEtags?.runtimeEnvironments) {
+    params.set("runtimeEnvironmentsEtag", input.knownEtags.runtimeEnvironments);
+  }
+  if (input?.knownEtags?.scheduleEvents) params.set("scheduleEventsEtag", input.knownEtags.scheduleEvents);
+  const query = params.toString();
+  const url = query ? `/api/runtime/state?${query}` : "/api/runtime/state";
+  const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("本地运行时状态获取失败");
   }
-  return (await response.json()) as RuntimeStatePayload;
+  return (await response.json()) as RuntimeStateResponse;
 }
 
 export type ThreadRunnerActivity = {

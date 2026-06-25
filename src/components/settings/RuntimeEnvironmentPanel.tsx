@@ -12,7 +12,6 @@ import {
 import {
   activateEnvironmentCommand,
   createEnvironmentCommand,
-  removeEnvironmentCommand,
   RuntimeEnvironmentCommandError,
   setEnvironmentPermissionModeCommand,
   updateEnvironmentCommand,
@@ -25,6 +24,7 @@ import {
   type KikiSkillsInstallPayload,
   type KikiSkillsStatusPayload,
 } from "@/lib/api/kiki-skills";
+import { removeRuntimeEnvironment } from "@/lib/runtime/removeRuntimeEnvironment";
 import { normalizeRuntimeFilePolicy } from "@/lib/runtime/toolPolicy";
 import { cn } from "@/lib/utils";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -150,7 +150,6 @@ export function RuntimeEnvironmentPanel() {
   const setPermissionMode = useRuntimeEnvStore((state) => state.setPermissionMode);
   const setFilePolicyMode = useRuntimeEnvStore((state) => state.setFilePolicyMode);
   const setFilePolicyCustomCapability = useRuntimeEnvStore((state) => state.setFilePolicyCustomCapability);
-  const removeEnvironment = useRuntimeEnvStore((state) => state.removeEnvironment);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
   const [machines, setMachines] = useState<MachineRecord[]>([]);
@@ -217,6 +216,7 @@ export function RuntimeEnvironmentPanel() {
   }, []);
 
   const refreshEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
+    setDaemonActionError(null);
     setEnvironmentHealth(environment.id, { status: "checking" });
     try {
       const result = await getRuntimeEnvStatus({
@@ -230,6 +230,7 @@ export function RuntimeEnvironmentPanel() {
         cliPath: result.cliPath,
         claudeVersion: result.version,
       };
+      if (!useRuntimeEnvStore.getState().environments.some((item) => item.id === environment.id)) return;
       setEnvironmentHealth(environment.id, health);
       await persistEnvironmentPatch(environment.id, {
         cliPath: result.cliPath,
@@ -242,6 +243,7 @@ export function RuntimeEnvironmentPanel() {
         status: "offline",
         reason: error instanceof Error ? error.message : "环境状态检测失败",
       };
+      if (!useRuntimeEnvStore.getState().environments.some((item) => item.id === environment.id)) return;
       setEnvironmentHealth(environment.id, health);
       await persistEnvironmentPatch(environment.id, {
         health,
@@ -251,6 +253,7 @@ export function RuntimeEnvironmentPanel() {
   }, [handleRuntimeCommandError, persistEnvironmentPatch, setEnvironmentHealth]);
 
   const handleCreateEnvironment = useCallback(async (environment: Omit<RuntimeEnvironment, "id">) => {
+    setDaemonActionError(null);
     try {
       const result = await createEnvironmentCommand({ environment });
       if (!result.environment) return;
@@ -263,25 +266,16 @@ export function RuntimeEnvironmentPanel() {
   const handleRemoveEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
     const ok = window.confirm(`删除本地环境「${environment.name}」？`);
     if (!ok) return;
+    setDaemonActionError(null);
     try {
-      const removeOnce = () => removeEnvironmentCommand({ id: environment.id });
-      let result: Awaited<ReturnType<typeof removeEnvironmentCommand>>;
-      try {
-        result = await removeOnce();
-      } catch (error) {
-        if (!(error instanceof RuntimeEnvironmentCommandError) || !error.conflict) {
-          throw error;
-        }
-        result = await removeOnce();
-      }
-      removeEnvironment(environment.id);
-      useRuntimeEnvStore.getState().replaceEnvironments(result.environments, null, result.revision);
+      await removeRuntimeEnvironment({ environment });
     } catch (error) {
       handleRuntimeCommandError(error, "Runtime 环境删除失败");
     }
-  }, [handleRuntimeCommandError, removeEnvironment]);
+  }, [handleRuntimeCommandError]);
 
   const handleActivateEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
+    setDaemonActionError(null);
     try {
       const result = await activateEnvironmentCommand({ id: environment.id });
       setActiveEnvironment(environment.id);
@@ -295,6 +289,7 @@ export function RuntimeEnvironmentPanel() {
     environment: RuntimeEnvironment,
     permissionMode: RuntimePermissionMode,
   ) => {
+    setDaemonActionError(null);
     try {
       const result = await setEnvironmentPermissionModeCommand({ id: environment.id, permissionMode });
       setPermissionMode(environment.id, permissionMode);
@@ -308,6 +303,7 @@ export function RuntimeEnvironmentPanel() {
     environment: RuntimeEnvironment,
     mode: RuntimeFilePolicyMode,
   ) => {
+    setDaemonActionError(null);
     const filePolicy = {
       ...normalizeRuntimeFilePolicy(environment.filePolicy),
       mode,
@@ -329,6 +325,7 @@ export function RuntimeEnvironmentPanel() {
     capability: RuntimeToolCapability,
     enabled: boolean,
   ) => {
+    setDaemonActionError(null);
     const normalized = normalizeRuntimeFilePolicy(environment.filePolicy);
     const filePolicy = {
       ...normalized,
@@ -353,6 +350,7 @@ export function RuntimeEnvironmentPanel() {
     environment: RuntimeEnvironment,
     allowedToolRules: RuntimeToolPermissionRule[],
   ) => {
+    setDaemonActionError(null);
     const filePolicy = {
       ...normalizeRuntimeFilePolicy(environment.filePolicy),
       allowedToolRules,

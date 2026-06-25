@@ -5,6 +5,11 @@ import { runAwaitingDisplayModelSpecs } from "../src/lib/taskInstance/awaitingDi
 import { runProtocolNormalizeSpecs } from "../src/lib/server/protocol/protocolNormalize.spec";
 import { runPromptDuplicationGuardSpecs } from "../src/lib/planning/specs/promptDuplicationGuardSpec";
 import { runRuntimeStateChannelSpecs } from "../src/lib/runtimeStateChannel.spec";
+import { runDaemonLogModeSpecs } from "../packages/daemon/src/logMode.spec";
+import { runRuntimeEnvironmentCommandClientSpecs } from "../src/lib/api/runtime-environment-commands.spec";
+import { runRuntimeDaemonApiSpecs } from "../src/lib/api/runtime-daemon.spec";
+import { runRemoveRuntimeEnvironmentSpecs } from "../src/lib/runtime/removeRuntimeEnvironment.spec";
+import { runAssistantMessageTimelineSpecs } from "../src/lib/assistantMessageTimeline.spec";
 import { runConversationOrderingSpecs } from "../src/lib/conversationOrdering.spec";
 import { runRoutesSpecs } from "../src/lib/routes.spec";
 import { runTaskResultPresentationFilterSpecs } from "../src/lib/taskResult/presentationFilter.spec";
@@ -22,6 +27,7 @@ import { runGoalSchedulerEngineSpecs } from "../src/lib/server/scheduling/taskSc
 import { runDispatchPauseServiceSpecs } from "../src/lib/server/scheduling/dispatchPauseService.spec";
 import { runConversationCommandServiceSpecs } from "../src/lib/server/services/conversationCommandService.spec";
 import { runRuntimeEventsAggregationSpecs } from "../src/lib/api/runtime-events.spec";
+import { runRuntimeEventBridgeSnapshotApplySpecs } from "../src/components/providers/RuntimeEventBridge.spec";
 import { runClaudeTransportSessionSpecs } from "../src/lib/server/claude/transport.spec";
 import { runClaudeTraceStoreSpecs } from "../src/lib/server/claude/traceStore.spec";
 import { runPiAdapterSpecs } from "../src/lib/server/runtime/adapters/piAdapter.spec";
@@ -130,6 +136,7 @@ runTaskResultParserSpecs();
 runRuntimeEnvironmentCommandServiceSpecs();
 runConversationCommandServiceSpecs();
 runRuntimeEventsAggregationSpecs();
+runRuntimeEventBridgeSnapshotApplySpecs();
 runStorageAdapterSpecs();
 runJsonRepairAutoCloseSpecs();
 runGoalFactorySpecs();
@@ -182,10 +189,15 @@ runLoopTickLogSpecs();
 runContextResolverSpecs();
 
 (async () => {
+  await runRuntimeEnvironmentCommandClientSpecs();
+  await runRuntimeDaemonApiSpecs();
   await runAgentExecutorSpecs();
   await runLocalRepairCycleSpecs();
   await runClaudeJsonInvokeSpecs();
+  await runDaemonLogModeSpecs();
   await runSpecWriterSpecs();
+  await runRemoveRuntimeEnvironmentSpecs();
+  await runAssistantMessageTimelineSpecs();
   await runResumeBlockedTaskSpecs();
   await runTopicInitSagaSpecs();
   await runTopicInitSagaDefaultsSpecs();

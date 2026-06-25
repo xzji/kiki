@@ -5,6 +5,7 @@ import { runRemoteDaemonLoop } from "@/lib/daemon/remoteDaemonLoop";
 import type { RemoteDaemonServiceStatus } from "@/lib/server/tunnel/tunnelHub";
 
 import packageJson from "../package.json";
+import { parseTailLineCount, runDaemonLogMode } from "./logMode";
 import { collectDaemonServiceEnv } from "./pathEnv";
 import {
   installService as installDaemonService,
@@ -16,7 +17,7 @@ import {
 } from "./service";
 import { ensureSingleDaemonInstance } from "./singleton";
 
-type Subcommand = "run" | "install" | "uninstall" | "status" | "version" | "help";
+type Subcommand = "run" | "install" | "uninstall" | "status" | "log" | "version" | "help";
 const DAEMON_PACKAGE_VERSION = packageJson.version;
 
 function readArg(flag: string): string | undefined {
@@ -33,11 +34,13 @@ function resolveSubcommand(): Subcommand {
     positional === "install" ||
     positional === "uninstall" ||
     positional === "status" ||
+    positional === "log" ||
     positional === "version" ||
     positional === "help"
   ) {
     return positional;
   }
+  if (positional === "logs") return "log";
   if (process.argv.includes("--help") || process.argv.includes("-h")) return "help";
   if (process.argv.includes("--version") || process.argv.includes("-v")) return "version";
   return "run";
@@ -115,12 +118,14 @@ function printHelp() {
   kiki-daemon install    [--server-url <url> --api-key <key>] 注册后台服务 + 开机自启（已安装时可复用原配置）
   kiki-daemon uninstall                                        卸载后台服务
   kiki-daemon status                                           查看后台服务状态
+  kiki-daemon log        [--lines 200] [--no-follow]           进入日志模式，实时查看 daemon 执行记录
   kiki-daemon version                                          查看当前版本
   kiki-daemon help                                             显示本帮助
 
 示例:
   npm i -g @kiki_agent/daemon@latest && kiki-daemon install --server-url https://kiki.example.com --api-key sk_machine_xxx
   npm i -g @kiki_agent/daemon@latest && kiki-daemon install
+  kiki-daemon log
 `);
 }
 
@@ -151,6 +156,14 @@ async function main() {
     if (status.pid) console.log(`  进程号: ${status.pid}`);
     if (status.running) console.log(`  进程版本: ${status.daemonVersion ?? "未知"}`);
     if (status.path) console.log(`  配置文件: ${status.path}`);
+    return;
+  }
+
+  if (subcommand === "log") {
+    await runDaemonLogMode({
+      lines: parseTailLineCount(readArg("--lines") ?? readArg("--tail")),
+      follow: !process.argv.includes("--no-follow"),
+    });
     return;
   }
 

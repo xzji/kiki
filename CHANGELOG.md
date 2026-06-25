@@ -2,6 +2,30 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-06-25
+
+### Changed
+- Runtime 状态快照接口增加 ETag/unchanged 返回，前端 RuntimeEventBridge 在 SSE 断线恢复、跨标签同步和批量事件收敛时复用已知 ETag，减少重复全量 `/api/runtime/state` 拉取。
+- SSE 空闲心跳改为注释帧并增加空闲退避，降低无事件会话的轮询与 DB 压力；生产自定义 server 增加文本/JSON 响应压缩，排除 SSE 流。
+- 机器 tunnel WebSocket 开启消息压缩，并对 daemon hello 做状态签名去重；存在运行中 job/治理 tick 时仍按周期续发 hello 以续租。
+- 后端日志面板在页面隐藏时暂停轮询，恢复可见后继续刷新，降低后台标签页负载。
+
+### Fixed
+- 删除本地 Runtime 环境改为确认后立即从本地投影移除，服务端失败时回滚；检测刷新返回时若环境已删除则跳过持久化，避免“检测中”和删除互相抢 revision。
+- Runtime 命令遇到服务端 404 时会刷新快照，清理浏览器侧已不存在的陈旧 Runtime 投影。
+- 助手消息中的工具授权卡片按 CLI 事件时间线展示，避免最终回复先于授权卡片造成上下文顺序混乱。
+
+### Added
+- `kiki-daemon log` / `kiki-daemon logs` 子命令：默认显示最近 200 行 `daemon.log` 并实时跟随，支持 `--lines`/`--tail` 和 `--no-follow`。
+- 新增 daemon log、Runtime 快照 ETag、Runtime 删除乐观投影、助手消息时间线和 RuntimeEventBridge 快照应用回归测试。
+
+### Verification
+- 通过 `pnpm test:planning`。
+- 通过 `pnpm build`。
+- 通过 `pnpm tsc --noEmit`。
+- 通过 `pnpm lint`。
+- 通过 `packages/daemon` 的 `npm run build`。
+
 ## 2026-06-24
 
 ### Changed

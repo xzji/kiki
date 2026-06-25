@@ -1,7 +1,7 @@
 "use client";
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
-import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeStateSnapshot, isRuntimeStateUnchangedPayload } from "@/lib/api/runtime-daemon";
 import { publishRuntimeStateChange } from "@/lib/runtimeStateChannel";
 import { makeId } from "@/lib/utils";
 import { useRuntimeEnvStore } from "@/stores/runtimeEnvStore";
@@ -63,11 +63,13 @@ async function requestRuntimeEnvironmentCommand(input: {
   });
   const data = await readCommandResponse(response);
   if (!response.ok) {
-    if (data.conflict) {
+    if (data.conflict || response.status === 404) {
       const snapshot = await fetchRuntimeStateSnapshot();
-      useRuntimeEnvStore
-        .getState()
-        .replaceEnvironments(snapshot.runtimeEnvironments, null, snapshot.meta?.revisions?.runtimeEnvironments);
+      if (!isRuntimeStateUnchangedPayload(snapshot)) {
+        useRuntimeEnvStore
+          .getState()
+          .replaceEnvironments(snapshot.runtimeEnvironments, null, snapshot.meta?.revisions?.runtimeEnvironments);
+      }
     }
     throw new RuntimeEnvironmentCommandError(
       response.status,

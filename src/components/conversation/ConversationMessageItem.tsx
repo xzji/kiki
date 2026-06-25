@@ -10,6 +10,7 @@ import { TaskMessageCard } from "@/components/conversation/TaskMessageCard";
 import { TaskInteractionRequestMessage } from "@/components/conversation/TaskInteractionRequestMessage";
 import { ArtifactRenderer } from "@/components/execution/ArtifactRenderer";
 import { ToolPermissionRequestDialog } from "@/components/runtime/ToolPermissionRequestDialog";
+import { buildAssistantTimelineNodes } from "@/lib/assistantMessageTimeline";
 import { formatMessageTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { selectVisibleGoals, useGoalStore } from "@/stores/goalStore";
@@ -21,31 +22,11 @@ import type {
   Task,
   TaskExpectedResult,
 } from "@/types/kiki";
-import type { ClaudeStreamEvent } from "@/types/runtime";
 import type {
   MessageFeedbackRating,
   MessageFeedbackReasonCode,
   MessageFeedbackRecord,
 } from "@/types/messageFeedback";
-
-type ToolPermissionRequestEvent = Extract<ClaudeStreamEvent, { type: "tool_permission_request" }>;
-
-function getToolPermissionRequestFromEvent(input: unknown): ToolPermissionRequestEvent | null {
-  if (!input || typeof input !== "object") return null;
-  const candidate = (input as { toolPermissionRequest?: unknown }).toolPermissionRequest;
-  if (!candidate || typeof candidate !== "object") return null;
-  const request = candidate as Partial<ToolPermissionRequestEvent>;
-  if (
-    request.type !== "tool_permission_request" ||
-    typeof request.requestId !== "string" ||
-    typeof request.runtimeEnvId !== "string" ||
-    typeof request.toolName !== "string" ||
-    typeof request.suggestedRule !== "string"
-  ) {
-    return null;
-  }
-  return request as ToolPermissionRequestEvent;
-}
 
 /**
  * 单条对话消息。
@@ -147,12 +128,7 @@ export function ConversationMessageItem({
   }, [goals, message]);
 
   const timeLabel = formatMessageTime(message.createdAt);
-  const toolPermissionRequests =
-    message.kind === "text" || message.kind === "goal_plan_card"
-      ? (message.cliProcess?.events
-          .map((event) => getToolPermissionRequestFromEvent(event.input))
-          .filter((request): request is ToolPermissionRequestEvent => Boolean(request)) ?? [])
-      : [];
+  const assistantTimelineNodes = useMemo(() => buildAssistantTimelineNodes(message), [message]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -225,6 +201,34 @@ export function ConversationMessageItem({
     message.status !== "error" &&
     message.content.trim().length > 0 &&
     Boolean(onSubmitFeedback);
+  const shouldRenderAssistantTimeline =
+    message.kind === "text" || message.kind === "goal_plan_card";
+
+  const renderAssistantContent = () => (
+    <>
+      <div className="max-w-3xl">
+        {isKikiLoading ? (
+          <LoadingDots />
+        ) : (
+          <MarkdownRenderer content={message.content} />
+        )}
+      </div>
+      {message.kind === "text" && message.artifactRefs?.length ? (
+        <div className="mt-2 max-w-3xl">
+          <ArtifactRenderer refs={message.artifactRefs} hasInteractiveSurface />
+        </div>
+      ) : null}
+
+      {canShowMessageFeedback ? (
+        <MessageFeedbackControls
+          feedback={feedback}
+          content={message.content}
+          onSubmit={(input) => onSubmitFeedback?.(message, input)}
+          onClear={() => onSubmitFeedback?.(message, null)}
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <div className="group relative flex items-start gap-3">
@@ -261,40 +265,25 @@ export function ConversationMessageItem({
             ) : null}
           </div>
         </div>
-        <div className="max-w-3xl">
-          {isKikiLoading ? (
-            <LoadingDots />
-          ) : (
-            <MarkdownRenderer content={message.content} />
-          )}
-        </div>
-        {message.kind === "text" && message.artifactRefs?.length ? (
-          <div className="mt-2 max-w-3xl">
-            <ArtifactRenderer refs={message.artifactRefs} hasInteractiveSurface />
+        {shouldRenderAssistantTimeline ? (
+          <div className="space-y-3">
+            {assistantTimelineNodes.map((node) =>
+              node.kind === "tool_permission_request" ? (
+                <div key={node.key} className="grid max-w-3xl gap-2">
+                  <ToolPermissionRequestDialog
+                    request={node.item.request}
+                    variant="inline"
+                    onResolved={() => undefined}
+                  />
+                </div>
+              ) : (
+                <div key={node.key}>{renderAssistantContent()}</div>
+              ),
+            )}
           </div>
-        ) : null}
-
-        {canShowMessageFeedback ? (
-          <MessageFeedbackControls
-            feedback={feedback}
-            content={message.content}
-            onSubmit={(input) => onSubmitFeedback?.(message, input)}
-            onClear={() => onSubmitFeedback?.(message, null)}
-          />
-        ) : null}
-
-        {toolPermissionRequests.length > 0 ? (
-          <div className="mt-3 grid max-w-3xl gap-2">
-            {toolPermissionRequests.map((request) => (
-              <ToolPermissionRequestDialog
-                key={request.requestId}
-                request={request}
-                variant="inline"
-                onResolved={() => undefined}
-              />
-            ))}
-          </div>
-        ) : null}
+        ) : (
+          renderAssistantContent()
+        )}
 
         {sagaRequestId && (message.status === "streaming" || saga) ? (
           <SagaProgressCard saga={saga} />

@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeStateSnapshot, isRuntimeStateUnchangedPayload } from "@/lib/api/runtime-daemon";
 import type { AgentEvent, ScheduleViewMode } from "@/types/schedule";
 
 type ScheduleStore = {
@@ -50,6 +50,7 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
     if (get().hydrated) return;
     try {
       const snapshot = await fetchRuntimeStateSnapshot();
+      if (isRuntimeStateUnchangedPayload(snapshot)) return;
       const revision = snapshot.meta?.revisions?.scheduleEvents;
       get().replaceEvents(snapshot.scheduleEvents, revision);
       set({ hydrated: true });

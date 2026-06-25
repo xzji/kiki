@@ -1,7 +1,7 @@
 "use client";
 
 import { createIdempotencyKey } from "@/lib/opaqueIds";
-import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
+import { fetchRuntimeStateSnapshot, isRuntimeStateUnchangedPayload } from "@/lib/api/runtime-daemon";
 import { publishRuntimeStateChange } from "@/lib/runtimeStateChannel";
 import { useScheduleStore } from "@/stores/scheduleStore";
 import type { AgentEvent } from "@/types/schedule";
@@ -64,9 +64,11 @@ async function requestScheduleCommand(input: {
   if (!response.ok) {
     if (data.conflict) {
       const snapshot = await fetchRuntimeStateSnapshot();
-      useScheduleStore
-        .getState()
-        .replaceEvents(snapshot.scheduleEvents, snapshot.meta?.revisions?.scheduleEvents);
+      if (!isRuntimeStateUnchangedPayload(snapshot)) {
+        useScheduleStore
+          .getState()
+          .replaceEvents(snapshot.scheduleEvents, snapshot.meta?.revisions?.scheduleEvents);
+      }
     }
     throw new ScheduleCommandError(
       response.status,

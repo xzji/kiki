@@ -11,6 +11,7 @@ import next from "next";
 import { MACHINE_TUNNEL_WS_PATH } from "@/lib/server/tunnel/machineTunnelProtocol";
 import { bootstrapCloudControlPlane } from "@/lib/server/orchestrator/cloudOrchestratorRunner";
 import { getPublicBaseUrl } from "@/lib/server/http/publicBaseUrl";
+import { handleWithResponseCompression } from "@/lib/server/http/responseCompression";
 
 process.env.KIKI_ORCHESTRATOR_MODE = process.env.KIKI_ORCHESTRATOR_MODE ?? "cloud";
 process.env.KIKI_LOCAL_CLI_ONLY = process.env.KIKI_LOCAL_CLI_ONLY ?? "true";
@@ -26,7 +27,9 @@ type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) =
 void app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url ?? "/", true);
-    void handle(req, res, parsedUrl);
+    handleWithResponseCompression(req, res, () => {
+      void handle(req, res, parsedUrl);
+    });
   });
 
   bootstrapCloudControlPlane(server);

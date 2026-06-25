@@ -1,14 +1,16 @@
 import { NextRequest } from "next/server";
 
 import { getGoalEvents } from "@/lib/server/repositories/goalEventLogRepository";
-import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
+import { createSseHeaders, writeSseComment, writeSseEvent } from "@/lib/server/sse";
 import { bindUserContextTick } from "@/lib/server/sse/userContextTick";
 import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const POLL_INTERVAL_MS = 2000;
+const ACTIVE_POLL_INTERVAL_MS = 2000;
+const IDLE_POLL_INTERVAL_MS = 5000;
+const IDLE_TICKS_BEFORE_BACKOFF = 3;
 
 async function GETHandler(request: NextRequest, context: { userId: string }) {
   const { userId } = context;
@@ -21,6 +23,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
   if (!Number.isFinite(cursor)) cursor = 0;
   let timer: NodeJS.Timeout | null = null;
   let disposed = false;
+  let idleTicks = 0;
   let cleanup: () => void = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
@@ -29,7 +32,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
         if (disposed) return;
         disposed = true;
         if (timer) {
-          clearInterval(timer);
+          clearTimeout(timer);
           timer = null;
         }
         try {
@@ -45,9 +48,11 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
           const events = getGoalEvents({ goalId, fromId: cursor, limit: 100 });
           if (events.length) {
             cursor = events[events.length - 1].id;
+            idleTicks = 0;
             writeSseEvent(controller, "events", { events, nextCursor: cursor });
           } else {
-            writeSseEvent(controller, "heartbeat", { cursor });
+            idleTicks += 1;
+            writeSseComment(controller);
           }
         } catch (error) {
           writeSseEvent(controller, "error", {
@@ -56,8 +61,17 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
         }
       };
       const boundTick = bindUserContextTick(userId, tick);
+      const scheduleNext = () => {
+        if (disposed) return;
+        const interval =
+          idleTicks >= IDLE_TICKS_BEFORE_BACKOFF ? IDLE_POLL_INTERVAL_MS : ACTIVE_POLL_INTERVAL_MS;
+        timer = setTimeout(() => {
+          boundTick();
+          scheduleNext();
+        }, interval);
+      };
       boundTick();
-      timer = setInterval(boundTick, POLL_INTERVAL_MS);
+      scheduleNext();
       if (request.signal.aborted) {
         cleanup();
         return;

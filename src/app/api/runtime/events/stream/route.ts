@@ -2,14 +2,16 @@ import { NextRequest } from "next/server";
 
 import { getConversationEvents } from "@/lib/server/repositories/conversationEventLogRepository";
 import { getGoalEventsSince } from "@/lib/server/repositories/goalEventLogRepository";
-import { createSseHeaders, writeSseEvent } from "@/lib/server/sse";
+import { createSseHeaders, writeSseComment, writeSseEvent } from "@/lib/server/sse";
 import { bindUserContextTick } from "@/lib/server/sse/userContextTick";
 import { withAuth } from "@/lib/server/http/withAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const POLL_INTERVAL_MS = 2000;
+const ACTIVE_POLL_INTERVAL_MS = 2000;
+const IDLE_POLL_INTERVAL_MS = 5000;
+const IDLE_TICKS_BEFORE_BACKOFF = 3;
 const TICK_LIMIT = 200;
 
 function parseCursor(value: string | null): number {
@@ -24,6 +26,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
   let conversationCursor = parseCursor(searchParams.get("conversationCursor"));
   let timer: NodeJS.Timeout | null = null;
   let disposed = false;
+  let idleTicks = 0;
   let cleanup: () => void = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
@@ -32,7 +35,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
         if (disposed) return;
         disposed = true;
         if (timer) {
-          clearInterval(timer);
+          clearTimeout(timer);
           timer = null;
         }
         try {
@@ -50,6 +53,7 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
           const goalEvents = getGoalEventsSince({ fromId: goalCursor, limit: TICK_LIMIT });
           if (goalEvents.length) {
             goalCursor = goalEvents[goalEvents.length - 1].id;
+            idleTicks = 0;
             writeSseEvent(controller, "goal-events", {
               events: goalEvents,
               nextCursor: goalCursor,
@@ -61,13 +65,15 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
           });
           if (conversationEvents.length) {
             conversationCursor = conversationEvents[conversationEvents.length - 1].id;
+            idleTicks = 0;
             writeSseEvent(controller, "conversation-events", {
               events: conversationEvents,
               nextCursor: conversationCursor,
             });
           }
           if (!goalEvents.length && !conversationEvents.length) {
-            writeSseEvent(controller, "heartbeat", { ts: Date.now() });
+            idleTicks += 1;
+            writeSseComment(controller);
           }
         } catch (error) {
           writeSseEvent(controller, "error", {
@@ -77,8 +83,17 @@ async function GETHandler(request: NextRequest, context: { userId: string }) {
       };
 
       const boundTick = bindUserContextTick(userId, tick);
+      const scheduleNext = () => {
+        if (disposed) return;
+        const interval =
+          idleTicks >= IDLE_TICKS_BEFORE_BACKOFF ? IDLE_POLL_INTERVAL_MS : ACTIVE_POLL_INTERVAL_MS;
+        timer = setTimeout(() => {
+          boundTick();
+          scheduleNext();
+        }, interval);
+      };
       boundTick();
-      timer = setInterval(boundTick, POLL_INTERVAL_MS);
+      scheduleNext();
 
       if (request.signal.aborted) {
         cleanup();

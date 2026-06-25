@@ -13,6 +13,28 @@ const WS_MIN_RECONNECT_DELAY_MS = 1_000;
 const WS_MAX_RECONNECT_DELAY_MS = 30_000;
 const WS_HELLO_RENEW_INTERVAL_MS = 60_000;
 const MAX_PENDING_WS_OUTBOUND_ENVELOPES = 2_000;
+const WS_COMPRESSION_OPTIONS = { threshold: 1024 };
+const WS_CAPABILITIES = [
+  "execute",
+  "discover_runtimes",
+  "check_runtime",
+  "select_directory",
+  "skills",
+  "daemon_service",
+  "run_prompt",
+  "stream_prompt",
+  "cancel",
+  "topic_governance_tick",
+  "thread_governance_tick",
+];
+
+function helloStateSignature(state: DaemonHelloState) {
+  return JSON.stringify({
+    runningJobIds: [...state.runningJobIds].sort(),
+    runningGovernanceJobIds: [...state.runningGovernanceJobIds].sort(),
+    activeStreamSessionIds: [...state.activeStreamSessionIds].sort(),
+  });
+}
 
 function sendEnvelopeOverWs(ws: WebSocket, envelope: MachineTunnelEnvelope) {
   if (ws.readyState !== WebSocket.OPEN) return false;
@@ -122,46 +144,41 @@ export async function runWebSocketTransport(input: {
     let watchdogTimer: NodeJS.Timeout | null = null;
     let helloRenewTimer: NodeJS.Timeout | null = null;
     let heartbeatSeen = false;
+    let lastHelloSignature: string | null = null;
 
     const clearWatchdog = () => {
       if (!watchdogTimer) return;
       clearTimeout(watchdogTimer);
       watchdogTimer = null;
     };
-      const sendHello = (target: WebSocket) => {
-        const helloState = input.getHelloState();
-        sendEnvelopeOverWs(target, {
-          kind: "hello",
-          daemonVersion: input.daemonVersion,
-          fingerprint: input.fingerprint,
-          capabilities: [
-            "execute",
-            "discover_runtimes",
-            "check_runtime",
-            "select_directory",
-            "skills",
-            "daemon_service",
-            "run_prompt",
-            "stream_prompt",
-            "cancel",
-            "topic_governance_tick",
-            "thread_governance_tick",
-          ],
-          runningJobIds: helloState.runningJobIds,
-          runningGovernanceJobIds: helloState.runningGovernanceJobIds,
-          activeStreamSessionIds: helloState.activeStreamSessionIds,
+    const sendHello = (target: WebSocket, options?: { force?: boolean }) => {
+      const helloState = input.getHelloState();
+      const signature = helloStateSignature(helloState);
+      const renewsLeases =
+        helloState.runningJobIds.length > 0 || helloState.runningGovernanceJobIds.length > 0;
+      if (!options?.force && !renewsLeases && signature === lastHelloSignature) return false;
+      const sent = sendEnvelopeOverWs(target, {
+        kind: "hello",
+        daemonVersion: input.daemonVersion,
+        fingerprint: input.fingerprint,
+        capabilities: WS_CAPABILITIES,
+        runningJobIds: helloState.runningJobIds,
+        runningGovernanceJobIds: helloState.runningGovernanceJobIds,
+        activeStreamSessionIds: helloState.activeStreamSessionIds,
+      });
+      if (sent) lastHelloSignature = signature;
+      if (sent && helloState.runningGovernanceJobIds.length > 0) {
+        input.callbacks.logEvent("info", "hb", "WS governance lease renew hello sent", {
+          runningGovernanceJobs: helloState.runningGovernanceJobIds.length,
         });
-        if (helloState.runningGovernanceJobIds.length > 0) {
-          input.callbacks.logEvent("info", "hb", "WS governance lease renew hello sent", {
-            runningGovernanceJobs: helloState.runningGovernanceJobIds.length,
-          });
-        }
-      };
-      const clearHelloRenewTimer = () => {
-        if (!helloRenewTimer) return;
-        clearInterval(helloRenewTimer);
-        helloRenewTimer = null;
-      };
+      }
+      return sent;
+    };
+    const clearHelloRenewTimer = () => {
+      if (!helloRenewTimer) return;
+      clearInterval(helloRenewTimer);
+      helloRenewTimer = null;
+    };
     const resetWatchdog = () => {
       clearWatchdog();
       watchdogTimer = setTimeout(() => {
@@ -177,7 +194,7 @@ export async function runWebSocketTransport(input: {
 
     await new Promise<void>((resolve) => {
       const currentWs = new WebSocket(wsUrl, {
-        perMessageDeflate: false,
+        perMessageDeflate: WS_COMPRESSION_OPTIONS,
         headers: {
           "x-machine-api-key": input.apiKey,
           "x-machine-fingerprint": input.fingerprint,
@@ -195,12 +212,12 @@ export async function runWebSocketTransport(input: {
         });
         resetWatchdog();
         input.setOutboundTransport(bufferedOutbound.transport);
+        sendHello(currentWs, { force: true });
+        clearHelloRenewTimer();
+        helloRenewTimer = setInterval(() => {
+          if (ws !== currentWs || currentWs.readyState !== WebSocket.OPEN) return;
           sendHello(currentWs);
-          clearHelloRenewTimer();
-          helloRenewTimer = setInterval(() => {
-            if (ws !== currentWs || currentWs.readyState !== WebSocket.OPEN) return;
-            sendHello(currentWs);
-          }, WS_HELLO_RENEW_INTERVAL_MS);
+        }, WS_HELLO_RENEW_INTERVAL_MS);
         bufferedOutbound.flushPending();
       });
 

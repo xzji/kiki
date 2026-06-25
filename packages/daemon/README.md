@@ -44,8 +44,11 @@ kiki-daemon install \
 
 ```bash
 kiki-daemon status      # 查看是否已安装 / 运行中
+kiki-daemon log         # 进入日志模式，实时查看 daemon 执行记录
 kiki-daemon uninstall   # 停止并移除后台服务
 ```
+
+`log` 默认显示最近 200 行并持续跟随，可用 `kiki-daemon log --lines 500` 调整初始行数；脚本里只想查看一次可用 `--no-follow`。
 
 数据目录固定为 `~/.kiki/data`，日志在 `~/.kiki/runtime/logs/`。
 
