@@ -19,6 +19,7 @@ import {
 } from "@/lib/server/workspace/conversationWorkspace";
 import {
   claimQueuedRuntimeJobs,
+  getRuntimeJob,
   getRuntimeJobByRequestId,
   isRuntimeJobLeaseHeld,
   releaseExpiredRuntimeJobLeases,
@@ -253,10 +254,23 @@ async function executeClaimedJob(params: {
       conversationWorkspaceDir,
       taskWorkspaceDir,
       resumeContext: job.payload.resumeContext,
+      resumeSessionId: job.payload.resumeSessionId,
       initialTrajectory: job.payload.resumeContext ? job.trajectory : [],
       signal: abortController.signal,
       onProgressPing: (kind) => processSupervisor.markProgress(requestId, kind),
       onSpawn: (pid) => processSupervisor.attachProcess(requestId, pid),
+      onSessionId: (sessionId) => {
+        const latest = getRuntimeJob(job.id) ?? job;
+        const payload = { ...latest.payload };
+        if (sessionId) {
+          payload.resumeSessionId = sessionId;
+          payload.executionMachineId = device.deviceId;
+        } else {
+          delete payload.resumeSessionId;
+          delete payload.executionMachineId;
+        }
+        updateGoalRuntimeJobExecution(job.id, { payload });
+      },
     });
     if (abortController.signal.aborted) {
       throw new Error(leaseLostMessage || `任务 ${job.id} 已因 lease 失效或超时中断`);

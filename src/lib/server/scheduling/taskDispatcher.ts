@@ -274,6 +274,18 @@ function readRuntimeJobStatusPatch(progress?: GoalServerProgress): {
   return { status };
 }
 
+function readRuntimeSessionPatch(progress?: GoalServerProgress): { sessionId: string | null } | null {
+  const payload = progress?.resultPayload;
+  if (!isRecord(payload)) return null;
+  if (typeof payload.runtimeSessionId === "string" && payload.runtimeSessionId.trim()) {
+    return { sessionId: payload.runtimeSessionId.trim() };
+  }
+  if (payload.runtimeSessionInvalid === true) {
+    return { sessionId: null };
+  }
+  return null;
+}
+
 function registerTunnelToolPermissionRequest(input: {
   active: ActiveTunnelDispatch;
   blocker: ExecutionBlocker;
@@ -316,12 +328,24 @@ function handleTunnelJobProgress(input: {
     const trajectoryFromLog = input.log ? mergeRuntimeJobTrajectoryFromLog(current.trajectory, input.log) : undefined;
     const trajectory = input.trajectory && input.trajectory.length > 0 ? input.trajectory : trajectoryFromLog;
     const statusPatch = readRuntimeJobStatusPatch(input.progress);
+    const sessionPatch = readRuntimeSessionPatch(input.progress);
+    const payload = sessionPatch ? { ...current.payload } : undefined;
+    if (payload && sessionPatch) {
+      if (sessionPatch.sessionId) {
+        payload.resumeSessionId = sessionPatch.sessionId;
+        payload.executionMachineId = active.machineId;
+      } else {
+        delete payload.resumeSessionId;
+        delete payload.executionMachineId;
+      }
+    }
     if (statusPatch?.status === "awaiting_user" && statusPatch.blocker) {
       registerTunnelToolPermissionRequest({ active, blocker: statusPatch.blocker });
     }
     const next = updateGoalRuntimeJobExecution(input.jobId, {
       ...(statusPatch ? { status: statusPatch.status } : {}),
       ...(statusPatch && "blocker" in statusPatch ? { blocker: statusPatch.blocker } : {}),
+      ...(payload ? { payload } : {}),
       ...(input.progress ? { progress: input.progress } : {}),
       ...(logs ? { logs } : {}),
       ...(trajectory && trajectory.length > 0 ? { trajectory } : {}),
@@ -351,10 +375,18 @@ function createRenewTimer(jobId: string, machineId: string, userId: string, leas
       return;
     }
     runWithUserContext(userId, () => {
-      renewRuntimeJobLease(jobId, {
+      const { renewed } = renewRuntimeJobLease(jobId, {
         leaseOwner,
         leaseMs: LEASE_RENEW_DURATION_MS,
       });
+      if (renewed) return;
+      // 续租失败需区分两类：awaiting_user 是合法的非 running 暂停态——daemon 仍持有该 job
+      // 等待工具授权回传，dispatch 必须保留，否则会取消待决授权并误放并发预算。其余情形
+      //（job 行已被删/落入终态/被他人接管/已回 queued）才释放 active dispatch 与并发预算，
+      // 否则槽位永久占用导致后续任务无法派发（与 daemon 端僵尸同源）。
+      const job = getRuntimeJob(jobId);
+      if (job?.status === "awaiting_user") return;
+      finishTunnelDispatch(jobId);
     });
   }, LEASE_RENEW_INTERVAL_MS);
 }
@@ -423,7 +455,6 @@ export async function dispatchReadyTasksToMachines(input: {
   if (onlineMachineIds.length === 0) {
     return { processed: 0, skippedOffline: true };
   }
-  const machineId = onlineMachineIds[0];
 
   const config = getOrchestratorConfig();
   const available = Math.max(
@@ -448,16 +479,28 @@ export async function dispatchReadyTasksToMachines(input: {
 
   let processed = 0;
   for (const job of claimed) {
+    let dispatchJob: RuntimeJobRecord = job;
+    let machineId = onlineMachineIds[0];
+    if (job.payload.resumeSessionId && job.payload.executionMachineId) {
+      if (onlineMachineIds.includes(job.payload.executionMachineId)) {
+        machineId = job.payload.executionMachineId;
+      } else {
+        const payload = { ...job.payload };
+        delete payload.resumeSessionId;
+        delete payload.executionMachineId;
+        dispatchJob = updateGoalRuntimeJobExecution(job.id, { payload }) ?? { ...job, payload };
+      }
+    }
     if (!hub.isMachineOnline(machineId, userId)) {
       runWithUserContext(userId, () => {
-        updateGoalRuntimeJobExecution(job.id, {
+        updateGoalRuntimeJobExecution(dispatchJob.id, {
           status: "queued",
           lastError: "machine 已离线，任务重新入队",
           leaseOwner: undefined,
           leaseExpiresAt: undefined,
         });
         projectRuntimeJobStatusProjection({
-          job,
+          job: dispatchJob,
           status: "queued",
           reason: "machine 已离线，任务重新入队",
         });
@@ -468,34 +511,34 @@ export async function dispatchReadyTasksToMachines(input: {
     orchestratorConcurrencyBudget.acquire(userId, 1);
     inFlightTunnelJobs.add(job.id);
 
-    const requestId = job.requestId ?? `goal-task-${job.id}`;
-    activeTunnelDispatches.set(job.id, {
-      job,
+    const requestId = dispatchJob.requestId ?? `goal-task-${dispatchJob.id}`;
+    activeTunnelDispatches.set(dispatchJob.id, {
+      job: dispatchJob,
       leaseOwner: input.leaseOwner,
       userId,
       machineId,
-      renewTimer: createRenewTimer(job.id, machineId, userId, input.leaseOwner),
+      renewTimer: createRenewTimer(dispatchJob.id, machineId, userId, input.leaseOwner),
       pendingToolPermissionRequestIds: new Set<string>(),
     });
 
     runWithUserContext(userId, () => {
       const now = new Date().toISOString();
-      updateGoalRuntimeJobExecution(job.id, {
+      updateGoalRuntimeJobExecution(dispatchJob.id, {
         progress: {
           requestId,
           scope: "goal_task_execute",
           status: "running",
           phase: "executing",
           message: "任务已下发到本地 machine，等待 Agent 启动执行。",
-          startedAt: job.startedAt ?? now,
+          startedAt: dispatchJob.startedAt ?? now,
           updatedAt: now,
-          goalId: job.goalId,
-          taskId: job.taskId,
-          taskInstanceId: job.taskInstanceId,
+          goalId: dispatchJob.goalId,
+          taskId: dispatchJob.taskId,
+          taskInstanceId: dispatchJob.taskInstanceId,
         },
       });
       projectRuntimeJobStatusProjection({
-        job,
+        job: dispatchJob,
         status: "running",
         reason: "云端经 Tunnel 下发到本地 machine",
       });
@@ -504,26 +547,28 @@ export async function dispatchReadyTasksToMachines(input: {
     try {
       hub.sendExecute({
         machineId,
-        jobId: job.id,
+        jobId: dispatchJob.id,
         requestId,
         payload: {
-          goal: job.payload.goal,
-          subGoal: job.payload.subGoal,
-          task: job.payload.task,
-          instance: job.payload.instance,
+          goal: dispatchJob.payload.goal,
+          subGoal: dispatchJob.payload.subGoal,
+          task: dispatchJob.payload.task,
+          instance: dispatchJob.payload.instance,
           // 用最新快照刷新 filePolicy：续跑前用户「始终允许并写入 Runtime 策略」写入的规则
           // 此刻才能随下发生效，否则 daemon 仍按旧 payload 策略匹配，对同一工具反复弹窗。
-          runtimeEnv: refreshRuntimeEnvFilePolicy(job.payload.runtimeEnv),
-          resumeContext: job.payload.resumeContext,
-          toolPermissionSessionRules: job.payload.toolPermissionSessionRules,
-          trajectory: job.trajectory,
+          runtimeEnv: refreshRuntimeEnvFilePolicy(dispatchJob.payload.runtimeEnv),
+          resumeContext: dispatchJob.payload.resumeContext,
+          resumeSessionId: dispatchJob.payload.resumeSessionId,
+          executionMachineId: dispatchJob.payload.executionMachineId,
+          toolPermissionSessionRules: dispatchJob.payload.toolPermissionSessionRules,
+          trajectory: dispatchJob.trajectory,
         },
       });
       processed += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tunnel 下发失败";
-      requeueTunnelJob(activeTunnelDispatches.get(job.id)!, message);
-      finishTunnelDispatch(job.id);
+      requeueTunnelJob(activeTunnelDispatches.get(dispatchJob.id)!, message);
+      finishTunnelDispatch(dispatchJob.id);
     }
   }
 

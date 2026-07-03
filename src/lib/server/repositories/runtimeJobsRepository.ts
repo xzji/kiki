@@ -37,6 +37,8 @@ export type RuntimeJobPayload = {
   conversationWorkspaceDir?: string;
   taskWorkspaceDir?: string;
   resumeContext?: string;
+  resumeSessionId?: string;
+  executionMachineId?: string;
   toolPermissionSessionRules?: RuntimeToolPermissionRule[];
 };
 

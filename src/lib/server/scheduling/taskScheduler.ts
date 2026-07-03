@@ -66,6 +66,10 @@ function getReadyTasks(goals: Goal[]): ReadyTaskSelection {
       for (const task of subGoal.tasks) {
         if (task.autoRunDisabled) continue;
         if (task.progress >= 100 && task.taskType === "one_shot") continue;
+        if (task.instances.some((instance) => instance.status === "paused")) {
+          skipped += 1;
+          continue;
+        }
         if (openTaskIds.has(normalizeTaskId(task.id))) continue;
         if (!isTaskTriggerDue(task, now)) continue;
         const dependencyReadiness = resolveSchedulerDependencyReadiness({

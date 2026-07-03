@@ -9,7 +9,7 @@ import { appendRuntimeDaemonLog } from "@/lib/daemon/daemonState";
 import { createDaemonTrace, logDaemonEvent, logTraceEnabledWarning } from "@/lib/daemon/daemonLogger";
 import { enterUserContext, runWithUserContext } from "@/lib/server/context/userContext";
 import { runGoalTask } from "@/lib/server/goalTaskRunner";
-import { setGoalTelemetryObserver } from "@/lib/server/goalTelemetry";
+import { getGoalTelemetryProgress, setGoalTelemetryObserver, updateGoalTelemetry } from "@/lib/server/goalTelemetry";
 import { getKikiDefaultSkillsStatus, installKikiDefaultSkills } from "@/lib/server/kikiSkills/installService";
 import { runGovernanceTickLocally } from "@/lib/server/governance/governanceTickLocalExecutor";
 import { isGovernanceTickCommand, type GovernanceTickMachineCommand } from "@/lib/server/governance/governanceTickProtocol";
@@ -118,6 +118,28 @@ function safeJsonBytes(value: unknown) {
 
 const GOVERNANCE_RAW_LOG_LIMIT = 1200;
 
+function publishRuntimeSessionProgress(input: {
+  requestId: string;
+  payload: RuntimeJobPayload;
+  sessionId: string | null;
+}) {
+  const nextPayload = { ...(getGoalTelemetryProgress(input.requestId)?.resultPayload ?? {}) };
+  delete nextPayload.runtimeSessionId;
+  delete nextPayload.runtimeSessionInvalid;
+  updateGoalTelemetry({
+    requestId: input.requestId,
+    scope: "goal_task_execute",
+    phase: "executing",
+    message: input.sessionId ? "Claude 会话已记录，可用于断点续跑" : "Claude 会话已失效，已清除断点续跑会话",
+    goalId: input.payload.goal.id,
+    taskId: input.payload.task.id,
+    taskInstanceId: input.payload.instance.id,
+    resultPayload: input.sessionId
+      ? { ...nextPayload, runtimeSessionId: input.sessionId }
+      : { ...nextPayload, runtimeSessionInvalid: true },
+  });
+}
+
 function clipGovernanceRaw(value: string | undefined) {
   if (!value) return "";
   return value.length > GOVERNANCE_RAW_LOG_LIMIT ? `${value.slice(0, GOVERNANCE_RAW_LOG_LIMIT)}...` : value;
@@ -182,8 +204,15 @@ async function executeRemoteJob(input: {
     instance: input.payload.instance,
     runtimeEnv: input.payload.runtimeEnv,
     resumeContext: input.payload.resumeContext,
+    resumeSessionId: input.payload.resumeSessionId,
     initialTrajectory: input.initialTrajectory,
     signal: input.signal,
+    onSessionId: (sessionId) =>
+      publishRuntimeSessionProgress({
+        requestId: input.requestId,
+        payload: input.payload,
+        sessionId,
+      }),
   });
 }
 
@@ -690,7 +719,28 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
     thread_governance_tick: handleGovernanceCommand,
     execute(command, startedAt) {
       if (command.type !== "execute") return;
-      if (runningJobs.has(command.jobId)) return;
+      if (runningJobs.has(command.jobId)) {
+        const existingController = runningJobControllers.get(command.jobId);
+        const hasLiveController = Boolean(existingController) && !existingController!.signal.aborted;
+        if (hasLiveController) {
+          // 真正在执行中的重复下发：daemon 已通过 hello 上报该 job running，云端不应重复启动。
+          // 不重跑（避免同一 job 并发双跑），但记录日志以便观测云端为何重复派发。
+          logDaemonEvent("info", "exec", "duplicate execute ignored: job already running", {
+            requestId: command.requestId,
+            jobId: command.jobId,
+          });
+          return;
+        }
+        // 僵尸残留：runningJobs 仍持有该 jobId，但 controller 缺失或已 abort，说明上一轮执行的
+        // 收尾（finally）未运行（执行链挂死或被中止后未清理）。清掉残留再按新命令重跑，
+        // 否则该 jobId 会永久占用 hello 上报的 running 名额，撑满并发预算导致后续任务无法派发。
+        logDaemonEvent("info", "exec", "reclaiming stale running job before re-execute", {
+          requestId: command.requestId,
+          jobId: command.jobId,
+        });
+        runningJobs.delete(command.jobId);
+        runningJobControllers.delete(command.jobId);
+      }
       const abortController = new AbortController();
       runningJobs.add(command.jobId);
       runningJobControllers.set(command.jobId, abortController);
@@ -716,6 +766,8 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             instance: raw.instance,
             runtimeEnv: raw.runtimeEnv,
             resumeContext: raw.resumeContext,
+            resumeSessionId: raw.resumeSessionId,
+            executionMachineId: raw.executionMachineId,
             toolPermissionSessionRules: raw.toolPermissionSessionRules,
           };
           const initialTrajectory = Array.isArray(raw.trajectory) ? raw.trajectory : [];
@@ -766,9 +818,15 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
             error: message,
           });
         } finally {
-          runningJobs.delete(command.jobId);
-          runningJobControllers.delete(command.jobId);
-          requestIdToRunningJob.delete(command.requestId);
+          // 仅当本次执行的 controller 仍是当前登记的那个时才清理，避免被 reclaim 重跑后
+          // 旧的挂死 promise 迟到 settle 时误删新一轮执行的 runningJobs / controller 状态。
+          if (runningJobControllers.get(command.jobId) === abortController) {
+            runningJobs.delete(command.jobId);
+            runningJobControllers.delete(command.jobId);
+            if (requestIdToRunningJob.get(command.requestId) === command.jobId) {
+              requestIdToRunningJob.delete(command.requestId);
+            }
+          }
         }
       })();
     },
@@ -777,6 +835,26 @@ export async function runRemoteDaemonLoop(input: RunRemoteDaemonLoopInput) {
       const abortController = runningJobControllers.get(command.jobId);
       const running = runningJobs.has(command.jobId);
       if (!abortController || abortController.signal.aborted) {
+        // 僵尸兜底：jobId 仍在 runningJobs（撑占 hello 上报的 running 名额），但 controller
+        // 缺失或已 abort，无法再 abort 出一个 failed 终态。直接清理本地残留并回执 cancelled，
+        // 让云端解除 in-flight、释放并发预算，避免后续任务永久无法派发。
+        if (running) {
+          logDaemonEvent("info", "exec", "cancel reclaiming stale running job", {
+            requestId: command.requestId,
+            jobId: command.jobId,
+            reason: command.reason,
+          });
+          runningJobs.delete(command.jobId);
+          runningJobControllers.delete(command.jobId);
+          void sendResult({
+            type: "execute",
+            jobId: command.jobId,
+            ok: false,
+            status: "failed",
+            error: command.reason ?? "任务已取消",
+          });
+          return;
+        }
         logDaemonEvent("info", "cmd", "cancel ignored", {
           requestId: command.requestId,
           jobId: command.jobId,

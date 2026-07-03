@@ -141,6 +141,8 @@ export type ClaudeStreamOptions = {
   runtimeKind?: LocalRuntimeKind;
   /** 本次运行需要 resume 的 session id（由服务端按 runtimeKind 解析后传入）。 */
   resumeSessionId?: string;
+  /** Claude resume 可能 fork 新 session；任务续跑需要持久化最新 id，聊天链路维持旧行为。 */
+  emitDuplicateSessionIds?: boolean;
   contextPack?: string;
   workspacePolicy?: "conversation" | "task" | string;
   systemPromptMode?: "conversation" | "neutral";
@@ -737,6 +739,16 @@ export function classifySessionFromInitPayload(
     return { kind: "ignore" };
   }
   return { kind: "duplicate-init", ignored: payload.session_id };
+}
+
+export function nextCanonicalSessionFromDecision(input: {
+  currentSessionId: string | undefined;
+  decision: ClaudeSessionDecision;
+  emitDuplicateSessionIds?: boolean;
+}) {
+  if (input.decision.kind === "set") return input.decision.sessionId;
+  if (input.decision.kind === "duplicate-init" && input.emitDuplicateSessionIds) return input.decision.ignored;
+  return input.currentSessionId;
 }
 
 export type ClaudeResultErrorDecision =
@@ -1558,8 +1570,20 @@ export async function streamPrompt(options: ClaudeStreamOptions) {
 
       const sessionDecision = classifySessionFromInitPayload(payload, canonicalSessionId);
       if (sessionDecision.kind === "set") {
-        canonicalSessionId = sessionDecision.sessionId;
+        canonicalSessionId = nextCanonicalSessionFromDecision({
+          currentSessionId: canonicalSessionId,
+          decision: sessionDecision,
+          emitDuplicateSessionIds: options.emitDuplicateSessionIds,
+        });
         if (!emitEvent({ type: "session", sessionId: sessionDecision.sessionId })) return;
+      }
+      if (sessionDecision.kind === "duplicate-init" && options.emitDuplicateSessionIds) {
+        canonicalSessionId = nextCanonicalSessionFromDecision({
+          currentSessionId: canonicalSessionId,
+          decision: sessionDecision,
+          emitDuplicateSessionIds: options.emitDuplicateSessionIds,
+        });
+        if (!emitEvent({ type: "session", sessionId: sessionDecision.ignored })) return;
       }
 
       if (payload.type === "system" && payload.subtype === "status") {

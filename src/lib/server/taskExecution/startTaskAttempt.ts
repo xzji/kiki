@@ -42,6 +42,8 @@ type StartTaskAttemptInput = {
   conversationWorkspaceDir?: string;
   taskWorkspaceDir?: string;
   resumeContext?: string;
+  resumeSessionId?: string;
+  executionMachineId?: string;
 };
 
 export type StartTaskAttemptResult =
@@ -170,6 +172,8 @@ function enqueueRuntimeJob(input: {
   conversationWorkspaceDir?: string;
   taskWorkspaceDir?: string;
   resumeContext?: string;
+  resumeSessionId?: string;
+  executionMachineId?: string;
 }) {
   return enqueueGoalRuntimeJob(
     {
@@ -181,6 +185,8 @@ function enqueueRuntimeJob(input: {
       conversationWorkspaceDir: input.conversationWorkspaceDir,
       taskWorkspaceDir: input.taskWorkspaceDir,
       resumeContext: input.resumeContext,
+      resumeSessionId: input.resumeSessionId,
+      executionMachineId: input.executionMachineId,
     },
     { requestId: input.requestId, eventSource: runtimeJobEventSource(input.triggerSource) },
   );
@@ -294,6 +300,8 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
     };
   }
   const resumeContext = input.resumeContext ?? pausedResumePatch?.resumeContext;
+  const resumeSessionId = input.resumeSessionId ?? (pausedResumePatch ? existing?.payload.resumeSessionId : undefined);
+  const executionMachineId = input.executionMachineId ?? (pausedResumePatch ? existing?.payload.executionMachineId : undefined);
 
   const decision = resolveAdmitDecision({
     conversationId,
@@ -370,6 +378,8 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       conversationWorkspaceDir: input.conversationWorkspaceDir,
       taskWorkspaceDir: input.taskWorkspaceDir,
       resumeContext,
+      resumeSessionId,
+      executionMachineId,
     });
     updateGoalRuntimeJobExecution(`job-${instance.id}`, {
       status: "awaiting_user",
@@ -427,6 +437,8 @@ export function startTaskAttempt(input: StartTaskAttemptInput): StartTaskAttempt
       payload: {
         ...queuedJob.payload,
         resumeContext,
+        resumeSessionId,
+        executionMachineId,
       },
       trajectory: pausedResumePatch.trajectory,
       result: pausedResumePatch.result,

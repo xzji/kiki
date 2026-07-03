@@ -152,6 +152,48 @@ function repeatMonitoringTask(id: string, subGoalId: string, title: string): Tas
   };
 }
 
+function goalWithPausedRecurringTask(): Goal {
+  const goalId = "goal-scheduler-paused-repeat-spec";
+  const subGoalId = "sub-scheduler-paused-repeat-spec";
+  const taskId = "task-scheduler-paused-repeat-spec";
+  const instance: TaskInstance = {
+    id: "inst-scheduler-paused-repeat-spec",
+    taskId,
+    dateLabel: "05-30",
+    status: "paused",
+    intro: "暂停中的循环实例",
+    payload: { kind: "generic_result", summary: "" },
+    createdAt: "2026-05-30T00:00:00.000Z",
+  };
+  return {
+    id: goalId,
+    title: "暂停循环任务目标",
+    deadline: "2026-05-30T00:00:00.000Z",
+    progress: 0,
+    createdAt: "2026-05-30T00:00:00.000Z",
+    conversationId: "conversation-scheduler-paused-repeat-spec",
+    workflow: {
+      phase: "executing",
+      planDecision: "confirmed",
+      startedAt: "2026-05-30T00:00:00.000Z",
+      updatedAt: "2026-05-30T00:00:00.000Z",
+    },
+    subGoals: [
+      {
+        id: subGoalId,
+        goalId,
+        title: "循环板块",
+        tasks: [
+          {
+            ...repeatMonitoringTask(taskId, subGoalId, "暂停中的循环任务"),
+            instances: [instance],
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function goalWithImmediateDependencyFanout(): Goal {
   const goalId = "goal-scheduler-fanout-spec";
   return {
@@ -425,6 +467,14 @@ export function runGoalSchedulerEngineSpecs() {
   });
   assert.equal(monitoringResult.createdJobs, 2);
   assert.equal(monitoringResult.skipped, 0);
+
+  const pausedRecurringResult = runGoalSchedulerEngine({
+    goals: [goalWithPausedRecurringTask()],
+    runtimeEnv: runtimeEnv(),
+    config: schedulerConfig(),
+  });
+  assert.equal(pausedRecurringResult.createdJobs, 0);
+  assert.equal(pausedRecurringResult.skipped, 1, "paused recurring task should freeze scheduler fan-out");
 
   // 回归：上游 job=completed 但持久化 raw 快照实例=pending 时，调度器应放行下游。
   // 这覆盖生产故障：scheduler 预筛使用 composed goals 判定 ready，但 startTaskAttempt

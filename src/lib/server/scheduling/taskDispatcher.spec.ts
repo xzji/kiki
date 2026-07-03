@@ -326,6 +326,103 @@ export async function runTaskDispatcherSpecs() {
       true,
       "execute payload should refresh latest runtime-scoped tool permission rules before dispatch",
     );
+    submitMachineResult({
+      type: "execute",
+      jobId: resumeJob.id,
+      ok: true,
+      status: "completed",
+      result: { finalMessage: "resume context job finished" },
+    });
+
+    const sessionJob = seedQueuedCloudJob("job-task-dispatcher-runtime-session");
+    const sessionDispatchResult = await runWithUserContext("spec-test-user", () =>
+      dispatchReadyTasksToMachines({
+        leaseOwner: "cloud-orchestrator-spec",
+        limit: 1,
+      }),
+    );
+    assert.equal(sessionDispatchResult.processed, 1);
+    submitMachineResult({
+      type: "execute_progress",
+      jobId: sessionJob.id,
+      progress: {
+        requestId: sessionJob.requestId ?? `goal-task-${sessionJob.id}`,
+        scope: "goal_task_execute",
+        status: "running",
+        phase: "executing",
+        message: "session id emitted",
+        startedAt: sessionJob.startedAt ?? sessionJob.createdAt,
+        updatedAt: new Date().toISOString(),
+        resultPayload: {
+          runtimeSessionId: "claude-session-task-dispatcher-spec",
+        },
+      },
+    });
+    assert.equal(
+      getRuntimeJob(sessionJob.id)?.payload.resumeSessionId,
+      "claude-session-task-dispatcher-spec",
+      "runtime session id progress should be promoted into job payload",
+    );
+    assert.equal(
+      getRuntimeJob(sessionJob.id)?.payload.executionMachineId,
+      machineId,
+      "runtime session id should be bound to dispatch machine",
+    );
+    submitMachineResult({
+      type: "execute_progress",
+      jobId: sessionJob.id,
+      progress: {
+        requestId: sessionJob.requestId ?? `goal-task-${sessionJob.id}`,
+        scope: "goal_task_execute",
+        status: "running",
+        phase: "executing",
+        message: "session invalid",
+        startedAt: sessionJob.startedAt ?? sessionJob.createdAt,
+        updatedAt: new Date().toISOString(),
+        resultPayload: {
+          runtimeSessionInvalid: true,
+        },
+      },
+    });
+    assert.equal(getRuntimeJob(sessionJob.id)?.payload.resumeSessionId, undefined);
+    assert.equal(getRuntimeJob(sessionJob.id)?.payload.executionMachineId, undefined);
+    submitMachineResult({
+      type: "execute",
+      jobId: sessionJob.id,
+      ok: true,
+      status: "completed",
+      result: { finalMessage: "session job finished" },
+    });
+
+    const offlineSessionJob = seedQueuedCloudJob("job-task-dispatcher-offline-session");
+    upsertRuntimeJob({
+      ...offlineSessionJob,
+      payload: {
+        ...offlineSessionJob.payload,
+        resumeSessionId: "stale-session-task-dispatcher-spec",
+        executionMachineId: "offline-machine-task-dispatcher-spec",
+      },
+    });
+    const offlineDispatchResult = await runWithUserContext("spec-test-user", () =>
+      dispatchReadyTasksToMachines({
+        leaseOwner: "cloud-orchestrator-spec",
+        limit: 1,
+      }),
+    );
+    assert.equal(offlineDispatchResult.processed, 1);
+    const offlineCommand = sent.at(-1);
+    assert.equal(offlineCommand?.type, "execute");
+    if (offlineCommand?.type !== "execute") throw new Error("expected offline fallback execute command");
+    assert.equal((offlineCommand.payload as { resumeSessionId?: string }).resumeSessionId, undefined);
+    assert.equal(getRuntimeJob(offlineSessionJob.id)?.payload.resumeSessionId, undefined);
+    assert.equal(getRuntimeJob(offlineSessionJob.id)?.payload.executionMachineId, undefined);
+    submitMachineResult({
+      type: "execute",
+      jobId: offlineSessionJob.id,
+      ok: true,
+      status: "completed",
+      result: { finalMessage: "offline fallback job finished" },
+    });
   } finally {
     unregisterMachineWsConnection(machineId, sender);
   }

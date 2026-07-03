@@ -2,6 +2,32 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-07-03
+
+### Changed
+- 云端/本地任务续跑链路新增 `resumeSessionId` 与 `executionMachineId` 透传：调度器会优先把任务派回原执行 machine，Claude 续跑中 fork 出的新 session id 也会实时回写到 runtime job，避免断点续跑丢失最新会话锚点。
+- 本地 daemon 收到重复 `execute` 时新增运行中与僵尸态区分：真正仍在执行的 job 直接忽略，controller 已失效但 `runningJobs` 残留时先回收再重跑，减少 hello 上报里的假 running 占位。
+- 调度器对循环任务的预筛增加 paused 实例冻结语义；同一任务存在已暂停实例时不再继续 fan-out 新实例，保持“暂停”而非“继续追加执行”。
+- 删除会话前会先终止关联 active dispatch、取消 runtime job 并释放 lease，避免数据库记录删除后本地 daemon 仍保留残留运行态。
+- 本地 daemon 包版本升级到 `@kiki_agent/daemon@0.2.25`，发布任务续跑会话保持与僵尸任务回收修复。
+
+### Fixed
+- 修复 Claude 任务续跑依赖旧 session id 时，一旦原会话失效就直接失败的问题：现在会先清除失效 session，再保留 `resumeContext` 做一次软续跑重试。
+- 修复 Tunnel lease 续租失败后把 `awaiting_user` 误当成普通失活任务回收的问题，避免工具授权等待中的任务被提前释放 active dispatch 和并发预算。
+- 修复 runtime session 所属 machine 离线后仍尝试带着陈旧 `resumeSessionId` 下发的问题；若原 machine 不在线，会清除 session 绑定并回退到普通执行。
+- 修复任务暂停/恢复、Tunnel 调度和本地 worker 链路未完整保留 `resumeSessionId` / `executionMachineId` 的问题，避免恢复后退化为重新开始。
+- 修复会话删除后 daemon 进程内残留 running job 占满并发槽，导致后续任务无法派发的问题。
+
+### Added
+- 新增 Claude transport、task dispatcher、task scheduler、dispatch pause service 等规格测试，覆盖 session id 提升/失效清理、离线 fallback、paused 循环任务冻结和恢复链路保留 session 绑定。
+
+### Verification
+- 通过 `pnpm test:planning`。
+- 通过 `pnpm build`。
+- 通过 `pnpm tsc --noEmit`。
+- 通过 `pnpm lint`。
+- 通过 `packages/daemon` 的 `npm run build`。
+
 ## 2026-06-25
 
 ### Changed

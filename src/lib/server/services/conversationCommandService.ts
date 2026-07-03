@@ -21,6 +21,11 @@ import {
   updateConversationFields,
 } from "@/lib/server/repositories/conversationsRepository";
 import {
+  cancelRuntimeJobsByConversationId,
+  releaseRuntimeJobLeasesByConversationId,
+} from "@/lib/server/repositories/runtimeJobsRepository";
+import { cancelActiveTunnelDispatchesByConversationId } from "@/lib/server/scheduling/taskDispatcher";
+import {
   deleteConversationMessage,
   getConversationMessage,
   insertConversationMessage,
@@ -182,6 +187,14 @@ export function deleteConversationDeep(conversationId: string): DeleteConversati
   const hadWorkspace = fs.existsSync(workspaceDir);
   const hadSessionMemory = fs.existsSync(sessionMemoryFilePath);
   let auditEvents = 0;
+
+  // 删除前先终止在途执行：向 daemon 下发 cancel（进程内 active dispatch），再把 DB 中
+  // 仍活跃的 job 落为 cancelled 并释放 lease。否则 DELETE 只清掉 DB 行，daemon 进程内的
+  // runningJobs 仍残留该 jobId，hello 持续上报 running 占满并发槽，后续新任务无法派发。
+  const cancelReason = "用户删除会话，终止关联任务执行";
+  cancelActiveTunnelDispatchesByConversationId(conversationId, cancelReason);
+  cancelRuntimeJobsByConversationId(conversationId);
+  releaseRuntimeJobLeasesByConversationId(conversationId);
 
   const memoryCandidates = cleanupUserMemoryCandidatesForConversationSync(conversationId);
   if (memoryCandidates.prunedSources > 0 || memoryCandidates.removed > 0) {

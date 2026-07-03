@@ -210,6 +210,8 @@ function seedRunningJob(goal: Goal): void {
       task,
       instance,
       runtimeEnv: localRuntimeEnv(),
+      resumeSessionId: "claude-session-pause-resume-spec",
+      executionMachineId: "machine-pause-resume-spec",
     },
     progress: {
       requestId: "req-running-pause-resume-spec",
@@ -275,6 +277,8 @@ export function runDispatchPauseServiceSpecs() {
   const pausedJob = getRuntimeJobByTaskInstanceId(INSTANCE_ID);
   assert.equal(pausedJob?.status, "cancelled", "暂停后 runtime job 应进入 cancelled/paused 权威状态");
   assert.ok(pausedJob?.payload.resumeContext?.includes("用户暂停全部任务执行"), "暂停后应保存 resumeContext");
+  assert.equal(pausedJob?.payload.resumeSessionId, "claude-session-pause-resume-spec", "暂停后不应丢失 resumeSessionId");
+  assert.equal(pausedJob?.payload.executionMachineId, "machine-pause-resume-spec", "暂停后不应丢失 executionMachineId");
   assert.equal(pausedJob?.trajectory.length, 1, "暂停后应保留上一轮 trajectory");
 
   const resumeResult = resumeAllTaskExecution();
@@ -282,6 +286,8 @@ export function runDispatchPauseServiceSpecs() {
   const resumedJob = getRuntimeJobByTaskInstanceId(INSTANCE_ID);
   assert.equal(resumedJob?.status, "queued", "恢复后 runtime job 应重新 queued");
   assert.ok(resumedJob?.payload.resumeContext?.includes("上下文继续"), "恢复后应继续携带 resumeContext");
+  assert.equal(resumedJob?.payload.resumeSessionId, "claude-session-pause-resume-spec", "恢复后应继续携带 resumeSessionId");
+  assert.equal(resumedJob?.payload.executionMachineId, "machine-pause-resume-spec", "恢复后应继续携带 executionMachineId");
   assert.equal(resumedJob?.trajectory.length, 1, "恢复后 queued job 应保留 checkpoint trajectory");
   assert.equal(
     (resumedJob?.result?.pauseResumeCheckpoint as { previousTrajectorySteps?: number } | undefined)

@@ -111,6 +111,7 @@ type RunGoalTaskInput = {
   conversationWorkspaceDir?: string;
   taskWorkspaceDir?: string;
   resumeContext?: string;
+  resumeSessionId?: string;
   initialTrajectory?: ExecutionTrajectoryStep[];
   executionContext?: TaskExecutionContext;
   agentRunId?: string;
@@ -119,6 +120,8 @@ type RunGoalTaskInput = {
   onProgressPing?: (kind: string) => void;
   /** Claude CLI spawn 成功后回传 pid，供上层绑定 OS 进程做生命周期管理。 */
   onSpawn?: (pid: number) => void;
+  /** Claude/Codex 等底层 CLI 可恢复 session id 变化回调；null 表示当前 session 已失效。 */
+  onSessionId?: (sessionId: string | null) => void;
 };
 
 // 本地 ctx helper 委托给各自模块的导出工厂,保持单一逻辑源。
@@ -1847,24 +1850,35 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, p
       workingDirectory,
       prompt: runnerPrompt,
     });
-    await streamClaudeCli({
-      message: runnerPrompt,
-      workingDirectory,
-      cliPath: input.runtimeEnv.cliPath,
-      permissionMode: input.runtimeEnv.permissionMode,
-      runtimeKind: input.runtimeEnv.runtimeKind,
-      runtimeEnvId: input.runtimeEnv.id,
-      filePolicy: input.runtimeEnv.filePolicy,
-      channelPolicy: { mode: "task" },
-      conversationId: input.goal.conversationId,
-      taskInstanceId: input.instance.id,
-      taskId: input.task.id,
-      agentRunId: input.agentRunId,
-      resumeSessionId: undefined,
-      signal: input.signal,
-      onSpawn: input.onSpawn,
-      onEvent: (event) => {
+    const runSingleAgentStream = async (resumeSessionId: string | undefined) => {
+      let sessionInvalidMessage: string | null = null;
+      await streamClaudeCli({
+        message: runnerPrompt,
+        workingDirectory,
+        cliPath: input.runtimeEnv.cliPath,
+        permissionMode: input.runtimeEnv.permissionMode,
+        runtimeKind: input.runtimeEnv.runtimeKind,
+        runtimeEnvId: input.runtimeEnv.id,
+        filePolicy: input.runtimeEnv.filePolicy,
+        channelPolicy: { mode: "task" },
+        conversationId: input.goal.conversationId,
+        taskInstanceId: input.instance.id,
+        taskId: input.task.id,
+        agentRunId: input.agentRunId,
+        resumeSessionId,
+        emitDuplicateSessionIds: Boolean(resumeSessionId),
+        signal: input.signal,
+        onSpawn: input.onSpawn,
+        onEvent: (event) => {
         input.onProgressPing?.(event.type);
+        if (event.type === "session" && input.runtimeEnv.runtimeKind === "claude") {
+          input.onSessionId?.(event.sessionId);
+        }
+        if (event.type === "session_invalid" && input.runtimeEnv.runtimeKind === "claude") {
+          sessionInvalidMessage = event.message;
+          input.onSessionId?.(null);
+          return;
+        }
         if (event.type === "delta" && event.text.trim()) {
           pendingAssistantProcessOutput += event.text;
           if (
@@ -2115,6 +2129,42 @@ async function executeOnce(input: RunGoalTaskInput & { attemptCount: number }, p
         }
       },
     });
+      return sessionInvalidMessage;
+    };
+
+    const initialResumeSessionId = input.runtimeEnv.runtimeKind === "claude" ? input.resumeSessionId : undefined;
+    const sessionInvalidMessage = await runSingleAgentStream(initialResumeSessionId);
+    if (sessionInvalidMessage && initialResumeSessionId) {
+      appendGoalLog({
+        requestId: input.requestId,
+        scope: "goal_task_execute",
+        level: "warn",
+        phase: "executing",
+        message: "原 Claude 会话已失效，降级为软续跑重试",
+        details: sessionInvalidMessage,
+        eventType: "resume_mode_started",
+        status: "running",
+        goalId: input.goal.id,
+        taskId: input.task.id,
+        taskInstanceId: input.instance.id,
+      });
+      appendTrajectory({
+        type: "system",
+        status: "running",
+        title: "原 Claude 会话已失效，改用软续跑重试",
+        thought: "系统已清除失效 session，并保留恢复上下文继续执行。",
+      });
+      finalMessage = "";
+      fallbackFinalMessage = "";
+      pendingAssistantProcessOutput = "";
+      lastStatus = null;
+      const retrySessionInvalidMessage = await runSingleAgentStream(undefined);
+      if (retrySessionInvalidMessage) {
+        throw new Error(retrySessionInvalidMessage);
+      }
+    } else if (sessionInvalidMessage) {
+      throw new Error(sessionInvalidMessage);
+    }
     appendGoalTaskAgentEvent(input, "llm.response", {
       phase: "goal_task_main_execution",
       rawText: finalMessage,

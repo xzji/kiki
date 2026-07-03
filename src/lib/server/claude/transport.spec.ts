@@ -4,6 +4,7 @@ import {
   buildWorkspaceSystemPrompt,
   classifyResultError,
   classifySessionFromInitPayload,
+  nextCanonicalSessionFromDecision,
   type ClaudeCliPayload,
 } from "@/lib/server/claude/transport";
 
@@ -131,7 +132,24 @@ export function runClaudeTransportSessionSpecs() {
     message: "No conversation found with session ID: stale-resume-session",
   });
 
-  // 13) task 模式不应要求 Agent 向交付物复述工具禁用状态。
+  // 13) chat 默认保持旧 session；task 续跑 opt-in 后应接纳 Claude resume fork 出的新 session id。
+  assert.equal(
+    nextCanonicalSessionFromDecision({
+      currentSessionId: "old-session",
+      decision: { kind: "duplicate-init", ignored: "forked-session" },
+    }),
+    "old-session",
+  );
+  assert.equal(
+    nextCanonicalSessionFromDecision({
+      currentSessionId: "old-session",
+      decision: { kind: "duplicate-init", ignored: "forked-session" },
+      emitDuplicateSessionIds: true,
+    }),
+    "forked-session",
+  );
+
+  // 14) task 模式不应要求 Agent 向交付物复述工具禁用状态。
   const taskPrompt = buildWorkspaceSystemPrompt({
     workspaceDir: "/tmp/workspace",
     workspacePolicy: "task",
