@@ -17,6 +17,9 @@
 - 会话视图（`ConversationView`）删除 `command === "goal"` 分支、信息收集续答分支与 goal checkpoint/recovery 恢复子路径，保留基于 `planningRunState.source === "saga"` 的 Saga 失败恢复路径。
 - 引入统一设计 token 体系与组件视觉重构：`globals.css` 定义文本/边框/表面/品牌/语义色等 CSS 变量，`tailwind.config.ts` 接入 token；新增 `ConfirmDialog` 全局确认弹窗（基于 `@radix-ui/react-alert-dialog`）并接入 `sonner` toast、`@radix-ui/react-popover`，多组件改用 token 与统一交互控件。
 
+### Fixed
+- 修复看门狗超时计龄导致的「续跑→秒超时→再续跑」死循环：`runGoalWatchdogWorker`（`src/lib/server/scheduling/goalSideEffects.ts`）原以 `instance.createdAt` 计算执行超时 age，使久存且反复暂停/续跑的实例刚进入 `in_progress` 就被立即判超时并暂停（线上一任务因此累计跑 77h 仍未通过）。改为优先用 `execution.activeSince`（当前执行片段起点）计龄，回退到 `execution.startedAt` / `createdAt`；`awaiting_user` 心跳分支保留原 `createdAt` 语义不变。
+
 ### Deprecated
 - 将 Goal 规划相关路由改为 410 墓碑并返回迁移提示（引导使用 `/api/topics/plan`），保留一个迭代观察窗口后再物理删除：`/api/goals/plan`、`/api/goals/plan/resume`、`/api/goals/plan/checkpoint`、`/api/goals/clarify`、`/api/goals/collect`、`/api/goals/progress`。执行运行时的 `goalTelemetry` 与任务执行进度接口不受影响。
 
