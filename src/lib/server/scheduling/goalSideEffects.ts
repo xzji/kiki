@@ -8,7 +8,10 @@ import {
   markTaskNotificationDeliveredState,
 } from "@/lib/server/repositories/taskNotificationStateRepository";
 import { getRuntimeJobByTaskInstanceId } from "@/lib/server/repositories/runtimeJobsRepository";
-import { updateGoalRuntimeJobExecution } from "@/lib/server/services/goalRuntimeService";
+import {
+  transitionTaskInstanceProjection,
+  updateGoalRuntimeJobExecution,
+} from "@/lib/server/services/goalRuntimeService";
 import { composeGoalsWithRuntimeJobs } from "@/lib/server/runtime/instanceComposition";
 import { applyConversationCommand } from "@/lib/server/services/conversationCommandService";
 import { getConversation } from "@/lib/server/repositories/conversationsRepository";
@@ -299,6 +302,7 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
             instance.execution?.activeSince ?? instance.execution?.startedAt ?? instance.createdAt;
           const runAgeMs = nowMs - new Date(runStartedAt).getTime();
           if (instance.status === "in_progress" && runAgeMs >= DEFAULT_EASTER_EGG_SETTINGS.taskDefaultTimeoutMs) {
+            const timeoutReason = "任务执行超时，daemon 已自动暂停。";
             const job = getRuntimeJobByTaskInstanceId(instance.id);
             if (job) {
               updateGoalRuntimeJobExecution(job.id, {
@@ -306,9 +310,20 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
                 finishedAt: now,
                 leaseOwner: undefined,
                 leaseExpiresAt: undefined,
-                lastError: "任务执行超时，daemon 已自动暂停。",
+                lastError: timeoutReason,
               });
             }
+            // job 置 cancelled 只更新 runtime_jobs 表并发 status_changed 事件，不落 goals 快照；
+            // 若前端漏收该事件，读快照会永远停留在 in_progress。这里同步把实例状态写回 goals
+            // 快照（cancelled + 非终止原因 → paused，与 instanceComposition 投影一致），
+            // 使快照与 job 状态强一致，UI 不再滞后为「执行中」。
+            transitionTaskInstanceProjection({
+              goals,
+              taskId: task.id,
+              instanceId: instance.id,
+              status: "paused",
+              reason: timeoutReason,
+            });
             paused += 1;
             appendGoalEventOnce({
               goalId: goal.id,
@@ -319,7 +334,7 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
               idempotencyKey: `instance.timeout_paused:${instance.id}`,
               createdAt: now,
               payload: {
-                reason: "任务执行超时，daemon 已自动暂停。",
+                reason: timeoutReason,
                 timeoutMs: DEFAULT_EASTER_EGG_SETTINGS.taskDefaultTimeoutMs,
               },
             });
