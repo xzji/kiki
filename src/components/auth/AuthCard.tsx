@@ -42,7 +42,7 @@ function PasswordField({
   const [visible, setVisible] = useState(false);
   return (
     <div className="mb-4">
-      <label htmlFor={id} className="mb-1.5 block text-[13px] text-[#374151]">
+      <label htmlFor={id} className="mb-1.5 block text-[13px] text-ink-strong">
         {label}
       </label>
       <div className="relative">
@@ -54,21 +54,21 @@ function PasswordField({
           onBlur={onBlur}
           aria-invalid={Boolean(error)}
           aria-describedby={error ? `${id}-error` : undefined}
-          className={`h-10 w-full rounded-lg border bg-white px-3 pr-10 text-sm text-[#1F2328] outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
-            error ? "border-[#FECACA]" : "border-[#D0D7DE]"
+          className={`h-10 w-full rounded-lg border bg-white px-3 pr-10 text-sm text-ink outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
+            error ? "border-danger-border" : "border-line-strong"
           }`}
         />
         <button
           type="button"
           aria-label={visible ? "隐藏密码" : "显示密码"}
-          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[#8C9198] hover:bg-[#F6F8FA]"
+          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-ink-faint hover:bg-surface-subtle"
           onClick={() => setVisible((prev) => !prev)}
         >
           {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
       </div>
       {error ? (
-        <p id={`${id}-error`} className="mt-1.5 text-xs text-[#B42318]">
+        <p id={`${id}-error`} className="mt-1.5 text-xs text-danger-hover">
           {error}
         </p>
       ) : null}
@@ -182,22 +182,22 @@ export function AuthCard() {
   }
 
   return (
-    <div className="w-full max-w-[400px] rounded-2xl border border-[#E5E7EB] bg-white px-7 py-8 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_16px_rgba(16,24,40,0.04)]">
-      <h1 className="text-xl font-semibold tracking-tight text-[#1F2328]">
+    <div className="w-full max-w-[400px] rounded-2xl border border-line bg-white px-7 py-8 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_16px_rgba(16,24,40,0.04)]">
+      <h1 className="text-xl font-semibold tracking-tight text-ink">
         {view === "login" ? "账号登录" : "创建账号"}
       </h1>
-      <p className="mt-1.5 text-[13px] text-[#6B7280]">
+      <p className="mt-1.5 text-[13px] text-ink-soft">
         {view === "login" ? "登录以进入你的工作空间" : "需要有效邀请码方可注册独立工作空间"}
       </p>
 
       {bannerError ? (
-        <div className="mt-4 rounded-lg bg-[#FEF2F2] px-3 py-2 text-sm text-[#B42318]">{bannerError}</div>
+        <div className="mt-4 rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-hover">{bannerError}</div>
       ) : null}
 
       <form className="mt-5" onSubmit={handleSubmit}>
         {view === "register" ? (
           <div className="mb-4">
-            <label htmlFor="inviteCode" className="mb-1.5 block text-[13px] text-[#374151]">
+            <label htmlFor="inviteCode" className="mb-1.5 block text-[13px] text-ink-strong">
               邀请码
             </label>
             <input
@@ -213,11 +213,11 @@ export function AuthCard() {
               aria-invalid={Boolean(touched.inviteCode && fieldErrors.inviteCode)}
               aria-describedby={fieldErrors.inviteCode ? "inviteCode-error" : undefined}
               className={`h-10 w-full rounded-lg border bg-white px-3 font-mono text-sm tracking-widest outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
-                touched.inviteCode && fieldErrors.inviteCode ? "border-[#FECACA]" : "border-[#D0D7DE]"
+                touched.inviteCode && fieldErrors.inviteCode ? "border-danger-border" : "border-line-strong"
               }`}
             />
             {touched.inviteCode && fieldErrors.inviteCode ? (
-              <p id="inviteCode-error" className="mt-1.5 text-xs text-[#B42318]">
+              <p id="inviteCode-error" className="mt-1.5 text-xs text-danger-hover">
                 {fieldErrors.inviteCode}
               </p>
             ) : null}
@@ -225,7 +225,7 @@ export function AuthCard() {
         ) : null}
 
         <div className="mb-4">
-          <label htmlFor="email" className="mb-1.5 block text-[13px] text-[#374151]">
+          <label htmlFor="email" className="mb-1.5 block text-[13px] text-ink-strong">
             邮箱
           </label>
           <input
@@ -238,11 +238,11 @@ export function AuthCard() {
             aria-invalid={Boolean(touched.email && fieldErrors.email)}
             aria-describedby={fieldErrors.email ? "email-error" : undefined}
             className={`h-10 w-full rounded-lg border bg-white px-3 text-sm outline-none transition focus:shadow-[0_0_0_3px_rgba(208,215,222,0.45)] ${
-              touched.email && fieldErrors.email ? "border-[#FECACA]" : "border-[#D0D7DE]"
+              touched.email && fieldErrors.email ? "border-danger-border" : "border-line-strong"
             }`}
           />
           {touched.email && fieldErrors.email ? (
-            <p id="email-error" className="mt-1.5 text-xs text-[#B42318]">
+            <p id="email-error" className="mt-1.5 text-xs text-danger-hover">
               {fieldErrors.email}
             </p>
           ) : null}
@@ -259,14 +259,14 @@ export function AuthCard() {
 
         {view === "register" && strength ? (
           <div className="mb-4 flex items-center gap-2 text-xs">
-            <span className="text-[#6B7280]">密码强度</span>
+            <span className="text-ink-soft">密码强度</span>
             <span
               className={
                 strength === "weak"
-                  ? "text-[#B42318]"
+                  ? "text-danger-hover"
                   : strength === "medium"
-                    ? "text-[#8A6D3B]"
-                    : "text-[#1A7F37]"
+                    ? "text-warning-strong"
+                    : "text-success"
               }
             >
               {strength === "weak" ? "弱" : strength === "medium" ? "中" : "强"}
@@ -286,10 +286,10 @@ export function AuthCard() {
             />
             <div className="mb-4">
               <div className="mb-1.5 flex items-baseline justify-between">
-                <label htmlFor="displayName" className="text-[13px] text-[#374151]">
+                <label htmlFor="displayName" className="text-[13px] text-ink-strong">
                   昵称
                 </label>
-                <span className="text-xs text-[#8C9198]">可选</span>
+                <span className="text-xs text-ink-faint">可选</span>
               </div>
               <input
                 id="displayName"
@@ -298,11 +298,11 @@ export function AuthCard() {
                 onChange={(event) => setDisplayName(event.target.value)}
                 onBlur={() => markTouched("displayName")}
                 className={`h-10 w-full rounded-lg border bg-white px-3 text-sm outline-none ${
-                  touched.displayName && fieldErrors.displayName ? "border-[#FECACA]" : "border-[#D0D7DE]"
+                  touched.displayName && fieldErrors.displayName ? "border-danger-border" : "border-line-strong"
                 }`}
               />
               {touched.displayName && fieldErrors.displayName ? (
-                <p className="mt-1.5 text-xs text-[#B42318]">{fieldErrors.displayName}</p>
+                <p className="mt-1.5 text-xs text-danger-hover">{fieldErrors.displayName}</p>
               ) : null}
             </div>
           </>
@@ -312,25 +312,25 @@ export function AuthCard() {
           type="submit"
           disabled={loading}
           aria-busy={loading}
-          className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#1F2328] text-sm font-medium text-white transition hover:bg-[#374151] disabled:opacity-70"
+          className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-ink text-sm font-medium text-white transition hover:bg-ink-strong disabled:opacity-70"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {loading ? (view === "login" ? "登录中…" : "注册中…") : view === "login" ? "登录" : "创建账号"}
         </button>
       </form>
 
-      <p className="mt-5 text-center text-sm text-[#6B7280]">
+      <p className="mt-5 text-center text-sm text-ink-soft">
         {view === "login" ? (
           <>
             还没有账号？{" "}
-            <button type="button" className="text-[#1F2328] underline" onClick={() => switchView("register")}>
+            <button type="button" className="text-ink underline" onClick={() => switchView("register")}>
               创建账号
             </button>
           </>
         ) : (
           <>
             已有账号？{" "}
-            <button type="button" className="text-[#1F2328] underline" onClick={() => switchView("login")}>
+            <button type="button" className="text-ink underline" onClick={() => switchView("login")}>
               去登录
             </button>
           </>

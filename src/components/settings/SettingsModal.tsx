@@ -111,18 +111,18 @@ export function SettingsModal({
   return (
       <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/20 md:items-center" onClick={onClose}>
       <div
-          className="relative flex h-dvh w-full flex-col overflow-hidden border border-[#E5E7EB] bg-white md:h-[88vh] md:max-h-[920px] md:w-[1080px] md:max-w-[96vw] md:flex-row md:rounded-2xl"
+          className="relative flex h-dvh w-full flex-col overflow-hidden border border-line bg-white md:h-[88vh] md:max-h-[920px] md:w-[1080px] md:max-w-[96vw] md:flex-row md:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="关闭设置"
-          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] hover:text-[#111]"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md text-ink-soft hover:bg-surface hover:text-[#111]"
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="flex flex-none flex-col border-b border-[#E5E7EB] bg-[#FBFBFC] px-4 py-3 md:w-[148px] md:border-b-0 md:border-r md:py-4">
+        <div className="flex flex-none flex-col border-b border-line bg-surface-subtle px-4 py-3 md:w-[148px] md:border-b-0 md:border-r md:py-4">
           <div className="mb-3 flex items-center px-2 md:mb-5">
             <div className="text-[15px] font-medium text-[#111]">设置</div>
           </div>
@@ -150,8 +150,8 @@ export function SettingsModal({
               className={cn(
                 "flex w-full items-center gap-2 rounded-xl border border-dashed px-3 py-2 text-left text-[12px] transition-colors",
                 activeTab === "easter-egg"
-                  ? "border-[#D6CCFF] bg-white text-[#5B3DBE]"
-                  : "border-[#E5E7EB] text-[#6B7280] hover:border-[#D6CCFF] hover:bg-white hover:text-[#5B3DBE]",
+                  ? "border-brand-border bg-white text-brand"
+                  : "border-line text-ink-soft hover:border-brand-border hover:bg-white hover:text-brand",
               )}
             >
               <Sparkles className="h-3.5 w-3.5" />
@@ -160,7 +160,7 @@ export function SettingsModal({
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex h-12 flex-none items-center border-b border-[#E5E7EB] px-4 md:h-14 md:px-6">
+            <div className="flex h-12 flex-none items-center border-b border-line px-4 md:h-14 md:px-6">
             <div className="text-[15px] font-medium text-[#111]">
               {activeTab === "account"
                 ? "账号"
@@ -195,8 +195,8 @@ export function SettingsModal({
 function UserMemoryPanel() {
   return (
     <div className="h-full min-h-[480px] max-w-[760px]">
-      <div className="mb-4 flex items-center gap-2 text-[13px] text-[#6B7280]">
-        <Brain className="h-4 w-4 text-[#5B3DBE]" />
+      <div className="mb-4 flex items-center gap-2 text-[13px] text-ink-soft">
+        <Brain className="h-4 w-4 text-brand" />
         <span>用户长期记忆会跨会话注入，用于保存稳定偏好和长期事实。</span>
       </div>
       <MemoryEditor
@@ -293,17 +293,17 @@ function AccountPanel({
 
   return (
     <div className="w-full space-y-5">
-      <div className="flex w-full items-center justify-between gap-6 rounded-2xl border border-[#E5E7EB] bg-white px-6 py-6">
+      <div className="flex w-full items-center justify-between gap-6 rounded-2xl border border-line bg-white px-6 py-6">
         <div className="flex min-w-0 items-center gap-4">
-          <div className="flex h-16 w-16 flex-none items-center justify-center rounded-full border border-[#D0D7DE] bg-[#E9E6FF] text-lg font-medium text-[#5F5AA2]">
+          <div className="flex h-16 w-16 flex-none items-center justify-center rounded-full border border-line-strong bg-brand-surface text-lg font-medium text-brand-soft">
             {initial}
           </div>
           <div className="min-w-0">
             <div className="truncate text-[17px] font-medium text-[#111]">{displayName}</div>
-            <div className="mt-1 truncate text-[13px] text-[#6B7280]">{email}</div>
+            <div className="mt-1 truncate text-[13px] text-ink-soft">{email}</div>
           </div>
         </div>
-        <div className="flex-none rounded-full border border-[#E5E7EB] bg-[#FAFAFB] px-3 py-1 text-[12px] text-[#4B5563]">
+        <div className="flex-none rounded-full border border-line bg-surface-subtle px-3 py-1 text-[12px] text-ink-strong">
           KiKi Agent 账户
         </div>
       </div>
@@ -311,10 +311,10 @@ function AccountPanel({
         <InfoField label="绑定邮箱" value={email} />
       </div>
       <div className="space-y-4">
-        <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+        <section className="rounded-2xl border border-line bg-white px-5 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-[12px] text-[#6B7280]">昵称</div>
+              <div className="text-[12px] text-ink-soft">昵称</div>
               <div className="mt-1 truncate text-[15px] text-[#111]">{displayName}</div>
               {profileMessage && !editingProfile ? (
                 <StatusMessage type={profileMessage.type} text={profileMessage.text} />
@@ -328,14 +328,14 @@ function AccountPanel({
                 setProfileMessage(null);
                 setEditingProfile((prev) => !prev);
               }}
-              className="flex-none rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+              className="flex-none rounded-lg border border-line-strong px-3 py-1.5 text-[12px] text-ink-strong hover:bg-surface disabled:cursor-not-allowed disabled:text-ink-soft"
             >
               {editingProfile ? "收起" : "编辑"}
             </button>
           </div>
           {editingProfile ? (
-            <form className="mt-5 border-t border-[#EEF1F4] pt-5" onSubmit={handleProfileSubmit}>
-              <label htmlFor="account-display-name" className="block text-[12px] text-[#6B7280]">
+            <form className="mt-5 border-t border-surface-subtle pt-5" onSubmit={handleProfileSubmit}>
+              <label htmlFor="account-display-name" className="block text-[12px] text-ink-soft">
                 新昵称
               </label>
               <input
@@ -347,15 +347,15 @@ function AccountPanel({
                 }}
                 maxLength={30}
                 disabled={!user || savingProfile}
-                className="mt-2 h-10 w-full rounded-xl border border-[#D0D7DE] bg-white px-3 text-[14px] text-[#111] outline-none focus:border-[#5B3DBE] disabled:bg-[#F5F6F8] disabled:text-[#9CA3AF]"
+                className="mt-2 h-10 w-full rounded-xl border border-line-strong bg-white px-3 text-[14px] text-[#111] outline-none focus:border-brand disabled:bg-surface disabled:text-ink-soft"
               />
-              <div className="mt-2 text-[12px] text-[#9CA3AF]">{displayNameDraft.trim().length}/30</div>
+              <div className="mt-2 text-[12px] text-ink-soft">{displayNameDraft.trim().length}/30</div>
               {profileMessage ? <StatusMessage type={profileMessage.type} text={profileMessage.text} /> : null}
               <div className="mt-5 flex gap-2">
                 <button
                   type="submit"
                   disabled={!user || savingProfile || !displayNameDraft.trim() || displayNameDraft.trim() === displayName}
-                  className="h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-[#242424] disabled:cursor-not-allowed disabled:bg-[#D1D5DB]"
+                  className="h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-ink-strong disabled:cursor-not-allowed disabled:bg-line"
                 >
                   {savingProfile ? "保存中..." : "保存"}
                 </button>
@@ -367,7 +367,7 @@ function AccountPanel({
                     setProfileMessage(null);
                     setEditingProfile(false);
                   }}
-                  className="h-10 rounded-xl border border-[#D0D7DE] px-4 text-[13px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+                  className="h-10 rounded-xl border border-line-strong px-4 text-[13px] text-ink-strong hover:bg-surface disabled:cursor-not-allowed disabled:text-ink-soft"
                 >
                   取消
                 </button>
@@ -375,11 +375,11 @@ function AccountPanel({
             </form>
           ) : null}
         </section>
-        <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+        <section className="rounded-2xl border border-line bg-white px-5 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-[15px] font-medium text-[#111]">密码</div>
-              <div className="mt-1 text-[12px] text-[#6B7280]">需要时再修改登录密码。</div>
+              <div className="mt-1 text-[12px] text-ink-soft">需要时再修改登录密码。</div>
               {passwordMessage && !editingPassword ? (
                 <StatusMessage type={passwordMessage.type} text={passwordMessage.text} />
               ) : null}
@@ -392,13 +392,13 @@ function AccountPanel({
                 setPasswordMessage(null);
                 setEditingPassword((prev) => !prev);
               }}
-              className="flex-none rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+              className="flex-none rounded-lg border border-line-strong px-3 py-1.5 text-[12px] text-ink-strong hover:bg-surface disabled:cursor-not-allowed disabled:text-ink-soft"
             >
               {editingPassword ? "收起" : "修改"}
             </button>
           </div>
           {editingPassword ? (
-            <form className="mt-5 border-t border-[#EEF1F4] pt-1" onSubmit={handlePasswordSubmit}>
+            <form className="mt-5 border-t border-surface-subtle pt-1" onSubmit={handlePasswordSubmit}>
               <PasswordInput
                 id="account-current-password"
                 label="当前密码"
@@ -443,7 +443,7 @@ function AccountPanel({
                     !passwordForm.newPassword ||
                     !passwordForm.confirmPassword
                   }
-                  className="h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-[#242424] disabled:cursor-not-allowed disabled:bg-[#D1D5DB]"
+                  className="h-10 rounded-xl bg-[#111] px-4 text-[13px] font-medium text-white hover:bg-ink-strong disabled:cursor-not-allowed disabled:bg-line"
                 >
                   {savingPassword ? "修改中..." : "保存新密码"}
                 </button>
@@ -455,7 +455,7 @@ function AccountPanel({
                     setPasswordMessage(null);
                     setEditingPassword(false);
                   }}
-                  className="h-10 rounded-xl border border-[#D0D7DE] px-4 text-[13px] text-[#374151] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#9CA3AF]"
+                  className="h-10 rounded-xl border border-line-strong px-4 text-[13px] text-ink-strong hover:bg-surface disabled:cursor-not-allowed disabled:text-ink-soft"
                 >
                   取消
                 </button>
@@ -485,7 +485,7 @@ function PasswordInput({
 }) {
   return (
     <label htmlFor={id} className="mt-4 block">
-      <span className="text-[12px] text-[#6B7280]">{label}</span>
+      <span className="text-[12px] text-ink-soft">{label}</span>
       <input
         id={id}
         type="password"
@@ -493,7 +493,7 @@ function PasswordInput({
         autoComplete={autoComplete}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 h-10 w-full rounded-xl border border-[#D0D7DE] bg-white px-3 text-[14px] text-[#111] outline-none focus:border-[#5B3DBE] disabled:bg-[#F5F6F8] disabled:text-[#9CA3AF]"
+        className="mt-2 h-10 w-full rounded-xl border border-line-strong bg-white px-3 text-[14px] text-[#111] outline-none focus:border-brand disabled:bg-surface disabled:text-ink-soft"
       />
     </label>
   );
@@ -501,7 +501,7 @@ function PasswordInput({
 
 function StatusMessage({ type, text }: { type: "success" | "error"; text: string }) {
   return (
-    <div className={cn("mt-3 text-[12px]", type === "success" ? "text-[#027A48]" : "text-[#B42318]")}>
+    <div className={cn("mt-3 text-[12px]", type === "success" ? "text-success" : "text-danger-hover")}>
       {text}
     </div>
   );
@@ -521,7 +521,7 @@ function SettingsNavItem({
       type="button"
       onClick={onClick}
       className={cn(
-          "flex w-auto shrink-0 items-center rounded-xl px-3 py-2 text-left text-[13px] text-[#4B5563] hover:bg-white md:w-full",
+          "flex w-auto shrink-0 items-center rounded-xl px-3 py-2 text-left text-[13px] text-ink-strong hover:bg-white md:w-full",
         active && "bg-white font-medium text-[#111]",
       )}
     >
@@ -532,8 +532,8 @@ function SettingsNavItem({
 
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4">
-      <div className="text-[12px] text-[#6B7280]">{label}</div>
+    <div className="rounded-2xl border border-line bg-white px-5 py-4">
+      <div className="text-[12px] text-ink-soft">{label}</div>
       <div className="mt-1 break-all text-[14px] text-[#111]">{value}</div>
     </div>
   );
@@ -555,7 +555,7 @@ function EasterEggSettingsPanel({
   onReset: () => void;
 }) {
   if (!hydrated) {
-    return <div className="text-sm text-[#6B7280]">正在加载隐藏配置...</div>;
+    return <div className="text-sm text-ink-soft">正在加载隐藏配置...</div>;
   }
 
   const activeSettingKeys: NumericSettingKey[] = [
@@ -577,31 +577,31 @@ function EasterEggSettingsPanel({
 
   return (
     <div className="max-w-[680px] space-y-6">
-      <div className="rounded-2xl border border-[#E9D8FD] bg-[#FAF5FF] px-5 py-4">
-        <div className="flex items-center gap-2 text-[14px] font-medium text-[#5B3DBE]">
+      <div className="rounded-2xl border border-brand-border bg-brand-bg px-5 py-4">
+        <div className="flex items-center gap-2 text-[14px] font-medium text-brand">
           <Sparkles className="h-4 w-4" />
           <span>产品彩蛋</span>
         </div>
-        <div className="mt-2 text-[13px] leading-6 text-[#6B4F8C]">
-          这里放的是偏实验性和内部使用的系统阈值。当前浏览器保存后会立即影响 `/goal` 的信息收集、目标规划拆解，以及确认规划后的自动执行调度。
+        <div className="mt-2 text-[13px] leading-6 text-brand-soft">
+          这里放的是偏实验性和内部使用的系统阈值。当前浏览器保存后会立即影响 `/topic` 的信息收集、目标规划拆解，以及确认规划后的自动执行调度。
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+      <div className="rounded-2xl border border-line bg-white px-5 py-5">
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-[15px] font-medium text-[#111]">
-              <SlidersHorizontal className="h-4 w-4 text-[#5B3DBE]" />
+              <SlidersHorizontal className="h-4 w-4 text-brand" />
               <span>当前已生效</span>
             </div>
-            <div className="mt-1 text-[13px] text-[#6B7280]">
+            <div className="mt-1 text-[13px] text-ink-soft">
               修改后会影响 collecting_info 轮次、目标规划 prompt 拆解范围，以及真实 scheduler 的并发与调度节奏。
             </div>
           </div>
           <button
             type="button"
             onClick={onReset}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-[#D0D7DE] px-3 py-2 text-[12px] font-medium text-[#374151] hover:border-[#111] hover:text-[#111]"
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-line-strong px-3 py-2 text-[12px] font-medium text-ink-strong hover:border-[#111] hover:text-[#111]"
           >
             <RotateCcw className="h-3.5 w-3.5 shrink-0" />
             <span className="whitespace-nowrap">恢复默认</span>
@@ -625,12 +625,12 @@ function EasterEggSettingsPanel({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+      <div className="rounded-2xl border border-line bg-white px-5 py-5">
         <div className="flex items-center gap-2 text-[15px] font-medium text-[#111]">
-          <Lock className="h-4 w-4 text-[#6B7280]" />
+          <Lock className="h-4 w-4 text-ink-soft" />
           <span>与 coding-agent 对齐的预留项</span>
         </div>
-        <div className="mt-1 text-[13px] text-[#6B7280]">
+        <div className="mt-1 text-[13px] text-ink-soft">
           这些配置已经持久化，其中大部分仍作为后续执行监控和调试能力的预留项。
         </div>
         <div className="mt-5 space-y-4">
@@ -712,22 +712,22 @@ function NumericSettingField({
   };
 
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-[#FCFCFD] px-4 py-4">
+    <div className="rounded-2xl border border-line bg-surface-subtle px-4 py-4">
       <div className="flex items-start gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="text-[14px] font-medium text-[#111]">{label}</div>
-            {unit ? <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[11px] text-[#6B7280]">{unit}</span> : null}
+            {unit ? <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-[11px] text-ink-soft">{unit}</span> : null}
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[11px]",
-                active ? "bg-[#EEF4FF] text-[#175CD3]" : "bg-[#F3F4F6] text-[#6B7280]",
+                active ? "bg-info-bg text-info-strong" : "bg-surface-subtle text-ink-soft",
               )}
             >
               {active ? "已生效" : "预留"}
             </span>
           </div>
-          <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{description}</div>
+          <div className="mt-1 text-[12px] leading-5 text-ink-soft">{description}</div>
         </div>
       </div>
       <div className="mt-4 flex items-center gap-3">
@@ -738,7 +738,7 @@ function NumericSettingField({
           step={1}
           value={displayValue}
           onChange={(event) => handleDisplayValueChange(Number(event.target.value))}
-          className="h-2 flex-1 accent-[#5B3DBE]"
+          className="h-2 flex-1 accent-brand"
         />
         <div className="relative w-24 shrink-0">
           <input
@@ -748,18 +748,18 @@ function NumericSettingField({
             value={displayValue}
             onChange={(event) => handleDisplayValueChange(Number(event.target.value))}
             className={cn(
-              "w-full rounded-lg border border-[#D0D7DE] py-1.5 text-[12px] text-[#111] outline-none focus:border-[#5B3DBE]",
+              "w-full rounded-lg border border-line-strong py-1.5 text-[12px] text-[#111] outline-none focus:border-brand",
               unit ? "px-2 pr-9" : "px-2",
             )}
           />
           {unit ? (
-            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] text-[#9CA3AF]">
+            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] text-ink-soft">
               {unit}
             </span>
           ) : null}
         </div>
       </div>
-      <div className="mt-2 text-[11px] text-[#9CA3AF]">
+      <div className="mt-2 text-[11px] text-ink-soft">
         范围 {displayMin} - {displayMax}
         {unit ? ` ${unit}` : ""}
       </div>
@@ -783,19 +783,19 @@ function EnumSettingField({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-[#FCFCFD] px-4 py-4">
+    <div className="rounded-2xl border border-line bg-surface-subtle px-4 py-4">
       <div className="flex items-center gap-2">
         <div className="text-[14px] font-medium text-[#111]">{label}</div>
         <span
           className={cn(
             "rounded-full px-2 py-0.5 text-[11px]",
-            active ? "bg-[#EEF4FF] text-[#175CD3]" : "bg-[#F3F4F6] text-[#6B7280]",
+            active ? "bg-info-bg text-info-strong" : "bg-surface-subtle text-ink-soft",
           )}
         >
           {active ? "已生效" : "预留"}
         </span>
       </div>
-      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{description}</div>
+      <div className="mt-1 text-[12px] leading-5 text-ink-soft">{description}</div>
       <div className="mt-4 grid grid-cols-3 gap-2">
         {options.map((option) => (
           <button
@@ -805,8 +805,8 @@ function EnumSettingField({
             className={cn(
               "rounded-xl border px-3 py-2 text-[12px] transition-colors",
               value === option.value
-                ? "border-[#5B3DBE] bg-[#F4F0FF] text-[#5B3DBE]"
-                : "border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#D6CCFF] hover:text-[#5B3DBE]",
+                ? "border-brand bg-brand-bg text-brand"
+                : "border-line bg-white text-ink-strong hover:border-brand-border hover:text-brand",
             )}
           >
             {option.label}

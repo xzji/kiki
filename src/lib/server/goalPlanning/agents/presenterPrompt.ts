@@ -11,4 +11,4 @@
  * 当前实现仍位于 src/lib/server/goalPlanning.ts，此处仅作为
  * Topic 初始化 Saga 的命名空间锚点 re-export。
  */
-export { buildPlanPresentationPrompt } from "@/lib/server/goalPlanning";
+export { buildPlanPresentationPrompt } from "@/lib/server/goalPlanning/promptBuilders";

@@ -37,7 +37,7 @@ function renderSnippet(snippet: string, unread: boolean) {
       return (
         <span
           key={`${part}-${index}`}
-          className={unread ? "text-[#E5484D]" : "text-[#6B7280]"}
+          className={unread ? "text-badge" : "text-ink-soft"}
         >
           {part}
         </span>
@@ -79,7 +79,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
 
   return (
     <>
-        <div className="rounded-xl border border-[#E5E7EB] bg-white p-3 transition hover:border-[#111] md:p-4">
+        <div className="rounded-xl border border-line bg-white p-3 transition hover:border-[#111] md:p-4">
           <div className="flex flex-wrap items-center gap-2 text-[#111]">
           <button
             type="button"
@@ -91,10 +91,10 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
               className="flex min-w-[70%] flex-1 items-center gap-2 text-left md:min-w-0"
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {item.favorite ? <Star className="h-3.5 w-3.5 shrink-0 fill-[#F5A623] text-[#F5A623]" /> : null}
+            {item.favorite ? <Star className="h-3.5 w-3.5 shrink-0 fill-warning text-warning" /> : null}
             <h3 className="truncate text-sm font-semibold">{item.title}</h3>
           </button>
-            <span className="order-2 shrink-0 text-[11px] text-[#6B7280] md:order-none">{timeLabel}</span>
+            <span className="order-2 shrink-0 text-[11px] text-ink-soft md:order-none">{timeLabel}</span>
             <div className="relative order-3 shrink-0 md:order-none">
             <button
               type="button"
@@ -103,14 +103,14 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
                 event.stopPropagation();
                 setMenuOpen((prev) => !prev);
               }}
-                className="flex h-9 w-9 items-center justify-center rounded-md text-[#8C9198] transition hover:bg-[#F3F4F6] hover:text-[#111] md:h-6 md:w-6"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-ink-faint transition hover:bg-surface-subtle hover:text-[#111] md:h-6 md:w-6"
             >
               <MoreHorizontal className="h-4 w-4" />
             </button>
             {menuOpen ? (
               <>
                 <div className="fixed inset-0 z-10" onClick={closeMenu} />
-                <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 shadow-lg">
+                <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-lg border border-line bg-white py-1 shadow-lg">
                   {variant === "snoozed" ? (
                     <MenuItem icon={InboxIcon} label="移回收件箱" onClick={() => runAction(() => unsnoozeItem(item.id))} />
                   ) : (
@@ -143,7 +143,7 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
           >
             <ChevronDown
               className={cn(
-                "h-4 w-4 text-[#8C9198] transition-transform",
+                "h-4 w-4 text-ink-faint transition-transform",
                 expanded && "rotate-180",
               )}
             />
@@ -153,20 +153,20 @@ export function InboxCard({ item, variant = "active" }: { item: InboxItem; varia
         {!expanded ? (
           <div className="mt-2 flex items-start gap-2">
             {unread ? (
-              <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#E5484D]" />
+              <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-badge" />
             ) : null}
-            <p className="line-clamp-1 text-xs text-[#6B7280]">{renderSnippet(item.snippet, unread)}</p>
+            <p className="line-clamp-1 text-xs text-ink-soft">{renderSnippet(item.snippet, unread)}</p>
           </div>
         ) : null}
 
         {expanded ? (
-          <div className="mt-4 border-t border-[#E5E7EB] pt-4">
+          <div className="mt-4 border-t border-line pt-4">
             {expandedMessage ? (
               <div className="flex items-start gap-3">
                 <KikiAvatar size="sm" />
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 text-[13px] font-medium text-[#1F2328]">KiKi</div>
-                  <div className="whitespace-pre-wrap text-sm leading-6 text-[#374151]">
+                  <div className="mb-1 text-[13px] font-medium text-ink">KiKi</div>
+                  <div className="whitespace-pre-wrap text-sm leading-6 text-ink-strong">
                     {expandedMessage}
                   </div>
                 </div>
@@ -210,9 +210,9 @@ function MenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#374151] transition hover:bg-[#F5F6F8]"
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-strong transition hover:bg-surface"
     >
-      <Icon className="h-3.5 w-3.5 text-[#6B7280]" />
+      <Icon className="h-3.5 w-3.5 text-ink-soft" />
       <span>{label}</span>
     </button>
   );

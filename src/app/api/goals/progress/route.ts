@@ -1,23 +1,23 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-import { getGoalTelemetryProgress } from "@/lib/server/goalTelemetry";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function GETHandler(request: NextRequest) {
-  const requestId = request.nextUrl.searchParams.get("requestId")?.trim();
-  if (!requestId) {
-    return NextResponse.json({ reason: "requestId 不能为空" }, { status: 400 });
-  }
-
-  const progress = getGoalTelemetryProgress(requestId);
-  if (!progress) {
-    return NextResponse.json({ progress: null }, { status: 404 });
-  }
-
-  return NextResponse.json({ progress });
+// Tombstone: the legacy Goal planning progress poll has been removed. Planning
+// now runs exclusively on the Topic Init Saga (`/api/topics/plan`), which
+// streams progress via CLI events. Task-execution progress lives at
+// `/api/goals/tasks/progress` and is unaffected.
+async function GoneHandler() {
+  return withDeprecatedApiHeaders(
+    NextResponse.json(
+      { progress: null, reason: "Goal 规划命令已下线，请使用 /topic（POST /api/topics/plan）。" },
+      { status: 410 },
+    ),
+    "/api/topics/plan",
+  );
 }
 
-export const GET = withAuth(GETHandler);
+export const GET = withAuth(GoneHandler);

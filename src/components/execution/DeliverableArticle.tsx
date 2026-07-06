@@ -24,17 +24,17 @@ export function DeliverableArticle({
     <article
       className={
         clipMaxHeight
-          ? "flex flex-col rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:p-5"
-          : "rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:p-5"
+          ? "flex flex-col rounded-xl border border-line bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:p-5"
+          : "rounded-xl border border-line bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:p-5"
       }
       style={clipMaxHeight ? { maxHeight: clipMaxHeight } : undefined}
     >
       <div className="flex shrink-0 items-start justify-between gap-3">
-        <div className="text-[12px] font-medium text-[#8C9198]">{label}</div>
+        <div className="text-[12px] font-medium text-ink-faint">{label}</div>
         {headerActions ? <div className="shrink-0">{headerActions}</div> : null}
       </div>
       {title ? (
-        <h3 className="mt-2 shrink-0 text-[16px] font-semibold leading-7 text-[#1F2328]">{title}</h3>
+        <h3 className="mt-2 shrink-0 text-[16px] font-semibold leading-7 text-ink">{title}</h3>
       ) : null}
       {clipMaxHeight ? (
         <div className="relative mt-4 flex min-h-0 flex-1 flex-col">

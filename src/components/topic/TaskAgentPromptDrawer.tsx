@@ -87,17 +87,17 @@ export function TaskAgentPromptDrawer({
   return (
     <div className="fixed inset-0 z-50 bg-black/10 backdrop-blur-[1px]" onClick={onClose}>
       <div
-          className="absolute inset-y-0 right-0 flex w-full max-w-full flex-col overflow-hidden border-l border-[#E5E7EB] bg-white shadow-xl md:w-[620px]"
+          className="absolute inset-y-0 right-0 flex w-full max-w-full flex-col overflow-hidden border-l border-line bg-white shadow-xl md:w-[620px]"
         onClick={(event) => event.stopPropagation()}
       >
-          <div className="flex flex-col gap-3 border-b border-[#E5E7EB] px-4 py-4 md:flex-row md:items-start md:justify-between md:px-6">
+          <div className="flex flex-col gap-3 border-b border-line px-4 py-4 md:flex-row md:items-start md:justify-between md:px-6">
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] text-[#8C9198]">Agent 完整任务内容（实时根据当前任务字段生成）</div>
-            <h3 className="mt-1 truncate text-[16px] font-semibold tracking-[-0.01em] text-[#1F2328]">
+            <div className="text-[12px] text-ink-faint">Agent 完整任务内容（实时根据当前任务字段生成）</div>
+            <h3 className="mt-1 truncate text-[16px] font-semibold tracking-[-0.01em] text-ink">
               {task.title.replace(/^任务\d+：/, "")} · agent prompt
             </h3>
             {previewInstance ? (
-              <div className="mt-1 text-[12px] text-[#6B7280]">
+              <div className="mt-1 text-[12px] text-ink-soft">
                 实例：{previewInstance.dateLabel}（{previewInstance.id}）
               </div>
             ) : null}
@@ -106,14 +106,14 @@ export function TaskAgentPromptDrawer({
             <button
               type="button"
               onClick={handleCopy}
-              className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+              className="rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
             >
               {copied ? "已复制" : "复制"}
             </button>
             <button
               type="button"
               onClick={handleDownload}
-              className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+              className="rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
             >
               下载 .md
             </button>
@@ -121,17 +121,17 @@ export function TaskAgentPromptDrawer({
               type="button"
               onClick={onClose}
               aria-label="关闭"
-              className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+              className="rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
             >
               关闭
             </button>
           </div>
         </div>
           <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6">
-          <pre className="whitespace-pre-wrap rounded-lg border border-[#E5E7EB] bg-[#FAFBFC] p-4 text-[12.5px] leading-6 text-[#1F2328]">
+          <pre className="whitespace-pre-wrap rounded-lg border border-line bg-surface-subtle p-4 text-[12.5px] leading-6 text-ink">
             {promptText}
           </pre>
-          <p className="mt-3 text-[12px] text-[#8C9198]">
+          <p className="mt-3 text-[12px] text-ink-faint">
             说明：上述内容是 KiKi 在执行该任务时实时拼装并发送给 Agent 的完整 prompt。修改任务字段（标题、描述、执行目标、交付物要求、协作要求等）后，重新打开本面板会自动重新生成。
           </p>
         </div>

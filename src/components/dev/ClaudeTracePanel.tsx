@@ -167,34 +167,34 @@ export function ClaudeTracePanel() {
   };
 
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+    <div className="rounded-2xl border border-line bg-white px-5 py-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[15px] font-medium text-[#111]">Claude Trace</div>
-          <div className="mt-1 text-[13px] text-[#6B7280]">
+          <div className="mt-1 text-[13px] text-ink-soft">
             查看 Claude CLI 真实 prompt、thinking、stdout、stderr 和最终 output 原文。
           </div>
         </div>
         <button
           type="button"
           onClick={() => void fetchTraces()}
-          className="inline-flex items-center gap-2 rounded-lg border border-[#D0D7DE] px-3 py-2 text-[12px] font-medium text-[#374151] hover:border-[#111] hover:text-[#111]"
+          className="inline-flex items-center gap-2 rounded-lg border border-line-strong px-3 py-2 text-[12px] font-medium text-ink-strong hover:border-[#111] hover:text-[#111]"
         >
           <RefreshCcw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
           刷新
         </button>
       </div>
 
-      {error ? <div className="mt-3 text-[12px] text-[#B42318]">{error}</div> : null}
+      {error ? <div className="mt-3 text-[12px] text-danger-hover">{error}</div> : null}
 
       <div className="mt-4 grid min-h-[520px] grid-cols-[280px_minmax(0,1fr)] gap-4">
-        <div className="overflow-hidden rounded-xl border border-[#E5E7EB]">
-          <div className="border-b border-[#E5E7EB] px-3 py-2 text-[12px] font-medium text-[#6B7280]">
+        <div className="overflow-hidden rounded-xl border border-line">
+          <div className="border-b border-line px-3 py-2 text-[12px] font-medium text-ink-soft">
             最近 Trace
           </div>
           <div className="max-h-[480px] overflow-y-auto">
             {traces.length === 0 ? (
-              <div className="px-3 py-4 text-[12px] text-[#8C9198]">暂无 Claude Trace。触发一次 /goal 或普通对话后会出现在这里。</div>
+              <div className="px-3 py-4 text-[12px] text-ink-faint">暂无 Claude Trace。触发一次 /topic 或普通对话后会出现在这里。</div>
             ) : (
               traces.map((trace) => (
                 <button
@@ -202,8 +202,8 @@ export function ClaudeTracePanel() {
                   type="button"
                   onClick={() => setSelectedTraceId(trace.traceId)}
                   className={cn(
-                    "block w-full border-b border-[#F0F1F3] px-3 py-3 text-left hover:bg-[#FAFBFC]",
-                    selectedTraceId === trace.traceId && "bg-[#F6F8FA]",
+                    "block w-full border-b border-surface-subtle px-3 py-3 text-left hover:bg-surface-subtle",
+                    selectedTraceId === trace.traceId && "bg-surface-subtle",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -212,43 +212,43 @@ export function ClaudeTracePanel() {
                       className={cn(
                         "shrink-0 rounded-full px-2 py-0.5 text-[10px]",
                         trace.status === "failed"
-                          ? "bg-[#FEF2F2] text-[#B42318]"
+                          ? "bg-danger-bg text-danger-hover"
                           : trace.status === "running"
-                            ? "bg-[#EEF4FF] text-[#175CD3]"
-                            : "bg-[#F0FDF4] text-[#166534]",
+                            ? "bg-info-bg text-info-strong"
+                            : "bg-success-bg text-success-strong",
                       )}
                     >
                       {statusText(trace.status)}
                     </span>
                   </div>
-                  <div className="mt-1 truncate font-mono text-[11px] text-[#6B7280]">{trace.traceId}</div>
-                  <div className="mt-1 text-[11px] text-[#8C9198]">{formatTime(trace.startedAt)}</div>
+                  <div className="mt-1 truncate font-mono text-[11px] text-ink-soft">{trace.traceId}</div>
+                  <div className="mt-1 text-[11px] text-ink-faint">{formatTime(trace.startedAt)}</div>
                 </button>
               ))
             )}
           </div>
         </div>
 
-        <div className="min-w-0 rounded-xl border border-[#E5E7EB]">
-          <div className="flex items-center justify-between gap-3 border-b border-[#E5E7EB] px-4 py-3">
+        <div className="min-w-0 rounded-xl border border-line">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
             <div className="min-w-0">
               <div className="truncate text-[13px] font-medium text-[#111]">
                 {detail ? traceTitle(detail) : "未选择 Trace"}
               </div>
-              {detail ? <div className="mt-1 truncate font-mono text-[11px] text-[#6B7280]">{detail.relativeTraceDir}</div> : null}
+              {detail ? <div className="mt-1 truncate font-mono text-[11px] text-ink-soft">{detail.relativeTraceDir}</div> : null}
             </div>
             <button
               type="button"
               onClick={() => void copyCurrent()}
               disabled={!currentContent}
-              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-[#D0D7DE] px-3 py-2 text-[12px] text-[#374151] disabled:cursor-not-allowed disabled:opacity-40 hover:border-[#111] hover:text-[#111]"
+              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink-strong disabled:cursor-not-allowed disabled:opacity-40 hover:border-[#111] hover:text-[#111]"
             >
               <Copy className="h-3.5 w-3.5" />
               复制当前
             </button>
           </div>
 
-          <div className="flex gap-1 border-b border-[#E5E7EB] px-3 py-2">
+          <div className="flex gap-1 border-b border-line px-3 py-2">
             {TABS.map((item) => (
               <button
                 key={item.id}
@@ -256,7 +256,7 @@ export function ClaudeTracePanel() {
                 onClick={() => setTab(item.id)}
                 className={cn(
                   "rounded-md px-3 py-1.5 text-[12px]",
-                  tab === item.id ? "bg-[#111] text-white" : "text-[#6B7280] hover:bg-[#F5F6F8] hover:text-[#111]",
+                  tab === item.id ? "bg-[#111] text-white" : "text-ink-soft hover:bg-surface hover:text-[#111]",
                 )}
               >
                 {item.label}
@@ -264,7 +264,7 @@ export function ClaudeTracePanel() {
             ))}
           </div>
 
-          <pre className="max-h-[430px] min-h-[430px] overflow-auto whitespace-pre-wrap break-words bg-[#0F172A] px-4 py-3 font-mono text-[11px] leading-5 text-[#E2E8F0]">
+          <pre className="max-h-[430px] min-h-[430px] overflow-auto whitespace-pre-wrap break-words bg-ink-strong px-4 py-3 font-mono text-[11px] leading-5 text-line">
             {detailLoading ? "加载中..." : currentContent || "暂无内容"}
           </pre>
         </div>
@@ -285,14 +285,14 @@ export function ClaudeTraceDialog({
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
-        className="relative w-[1120px] max-w-[94vw] rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-2xl"
+        className="relative w-[1120px] max-w-[94vw] rounded-2xl border border-line bg-white p-5 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           aria-label="关闭 Claude Trace"
           onClick={onClose}
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] hover:text-[#111]"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-md text-ink-soft hover:bg-surface hover:text-[#111]"
         >
           <X className="h-4 w-4" />
         </button>

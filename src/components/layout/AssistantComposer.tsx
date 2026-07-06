@@ -180,16 +180,16 @@ export function AssistantComposer({
   return (
     <div
       ref={composerRef}
-      className="relative rounded-2xl border border-[#E5E7EB] bg-white px-3 py-3"
+      className="relative rounded-2xl border border-line bg-white px-3 py-3"
     >
       <div className="flex min-h-[84px] flex-col">
         {quotedMessage ? (
-          <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-2">
+          <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-line bg-surface-hover px-3 py-2">
             <div className="min-w-0">
-              <div className="text-[12px] font-medium text-[#1F2328]">
+              <div className="text-[12px] font-medium text-ink">
                 引用 {quotedMessage.roleLabel}
               </div>
-              <div className="mt-0.5 line-clamp-2 text-[12px] leading-5 text-[#6B7280]">
+              <div className="mt-0.5 line-clamp-2 text-[12px] leading-5 text-ink-soft">
                 {quotedMessage.content}
               </div>
             </div>
@@ -197,7 +197,7 @@ export function AssistantComposer({
               type="button"
               aria-label="取消引用"
               onClick={onClearQuote}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#8C9198] hover:bg-white hover:text-[#1F2328]"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-white hover:text-ink"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -278,17 +278,17 @@ export function AssistantComposer({
               }
             }}
             placeholder={inputPlaceholder}
-            className="min-h-[48px] min-w-0 flex-1 resize-none bg-transparent text-sm leading-6 text-[#1F2328] outline-none placeholder:text-[#9197A3]"
+            className="min-h-[48px] min-w-0 flex-1 resize-none bg-transparent text-sm leading-6 text-ink outline-none placeholder:text-ink-faint"
           />
         </div>
         {showCommandMenu ? (
-          <div className="absolute bottom-[96px] left-3 z-20 w-[300px] rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
+          <div className="absolute bottom-[96px] left-3 z-20 w-[300px] rounded-xl border border-line bg-white p-1 shadow-sm">
             {commandSuggestions.map((command, index) => (
               <button
                 key={command.name}
                 type="button"
                 className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left ${
-                  index === activeCommandIndex ? "bg-[#F5F6F8]" : "hover:bg-[#F5F6F8]"
+                  index === activeCommandIndex ? "bg-surface" : "hover:bg-surface"
                 }`}
                 onMouseEnter={() => setActiveCommandIndex(index)}
                 onClick={() => selectCommand(index)}
@@ -297,8 +297,8 @@ export function AssistantComposer({
                   /{command.name}
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-[13px] font-medium text-[#1F2328]">{command.label}</span>
-                  <span className="mt-0.5 block text-[12px] leading-4 text-[#6B7280]">
+                  <span className="block text-[13px] font-medium text-ink">{command.label}</span>
+                  <span className="mt-0.5 block text-[12px] leading-4 text-ink-soft">
                     {command.description}
                   </span>
                 </span>
@@ -311,7 +311,7 @@ export function AssistantComposer({
             {attachments.map((attachment) => (
               <span
                 key={attachment.id}
-                className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E7EB] bg-[#F8FAFC] py-1 pl-3 pr-1.5 text-xs text-[#6B7280]"
+                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface-subtle py-1 pl-3 pr-1.5 text-xs text-ink-soft"
               >
                 <span className="max-w-[180px] truncate">{attachment.filename}</span>
                 <button
@@ -319,7 +319,7 @@ export function AssistantComposer({
                   aria-label={`删除附件 ${attachment.filename}`}
                   disabled={disabled}
                   onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
-                  className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[#8C9198] hover:bg-[#E5E7EB] hover:text-[#1F2328] disabled:cursor-not-allowed"
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-faint hover:bg-line hover:text-ink disabled:cursor-not-allowed"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -327,7 +327,7 @@ export function AssistantComposer({
             ))}
           </div>
         ) : null}
-        <div className="mt-auto flex items-center justify-between gap-2 pt-2 text-xs text-[#6B7280]">
+        <div className="mt-auto flex items-center justify-between gap-2 pt-2 text-xs text-ink-soft">
           <div className="flex items-center gap-1">
             <input
               ref={fileInputRef}
@@ -340,7 +340,7 @@ export function AssistantComposer({
             <button
               type="button"
               disabled={disabled}
-              className="rounded-md p-1.5 hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#C1C7D0]"
+              className="rounded-md p-1.5 hover:bg-surface disabled:cursor-not-allowed disabled:text-line"
               aria-label="上传附件"
               onClick={() => fileInputRef.current?.click()}
             >
@@ -350,7 +350,7 @@ export function AssistantComposer({
               <button
                 type="button"
                 disabled={disabled}
-                className="rounded-md p-1.5 hover:bg-[#F5F6F8]"
+                className="rounded-md p-1.5 hover:bg-surface"
                 aria-label="连接器"
                 onClick={() => {
                   setShowConnectorMenu((prev) => !prev);
@@ -360,12 +360,12 @@ export function AssistantComposer({
                 <Link2 className="h-4 w-4" />
               </button>
               {showConnectorMenu ? (
-                <div className="absolute bottom-10 left-0 z-10 w-44 rounded-xl border border-[#E5E7EB] bg-white p-1">
+                <div className="absolute bottom-10 left-0 z-10 w-44 rounded-xl border border-line bg-white p-1">
                   {connectorItems.map((item) => (
                     <button
                       key={item}
                       type="button"
-                      className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-[#374151] hover:bg-[#F5F6F8]"
+                      className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-ink-strong hover:bg-surface"
                       onClick={() => setShowConnectorMenu(false)}
                     >
                       {item}
@@ -380,7 +380,7 @@ export function AssistantComposer({
               <button
                 type="button"
                 disabled={disabled}
-                className="flex max-w-[220px] items-center gap-1 rounded-md px-2 py-1.5 hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#C1C7D0]"
+                className="flex max-w-[220px] items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface disabled:cursor-not-allowed disabled:text-line"
                 onClick={() => {
                   setShowModelMenu((prev) => !prev);
                   setShowConnectorMenu(false);
@@ -391,7 +391,7 @@ export function AssistantComposer({
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
               {showModelMenu ? (
-                <div className="absolute bottom-10 right-0 z-10 w-64 rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-sm">
+                <div className="absolute bottom-10 right-0 z-10 w-64 rounded-xl border border-line bg-white p-1 shadow-sm">
                   {localMode ? (
                     connectedRuntimeEnvironments.length > 0 ? (
                       connectedRuntimeEnvironments.map((runtime) => {
@@ -400,8 +400,8 @@ export function AssistantComposer({
                           <button
                             key={runtime.id}
                             type="button"
-                            className={`flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-[#F5F6F8] ${
-                              selected ? "text-[#111]" : "text-[#374151]"
+                            className={`flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-surface ${
+                              selected ? "text-[#111]" : "text-ink-strong"
                             }`}
                             onClick={() => {
                               setShowModelMenu(false);
@@ -412,12 +412,12 @@ export function AssistantComposer({
                               <span className="block truncate text-[13px] font-medium">
                                 {runtime.name || runtimeKindLabel(runtime)}
                               </span>
-                              <span className="mt-0.5 block truncate text-[11px] text-[#6B7280]">
+                              <span className="mt-0.5 block truncate text-[11px] text-ink-soft">
                                 {runtimeKindLabel(runtime)} · {runtime.permissionMode}
                               </span>
                             </span>
                             {selected ? (
-                              <span className="mt-0.5 shrink-0 rounded-full bg-[#ECFDF3] px-2 py-0.5 text-[11px] text-[#067647]">
+                              <span className="mt-0.5 shrink-0 rounded-full bg-success-bg px-2 py-0.5 text-[11px] text-success">
                                 当前
                               </span>
                             ) : null}
@@ -425,7 +425,7 @@ export function AssistantComposer({
                         );
                       })
                     ) : (
-                      <div className="px-3 py-2 text-[12px] leading-5 text-[#6B7280]">
+                      <div className="px-3 py-2 text-[12px] leading-5 text-ink-soft">
                         暂无已连接 Runtime，请到设置中连接。
                       </div>
                     )
@@ -434,8 +434,8 @@ export function AssistantComposer({
                       <button
                         key={item}
                         type="button"
-                        className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[#F5F6F8] ${
-                          item === selectedModel ? "text-[#111]" : "text-[#374151]"
+                        className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-surface ${
+                          item === selectedModel ? "text-[#111]" : "text-ink-strong"
                         }`}
                         onClick={() => {
                           setSelectedModel(item);
@@ -453,7 +453,7 @@ export function AssistantComposer({
               <button
                 type="button"
                 onClick={onStop}
-                className="rounded-full border border-[#D0D7DE] p-1.5 text-[#B42318] transition hover:border-[#B42318] hover:bg-[#FEF2F2]"
+                className="rounded-full border border-line-strong p-1.5 text-danger-hover transition hover:border-danger-hover hover:bg-danger-bg"
                 aria-label="停止生成"
               >
                 <Square className="h-4 w-4 fill-current" />
@@ -465,8 +465,8 @@ export function AssistantComposer({
                 disabled={isEmpty || disabled}
                 className={`rounded-full border p-1.5 transition ${
                   isEmpty || disabled
-                    ? "cursor-not-allowed border-[#E5E7EB] text-[#C1C7D0]"
-                    : "border-[#D0D7DE] text-[#111] hover:border-[#111]"
+                    ? "cursor-not-allowed border-line text-line"
+                    : "border-line-strong text-[#111] hover:border-[#111]"
                 }`}
                 aria-label="发送"
               >

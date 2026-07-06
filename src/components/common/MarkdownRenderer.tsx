@@ -167,13 +167,13 @@ function renderInline(text: string): ReactNode[] {
     const key = `${match.index}-${token}`;
     if (token.startsWith("`")) {
       nodes.push(
-        <code key={key} className="rounded bg-[#F3F4F6] px-1 py-0.5 font-mono text-[0.92em] text-[#1F2328]">
+        <code key={key} className="rounded bg-surface-subtle px-1 py-0.5 font-mono text-[0.92em] text-ink">
           {token.slice(1, -1)}
         </code>,
       );
     } else if (token.startsWith("**")) {
       nodes.push(
-        <strong key={key} className="font-semibold text-[#1F2328]">
+        <strong key={key} className="font-semibold text-ink">
           {token.slice(2, -2)}
         </strong>,
       );
@@ -192,7 +192,7 @@ function renderInline(text: string): ReactNode[] {
             href={safeHref(link[2])}
             target={link[2].startsWith("#") || link[2].startsWith("/") ? undefined : "_blank"}
             rel="noreferrer"
-            className="font-medium text-[#0969DA] underline underline-offset-2 hover:text-[#0550AE]"
+            className="font-medium text-info-strong underline underline-offset-2 hover:text-info-strong"
           >
             {link[1]}
           </a>,
@@ -221,14 +221,14 @@ export function MarkdownRenderer({
   const blocks = parseMarkdown(content);
 
   return (
-    <div className={cn("space-y-3 break-words text-sm leading-6 text-[#374151]", className)}>
+    <div className={cn("space-y-3 break-words text-sm leading-6 text-ink-strong", className)}>
       {blocks.map((block, index) => {
         const key = `${block.kind}-${index}`;
         switch (block.kind) {
           case "heading": {
             const Tag = (`h${block.level}` as keyof JSX.IntrinsicElements);
             return (
-              <Tag key={key} className="mt-4 text-[15px] font-semibold leading-7 text-[#1F2328] first:mt-0">
+              <Tag key={key} className="mt-4 text-[15px] font-semibold leading-7 text-ink first:mt-0">
                 {renderInline(block.text)}
               </Tag>
             );
@@ -241,7 +241,7 @@ export function MarkdownRenderer({
             );
           case "blockquote":
             return (
-              <blockquote key={key} className="border-l-4 border-[#D0D7DE] pl-3 text-[#6B7280]">
+              <blockquote key={key} className="border-l-4 border-line-strong pl-3 text-ink-soft">
                 <p className="whitespace-pre-wrap">{renderInline(block.text)}</p>
               </blockquote>
             );
@@ -249,7 +249,7 @@ export function MarkdownRenderer({
             return (
               <pre
                 key={key}
-                className="overflow-x-auto rounded-xl bg-[#0F172A] p-3 text-[12px] leading-5 text-[#E5E7EB]"
+                className="overflow-x-auto rounded-xl bg-ink-strong p-3 text-[12px] leading-5 text-line"
               >
                 <code>{block.code}</code>
               </pre>
@@ -275,7 +275,7 @@ export function MarkdownRenderer({
               <TablePreview key={key} data={{ headers: block.headers, rows: block.rows }} variant={tableVariant} />
             );
           case "hr":
-            return <hr key={key} className="border-[#E5E7EB]" />;
+            return <hr key={key} className="border-line" />;
         }
       })}
     </div>

@@ -40,10 +40,10 @@ export function OptionalFeedbackSuggestions({
           type="button"
           disabled={Boolean(pendingValue)}
           onClick={() => void submit(option, index)}
-          className="flex w-fit max-w-full items-center gap-3 rounded-lg bg-[#EEF0F3] px-3.5 py-2 text-left text-[13px] leading-5 text-[#6B7280] transition hover:bg-[#E2E6EB] hover:text-[#1F2328] disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex w-fit max-w-full items-center gap-3 rounded-lg bg-surface-subtle px-3.5 py-2 text-left text-[13px] leading-5 text-ink-soft transition hover:bg-line hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="min-w-0 truncate">{option}</span>
-          <span className="relative h-3 w-[18px] shrink-0 text-[#8C9198]" aria-hidden="true">
+          <span className="relative h-3 w-[18px] shrink-0 text-ink-faint" aria-hidden="true">
             <span className="absolute right-px top-1/2 h-px w-3.5 -translate-y-1/2 bg-current" />
             <span className="absolute right-px top-1/2 h-1.5 w-1.5 -translate-y-1/2 rotate-45 border-r border-t border-current" />
           </span>

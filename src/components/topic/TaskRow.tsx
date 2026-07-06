@@ -2,6 +2,7 @@
 
 import { Check, Circle, CircleDot, Dot, Ellipsis } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { TaskEditDrawer } from "@/components/topic/TaskEditDrawer";
 import { deleteGoalTaskCommand } from "@/lib/api/goal-commands";
@@ -72,21 +73,21 @@ export function TaskRow({
       }}
       className={cn(
         "flex w-full items-start gap-3 rounded-xl px-2 py-3 text-left transition md:px-3",
-        isPendingChange ? "cursor-default opacity-70" : "hover:bg-[#F8F9FB]",
+        isPendingChange ? "cursor-default opacity-70" : "hover:bg-surface-hover",
       )}
     >
       <span
         className={cn(
           "mt-0.5 inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border",
           taskState === "completed"
-            ? "border-[#1F2328] bg-[#1F2328] text-white"
+            ? "border-ink bg-ink text-white"
             : taskState === "awaiting_user"
-              ? "border-[#D9A441] text-[#8A6D3B]"
+              ? "border-warning text-warning-strong"
             : taskState === "error"
-              ? "border-[#B42318] text-[#B42318]"
+              ? "border-danger-hover text-danger-hover"
             : taskState === "in_progress"
-              ? "border-[#1F2328] text-[#1F2328]"
-              : "border-[#D0D7DE] text-transparent"
+              ? "border-ink text-ink"
+              : "border-line-strong text-transparent"
         )}
       >
         {taskState === "completed" ? (
@@ -96,12 +97,12 @@ export function TaskRow({
             className={cn(
               "h-3.5 w-3.5",
               taskState === "awaiting_user"
-                ? "fill-[#D9A441] text-[#D9A441]"
+                ? "fill-warning text-warning"
                 : taskState === "error"
-                  ? "fill-[#B42318] text-[#B42318]"
+                  ? "fill-danger-hover text-danger-hover"
                 : taskState === "in_progress"
-                  ? "fill-[#1F2328] text-[#1F2328]"
-                  : "text-[#D0D7DE]",
+                  ? "fill-ink text-ink"
+                  : "text-line-strong",
             )}
           />
         )}
@@ -110,26 +111,26 @@ export function TaskRow({
           <div className="flex items-start justify-between gap-2 md:gap-3">
           <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={cn("min-w-0 text-sm font-medium md:truncate", taskState === "completed" ? "text-[#9AA0A6] line-through" : "text-[#1F2328]")}>
+                <span className={cn("min-w-0 text-sm font-medium md:truncate", taskState === "completed" ? "text-ink-faint line-through" : "text-ink")}>
                 {stripTaskPrefix(task.title)}
               </span>
               <span
                 className={cn(
                   "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
                   taskState === "completed"
-                    ? "bg-[#E5E7EB] text-[#6B7280]"
+                    ? "bg-line text-ink-soft"
                     : taskState === "awaiting_user"
-                      ? "bg-[#FFF3CD] text-[#8A6D3B]"
+                      ? "bg-warning-bg text-warning-strong"
                     : taskState === "error"
-                      ? "bg-[#FDECEC] text-[#B42318]"
+                      ? "bg-danger-bg text-danger-hover"
                     : taskState === "in_progress"
-                      ? "bg-[#DDE1E7] text-[#1F2328]"
-                      : "bg-[#F5F6F8] text-[#8C9198]"
+                      ? "bg-line text-ink"
+                      : "bg-surface text-ink-faint"
                 )}
               >
                 {isPendingChange ? "保存中" : statusLabel}
               </span>
-              {unreadCount > 0 ? <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#E5484D]" /> : null}
+              {unreadCount > 0 ? <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-badge" /> : null}
             </div>
           </div>
             <span className="relative flex shrink-0 items-center justify-end gap-1 md:w-[96px]">
@@ -139,11 +140,11 @@ export function TaskRow({
                 onClick={(event) => {
                   event.stopPropagation();
                   void runTaskExecutionAction(task.id, executionAction.action).catch((error) => {
-                    window.alert(error instanceof Error ? error.message : "任务执行失败");
+                    toast.error(error instanceof Error ? error.message : "任务执行失败");
                   });
                 }}
                 className={cn(
-                  "inline-flex shrink-0 items-center rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-xs text-[#6B7280] transition hover:border-[#111]",
+                  "inline-flex shrink-0 items-center rounded-md border border-line-strong bg-white px-2 py-1 text-xs text-ink-soft transition hover:border-[#111]",
                     hovered ? "opacity-100" : "opacity-100 md:pointer-events-none md:opacity-0",
                 )}
               >
@@ -159,7 +160,7 @@ export function TaskRow({
                 setMenuOpen((prev) => !prev);
               }}
               className={cn(
-                "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#D0D7DE] bg-white text-[#6B7280] transition hover:border-[#111] hover:text-[#1F2328]",
+                "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line-strong bg-white text-ink-soft transition hover:border-[#111] hover:text-ink",
                   hovered || menuOpen ? "opacity-100" : "opacity-100 md:pointer-events-none md:opacity-0",
               )}
             >
@@ -169,7 +170,7 @@ export function TaskRow({
             {menuOpen ? (
               <div
                 onClick={(event) => event.stopPropagation()}
-                className="absolute right-0 top-8 z-20 w-28 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328]"
+                className="absolute right-0 top-8 z-20 w-28 overflow-hidden rounded-lg border border-line bg-white py-1 text-[12px] text-ink"
               >
                 <button
                   type="button"
@@ -177,7 +178,7 @@ export function TaskRow({
                     setEditOpen(true);
                     setMenuOpen(false);
                   }}
-                  className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+                  className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
                 >
                   编辑
                 </button>
@@ -206,10 +207,10 @@ export function TaskRow({
                       })
                       .catch((error) => {
                         removePendingTaskDelete(overlayId);
-                        window.alert(error instanceof Error ? error.message : "任务删除失败");
+                        toast.error(error instanceof Error ? error.message : "任务删除失败");
                       });
                   }}
-                  className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
+                  className="block w-full px-3 py-2 text-left text-danger hover:bg-surface-hover"
                 >
                   删除
                 </button>
@@ -218,7 +219,7 @@ export function TaskRow({
           </span>
         </div>
         {task.description ? (
-          <p className="mt-1.5 text-[13px] leading-5 text-[#6B7280]">{task.description}</p>
+          <p className="mt-1.5 text-[13px] leading-5 text-ink-soft">{task.description}</p>
         ) : null}
       </div>
     </div>

@@ -2,6 +2,34 @@
 
 本文件记录产品与工程迭代的主要变化。格式按时间倒序维护，提交前需过滤本地测试数据、临时路径、密钥和运行时数据。
 
+## 2026-07-06
+
+### Removed
+- 完整下线 legacy Goal 规划命令（`/goal`），规划链路统一收敛到 Topic Init Saga（`/topic`）：
+  - 删除 slash 命令定义中的 `goal` 条目与联合类型成员，`/goal` 不再被解析为命令。
+  - 删除服务端 `src/lib/server/goalPlanning.ts` 单体规划器（`generateGoalPlanWithClaude`、澄清/信息收集、checkpoint 读写恢复等 Goal-only 编排），以及仅其使用的私有 helper。
+  - 删除客户端 `src/lib/api/goals.ts` 规划客户端与 `goalWorkflow.ts` 中的 Goal-only 编排函数（`runGoalPlanning`、`startGoalInfoCollection`、`continueGoalWorkflowAfterInfo`、`resumeGoalWorkflowFromCheckpoint`、`resumeGoalWorkflowFromRecovery` 等），保留被 Topic UI 复用的 `commitGoalDraftToStores`/`replaceGoalDraftInStores`。
+  - 删除 `topicPlanning.ts` 中已无消费者的 legacy re-export 别名，仅保留 Saga 入口。
+
+### Changed
+- 抽离 6 个被 Topic Saga 复用的共享 prompt builder 到新模块 `src/lib/server/goalPlanning/promptBuilders.ts`（Interviewer / Planner / Presenter 角色锚点与规划回归 spec 改为引用该模块），使其不再依赖已下线的 legacy 编排。
+- 侧边栏助手（`assistantStore`）的规划入口从 `/goal` 迁移到 `/topic` Saga，并完整移植多轮澄清（`awaiting_user`）续答：以累积问答 history 作为上下文重放，避免多轮后早期答案丢失。
+- 会话视图（`ConversationView`）删除 `command === "goal"` 分支、信息收集续答分支与 goal checkpoint/recovery 恢复子路径，保留基于 `planningRunState.source === "saga"` 的 Saga 失败恢复路径。
+- 引入统一设计 token 体系与组件视觉重构：`globals.css` 定义文本/边框/表面/品牌/语义色等 CSS 变量，`tailwind.config.ts` 接入 token；新增 `ConfirmDialog` 全局确认弹窗（基于 `@radix-ui/react-alert-dialog`）并接入 `sonner` toast、`@radix-ui/react-popover`，多组件改用 token 与统一交互控件。
+
+### Deprecated
+- 将 Goal 规划相关路由改为 410 墓碑并返回迁移提示（引导使用 `/api/topics/plan`），保留一个迭代观察窗口后再物理删除：`/api/goals/plan`、`/api/goals/plan/resume`、`/api/goals/plan/checkpoint`、`/api/goals/clarify`、`/api/goals/collect`、`/api/goals/progress`。执行运行时的 `goalTelemetry` 与任务执行进度接口不受影响。
+
+### Notes
+- `goalInfoCollection` 的持久化基础设施（会话命令类型、store reducer、repository、DB 列 `goal_info_collection_json`）按最保守策略保留，仅移除前端写入方；本次不做破坏性 schema 变更。
+- 本地 daemon 无改动，版本保持 `@kiki_agent/daemon@0.2.25`。
+
+### Verification
+- 通过 `pnpm build`。
+- 通过 `pnpm tsc --noEmit`。
+- 通过 `pnpm lint`。
+- 通过 Topic Saga 与 prompt 去重专项 spec（`topicInitSaga` / `runTopicInitSagaDefaults` / `sagaDraftAdapter` / `promptDuplicationGuard`）。
+
 ## 2026-07-03
 
 ### Changed

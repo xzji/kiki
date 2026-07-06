@@ -18,10 +18,10 @@ export function RuntimeStatusBadge({ health }: { health?: RuntimeHealth }) {
     <span
       className={cn(
         "rounded-full border px-2 py-1 text-[11px]",
-        status === "online" && "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]",
-        status === "checking" && "border-[#E5E7EB] bg-[#F8FAFC] text-[#475467]",
-        status === "misconfigured" && "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]",
-        status === "offline" && "border-[#E5E7EB] bg-white text-[#6B7280]",
+        status === "online" && "border-success-border bg-success-bg text-success",
+        status === "checking" && "border-line bg-surface-subtle text-ink-strong",
+        status === "misconfigured" && "border-danger-border bg-danger-bg text-danger-hover",
+        status === "offline" && "border-line bg-white text-ink-soft",
       )}
     >
       {label}

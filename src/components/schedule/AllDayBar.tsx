@@ -55,10 +55,10 @@ export function AllDayBar({ days, events, onClickEvent }: Props) {
   const containerHeight = VERTICAL_PADDING * 2 + totalRows * ROW_HEIGHT + (totalRows - 1) * ROW_GAP;
 
   return (
-    <div className="flex border-b border-[#E5E7EB] bg-white">
+    <div className="flex border-b border-line bg-white">
       <div
         style={{ width: TIME_GUTTER_WIDTH }}
-        className="flex flex-none items-start justify-end border-r border-[#E5E7EB] px-2 py-2 text-[11px] text-[#6B7280]"
+        className="flex flex-none items-start justify-end border-r border-line px-2 py-2 text-[11px] text-ink-soft"
       >
         全天
       </div>
@@ -73,7 +73,7 @@ export function AllDayBar({ days, events, onClickEvent }: Props) {
             return (
               <div
                 key={day.toISOString()}
-                className="border-l border-[#E5E7EB] first:border-l-0"
+                className="border-l border-line first:border-l-0"
                 style={{ backgroundColor: isWeekend ? "#F5F6F8" : undefined }}
                 aria-hidden
                 data-column-index={index}

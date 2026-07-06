@@ -49,16 +49,16 @@ export function SubmittedInteractionPanel({ instance }: { instance: TaskInstance
   if (!submission || instance.awaitingUser) return null;
   const details = submittedDetails(instance);
   return (
-    <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
+    <div className="max-w-[720px] text-[13px] leading-6 text-ink-strong">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-[#1F2328]">{submittedStatusLabel(submission.status)}</span>
-        <span className="text-[12px] text-[#8C9198]">
+        <span className="font-medium text-ink">{submittedStatusLabel(submission.status)}</span>
+        <span className="text-[12px] text-ink-faint">
           {formatSubmittedAt(submission.submittedAt)}
         </span>
       </div>
       {details.length ? (
-        <div className="mt-2 text-[#1F2328]">
-          <div className="text-[12px] text-[#57606A]">已提交的信息</div>
+        <div className="mt-2 text-ink">
+          <div className="text-[12px] text-ink-strong">已提交的信息</div>
           <div className="mt-1 space-y-1">
             {details.map((detail) => (
               <div key={detail}>{detail}</div>
@@ -67,7 +67,7 @@ export function SubmittedInteractionPanel({ instance }: { instance: TaskInstance
         </div>
       ) : null}
       {instance.status === "in_progress" ? (
-        <div className="mt-2 text-[12px] text-[#8C9198]">KiKi 已收到，正在继续执行。</div>
+        <div className="mt-2 text-[12px] text-ink-faint">KiKi 已收到，正在继续执行。</div>
       ) : null}
     </div>
   );
@@ -134,14 +134,14 @@ function extractFeedbackFields(feedback: string) {
 function optionRowClass(selected: boolean) {
   return [
     "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-0 py-2 text-left text-[13px] transition",
-    selected ? "font-semibold text-[#1F2933]" : "text-[#4B5563] hover:text-[#1F2933]",
+    selected ? "font-semibold text-ink-strong" : "text-ink-strong hover:text-ink-strong",
   ].join(" ");
 }
 
 function optionDotClass(selected: boolean) {
   return [
     "h-2 w-2 shrink-0 rounded-full transition",
-    selected ? "bg-[#64748B] ring-4 ring-[#EEF0F3]" : "bg-[#D0D7DE] ring-4 ring-transparent",
+    selected ? "bg-ink-strong ring-4 ring-surface-subtle" : "bg-line-strong ring-4 ring-transparent",
   ].join(" ");
 }
 
@@ -391,12 +391,12 @@ export function AwaitingUserResumePanel({
   const headline = displayModel.headline || instance.awaitingUser.reason;
 
   return (
-    <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
-      <div className="flex items-center gap-2 text-[13px] font-semibold text-[#1F2328]">
-        <span className="h-1.5 w-1.5 rounded-full bg-[#8C9198]" />
+    <div className="max-w-[720px] text-[13px] leading-6 text-ink-strong">
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+        <span className="h-1.5 w-1.5 rounded-full bg-ink-faint" />
         <span>{displayModel.panelTitle}</span>
       </div>
-      <div className="mt-4 text-[14px] leading-6 text-[#374151]">{headline}</div>
+      <div className="mt-4 text-[14px] leading-6 text-ink-strong">{headline}</div>
       {promptFields.length ? (
         <div className="mt-3 space-y-3">
           {promptFields.map((item, index) => {
@@ -410,11 +410,11 @@ export function AwaitingUserResumePanel({
               <div key={item.id}>
                 {hideItemQuestion ? null : (
                   <div>
-                    <div className="text-[13px] font-semibold text-[#1F2328]">
+                    <div className="text-[13px] font-semibold text-ink">
                       {index + 1}. {itemTitle}
                     </div>
                     {itemDescription ? (
-                      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{itemDescription}</div>
+                      <div className="mt-1 text-[12px] leading-5 text-ink-soft">{itemDescription}</div>
                     ) : null}
                   </div>
                 )}
@@ -449,16 +449,16 @@ export function AwaitingUserResumePanel({
                         type="button"
                         disabled={uploadingFieldId === item.id}
                         onClick={() => fileInputRefs.current[item.id]?.click()}
-                        className="rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] font-medium text-[#374151] transition hover:border-[#1F2328] hover:text-[#1F2328] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-lg border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink-strong transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {uploadingFieldId === item.id ? "上传中..." : item.inputKind === "file" ? "上传文件" : "上传截图"}
                       </button>
                       {selectedFiles.length ? (
-                        <span className="min-w-0 truncate text-[12px] text-[#57606A]">
+                        <span className="min-w-0 truncate text-[12px] text-ink-strong">
                           已上传：{selectedFiles.map((file) => file.name).join("、")}
                         </span>
                       ) : (
-                        <span className="text-[12px] text-[#8C9198]">
+                        <span className="text-[12px] text-ink-faint">
                           {item.inputKind === "image_or_text" ? "也可以直接填写文字记录" : "请先上传后再提交"}
                         </span>
                       )}
@@ -491,7 +491,7 @@ export function AwaitingUserResumePanel({
                         onFocus={() => chooseCustom(item)}
                         onChange={(event) => updateCustomValue(event.target.value, item)}
                         placeholder={inputPlaceholderFor(item)}
-                          className="col-start-2 min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328] md:col-start-auto"
+                          className="col-start-2 min-w-0 border-b border-line-strong bg-transparent px-1 py-1 text-[13px] font-normal text-ink-strong outline-none placeholder:text-ink-faint focus:border-ink md:col-start-auto"
                       />
                     </div>
                   ) : null}
@@ -543,7 +543,7 @@ export function AwaitingUserResumePanel({
                 onFocus={() => chooseCustom()}
                 onChange={(event) => updateCustomValue(event.target.value)}
                 placeholder={options.length ? "请输入你的选择" : "请输入需要补充的信息"}
-                  className="col-start-2 min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328] md:col-start-auto"
+                  className="col-start-2 min-w-0 border-b border-line-strong bg-transparent px-1 py-1 text-[13px] font-normal text-ink-strong outline-none placeholder:text-ink-faint focus:border-ink md:col-start-auto"
               />
             </div>
           </div>
@@ -551,13 +551,13 @@ export function AwaitingUserResumePanel({
       )}
       {blocker ? (
         <div className="mt-5 space-y-3">
-          {error ? <div className="text-[12px] text-[#B42318]">{error}</div> : null}
+          {error ? <div className="text-[12px] text-danger-hover">{error}</div> : null}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
             <button
               type="button"
               disabled={Boolean(pending) || Boolean(uploadingFieldId)}
               onClick={() => void submit(true)}
-                className="w-full rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#2B2B2B] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                className="w-full rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-ink-strong disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {pending === "approve" ? "提交中..." : uploadingFieldId ? "上传中..." : primaryLabelFor(instance)}
             </button>
@@ -566,7 +566,7 @@ export function AwaitingUserResumePanel({
                 type="button"
                 disabled={Boolean(pending) || Boolean(uploadingFieldId)}
                 onClick={() => void submit(false)}
-                  className="w-full bg-transparent px-0 py-2 text-left text-[13px] text-[#6B7280] hover:text-[#1F2933] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  className="w-full bg-transparent px-0 py-2 text-left text-[13px] text-ink-soft hover:text-ink-strong disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 {pending === "revise" ? "提交中..." : "让 KiKi 修改后继续"}
               </button>

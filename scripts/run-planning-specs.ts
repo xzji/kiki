@@ -38,7 +38,6 @@ import { runContextPackBoundarySpecs } from "../src/lib/server/workspace/context
 import { runGovernanceGateSpecs } from "../src/lib/server/governance/governanceGate.spec";
 import { runGovernanceIntentSpecs } from "../src/lib/server/governance/governanceIntent.spec";
 import { runJsonRepairAutoCloseSpecs } from "../src/lib/server/claude/jsonRepair.spec";
-import { runDeliveryClosureAuditSpecs } from "../src/lib/server/goalPlanning/deliveryClosureAudit.spec";
 import { runTaskDraftPromptSpecs } from "../src/lib/server/goalPlanning/taskDraftPrompt.spec";
 import { runTaskDraftReviewSpecs } from "../src/lib/server/goalPlanning/taskDraftReview.spec";
 import { runRefinerPromptSpecs } from "../src/lib/server/goalPlanning/agents/refinerPrompt.spec";
@@ -143,7 +142,6 @@ runGoalPlanDrawerSpecs();
 runStorageAdapterSpecs();
 runJsonRepairAutoCloseSpecs();
 runGoalFactorySpecs();
-runDeliveryClosureAuditSpecs();
 runTaskDraftPromptSpecs();
 runTaskDraftReviewSpecs();
 runRefinerPromptSpecs();

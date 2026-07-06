@@ -24,19 +24,19 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
   switch (block.kind) {
     case "heading": {
       const Tag = block.level === 1 ? "h2" : block.level === 2 ? "h3" : "h4";
-      return <Tag className="text-[15px] font-semibold leading-7 text-[#1F2328]">{block.text}</Tag>;
+      return <Tag className="text-[15px] font-semibold leading-7 text-ink">{block.text}</Tag>;
     }
     case "paragraph":
-      return <p className="whitespace-pre-wrap text-[14px] leading-7 text-[#374151]">{block.text}</p>;
+      return <p className="whitespace-pre-wrap text-[14px] leading-7 text-ink-strong">{block.text}</p>;
     case "markdown":
       return <MarkdownRenderer content={block.content} className="text-[14px] leading-7" tableVariant="with-toolbar" />;
     case "list":
       return block.ordered ? (
-        <ol className="list-decimal space-y-1 pl-5 text-[14px] leading-7 text-[#374151]">
+        <ol className="list-decimal space-y-1 pl-5 text-[14px] leading-7 text-ink-strong">
           {block.items.map((item) => <li key={item}>{item}</li>)}
         </ol>
       ) : (
-        <ul className="list-disc space-y-1 pl-5 text-[14px] leading-7 text-[#374151]">
+        <ul className="list-disc space-y-1 pl-5 text-[14px] leading-7 text-ink-strong">
           {block.items.map((item) => <li key={item}>{item}</li>)}
         </ul>
       );
@@ -44,9 +44,9 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
       return (
         <div className="grid gap-2">
           {block.entries.map((entry) => (
-            <div key={entry.label} className="grid gap-1 rounded-lg bg-[#F8F9FB] px-3 py-2 text-[13px] md:grid-cols-[96px_1fr] md:gap-3">
-              <div className="text-[#8C9198]">{entry.label}</div>
-              <div className={entry.emphasis ? "font-medium text-[#1F2328]" : "text-[#374151]"}>{cellText(entry.value)}</div>
+            <div key={entry.label} className="grid gap-1 rounded-lg bg-surface-hover px-3 py-2 text-[13px] md:grid-cols-[96px_1fr] md:gap-3">
+              <div className="text-ink-faint">{entry.label}</div>
+              <div className={entry.emphasis ? "font-medium text-ink" : "text-ink-strong"}>{cellText(entry.value)}</div>
             </div>
           ))}
         </div>
@@ -61,16 +61,16 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
       );
     case "decision":
       return (
-        <div className="rounded-xl border border-[#E5E7EB] bg-[#FAFAFB] p-4">
-          <div className="text-[13px] font-medium text-[#1F2328]">{block.question}</div>
+        <div className="rounded-xl border border-line bg-surface-subtle p-4">
+          <div className="text-[13px] font-medium text-ink">{block.question}</div>
           <div className="mt-3 space-y-2">
             {block.options.map((option) => (
-              <div key={option.id} className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-[#1F2328]">
+              <div key={option.id} className="rounded-lg border border-line bg-white px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-ink">
                   <span>{option.label}</span>
-                  {option.recommended ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[11px] text-[#25663A]">推荐</span> : null}
+                  {option.recommended ? <span className="rounded-full bg-success-bg px-2 py-0.5 text-[11px] text-success-strong">推荐</span> : null}
                 </div>
-                {option.rationale ? <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{option.rationale}</div> : null}
+                {option.rationale ? <div className="mt-1 text-[12px] leading-5 text-ink-soft">{option.rationale}</div> : null}
               </div>
             ))}
           </div>
@@ -79,12 +79,12 @@ function BlockRenderer({ block }: { block: ResultBlock }) {
     case "callout": {
       const toneClass =
         block.tone === "success"
-          ? "border-[#B7E4C7] bg-[#F0FFF4] text-[#25663A]"
+          ? "border-success-border bg-success-bg text-success-strong"
           : block.tone === "warn"
-            ? "border-[#F5D58B] bg-[#FFF9E8] text-[#8A6D3B]"
+            ? "border-warning-border bg-warning-bg text-warning-strong"
             : block.tone === "risk"
-              ? "border-[#F5B5B8] bg-[#FFF1F2] text-[#B42318]"
-              : "border-[#D8E7FF] bg-[#F4F8FF] text-[#0D47A1]";
+              ? "border-danger-border bg-danger-bg text-danger-hover"
+              : "border-info-bg bg-info-bg text-info-strong";
       return <div className={`rounded-xl border px-4 py-3 text-[13px] leading-6 ${toneClass}`}>{block.text}</div>;
     }
   }

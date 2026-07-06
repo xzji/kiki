@@ -48,6 +48,20 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
     }
   }, [anchor]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // ESC first dismisses the inline delete confirmation, then the popover.
+      if (confirming) {
+        setConfirming(false);
+      } else {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [confirming, onClose]);
+
   const palette = EVENT_COLORS[event.color ?? DEFAULT_EVENT_COLOR];
   const start = new Date(event.startTime);
   const end = new Date(event.endTime);
@@ -63,23 +77,26 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
 
   const card = (
     <div
-        className="fixed z-40 w-[calc(100vw-24px)] rounded-xl border border-[#E5E7EB] bg-white md:w-[340px]"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`日程详情：${event.title}`}
+        className="fixed z-40 w-[calc(100vw-24px)] rounded-xl border border-line bg-white md:w-[340px]"
         style={style}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-start justify-between px-4 pt-4">
         <div>
-          <div className="text-xs text-[#6B7280]">{dateText}</div>
-          <div className="mt-1 text-[22px] font-semibold text-[#1F2328]">{timeText}</div>
+          <div className="text-xs text-ink-soft">{dateText}</div>
+          <div className="mt-1 text-[22px] font-semibold text-ink">{timeText}</div>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => onEdit(event)} aria-label="编辑" className="rounded p-1 text-[#6B7280] hover:bg-[#F5F6F8]">
+          <button onClick={() => onEdit(event)} aria-label="编辑" className="rounded p-1 text-ink-soft hover:bg-surface">
             <Pencil className="h-4 w-4" />
           </button>
-          <button onClick={() => setConfirming(true)} aria-label="删除" className="rounded p-1 text-[#6B7280] hover:bg-[#F5F6F8]">
+          <button onClick={() => setConfirming(true)} aria-label="删除" className="rounded p-1 text-ink-soft hover:bg-surface">
             <Trash2 className="h-4 w-4" />
           </button>
-          <button onClick={onClose} aria-label="关闭" className="rounded p-1 text-[#6B7280] hover:bg-[#F5F6F8]">
+          <button onClick={onClose} aria-label="关闭" className="rounded p-1 text-ink-soft hover:bg-surface">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -94,41 +111,41 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
             {event.color ?? DEFAULT_EVENT_COLOR}
           </span>
           {event.createdByAgent ? (
-            <span className="rounded-full bg-[#EFEAFE] px-2 py-0.5 text-[11px] text-[#5B3DBE]">Agent 创建</span>
+            <span className="rounded-full bg-brand-bg px-2 py-0.5 text-[11px] text-brand">Agent 创建</span>
           ) : null}
           {event.status === "cancelled" ? (
-            <span className="rounded-full bg-[#FCE9EE] px-2 py-0.5 text-[11px] text-[#B0274A]">已取消</span>
+            <span className="rounded-full bg-danger-bg px-2 py-0.5 text-[11px] text-danger-strong">已取消</span>
           ) : null}
         </div>
-        <div className="mt-3 text-base font-semibold text-[#1F2328]">{event.title}</div>
+        <div className="mt-3 text-base font-semibold text-ink">{event.title}</div>
         {event.attendees.length > 0 ? (
           <div className="mt-3 flex items-center gap-2">
             <div className="flex -space-x-2">
               {event.attendees.slice(0, 4).map((attendee) => (
                 <span
                   key={attendee.id}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white bg-[#E9E6FF] text-[11px] font-medium text-[#5B3DBE]"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white bg-brand-surface text-[11px] font-medium text-brand"
                   title={attendee.name}
                 >
                   {attendee.name.slice(0, 2)}
                 </span>
               ))}
             </div>
-            <span className="text-xs text-[#6B7280]">{event.attendees.length} 位参与人</span>
+            <span className="text-xs text-ink-soft">{event.attendees.length} 位参与人</span>
           </div>
         ) : null}
         {event.location ? (
-          <div className="mt-3 text-xs text-[#475467]">
-            <span className="text-[#6B7280]">地点：</span>
+          <div className="mt-3 text-xs text-ink-strong">
+            <span className="text-ink-soft">地点：</span>
             {event.location}
           </div>
         ) : null}
         {event.description ? (
-          <p className="mt-3 text-xs leading-5 text-[#475467]">{event.description}</p>
+          <p className="mt-3 text-xs leading-5 text-ink-strong">{event.description}</p>
         ) : null}
       </div>
       {event.agentActions && event.agentActions.length > 0 ? (
-        <div className="mt-4 flex gap-2 border-t border-[#E5E7EB] px-4 py-3">
+        <div className="mt-4 flex gap-2 border-t border-line px-4 py-3">
           {event.agentActions.map((action) => (
             <button
               key={action.label}
@@ -139,7 +156,7 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
               className={
                 action.type === "primary"
                   ? "flex-1 rounded-lg bg-[#111] px-3 py-2 text-xs text-white hover:bg-[#333]"
-                  : "flex-1 rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-[#1F2328] hover:bg-[#F5F6F8]"
+                  : "flex-1 rounded-lg border border-line px-3 py-2 text-xs text-ink hover:bg-surface"
               }
             >
               {action.label}
@@ -147,7 +164,7 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
           ))}
         </div>
       ) : (
-        <div className="mt-4 flex gap-2 border-t border-[#E5E7EB] px-4 py-3">
+        <div className="mt-4 flex gap-2 border-t border-line px-4 py-3">
           <button
             type="button"
             onClick={() => onEdit(event)}
@@ -158,28 +175,27 @@ export function EventPopover({ event, anchor, onClose, onEdit, onDelete }: Props
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-[#1F2328] hover:bg-[#F5F6F8]"
+            className="flex-1 rounded-lg border border-line px-3 py-2 text-xs text-ink hover:bg-surface"
           >
             关闭
           </button>
         </div>
       )}
       {confirming ? (
-        <div className="border-t border-[#E5E7EB] bg-[#FDECEE] px-4 py-3">
-          <div className="mb-2 text-xs text-[#B0274A]">确认删除这条日程？该操作不可撤销。</div>
+        <div className="border-t border-line bg-danger-bg px-4 py-3">
+          <div className="mb-2 text-xs text-danger-strong">确认删除这条日程？该操作不可撤销。</div>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => onDelete(event)}
-              className="flex-1 rounded-lg px-3 py-2 text-xs text-white"
-              style={{ backgroundColor: "#E5484D" }}
+              className="flex-1 rounded-lg bg-badge px-3 py-2 text-xs text-white"
             >
               确认删除
             </button>
             <button
               type="button"
               onClick={() => setConfirming(false)}
-              className="flex-1 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1F2328]"
+              className="flex-1 rounded-lg border border-line bg-white px-3 py-2 text-xs text-ink"
             >
               取消
             </button>

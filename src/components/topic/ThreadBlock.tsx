@@ -62,21 +62,21 @@ export function ThreadBlock({
   return (
     <section
         className={`rounded-[18px] border bg-white px-4 py-4 md:px-6 md:py-5 ${
-        highlighted ? "border-[#1F2328]" : "border-[#E5E7EB]"
+        highlighted ? "border-ink" : "border-line"
       }`}
     >
       <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
         <div className="min-w-0">
           <div className="flex items-start gap-3">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F5F6F8] text-[11px] font-semibold text-[#1F2328]">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-[11px] font-semibold text-ink">
               {index}
             </div>
             <div className="min-w-0 flex flex-wrap items-center gap-2">
-              <h2 className="min-w-0 text-[15px] font-semibold text-[#1F2328] md:truncate">
+              <h2 className="min-w-0 text-[15px] font-semibold text-ink md:truncate">
                 {stripPrefix(subGoal.title)}
               </h2>
               {isPendingCreate ? (
-                <span className="inline-flex shrink-0 items-center rounded-md bg-[#F5F6F8] px-2 py-0.5 text-[11px] font-medium text-[#8C9198]">
+                <span className="inline-flex shrink-0 items-center rounded-md bg-surface px-2 py-0.5 text-[11px] font-medium text-ink-faint">
                   保存中
                 </span>
               ) : null}
@@ -85,7 +85,7 @@ export function ThreadBlock({
                   type="button"
                   onClick={() => setDetailsOpen((open) => !open)}
                   aria-expanded={detailsOpen}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-[#4B5563] hover:border-[#1F2328] hover:text-[#1F2328]"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line px-2 py-1 text-[11px] font-medium text-ink-strong hover:border-ink hover:text-ink"
                 >
                   {detailsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   详情
@@ -93,11 +93,11 @@ export function ThreadBlock({
               ) : null}
             </div>
           </div>
-          <div className="mt-3 h-1 overflow-hidden rounded-full bg-[#E5E7EB]">
-            <div className="h-full rounded-full bg-[#1F2328]" style={{ width: `${progress}%` }} />
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-line">
+            <div className="h-full rounded-full bg-ink" style={{ width: `${progress}%` }} />
           </div>
           {hasDetails && detailsOpen ? (
-            <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
+            <div className="mt-4 rounded-2xl border border-line bg-surface-subtle px-4 py-3">
               <div className="flex flex-wrap gap-2">
                 {subGoal.reviewInterval?.trim() ? (
                   <ReviewCyclePopover
@@ -121,7 +121,7 @@ export function ThreadBlock({
                 ) : null}
               </div>
 
-              <ul className="mt-3 list-disc space-y-3 pl-5 text-left text-[13px] leading-6 text-[#1F2328]">
+              <ul className="mt-3 list-disc space-y-3 pl-5 text-left text-[13px] leading-6 text-ink">
                 {subGoal.description?.trim() ? (
                   <DetailGroup label="线程说明" items={[subGoal.description]} />
                 ) : null}
@@ -137,7 +137,7 @@ export function ThreadBlock({
             </div>
           ) : null}
         </div>
-        <div className="shrink-0 text-[12px] font-medium tabular-nums text-[#8C9198] md:text-right">
+        <div className="shrink-0 text-[12px] font-medium tabular-nums text-ink-faint md:text-right">
           {completedCount} / {displayTasks.length}
         </div>
       </div>
@@ -158,7 +158,7 @@ export function ThreadBlock({
           <button
             type="button"
             onClick={() => setTaskDrawerOpen(true)}
-            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#D4D7DD] bg-transparent px-3 py-2.5 text-[13px] text-[#6B7280] hover:border-[#1F2328] hover:text-[#1F2328]"
+            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line bg-transparent px-3 py-2.5 text-[13px] text-ink-soft hover:border-ink hover:text-ink"
           >
             <Plus className="h-3.5 w-3.5" />
             添加任务
@@ -212,9 +212,9 @@ function DetailGroup({ label, items, ordered = false }: { label: string; items: 
   return (
     <li className="pl-0.5">
         <div className="grid grid-cols-1 items-start gap-1 md:grid-cols-[5.5rem_minmax(0,1fr)]">
-        <span className="font-medium text-[#6B7280]">{label}</span>
+        <span className="font-medium text-ink-soft">{label}</span>
         {ordered || displayItems.length > 1 ? (
-          <ol className="list-decimal space-y-1 pl-5 text-[#1F2328]">
+          <ol className="list-decimal space-y-1 pl-5 text-ink">
             {displayItems.map((item, index) => (
               <li key={`${label}-${index}`} className="whitespace-pre-wrap break-words pl-0.5">
                 {item}
@@ -222,7 +222,7 @@ function DetailGroup({ label, items, ordered = false }: { label: string; items: 
             ))}
           </ol>
         ) : (
-          <span className="whitespace-pre-wrap break-words text-[#1F2328]">{displayItems[0]}</span>
+          <span className="whitespace-pre-wrap break-words text-ink">{displayItems[0]}</span>
         )}
       </div>
     </li>
@@ -233,7 +233,7 @@ function DetailBadge({ label, tone = "default" }: { label: string; tone?: "defau
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-1 text-[12px] ${
-        tone === "light" ? "bg-white text-[#4B5563]" : "bg-[#EEF2F6] text-[#1F2328]"
+        tone === "light" ? "bg-white text-ink-strong" : "bg-surface-subtle text-ink"
       }`}
     >
       {label}

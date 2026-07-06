@@ -12,4 +12,4 @@ export {
   buildGoalClarificationPrompt,
   buildGoalFollowUpQuestionsPrompt,
   buildCollectedInfoSummaryPrompt,
-} from "@/lib/server/goalPlanning";
+} from "@/lib/server/goalPlanning/promptBuilders";

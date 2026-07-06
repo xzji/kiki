@@ -28,11 +28,11 @@ const permissionOptions: { value: RuntimePermissionMode; label: string; descript
 ];
 
 const runtimeMeta: Record<LocalRuntimeKind, { accent: string; icon: ReactNode }> = {
-  claude: { accent: "bg-[#F3EEFF] text-[#5B3DBE]", icon: <Sparkles className="h-4 w-4" /> },
-  codex: { accent: "bg-[#EEF6FF] text-[#2563EB]", icon: <Code2 className="h-4 w-4" /> },
-  gemini: { accent: "bg-[#ECFDF3] text-[#067647]", icon: <Bot className="h-4 w-4" /> },
-  pi: { accent: "bg-[#FFF1F2] text-[#BE123C]", icon: <Atom className="h-4 w-4" /> },
-  cursor: { accent: "bg-[#EEF2FF] text-[#3730A3]", icon: <MousePointer2 className="h-4 w-4" /> },
+  claude: { accent: "bg-brand-bg text-brand", icon: <Sparkles className="h-4 w-4" /> },
+  codex: { accent: "bg-info-bg text-info", icon: <Code2 className="h-4 w-4" /> },
+  gemini: { accent: "bg-success-bg text-success", icon: <Bot className="h-4 w-4" /> },
+  pi: { accent: "bg-danger-bg text-danger-strong", icon: <Atom className="h-4 w-4" /> },
+  cursor: { accent: "bg-brand-bg text-brand", icon: <MousePointer2 className="h-4 w-4" /> },
 };
 
 const runtimeIconByName: Record<string, ReactNode> = {
@@ -216,13 +216,13 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
   return (
     <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/25 md:items-center" onClick={handleClose}>
       <div
-        className="flex h-dvh w-full flex-col overflow-hidden border border-[#E5E7EB] bg-white md:h-auto md:max-h-[78vh] md:w-[720px] md:max-w-[92vw] md:rounded-2xl"
+        className="flex h-dvh w-full flex-col overflow-hidden border border-line bg-white md:h-auto md:max-h-[78vh] md:w-[720px] md:max-w-[92vw] md:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex h-14 flex-none items-center justify-between border-b border-[#E5E7EB] px-5">
+        <div className="flex h-14 flex-none items-center justify-between border-b border-line px-5">
           <div>
             <div className="text-[15px] font-medium text-[#111]">添加本地运行环境</div>
-            <div className="mt-0.5 text-[12px] text-[#6B7280]">
+            <div className="mt-0.5 text-[12px] text-ink-soft">
               通过已连接的本机电脑扫描 CLI，选择后绑定为执行环境。请保持本机 daemon 在线。
             </div>
           </div>
@@ -230,13 +230,13 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
             type="button"
             onClick={handleClose}
             aria-label="关闭本地环境引导"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[#8C9198] hover:bg-[#F5F6F8] hover:text-[#111]"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint hover:bg-surface hover:text-[#111]"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex-none border-b border-[#E5E7EB] px-4 py-3 md:px-5 md:py-4">
+        <div className="flex-none border-b border-line px-4 py-3 md:px-5 md:py-4">
           <div className="flex gap-2 overflow-x-auto md:grid md:grid-cols-4">
             {steps.map((item, index) => {
               const active = item.key === step;
@@ -248,8 +248,8 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                       "min-w-[132px] md:min-w-0",
                     "rounded-xl border px-3 py-2 text-[12px]",
                     active && "border-[#111] bg-white text-[#111]",
-                    done && "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]",
-                    !active && !done && "border-[#E5E7EB] bg-[#FAFAFB] text-[#6B7280]",
+                    done && "border-success-border bg-success-bg text-success",
+                    !active && !done && "border-line bg-surface-subtle text-ink-soft",
                   )}
                 >
                   <div className="font-medium">Step {index + 1}</div>
@@ -262,7 +262,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {error ? (
-            <div className="mb-4 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+            <div className="mb-4 rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-[12px] leading-5 text-danger-hover">
               {error}
             </div>
           ) : null}
@@ -307,11 +307,11 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
           ) : null}
         </div>
 
-        <div className="flex h-14 flex-none items-center justify-between border-t border-[#E5E7EB] px-5">
+        <div className="flex h-14 flex-none items-center justify-between border-t border-line px-5">
           <button
             type="button"
             onClick={handleClose}
-            className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#6B7280] hover:bg-[#F8F9FB]"
+            className="inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-[13px] text-ink-soft hover:bg-surface-hover"
           >
             取消
           </button>
@@ -324,7 +324,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                   if (step === "permission") setStep("select");
                   if (step === "confirm") setStep("permission");
                 }}
-                className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#6B7280] hover:bg-[#F8F9FB]"
+                className="inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-[13px] text-ink-soft hover:bg-surface-hover"
               >
                 上一步
               </button>
@@ -334,7 +334,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                 type="button"
                 onClick={installedRuntimes.length > 0 ? () => setStep("select") : scanRuntimes}
                 disabled={isScanning}
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-[#C1C7D0]"
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-line"
               >
                 {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {installedRuntimes.length > 0 ? "下一步" : "重新检测"}
@@ -345,7 +345,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                 type="button"
                 onClick={() => setStep("permission")}
                 disabled={!canContinueSelect}
-                className="inline-flex h-9 items-center rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-[#C1C7D0]"
+                className="inline-flex h-9 items-center rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-line"
               >
                 下一步
               </button>
@@ -355,7 +355,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                 type="button"
                 onClick={runCheck}
                 disabled={!canCheck}
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-[#C1C7D0]"
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-line"
               >
                 {isChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 检测并确认
@@ -385,7 +385,7 @@ export function LocalRuntimeWizard({ open, onClose, onSave }: Props) {
                   });
                   handleClose();
                 }}
-                className="inline-flex h-9 items-center rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-[#C1C7D0]"
+                className="inline-flex h-9 items-center rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-line"
               >
                 确认添加
               </button>
@@ -414,7 +414,7 @@ function ScanStep({
       <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
         <Loader2 className="h-6 w-6 animate-spin text-[#111]" />
         <div className="mt-4 text-[14px] font-medium text-[#111]">正在检测本地 Runtimes</div>
-        <div className="mt-1 text-[12px] text-[#6B7280]">正在通过已连接电脑扫描 Claude / Codex / Gemini CLI…</div>
+        <div className="mt-1 text-[12px] text-ink-soft">正在通过已连接电脑扫描 Claude / Codex / Gemini CLI…</div>
       </div>
     );
   }
@@ -424,7 +424,7 @@ function ScanStep({
       <div className="space-y-4">
         <div>
           <div className="text-[14px] font-medium text-[#111]">未检测到可用 Runtime</div>
-          <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
+          <div className="mt-1 text-[12px] leading-5 text-ink-soft">
             需要先安装至少一个 CLI，并确保命令在 PATH 中可用。安装后点击“重新检测”。
           </div>
         </div>
@@ -436,7 +436,7 @@ function ScanStep({
         <button
           type="button"
           onClick={onScan}
-          className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#111] hover:bg-[#F8F9FB]"
+          className="inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-[13px] text-[#111] hover:bg-surface-hover"
         >
           重新检测
         </button>
@@ -447,7 +447,7 @@ function ScanStep({
   return (
     <div>
       <div className="text-[14px] font-medium text-[#111]">已完成本地 Runtime 检测</div>
-      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
+      <div className="mt-1 text-[12px] leading-5 text-ink-soft">
         检测到 {installed.length} 个可用 Runtime。下一步选择要添加的 Runtime。
       </div>
       <div className="mt-4 grid gap-3">
@@ -471,7 +471,7 @@ function SelectRuntimeStep({
   return (
     <div>
       <div className="text-[14px] font-medium text-[#111]">选择要添加的 Runtime</div>
-      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
+      <div className="mt-1 text-[12px] leading-5 text-ink-soft">
         这里只展示已安装并可执行的 Runtime。当前聊天链路支持 Claude CLI、Pi CLI、Cursor CLI 与 Codex CLI。
       </div>
       <div className="mt-4 grid gap-3">
@@ -501,7 +501,7 @@ function PermissionStep({
   return (
     <div>
       <div className="text-[14px] font-medium text-[#111]">确认权限模式</div>
-      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
+      <div className="mt-1 text-[12px] leading-5 text-ink-soft">
         {isCodex
           ? "Codex exec 首版不支持 KiKi 手动确认，请选择只读聊天或项目内可执行。"
           : "默认推荐“手动确认”。后续也可以在运行环境列表里随时切换。"}
@@ -525,11 +525,11 @@ function PermissionStep({
               disabled && "cursor-not-allowed opacity-50",
               option.value === permissionMode
                 ? "border-[#111] bg-white"
-                : "border-[#E5E7EB] bg-[#FAFAFB] hover:bg-white",
+                : "border-line bg-surface-subtle hover:bg-white",
             )}
           >
             <div className="text-[13px] font-medium text-[#111]">{option.label}</div>
-            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{description}</div>
+            <div className="mt-1 text-[12px] leading-5 text-ink-soft">{description}</div>
           </button>
           );
         })}
@@ -564,7 +564,7 @@ function ConfirmStep({
   return (
     <div>
       <div className="text-[14px] font-medium text-[#111]">确认运行环境信息</div>
-      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
+      <div className="mt-1 text-[12px] leading-5 text-ink-soft">
         保存后会把这个 Runtime 设为当前默认环境，KiKi 助手和会话页都会优先使用它。
       </div>
       <div className="mt-4 grid gap-3">
@@ -575,16 +575,16 @@ function ConfirmStep({
           label="权限模式"
           value={permissionOptions.find((item) => item.value === permissionMode)?.label || permissionMode}
         />
-        <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+        <div className="rounded-2xl border border-line bg-white px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[12px] text-[#6B7280]">工作目录</div>
+            <div className="text-[12px] text-ink-soft">工作目录</div>
             <button
               type="button"
               onClick={onChangeWorkingDirectory}
               disabled={isSelectingDirectory}
               className={cn(
-                "inline-flex h-8 items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 text-[12px] text-[#111] hover:bg-[#F8F9FB]",
-                isSelectingDirectory && "cursor-not-allowed bg-[#FAFAFB] text-[#9AA0A6]",
+                "inline-flex h-8 items-center gap-2 rounded-lg border border-line bg-white px-3 text-[12px] text-[#111] hover:bg-surface-hover",
+                isSelectingDirectory && "cursor-not-allowed bg-surface-subtle text-ink-faint",
               )}
             >
               {isSelectingDirectory ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
@@ -592,10 +592,10 @@ function ConfirmStep({
             </button>
           </div>
           <div className="mt-1 break-all text-[13px] text-[#111]">{workingDirectory}</div>
-          <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">修改后会自动重新检测该目录是否可用。</div>
+          <div className="mt-1 text-[12px] leading-5 text-ink-soft">修改后会自动重新检测该目录是否可用。</div>
           {showManualDirectoryInput ? (
-            <div className="mt-3 space-y-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 py-3">
-              <div className="text-[12px] leading-5 text-[#92400E]">
+            <div className="mt-3 space-y-2 rounded-xl border border-warning-border bg-warning-bg px-3 py-3">
+              <div className="text-[12px] leading-5 text-warning-strong">
                 云端无法直接打开目录选择器，请输入你本机上的绝对路径（例如 /Users/你的名字/Projects）。
               </div>
               <input
@@ -603,13 +603,13 @@ function ConfirmStep({
                 value={manualDirectoryDraft}
                 onChange={(event) => onManualDirectoryDraftChange(event.target.value)}
                 placeholder="/Users/you/Projects"
-                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] text-[#111] outline-none focus:border-[#111]"
+                className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[13px] text-[#111] outline-none focus:border-[#111]"
               />
               <button
                 type="button"
                 onClick={onSubmitManualWorkingDirectory}
                 disabled={!manualDirectoryDraft.trim() || isSelectingDirectory}
-                className="inline-flex h-8 items-center rounded-lg bg-[#111] px-3 text-[12px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-[#C1C7D0]"
+                className="inline-flex h-8 items-center rounded-lg bg-[#111] px-3 text-[12px] text-white hover:bg-[#222] disabled:cursor-not-allowed disabled:bg-line"
               >
                 确认路径并检测
               </button>
@@ -618,7 +618,7 @@ function ConfirmStep({
         </div>
       </div>
       {result?.ok ? (
-        <div className="mt-4 rounded-2xl border border-[#D1FADF] bg-[#ECFDF3] px-4 py-3 text-[12px] text-[#067647]">
+        <div className="mt-4 rounded-2xl border border-success-border bg-success-bg px-4 py-3 text-[12px] text-success">
           <div className="flex items-center gap-2 font-medium">
             <CheckCircle2 className="h-4 w-4" />
             <span>Runtime 检测通过，可以添加</span>
@@ -632,7 +632,7 @@ function ConfirmStep({
 function RuntimeInstallCard({ runtime }: { runtime: RuntimeDiscoveryItem }) {
   const meta = getRuntimeMeta(runtime);
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+    <div className="rounded-2xl border border-line bg-white px-4 py-3">
       <div className="flex items-start gap-3">
         <span className={cn("flex h-9 w-9 items-center justify-center rounded-xl", meta.accent)}>
           {meta.icon}
@@ -644,14 +644,14 @@ function RuntimeInstallCard({ runtime }: { runtime: RuntimeDiscoveryItem }) {
               className={cn(
                 "rounded-full border px-2 py-1 text-[11px]",
                 runtime.installed
-                  ? "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]"
-                  : "border-[#E5E7EB] bg-[#FAFAFB] text-[#6B7280]",
+                  ? "border-success-border bg-success-bg text-success"
+                  : "border-line bg-surface-subtle text-ink-soft",
               )}
             >
               {runtime.installed ? "已安装" : "未安装"}
             </span>
           </div>
-          <div className="mt-1 break-all text-[12px] leading-5 text-[#6B7280]">
+          <div className="mt-1 break-all text-[12px] leading-5 text-ink-soft">
             {runtime.installed
               ? `${runtime.cliPath || runtime.command}${runtime.version ? ` · ${runtime.version}` : ""}`
               : runtime.installHint}
@@ -678,7 +678,7 @@ function RuntimeSelectCard({
       onClick={onClick}
       className={cn(
         "rounded-2xl border bg-white px-4 py-3 text-left transition",
-        selected ? "border-[#111]" : "border-[#E5E7EB] hover:border-[#111]",
+        selected ? "border-[#111]" : "border-line hover:border-[#111]",
       )}
     >
       <div className="flex items-start gap-3">
@@ -694,7 +694,7 @@ function RuntimeSelectCard({
               </span>
             ) : null}
           </div>
-          <div className="mt-1 break-all text-[12px] leading-5 text-[#6B7280]">
+          <div className="mt-1 break-all text-[12px] leading-5 text-ink-soft">
             {runtime.cliPath || runtime.command}
             {runtime.version ? ` · ${runtime.version}` : ""}
           </div>
@@ -706,8 +706,8 @@ function RuntimeSelectCard({
 
 function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
-      <div className="text-[12px] text-[#6B7280]">{label}</div>
+    <div className="rounded-2xl border border-line bg-white px-4 py-3">
+      <div className="text-[12px] text-ink-soft">{label}</div>
       <div className="mt-1 break-all text-[13px] text-[#111]">{value}</div>
     </div>
   );

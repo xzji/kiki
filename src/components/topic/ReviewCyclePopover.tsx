@@ -1,8 +1,9 @@
 "use client";
 
+import * as Popover from "@radix-ui/react-popover";
 import { RotateCcw } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   fetchGovernanceHistory,
@@ -43,23 +44,6 @@ export function ReviewCyclePopover({
   const [triggerMessage, setTriggerMessage] = useState<string | null>(null);
   const [entries, setEntries] = useState<GovernanceTickEntry[]>([]);
   const [expandedActions, setExpandedActions] = useState<Set<string>>(() => new Set());
-  const rootRef = useRef<HTMLSpanElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,30 +101,35 @@ export function ReviewCyclePopover({
   };
 
   return (
-    <span ref={rootRef} className="relative inline-flex">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm text-[#6B7280] underline decoration-[#D0D7DE] underline-offset-4 hover:text-[#1F2328]"
-      >
-        <RotateCcw className="h-3.5 w-3.5" />
-        回顾周期：{label}
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-7 z-50 w-[360px] max-w-[calc(100vw-32px)] rounded-2xl border border-[#E5E7EB] bg-white p-4 text-left shadow-[0_16px_48px_rgba(15,23,42,0.16)]">
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm text-ink-soft underline decoration-line-strong underline-offset-4 hover:text-ink"
+        >
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+          回顾周期：{label}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          className="z-50 w-[360px] max-w-[calc(100vw-32px)] rounded-2xl border border-line bg-white p-4 text-left shadow-[0_16px_48px_rgba(15,23,42,0.16)] focus:outline-none"
+        >
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-[12px] text-[#8C9198]">{kind === "topic" ? "Topic 治理" : "Thread 治理"}</div>
-              <div className="mt-1 text-sm font-semibold text-[#1F2328]">回顾周期：{label}</div>
+              <div className="text-[12px] text-ink-faint">{kind === "topic" ? "Topic 治理" : "Thread 治理"}</div>
+              <div className="mt-1 text-sm font-semibold text-ink">回顾周期：{label}</div>
             </div>
             {phaseLabel ? <GovernanceBadge tone={phaseTone}>{phaseLabel}</GovernanceBadge> : null}
           </div>
 
-          <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] p-3">
+          <div className="mt-4 rounded-xl border border-line bg-surface-subtle p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[12px] font-medium text-[#1F2328]">立即执行一次治理</div>
-                <div className="mt-1 text-[11px] leading-4 text-[#8C9198]">
+                <div className="text-[12px] font-medium text-ink">立即执行一次治理</div>
+                <div className="mt-1 text-[11px] leading-4 text-ink-faint">
                   复用当前治理队列、机器派发和回执链路。
                 </div>
               </div>
@@ -148,12 +137,12 @@ export function ReviewCyclePopover({
                 type="button"
                 onClick={runNow}
                 disabled={triggering}
-                className="shrink-0 rounded-lg bg-[#1F2328] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#111827] disabled:cursor-not-allowed disabled:opacity-60"
+                className="shrink-0 rounded-lg bg-ink px-3 py-2 text-[12px] font-medium text-white hover:bg-ink-strong disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {triggering ? "发起中..." : "立即执行"}
               </button>
             </div>
-            {triggerMessage ? <div className="mt-2 text-[11px] text-[#137333]">{triggerMessage}</div> : null}
+            {triggerMessage ? <div className="mt-2 text-[11px] text-success">{triggerMessage}</div> : null}
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -163,23 +152,23 @@ export function ReviewCyclePopover({
             <GovernanceMetric label="连续失败" value={`${failureCount ?? 0} 次`} />
           </div>
 
-          <div className="mt-4 border-t border-[#EEF0F3] pt-3">
-            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">治理历史</div>
-            {loading ? <div className="text-[12px] text-[#8C9198]">加载中...</div> : null}
-            {!loading && error ? <div className="text-[12px] text-[#B42318]">{error}</div> : null}
+          <div className="mt-4 border-t border-surface-subtle pt-3">
+            <div className="mb-2 text-[12px] font-medium text-ink-soft">治理历史</div>
+            {loading ? <div className="text-[12px] text-ink-faint">加载中...</div> : null}
+            {!loading && error ? <div className="text-[12px] text-danger-hover">{error}</div> : null}
             {!loading && !error && entries.length === 0 ? (
-              <div className="text-[12px] text-[#8C9198]">暂无治理记录</div>
+              <div className="text-[12px] text-ink-faint">暂无治理记录</div>
             ) : null}
             {!loading && !error && entries.length > 0 ? (
               <div className="max-h-[260px] space-y-2 overflow-auto pr-1">
                 {entries.map((entry) => (
-                  <div key={entry.id} className="rounded-xl bg-[#F8FAFC] px-3 py-2">
+                  <div key={entry.id} className="rounded-xl bg-surface-subtle px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-[11px] text-[#8C9198]">{formatMessageTime(entry.occurredAt)}</div>
+                      <div className="text-[11px] text-ink-faint">{formatMessageTime(entry.occurredAt)}</div>
                       <GovernanceBadge tone={entryTone(entry)}>{entryStatusLabel(entry)}</GovernanceBadge>
                     </div>
                     {entry.assessment ? (
-                      <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-[#6B7280]">
+                      <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-ink-soft">
                         评估：{entry.assessment}
                       </div>
                     ) : null}
@@ -199,16 +188,16 @@ export function ReviewCyclePopover({
                         })}
                       </div>
                     ) : (
-                      <div className="mt-1 text-[12px] leading-5 text-[#1F2328]">{summarizeEntry(entry)}</div>
+                      <div className="mt-1 text-[12px] leading-5 text-ink">{summarizeEntry(entry)}</div>
                     )}
                   </div>
                 ))}
               </div>
             ) : null}
           </div>
-        </div>
-      ) : null}
-    </span>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -223,13 +212,13 @@ function GovernanceActionRow({
 }) {
   const Icon = expanded ? ChevronDown : ChevronRight;
   return (
-    <div className="rounded-lg border border-[#E5E7EB] bg-white">
+    <div className="rounded-lg border border-line bg-white">
       <button
         type="button"
         onClick={onToggle}
         className="flex w-full items-center gap-2 px-2.5 py-2 text-left"
       >
-        <Icon className="h-3.5 w-3.5 shrink-0 text-[#8C9198]" />
+        <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
         <span
           className={cn(
             "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
@@ -238,10 +227,10 @@ function GovernanceActionRow({
         >
           {actionKindLabel(detail)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-[#1F2328]">{detail.summary}</span>
+        <span className="min-w-0 flex-1 truncate text-[12px] text-ink">{detail.summary}</span>
       </button>
       {expanded ? (
-        <div className="border-t border-[#EEF0F3] px-3 py-2 text-[11px] leading-4 text-[#4B5563]">
+        <div className="border-t border-surface-subtle px-3 py-2 text-[11px] leading-4 text-ink-strong">
           <div>影响对象：{targetLabel(detail)}</div>
           <div className="mt-1">做了什么：{detail.summary}</div>
           {detail.reason ? <div className="mt-1 line-clamp-2">为什么：{detail.reason}</div> : null}
@@ -258,7 +247,7 @@ function GovernanceActionRow({
                 </div>
               ))}
               {detail.fieldChanges.length > 4 ? (
-                <div className="text-[#8C9198]">另有 {detail.fieldChanges.length - 4} 项变化</div>
+                <div className="text-ink-faint">另有 {detail.fieldChanges.length - 4} 项变化</div>
               ) : null}
             </div>
           ) : null}
@@ -387,10 +376,10 @@ function targetLabel(detail: GovernanceActionPresentation) {
 }
 
 function actionToneClass(severity: GovernanceActionPresentation["severity"]) {
-  if (severity === "success") return "bg-[#E6F4EA] text-[#137333]";
-  if (severity === "warning") return "bg-[#FFF4CC] text-[#7A5A00]";
-  if (severity === "danger") return "bg-[#FDECEC] text-[#B42318]";
-  return "bg-[#F5F6F8] text-[#4B5563]";
+  if (severity === "success") return "bg-success-bg text-success";
+  if (severity === "warning") return "bg-warning-bg text-warning-strong";
+  if (severity === "danger") return "bg-danger-bg text-danger-hover";
+  return "bg-surface text-ink-strong";
 }
 
 function formatGovernanceTime(value?: string) {
@@ -400,8 +389,8 @@ function formatGovernanceTime(value?: string) {
 function GovernanceMetric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[11px] text-[#8C9198]">{label}</div>
-      <div className="mt-1 text-[12px] text-[#1F2328]">{value}</div>
+      <div className="text-[11px] text-ink-faint">{label}</div>
+      <div className="mt-1 text-[12px] text-ink">{value}</div>
     </div>
   );
 }
@@ -411,10 +400,10 @@ function GovernanceBadge({ children, tone = "default" }: { children: React.React
     <span
       className={cn(
         "inline-flex items-center rounded-full px-2 py-1 text-[11px] font-medium",
-        tone === "success" && "bg-[#E6F4EA] text-[#137333]",
-        tone === "warning" && "bg-[#FFF4CC] text-[#7A5A00]",
-        tone === "danger" && "bg-[#FDECEC] text-[#B42318]",
-        tone === "default" && "bg-[#F5F6F8] text-[#4B5563]",
+        tone === "success" && "bg-success-bg text-success",
+        tone === "warning" && "bg-warning-bg text-warning-strong",
+        tone === "danger" && "bg-danger-bg text-danger-hover",
+        tone === "default" && "bg-surface text-ink-strong",
       )}
     >
       {children}

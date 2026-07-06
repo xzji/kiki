@@ -84,14 +84,14 @@ export function TaskDetailDrawer() {
 
   return (
     <aside
-      className="fixed inset-y-0 z-40 flex w-full min-w-0 flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
+      className="fixed inset-y-0 z-40 flex w-full min-w-0 flex-col border-l border-line bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
       style={{
         right: isMobile ? 0 : panelLayout.detailRightOffset,
         width: isMobile ? undefined : panelLayout.detailWidth,
       }}
       aria-label="任务详情"
     >
-      <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
+      <div className="flex h-12 flex-none items-center gap-4 border-b border-line px-4">
         <TopicPlanBreadcrumb
           goalId={goal.id}
           goalTitle={goal.title}
@@ -104,7 +104,7 @@ export function TaskDetailDrawer() {
             type="button"
             aria-label="关闭任务侧栏"
             onClick={close}
-            className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
+            className="rounded-md p-1.5 text-ink-soft hover:bg-surface"
           >
             <ChevronsRight className="h-4 w-4" />
           </button>
@@ -114,7 +114,7 @@ export function TaskDetailDrawer() {
             })}
             aria-label="展开为全屏"
             onClick={close}
-            className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
+            className="rounded-md p-1.5 text-ink-soft hover:bg-surface"
           >
             <Maximize2 className="h-4 w-4" />
           </Link>
@@ -135,7 +135,7 @@ export function TaskDetailDrawer() {
           type="button"
           aria-label="打开对话"
           onClick={openAssistant}
-          className="absolute bottom-5 right-5 flex h-10 w-10 items-center justify-center rounded-full border border-[#E5E7EB] bg-white text-[#1F2328] hover:border-[#1F2328]"
+          className="absolute bottom-5 right-5 flex h-10 w-10 items-center justify-center rounded-full border border-line bg-white text-ink hover:border-ink"
         >
           <MessageCircle className="h-4 w-4" />
         </button>

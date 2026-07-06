@@ -69,17 +69,17 @@ function TaskCardMetaContent({
 }) {
   return (
     <>
-      <div className="text-[15px] font-semibold text-[#1F2328]">
+      <div className="text-[15px] font-semibold text-ink">
         {buildInstanceCardTitle(task, instance)}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-ink-faint">
         <span>{EXECUTION_KIND_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</span>
-        <span className="text-[#D0D7DE]">/</span>
+        <span className="text-line-strong">/</span>
         <span>{statusLabel}</span>
         {badgeLabel ? (
           <>
-            <span className="text-[#D0D7DE]">/</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F8F1DF] px-2 py-0.5 font-medium text-[#9A7A34] before:h-1 before:w-1 before:rounded-full before:bg-current">
+            <span className="text-line-strong">/</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-bg px-2 py-0.5 font-medium text-warning-strong before:h-1 before:w-1 before:rounded-full before:bg-current">
               {badgeLabel}
             </span>
           </>
@@ -87,7 +87,7 @@ function TaskCardMetaContent({
         <ArtifactSummaryChip refs={instance.result?.taskResult?.artifactRefs} hasInteractiveSurface={hasInteractiveSurface} />
       </div>
       {hideSummary ? null : (
-        <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#374151]">{summaryText}</div>
+        <div className="mt-2 line-clamp-2 text-[13px] leading-6 text-ink-strong">{summaryText}</div>
       )}
     </>
   );
@@ -139,7 +139,7 @@ function TaskCardMeta({
           onOpen();
         }
       }}
-      className="cursor-pointer rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
+      className="cursor-pointer rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-line-strong"
     >
       {content}
     </div>
@@ -268,7 +268,7 @@ export function TaskMessageCard({
           onOpen();
         }
       }}
-        className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-4 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE] md:p-6"
+        className="mt-3 w-full cursor-pointer rounded-[20px] border border-line-strong bg-white p-4 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-line-strong md:p-6"
     >
       {meta}
       {interactionPanels}

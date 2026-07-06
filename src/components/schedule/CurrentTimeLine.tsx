@@ -25,11 +25,11 @@ export function CurrentTimeLine({ now, labelVariant = "text" }: Props) {
             {label}
           </span>
         ) : (
-          <span className="ml-2 text-[11px] font-medium text-[#E5484D]">{label}</span>
+          <span className="ml-2 text-[11px] font-medium text-badge">{label}</span>
         )}
       </div>
-      <div className="relative h-px bg-[#E5484D]" style={{ marginLeft: TIME_GUTTER_WIDTH }}>
-        <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-[#E5484D]" />
+      <div className="relative h-px bg-badge" style={{ marginLeft: TIME_GUTTER_WIDTH }}>
+        <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-badge" />
       </div>
     </div>
   );

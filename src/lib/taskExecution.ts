@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
 import { transitionGoalInstance } from "@/lib/api/goal-commands";
 import { createTaskRequestId, startTaskRun, TaskRunApiError, waitForTaskRunCompletion } from "@/lib/api/taskRuns";
@@ -193,7 +195,7 @@ function notifyTaskExecutionNotice(onNotice: TaskExecutionActionOptions["onNotic
     return;
   }
   if (typeof window !== "undefined") {
-    window.alert(message);
+    toast.info(message);
   }
 }
 

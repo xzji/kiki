@@ -103,7 +103,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="h-dvh overflow-hidden bg-[#F5F6F8] text-[#1F2328] md:h-screen">
+    <div className="h-dvh overflow-hidden bg-surface text-ink md:h-screen">
       <Sidebar />
       <main
         className={mainClassName}

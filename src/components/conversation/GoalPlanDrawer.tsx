@@ -272,7 +272,7 @@ export function GoalPlanDrawer({
         className="fixed inset-0 z-30 bg-transparent"
       />
       <aside
-        className="fixed inset-y-0 right-0 z-40 flex flex-col border-l border-[#E5E7EB] bg-white"
+        className="fixed inset-y-0 right-0 z-40 flex flex-col border-l border-line bg-white"
         style={{ width: drawerWidth }}
         aria-label="主题规划"
       >
@@ -283,9 +283,9 @@ export function GoalPlanDrawer({
           onPointerDown={handleResizePointerDown}
           className="group absolute inset-y-0 left-0 z-10 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
         >
-          <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-[#8C9198]" />
+          <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-ink-faint" />
         </div>
-        <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
+        <div className="flex h-12 flex-none items-center gap-4 border-b border-line px-4">
           {goal ? (
             <TopicPlanBreadcrumb
               goalId={goal.id}
@@ -297,14 +297,14 @@ export function GoalPlanDrawer({
               onGoalPlanClick={activeTask ? () => setActiveTaskId(null) : undefined}
             />
           ) : (
-            <div className="min-w-0 flex-1 truncate text-sm font-medium text-[#1F2328]">主题规划</div>
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-ink">主题规划</div>
           )}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <button
               type="button"
               aria-label="关闭"
               onClick={onClose}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
             >
               <ChevronsRight className="h-4 w-4" />
             </button>
@@ -312,7 +312,7 @@ export function GoalPlanDrawer({
               <Link
                 href={fullscreenHref}
                 aria-label="全屏查看主题规划"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
               >
                 <Maximize2 className="h-4 w-4" />
               </Link>
@@ -322,11 +322,11 @@ export function GoalPlanDrawer({
 
         <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-6">
           {!goal ? (
-            <div className="mx-auto flex min-h-[320px] w-full max-w-2xl flex-col items-center justify-center rounded-2xl border border-dashed border-[#D0D7DE] bg-[#F8F9FB] px-8 text-center">
-              <div className="text-[14px] font-semibold text-[#1F2328]">
+            <div className="mx-auto flex min-h-[320px] w-full max-w-2xl flex-col items-center justify-center rounded-2xl border border-dashed border-line-strong bg-surface-hover px-8 text-center">
+              <div className="text-[14px] font-semibold text-ink">
                 {missingGoalRefresh.loading ? "正在加载目标规划..." : "暂时找不到这个目标规划"}
               </div>
-              <div className="mt-2 text-[12px] leading-5 text-[#6B7280]">
+              <div className="mt-2 text-[12px] leading-5 text-ink-soft">
                 {missingGoalRefresh.error
                   ? missingGoalRefresh.error
                   : "会话已经绑定目标，但本地目标投影尚未就绪。KiKi 正在重新同步运行时快照。"}
@@ -335,7 +335,7 @@ export function GoalPlanDrawer({
                 <button
                   type="button"
                   onClick={() => setRefreshAttempt((attempt) => attempt + 1)}
-                  className="mt-4 rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+                  className="mt-4 rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] font-medium text-ink hover:border-[#111]"
                 >
                   重新加载
                 </button>

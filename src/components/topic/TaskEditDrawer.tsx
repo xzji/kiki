@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { formatDateInput } from "@/lib/date";
 import { updateGoalTaskCommand } from "@/lib/api/goal-commands";
@@ -51,7 +52,7 @@ export function TaskEditDrawer({
 
   return (
       <div className="fixed inset-0 z-50 bg-black/10 backdrop-blur-[1px]">
-        <div className="absolute inset-y-0 right-0 w-full overflow-y-auto border-l border-[#E5E7EB] bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl md:w-[420px] md:p-6">
+        <div className="absolute inset-y-0 right-0 w-full overflow-y-auto border-l border-line bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl md:w-[420px] md:p-6">
         <h3 className="mb-6 text-lg font-semibold text-[#111]">编辑任务</h3>
         <div className="space-y-6">
           <Section title="任务基本信息">
@@ -63,17 +64,17 @@ export function TaskEditDrawer({
             <Field label="截止时间"><input type="date" value={form.deadline} onChange={(e) => setForm((prev) => ({ ...prev, deadline: e.target.value }))} className="input" /></Field>
           </Section>
           <Section title="所属关系">
-            <Field label="线程"><div className="rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#6B7280]">{task.subGoalId}</div></Field>
+            <Field label="线程"><div className="rounded-lg border border-line px-3 py-2 text-sm text-ink-soft">{task.subGoalId}</div></Field>
           </Section>
           <Section title="执行方式">
             <Field label="执行类型"><select value={form.executionKind} onChange={(e) => setForm((prev) => ({ ...prev, executionKind: e.target.value as Task["executionKind"] }))} className="input"><option value="generic_result">generic_result</option></select></Field>
           </Section>
           <Section title="KiKi 的建议">
-            <p className="rounded-lg border border-dashed border-[#D0D7DE] bg-[#F8FAFC] px-3 py-3 text-sm leading-6 text-[#6B7280]">这个任务适合保留每天 11:00 触发，因为它和你的托福训练节奏已经形成稳定习惯。若要进一步提升效率，可以把 payload 中的词汇组改成更聚焦的天文领域词汇。</p>
+            <p className="rounded-lg border border-dashed border-line-strong bg-surface-subtle px-3 py-3 text-sm leading-6 text-ink-soft">这个任务适合保留每天 11:00 触发，因为它和你的托福训练节奏已经形成稳定习惯。若要进一步提升效率，可以把 payload 中的词汇组改成更聚焦的天文领域词汇。</p>
           </Section>
         </div>
           <div className="mt-8 flex justify-end gap-3">
-          <button onClick={onClose} className="rounded-lg border border-[#D0D7DE] px-4 py-2 text-sm text-[#111] hover:bg-[#F5F6F8]">取消</button>
+          <button onClick={onClose} className="rounded-lg border border-line-strong px-4 py-2 text-sm text-[#111] hover:bg-surface">取消</button>
           <button
             disabled={submitting}
             onClick={async () => {
@@ -116,7 +117,7 @@ export function TaskEditDrawer({
                 removePendingTaskUpdate(overlayId);
               } catch (error) {
                 removePendingTaskUpdate(overlayId);
-                window.alert(error instanceof Error ? error.message : "任务保存失败");
+                toast.error(error instanceof Error ? error.message : "任务保存失败");
               } finally {
                 setSubmitting(false);
               }
@@ -136,5 +137,5 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block text-sm text-[#6B7280]"><div className="mb-1">{label}</div>{children}</label>;
+  return <label className="block text-sm text-ink-soft"><div className="mb-1">{label}</div>{children}</label>;
 }

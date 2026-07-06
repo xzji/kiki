@@ -24,11 +24,11 @@ export function MonthView({ focusDate, today, events, onClickEvent, onSelectDay 
   return (
     <div className="flex flex-col">
         <div className="flex items-center justify-between px-3 py-3 md:px-4 md:py-4">
-          <div className="text-[22px] font-semibold text-[#1F2328] md:text-[28px]">{formatMonthTitle(focusDate)}</div>
+          <div className="text-[22px] font-semibold text-ink md:text-[28px]">{formatMonthTitle(focusDate)}</div>
       </div>
-      <div className="grid grid-cols-7 border-t border-[#E5E7EB] text-[11px] text-[#6B7280]">
+      <div className="grid grid-cols-7 border-t border-line text-[11px] text-ink-soft">
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
-          <div key={d} className="border-l border-[#E5E7EB] px-3 py-2 first:border-l-0">
+          <div key={d} className="border-l border-line px-3 py-2 first:border-l-0">
             {d}
           </div>
         ))}
@@ -46,18 +46,18 @@ export function MonthView({ focusDate, today, events, onClickEvent, onSelectDay 
               type="button"
               onClick={() => onSelectDay(day)}
               className={cn(
-                "group flex flex-col items-stretch border-l border-t border-[#E5E7EB] px-2 py-2 text-left",
+                "group flex flex-col items-stretch border-l border-t border-line px-2 py-2 text-left",
                 "min-h-[72px] md:min-h-[calc((100vh-320px)/6)]",
                 index % 7 === 0 && "border-l-0",
-                !inMonth && "bg-[#F5F6F8]"
+                !inMonth && "bg-surface"
               )}
             >
               <div className="flex items-center justify-between">
                 <span
                   className={cn(
                     "text-xs",
-                    !inMonth ? "text-[#C7CAD1]" : "text-[#1F2328]",
-                    isToday && "font-semibold text-[#3370FF]"
+                    !inMonth ? "text-ink-faint" : "text-ink",
+                    isToday && "font-semibold text-info"
                   )}
                 >
                   {day.getDate()}
@@ -92,7 +92,7 @@ export function MonthView({ focusDate, today, events, onClickEvent, onSelectDay 
                   );
                 })}
                 {overflow > 0 ? (
-                  <span className="text-[11px] text-[#6B7280]">+{overflow} 更多</span>
+                  <span className="text-[11px] text-ink-soft">+{overflow} 更多</span>
                 ) : null}
               </div>
             </button>

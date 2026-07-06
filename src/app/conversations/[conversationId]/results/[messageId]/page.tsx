@@ -33,16 +33,16 @@ export default function ConversationResultPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <header className="flex min-h-12 shrink-0 items-center border-b border-[#E5E7EB] bg-white px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:h-12 md:px-4 md:py-0">
+      <header className="flex min-h-12 shrink-0 items-center border-b border-line bg-white px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:h-12 md:px-4 md:py-0">
         <button
           type="button"
           aria-label="关闭"
           onClick={() => router.push(`/conversations/${conversation.id}`)}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
         >
           <X className="h-4 w-4" />
         </button>
-          <div className="ml-3 min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[#1F2328] md:ml-auto md:text-right">
+          <div className="ml-3 min-w-0 flex-1 truncate text-left text-[13px] font-medium text-ink md:ml-auto md:text-right">
           {buildInstanceCardTitle(task, instance)}
         </div>
         <button
@@ -51,7 +51,7 @@ export default function ConversationResultPage({
           onClick={() =>
             router.push(`/conversations/${conversation.id}?resultMessageId=${encodeURIComponent(message.id)}`)
           }
-            className="ml-3 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] md:flex"
+            className="ml-3 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-surface md:flex"
         >
           <Minimize2 className="h-4 w-4" />
         </button>

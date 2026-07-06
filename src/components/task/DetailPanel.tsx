@@ -4,7 +4,7 @@ export function DetailPanel({ task }: { task: Task }) {
   const typeLabel = task.taskType === "one_shot" ? "一次性任务" : "重复任务";
 
   return (
-    <div className="mb-6 grid gap-4 rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-4 md:grid-cols-2">
+    <div className="mb-6 grid gap-4 rounded-xl border border-line bg-surface p-4 md:grid-cols-2">
       <Meta label="预期结果" value={task.expectedOutcome} />
       <Meta label="截止时间" value={task.deadline ? new Date(task.deadline).toISOString().slice(0, 10) : "未设置"} />
       <Meta label="完成进度" value={`${task.progress}%`} />
@@ -18,7 +18,7 @@ export function DetailPanel({ task }: { task: Task }) {
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="mb-1 text-xs text-[#6B7280]">{label}</div>
+      <div className="mb-1 text-xs text-ink-soft">{label}</div>
       <div className="text-sm font-medium text-[#111]">{value}</div>
     </div>
   );

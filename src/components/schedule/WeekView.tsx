@@ -50,9 +50,9 @@ export function WeekView({ focusDate, today, events, onClickEvent, onCreateAt }:
   return (
     <div className="flex flex-col overflow-x-auto">
       <div className="min-w-[980px] md:min-w-0">
-      <div className="flex border-b border-[#E5E7EB]">
+      <div className="flex border-b border-line">
         <div
-          className="flex-none border-r border-[#E5E7EB] px-2 py-2 text-[11px] text-[#6B7280]"
+          className="flex-none border-r border-line px-2 py-2 text-[11px] text-ink-soft"
           style={{ width: TIME_GUTTER_WIDTH }}
         >
           GMT+8
@@ -64,11 +64,11 @@ export function WeekView({ focusDate, today, events, onClickEvent, onCreateAt }:
             return (
               <div
                 key={day.toISOString()}
-                className="flex flex-col items-center border-l border-[#E5E7EB] py-2 text-xs first:border-l-0"
+                className="flex flex-col items-center border-l border-line py-2 text-xs first:border-l-0"
                 style={{ backgroundColor: weekend ? WEEKEND_BG : undefined }}
               >
-                <span className="text-[11px] text-[#6B7280]">{formatWeekdayShort(day)}</span>
-                <span className={`mt-1 text-sm font-semibold ${isToday ? "text-[#3370FF]" : "text-[#1F2328]"}`}>
+                <span className="text-[11px] text-ink-soft">{formatWeekdayShort(day)}</span>
+                <span className={`mt-1 text-sm font-semibold ${isToday ? "text-info" : "text-ink"}`}>
                   {day.getDate()}
                 </span>
               </div>
@@ -80,13 +80,13 @@ export function WeekView({ focusDate, today, events, onClickEvent, onCreateAt }:
       <div ref={scrollRef} className="relative overflow-y-auto" style={{ maxHeight: GRID_MAX_HEIGHT }}>
         <div className="flex">
           <div
-            className="flex-none border-r border-[#E5E7EB]"
+            className="flex-none border-r border-line"
             style={{ width: TIME_GUTTER_WIDTH }}
           >
             {HOURS.map((hour) => (
               <div
                 key={hour}
-                className="flex items-start justify-end border-b border-[#E5E7EB] pr-2 pt-1 text-[11px] text-[#6B7280]"
+                className="flex items-start justify-end border-b border-line pr-2 pt-1 text-[11px] text-ink-soft"
                 style={{ height: HOUR_HEIGHT }}
               >
                 {formatHourLabel(hour)}
@@ -134,7 +134,7 @@ function DayColumn({ day, events, onClickEvent, onEmptyClick }: DayColumnProps) 
 
   return (
     <div
-      className="relative border-l border-[#E5E7EB] first:border-l-0"
+      className="relative border-l border-line first:border-l-0"
       style={{ backgroundColor: weekend ? WEEKEND_BG : undefined }}
       onClick={(e) => {
         const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -142,9 +142,9 @@ function DayColumn({ day, events, onClickEvent, onEmptyClick }: DayColumnProps) 
       }}
     >
       {HOURS.map((hour) => (
-        <div key={hour} className="relative border-b border-[#E5E7EB]" style={{ height: HOUR_HEIGHT }}>
+        <div key={hour} className="relative border-b border-line" style={{ height: HOUR_HEIGHT }}>
           <div
-            className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-[#EFF1F4]"
+            className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-surface-subtle"
             style={{ top: HOUR_HEIGHT / 2 }}
           />
         </div>

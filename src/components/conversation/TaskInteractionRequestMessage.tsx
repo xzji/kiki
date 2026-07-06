@@ -99,28 +99,28 @@ function extractFeedbackFields(feedback: string) {
 function optionRowClass(selected: boolean) {
   return [
     "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-0 py-2 text-left text-[13px] transition",
-    selected ? "font-semibold text-[#1F2933]" : "text-[#4B5563] hover:text-[#1F2933]",
+    selected ? "font-semibold text-ink-strong" : "text-ink-strong hover:text-ink-strong",
   ].join(" ");
 }
 
 function optionDotClass(selected: boolean) {
   return [
     "h-2 w-2 shrink-0 rounded-full transition",
-    selected ? "bg-[#64748B] ring-4 ring-[#EEF0F3]" : "bg-[#D0D7DE] ring-4 ring-transparent",
+    selected ? "bg-ink-strong ring-4 ring-surface-subtle" : "bg-line-strong ring-4 ring-transparent",
   ].join(" ");
 }
 
 function submittedPanel(submission: InteractionSubmission, pending: boolean) {
   const details = submittedDetails(submission);
   return (
-    <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
+    <div className="max-w-[720px] text-[13px] leading-6 text-ink-strong">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-[#1F2328]">{submittedStatusLabel(submission.status)}</span>
-        <span className="text-[12px] text-[#8C9198]">{formatSubmittedAt(submission.submittedAt)}</span>
+        <span className="font-medium text-ink">{submittedStatusLabel(submission.status)}</span>
+        <span className="text-[12px] text-ink-faint">{formatSubmittedAt(submission.submittedAt)}</span>
       </div>
       {details.length ? (
-        <div className="mt-2 text-[#1F2328]">
-          <div className="text-[12px] text-[#57606A]">已提交的信息</div>
+        <div className="mt-2 text-ink">
+          <div className="text-[12px] text-ink-strong">已提交的信息</div>
           <div className="mt-1 space-y-1">
             {details.map((detail) => (
               <div key={detail}>{detail}</div>
@@ -128,7 +128,7 @@ function submittedPanel(submission: InteractionSubmission, pending: boolean) {
           </div>
         </div>
       ) : null}
-      {pending ? <div className="mt-2 text-[12px] text-[#8C9198]">KiKi 已收到，正在继续执行。</div> : null}
+      {pending ? <div className="mt-2 text-[12px] text-ink-faint">KiKi 已收到，正在继续执行。</div> : null}
     </div>
   );
 }
@@ -355,20 +355,20 @@ export function TaskInteractionRequestMessage({ conversationId, message, onOpen 
           onOpen();
         }
       }}
-      className="mt-3 w-full cursor-pointer rounded-[20px] border border-[#D0D7DE] bg-white p-6 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#D0D7DE]"
+      className="mt-3 w-full cursor-pointer rounded-[20px] border border-line-strong bg-white p-6 text-left transition hover:border-[#111] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-line-strong"
     >
-      <div className="text-[15px] font-semibold text-[#1F2328]">{snapshot.panelTitle}</div>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+      <div className="text-[15px] font-semibold text-ink">{snapshot.panelTitle}</div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-ink-faint">
         <span>Agent 任务</span>
-        <span className="text-[#D0D7DE]">/</span>
+        <span className="text-line-strong">/</span>
         <span>{submitted ? "已提交" : snapshot.statusLabel}</span>
       </div>
-      <div className="mt-4 text-[14px] leading-6 text-[#374151]">{snapshot.headline || snapshot.reason}</div>
+      <div className="mt-4 text-[14px] leading-6 text-ink-strong">{snapshot.headline || snapshot.reason}</div>
       <div className="mt-4" onClick={(event) => event.stopPropagation()}>
         {submitted ? (
           submittedPanel(submitted, Boolean(pending))
         ) : (
-          <div className="max-w-[720px] text-[13px] leading-6 text-[#374151]">
+          <div className="max-w-[720px] text-[13px] leading-6 text-ink-strong">
             {promptFields.length ? (
               <div className="space-y-3">
                 {promptFields.map((item, index) => {
@@ -382,11 +382,11 @@ export function TaskInteractionRequestMessage({ conversationId, message, onOpen 
                     <div key={item.id}>
                       {hideItemQuestion ? null : (
                         <div>
-                          <div className="text-[13px] font-semibold text-[#1F2328]">
+                          <div className="text-[13px] font-semibold text-ink">
                             {index + 1}. {item.label.trim() || questionForField(item)}
                           </div>
                           {item.description ? (
-                            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{item.description}</div>
+                            <div className="mt-1 text-[12px] leading-5 text-ink-soft">{item.description}</div>
                           ) : null}
                         </div>
                       )}
@@ -421,16 +421,16 @@ export function TaskInteractionRequestMessage({ conversationId, message, onOpen 
                               type="button"
                               disabled={uploadingFieldId === item.id}
                               onClick={() => fileInputRefs.current[item.id]?.click()}
-                              className="rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] font-medium text-[#374151] transition hover:border-[#1F2328] hover:text-[#1F2328] disabled:cursor-not-allowed disabled:opacity-50"
+                              className="rounded-lg border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink-strong transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {uploadingFieldId === item.id ? "上传中..." : item.inputKind === "file" ? "上传文件" : "上传截图"}
                             </button>
                             {selectedFiles.length ? (
-                              <span className="min-w-0 truncate text-[12px] text-[#57606A]">
+                              <span className="min-w-0 truncate text-[12px] text-ink-strong">
                                 已上传：{selectedFiles.map((file) => file.name).join("、")}
                               </span>
                             ) : (
-                              <span className="text-[12px] text-[#8C9198]">
+                              <span className="text-[12px] text-ink-faint">
                                 {item.inputKind === "image_or_text" ? "也可以直接填写文字记录" : "请先上传后再提交"}
                               </span>
                             )}
@@ -459,7 +459,7 @@ export function TaskInteractionRequestMessage({ conversationId, message, onOpen 
                               onFocus={() => chooseCustom(item)}
                               onChange={(event) => updateCustomValue(event.target.value, item)}
                               placeholder={item.inputPlaceholder?.trim() || `输入${item.label}`}
-                              className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
+                              className="min-w-0 border-b border-line-strong bg-transparent px-1 py-1 text-[13px] font-normal text-ink-strong outline-none placeholder:text-ink-faint focus:border-ink"
                             />
                           </div>
                         ) : null}
@@ -506,19 +506,19 @@ export function TaskInteractionRequestMessage({ conversationId, message, onOpen 
                     onFocus={() => chooseCustom()}
                     onChange={(event) => updateCustomValue(event.target.value)}
                     placeholder={pickOptions(snapshot.options).length ? "请输入你的选择" : "请输入需要补充的信息"}
-                    className="min-w-0 border-b border-[#D0D7DE] bg-transparent px-1 py-1 text-[13px] font-normal text-[#1F2933] outline-none placeholder:text-[#8C9198] focus:border-[#1F2328]"
+                    className="min-w-0 border-b border-line-strong bg-transparent px-1 py-1 text-[13px] font-normal text-ink-strong outline-none placeholder:text-ink-faint focus:border-ink"
                   />
                 </div>
               </div>
             )}
             <div className="mt-5 space-y-3">
-              {error ? <div className="text-[12px] text-[#B42318]">{error}</div> : null}
+              {error ? <div className="text-[12px] text-danger-hover">{error}</div> : null}
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   disabled={Boolean(pending) || Boolean(uploadingFieldId)}
                   onClick={() => void submit(true)}
-                  className="rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#2B2B2B] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg bg-[#111] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-ink-strong disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {pending === "approve" ? "提交中..." : uploadingFieldId ? "上传中..." : "提交信息并继续"}
                 </button>
@@ -527,7 +527,7 @@ export function TaskInteractionRequestMessage({ conversationId, message, onOpen 
                     type="button"
                     disabled={Boolean(pending) || Boolean(uploadingFieldId)}
                     onClick={() => void submit(false)}
-                    className="bg-transparent px-0 py-2 text-[13px] text-[#6B7280] hover:text-[#1F2933] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="bg-transparent px-0 py-2 text-[13px] text-ink-soft hover:text-ink-strong disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {pending === "revise" ? "提交中..." : "让 KiKi 修改后继续"}
                   </button>

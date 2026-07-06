@@ -55,13 +55,13 @@ export function AssistantSidebar() {
 
   return (
     <aside
-        className="fixed inset-0 z-40 flex h-dvh w-full flex-col border-l border-[#E5E7EB] bg-white md:inset-y-0 md:left-auto md:z-20 md:h-screen md:w-[400px]"
+        className="fixed inset-0 z-40 flex h-dvh w-full flex-col border-l border-line bg-white md:inset-y-0 md:left-auto md:z-20 md:h-screen md:w-[400px]"
       aria-label="KiKi 助手"
     >
-      <div className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[#1F2328]">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[#E5E7EB] bg-[#F5F6F8]">
-            <Sparkles className="h-3.5 w-3.5 text-[#5B3DBE]" />
+      <div className="flex h-12 flex-none items-center justify-between border-b border-line px-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface">
+            <Sparkles className="h-3.5 w-3.5 text-brand" />
           </span>
           <span>KiKi</span>
         </div>
@@ -69,7 +69,7 @@ export function AssistantSidebar() {
           type="button"
           aria-label="收起 KiKi"
           onClick={close}
-          className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
+          className="rounded-md p-1.5 text-ink-soft hover:bg-surface"
         >
           <PanelRightClose className="h-4 w-4" />
         </button>
@@ -77,7 +77,7 @@ export function AssistantSidebar() {
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? (
-          <div className="mb-4 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+          <div className="mb-4 rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-[12px] leading-5 text-danger-hover">
             <div>{error}</div>
             <button
               type="button"
@@ -85,7 +85,7 @@ export function AssistantSidebar() {
                 clearError();
                 openSettings("runtime");
               }}
-              className="mt-2 text-[12px] font-medium text-[#B42318] underline"
+              className="mt-2 text-[12px] font-medium text-danger-hover underline"
             >
               前往运行环境
             </button>
@@ -93,18 +93,18 @@ export function AssistantSidebar() {
         ) : null}
 
         {permissionRequest ? (
-          <div className="mb-4 rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#92400E]">
+          <div className="mb-4 rounded-2xl border border-warning-border bg-warning-bg px-4 py-3 text-[12px] leading-5 text-warning-strong">
             {permissionRequest}
           </div>
         ) : null}
 
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-[#E5E7EB] bg-[#F5F6F8]">
-              <Sparkles className="h-5 w-5 text-[#5B3DBE]" />
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-line bg-surface">
+              <Sparkles className="h-5 w-5 text-brand" />
             </div>
-            <div className="text-sm font-semibold text-[#1F2328]">和 KiKi 聊聊</div>
-            <div className="mt-2 max-w-[240px] text-[12px] leading-5 text-[#6B7280]">
+            <div className="text-sm font-semibold text-ink">和 KiKi 聊聊</div>
+            <div className="mt-2 max-w-[240px] text-[12px] leading-5 text-ink-soft">
               说出你的想法、目标或问题，KiKi 会在后台推进，并把关键节点同步到你的收件箱。
             </div>
           </div>
@@ -119,13 +119,13 @@ export function AssistantSidebar() {
                 </div>
               ) : (
                 <div key={m.id} className="flex justify-start">
-                  <div className="mr-2 mt-1 flex h-6 w-6 flex-none items-center justify-center rounded-full border border-[#E5E7EB] bg-[#E9E6FF]">
-                    <Sparkles className="h-3 w-3 text-[#5B3DBE]" />
+                  <div className="mr-2 mt-1 flex h-6 w-6 flex-none items-center justify-center rounded-full border border-line bg-brand-surface">
+                    <Sparkles className="h-3 w-3 text-brand" />
                   </div>
                   <div
                     className={cn(
-                      "max-w-[76vw] rounded-2xl rounded-bl-sm border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2328] md:max-w-[260px]",
-                      m.status === "streaming" && "after:ml-1 after:inline-block after:h-2 after:w-2 after:animate-pulse after:rounded-full after:bg-[#5B3DBE] after:align-middle after:content-['']",
+                      "max-w-[76vw] rounded-2xl rounded-bl-sm border border-line bg-white px-3 py-2 text-sm text-ink md:max-w-[260px]",
+                      m.status === "streaming" && "after:ml-1 after:inline-block after:h-2 after:w-2 after:animate-pulse after:rounded-full after:bg-brand after:align-middle after:content-['']",
                     )}
                   >
                     {m.content}
@@ -133,7 +133,7 @@ export function AssistantSidebar() {
                       <button
                         type="button"
                         onClick={() => router.push(`/conversations/${m.action?.conversationId}`)}
-                        className="mt-2 block rounded-lg border border-[#D0D7DE] px-3 py-1.5 text-[12px] font-medium text-[#1F2328] hover:border-[#111]"
+                        className="mt-2 block rounded-lg border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink hover:border-[#111]"
                       >
                         查看目标规划
                       </button>
@@ -151,13 +151,13 @@ export function AssistantSidebar() {
         )}
       </div>
 
-        <div className="flex-none border-t border-[#E5E7EB] bg-[#F9FAFB] px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:pb-3">
+        <div className="flex-none border-t border-line bg-surface-subtle px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:pb-3">
         {runtimeHydrated ? (
           activeRuntimeEnv?.type === "local" ? null : (
             <button
               type="button"
               onClick={() => openSettings("runtime")}
-              className="mb-2 w-full rounded-xl border border-dashed border-[#D0D7DE] bg-white px-3 py-2 text-left text-[12px] text-[#6B7280] hover:border-[#111] hover:text-[#111]"
+              className="mb-2 w-full rounded-xl border border-dashed border-line-strong bg-white px-3 py-2 text-left text-[12px] text-ink-soft hover:border-[#111] hover:text-[#111]"
             >
               还没有连接本地 Claude CLI，点击前往运行环境设置
             </button>

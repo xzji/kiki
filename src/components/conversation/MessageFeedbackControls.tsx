@@ -205,7 +205,7 @@ export function MessageFeedbackControls({
       className="mt-1.5 flex max-w-3xl justify-end"
       data-has-feedback={feedback ? "true" : "false"}
     >
-      <div className="flex items-center gap-0.5 text-[#8C9198]">
+      <div className="flex items-center gap-0.5 text-ink-faint">
         <button
           type="button"
           aria-label="答得好"
@@ -217,8 +217,8 @@ export function MessageFeedbackControls({
               : void submit({ rating: "good", reasonCodes: [] })
           }
           className={cn(
-            "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[#F5F6F8] hover:text-[#1F2328] disabled:opacity-60",
-            feedback?.rating === "good" && "bg-[#F0FDF4] text-[#1A7F37] opacity-100",
+            "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-surface hover:text-ink disabled:opacity-60",
+            feedback?.rating === "good" && "bg-success-bg text-success opacity-100",
           )}
         >
           <ThumbsUp className="h-3.5 w-3.5" />
@@ -239,8 +239,8 @@ export function MessageFeedbackControls({
             setDialogOpen(true);
           }}
           className={cn(
-            "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[#F5F6F8] hover:text-[#1F2328] disabled:opacity-60",
-            feedback?.rating === "bad" && "bg-[#FFF8C5] text-[#7D4E00] opacity-100",
+            "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-surface hover:text-ink disabled:opacity-60",
+            feedback?.rating === "bad" && "bg-warning-bg text-warning-strong opacity-100",
           )}
         >
           <ThumbsDown className="h-3.5 w-3.5" />
@@ -250,9 +250,9 @@ export function MessageFeedbackControls({
           aria-label="复制"
           title="复制"
           onClick={() => void copyText(content)}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[#F5F6F8] hover:text-[#1F2328]"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-surface hover:text-ink"
         >
-          {copied ? <Check className="h-3.5 w-3.5 text-[#1A7F37]" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
         <button
           type="button"
@@ -264,12 +264,12 @@ export function MessageFeedbackControls({
               showToast(err instanceof Error ? err.message : "生成分享图片失败");
             });
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[#F5F6F8] hover:text-[#1F2328] disabled:opacity-70"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-surface hover:text-ink disabled:opacity-70"
         >
           {sharing ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : shared ? (
-            <Check className="h-3.5 w-3.5 text-[#1A7F37]" />
+            <Check className="h-3.5 w-3.5 text-success" />
           ) : (
             <Share2 className="h-3.5 w-3.5" />
           )}
@@ -277,21 +277,21 @@ export function MessageFeedbackControls({
       </div>
 
       {sharing || toast ? (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[#111827] px-4 py-2 text-[13px] text-white shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink-strong px-4 py-2 text-[13px] text-white shadow-lg">
           {sharing ? "正在生成分享图片..." : toast}
         </div>
       ) : null}
 
       {dialogOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-[#D0D7DE] bg-white p-4 shadow-xl">
+          <div className="w-full max-w-sm rounded-2xl border border-line-strong bg-white p-4 shadow-xl">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[14px] font-medium text-[#1F2328]">这次回答哪里不好？</div>
+              <div className="text-[14px] font-medium text-ink">这次回答哪里不好？</div>
               <button
                 type="button"
                 aria-label="关闭"
                 onClick={() => setDialogOpen(false)}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[#8C9198] hover:bg-[#F5F6F8] hover:text-[#1F2328]"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-faint hover:bg-surface hover:text-ink"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -305,8 +305,8 @@ export function MessageFeedbackControls({
                   className={cn(
                     "rounded-full border px-3 py-1 text-[12px] transition-colors",
                     selectedSet.has(option.code)
-                      ? "border-[#1F2328] bg-[#1F2328] text-white"
-                      : "border-[#D0D7DE] bg-white text-[#4B5563] hover:bg-[#F5F6F8]",
+                      ? "border-ink bg-ink text-white"
+                      : "border-line-strong bg-white text-ink-strong hover:bg-surface",
                   )}
                 >
                   {option.label}
@@ -318,15 +318,15 @@ export function MessageFeedbackControls({
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
                 placeholder="补充具体问题"
-                className="mt-3 min-h-24 w-full resize-none rounded-xl border border-[#D0D7DE] px-3 py-2 text-[13px] leading-5 text-[#1F2328] outline-none focus:border-[#1F2328]"
+                className="mt-3 min-h-24 w-full resize-none rounded-xl border border-line-strong px-3 py-2 text-[13px] leading-5 text-ink outline-none focus:border-ink"
               />
             ) : null}
-            {error ? <div className="mt-2 text-[12px] text-[#B42318]">{error}</div> : null}
+            {error ? <div className="mt-2 text-[12px] text-danger-hover">{error}</div> : null}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDialogOpen(false)}
-                className="rounded-lg px-3 py-1.5 text-[13px] text-[#6B7280] hover:bg-[#F5F6F8]"
+                className="rounded-lg px-3 py-1.5 text-[13px] text-ink-soft hover:bg-surface"
               >
                 取消
               </button>
@@ -340,7 +340,7 @@ export function MessageFeedbackControls({
                     comment: comment.trim() || undefined,
                   })
                 }
-                className="rounded-lg bg-[#1F2328] px-3 py-1.5 text-[13px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-ink px-3 py-1.5 text-[13px] text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 提交
               </button>

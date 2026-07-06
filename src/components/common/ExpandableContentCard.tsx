@@ -76,7 +76,7 @@ export function ExpandableContentCard({
           event.stopPropagation();
           startExpand();
         }}
-        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-[#57606A] transition hover:bg-[#F5F6F8] hover:text-[#1F2328]"
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-ink-strong transition hover:bg-surface hover:text-ink"
         aria-label={expandLabel}
       >
         <Maximize2 className="h-3.5 w-3.5" />
@@ -109,15 +109,15 @@ export function ExpandableContentCard({
       style={expanded ? { left: leftInset, right: rightInset } : undefined}
     >
       {expanded ? (
-        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-[#E5E7EB] px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:h-12 md:px-4 md:py-0">
-          <div id={titleId} className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#1F2328]">
+        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:h-12 md:px-4 md:py-0">
+          <div id={titleId} className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
             {title}
           </div>
           <button
             type="button"
             aria-label={collapseLabel}
             onClick={close}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-[#57606A] transition hover:bg-[#F5F6F8] hover:text-[#1F2328]"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-ink-strong transition hover:bg-surface hover:text-ink"
           >
             <Minimize2 className="h-3.5 w-3.5" />
             {collapseLabel}

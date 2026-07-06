@@ -189,13 +189,13 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/25 px-4" onClick={handleClose}>
       <div
-        className="flex w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white shadow-[0_12px_40px_rgba(16,24,40,0.12)]"
+        className="flex w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-[0_12px_40px_rgba(16,24,40,0.12)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex flex-none items-start justify-between gap-4 border-b border-[#E5E7EB] px-5 py-4">
+        <div className="flex flex-none items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
             <div className="text-[15px] font-medium text-[#111]">连接本机电脑</div>
-            <div className="mt-0.5 text-[12px] leading-5 text-[#6B7280]">
+            <div className="mt-0.5 text-[12px] leading-5 text-ink-soft">
               在本机终端运行下方命令，注册为执行节点。安装后 daemon 后台常驻，可关闭终端。
             </div>
           </div>
@@ -203,7 +203,7 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
             type="button"
             onClick={handleClose}
             aria-label="关闭"
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-[#8C9198] hover:bg-[#F5F6F8] hover:text-[#111]"
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-ink-faint hover:bg-surface hover:text-[#111]"
           >
             <X className="h-4 w-4" />
           </button>
@@ -211,24 +211,24 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
 
         <div className="flex flex-col gap-4 px-5 py-5">
           {error ? (
-            <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+            <div className="rounded-xl border border-danger-border bg-danger-bg px-4 py-3 text-[12px] leading-5 text-danger-hover">
               {error}
             </div>
           ) : null}
 
           <div>
-            <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-[#374151]">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-ink-strong">
               <Terminal className="h-3.5 w-3.5" />
               <span>在本机终端运行此命令：</span>
             </div>
-            <div className="relative rounded-xl border border-[#1F2328] bg-[#111] px-4 py-3">
+            <div className="relative rounded-xl border border-ink bg-[#111] px-4 py-3">
               {loading ? (
-                <div className="flex items-center gap-2 py-2 text-[12px] text-[#9AA0A6]">
+                <div className="flex items-center gap-2 py-2 text-[12px] text-ink-faint">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   正在生成连接命令…
                 </div>
               ) : (
-                <code className="block whitespace-pre-wrap break-all pr-9 font-mono text-[12.5px] leading-6 text-[#A7F3D0]">
+                <code className="block whitespace-pre-wrap break-all pr-9 font-mono text-[12.5px] leading-6 text-success-border">
                   {connectCommand || "—"}
                 </code>
               )}
@@ -237,28 +237,28 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
                 onClick={() => void copyCommand()}
                 disabled={!connectCommand || loading}
                 aria-label="复制命令"
-                className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md text-[#9AA0A6] hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md text-ink-faint hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Copy className="h-4 w-4" />
               </button>
             </div>
-            {copied ? <div className="mt-1.5 text-[11px] text-[#067647]">已复制到剪贴板</div> : null}
-            <div className="mt-1.5 text-[11px] text-[#9AA0A6]">api-key 仅展示一次，请妥善保存。</div>
+            {copied ? <div className="mt-1.5 text-[11px] text-success">已复制到剪贴板</div> : null}
+            <div className="mt-1.5 text-[11px] text-ink-faint">api-key 仅展示一次，请妥善保存。</div>
           </div>
 
           {!isConnected ? (
-            <div className="flex items-center gap-3 rounded-xl border border-[#FDE6B8] bg-[#FFFAEB] px-4 py-3">
-              <span className="h-2.5 w-2.5 flex-none animate-pulse rounded-full bg-[#F59E0B]" />
-              <div className="text-[13px] font-medium text-[#92400E]">等待电脑连接…</div>
+            <div className="flex items-center gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3">
+              <span className="h-2.5 w-2.5 flex-none animate-pulse rounded-full bg-warning" />
+              <div className="text-[13px] font-medium text-warning-strong">等待电脑连接…</div>
             </div>
           ) : (
-            <div className="flex items-center gap-3 rounded-xl border border-[#D1FADF] bg-[#ECFDF3] px-4 py-3">
-              <CheckCircle2 className="h-4 w-4 flex-none text-[#067647]" />
+            <div className="flex items-center gap-3 rounded-xl border border-success-border bg-success-bg px-4 py-3">
+              <CheckCircle2 className="h-4 w-4 flex-none text-success" />
               <div className="flex-1">
-                <div className="text-[13px] font-medium text-[#067647]">
+                <div className="text-[13px] font-medium text-success">
                   已连接：{connectedMachine?.name || "本机电脑"}
                 </div>
-                <div className="mt-0.5 text-[12px] text-[#3F8F5F]">
+                <div className="mt-0.5 text-[12px] text-success">
                   {formatMachineFingerprint(connectedMachine?.fingerprint)} · {formatRelativeTime(connectedMachine?.lastSeenAt)} · 在线
                 </div>
               </div>
@@ -266,11 +266,11 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
           )}
         </div>
 
-        <div className="flex flex-none items-center justify-end gap-2 border-t border-[#E5E7EB] px-5 py-4">
+        <div className="flex flex-none items-center justify-end gap-2 border-t border-line px-5 py-4">
           <button
             type="button"
             onClick={handleClose}
-            className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#6B7280] hover:bg-[#F8F9FB]"
+            className="inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-[13px] text-ink-soft hover:bg-surface-hover"
           >
             取消
           </button>
@@ -280,7 +280,7 @@ export function ConnectMachineDialog({ open, onClose, onConnected }: Props) {
             onClick={handleClose}
             className={cn(
               "inline-flex h-9 items-center rounded-lg bg-[#111] px-3 text-[13px] text-white hover:bg-[#222]",
-              !isConnected && "cursor-not-allowed bg-[#C1C7D0] hover:bg-[#C1C7D0]",
+              !isConnected && "cursor-not-allowed bg-line hover:bg-line",
             )}
           >
             完成

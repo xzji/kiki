@@ -26,15 +26,15 @@ export default function DevRuntimePage() {
   const [selection, setSelection] = useState<Selection>({ sagaId: null, runId: null });
 
   return (
-    <div className="flex h-screen w-full bg-[#F8F9FB] text-[#111]">
-      <aside className="w-[320px] border-r border-[#E5E7EB] overflow-y-auto">
+    <div className="flex h-screen w-full bg-surface-hover text-[#111]">
+      <aside className="w-[320px] border-r border-line overflow-y-auto">
         <SagaInstancesList
           selectedSagaId={selection.sagaId}
           onSelect={(sagaId) => setSelection({ sagaId, runId: null })}
         />
       </aside>
       <main className="flex flex-1 flex-col overflow-hidden">
-        <section className="border-b border-[#E5E7EB] flex-1 overflow-y-auto p-4">
+        <section className="border-b border-line flex-1 overflow-y-auto p-4">
           <SagaRunsTimeline
             sagaId={selection.sagaId}
             selectedRunId={selection.runId}
@@ -66,14 +66,14 @@ function SagaInstancesList({
         <h2 className="text-sm font-semibold">Saga 实例（{total}）</h2>
         <button
           type="button"
-          className="text-xs text-[#3B82F6] hover:underline"
+          className="text-xs text-info hover:underline"
           onClick={refetch}
         >
           刷新
         </button>
       </header>
-      {loading ? <p className="text-xs text-[#6B7280]">加载中…</p> : null}
-      {error ? <p className="text-xs text-[#DC2626]">{error}</p> : null}
+      {loading ? <p className="text-xs text-ink-soft">加载中…</p> : null}
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
       <ul className="space-y-1">
         {items.map((saga) => (
           <li key={saga.id}>
@@ -82,26 +82,26 @@ function SagaInstancesList({
               onClick={() => onSelect(saga.id)}
               className={`w-full rounded-md border px-2 py-2 text-left text-xs ${
                 saga.id === selectedSagaId
-                  ? "border-[#3B82F6] bg-[#EFF6FF]"
-                  : "border-[#E5E7EB] bg-white hover:bg-[#F3F4F6]"
+                  ? "border-info bg-info-bg"
+                  : "border-line bg-white hover:bg-surface-subtle"
               }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium">{saga.type}</span>
                 <SagaStatusBadge status={saga.status} />
               </div>
-              <div className="mt-0.5 truncate text-[10px] text-[#6B7280]">
+              <div className="mt-0.5 truncate text-[10px] text-ink-soft">
                 {saga.id}
               </div>
               {saga.currentStep ? (
-                <div className="mt-0.5 text-[10px] text-[#374151]">step: {saga.currentStep}</div>
+                <div className="mt-0.5 text-[10px] text-ink-strong">step: {saga.currentStep}</div>
               ) : null}
             </button>
           </li>
         ))}
       </ul>
       {!loading && items.length === 0 ? (
-        <p className="text-xs text-[#6B7280]">无 saga 实例</p>
+        <p className="text-xs text-ink-soft">无 saga 实例</p>
       ) : null}
     </div>
   );
@@ -109,11 +109,11 @@ function SagaInstancesList({
 
 function SagaStatusBadge({ status }: { status: SagaInstance["status"] }) {
   const map: Record<SagaInstance["status"], string> = {
-    pending: "bg-[#E5E7EB] text-[#374151]",
-    running: "bg-[#DBEAFE] text-[#1D4ED8]",
-    awaiting_user: "bg-[#FEF3C7] text-[#92400E]",
-    completed: "bg-[#DCFCE7] text-[#166534]",
-    failed: "bg-[#FEE2E2] text-[#991B1B]",
+    pending: "bg-line text-ink-strong",
+    running: "bg-info-bg text-info-strong",
+    awaiting_user: "bg-warning-bg text-warning-strong",
+    completed: "bg-success-bg text-success-strong",
+    failed: "bg-danger-bg text-danger-strong",
   };
   return (
     <span className={`rounded px-1.5 py-0.5 text-[10px] ${map[status]}`}>
@@ -136,7 +136,7 @@ function SagaRunsTimeline({
   const { saga, runs, loading, error, refetch } = useAgentRunsBySaga(sagaId);
 
   if (!sagaId) {
-    return <p className="text-xs text-[#6B7280]">从左侧选择一个 saga 查看 agent_runs 时间线。</p>;
+    return <p className="text-xs text-ink-soft">从左侧选择一个 saga 查看 agent_runs 时间线。</p>;
   }
 
   // 按 scope 三组（§12.5.3）
@@ -157,14 +157,14 @@ function SagaRunsTimeline({
         </h2>
         <button
           type="button"
-          className="text-xs text-[#3B82F6] hover:underline"
+          className="text-xs text-info hover:underline"
           onClick={refetch}
         >
           刷新
         </button>
       </header>
-      {loading ? <p className="text-xs text-[#6B7280]">加载中…</p> : null}
-      {error ? <p className="text-xs text-[#DC2626]">{error}</p> : null}
+      {loading ? <p className="text-xs text-ink-soft">加载中…</p> : null}
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
       <div className="grid grid-cols-3 gap-3">
         <RunGroup
           title="topic_saga"
@@ -206,12 +206,12 @@ function RunGroup({
   onCommandApplied: () => void;
 }) {
   return (
-    <div className="rounded-md border border-[#E5E7EB] bg-white p-2">
-      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+    <div className="rounded-md border border-line bg-white p-2">
+      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
         {title}
       </h3>
       {runs.length === 0 ? (
-        <p className="text-[11px] text-[#9CA3AF]">—</p>
+        <p className="text-[11px] text-ink-soft">—</p>
       ) : (
         <ul className="space-y-1">
           {runs.map((run) => (
@@ -219,20 +219,20 @@ function RunGroup({
               key={run.id}
               className={`rounded border ${
                 run.id === selectedRunId
-                  ? "border-[#3B82F6] bg-[#EFF6FF]"
-                  : "border-transparent bg-[#F9FAFB]"
+                  ? "border-info bg-info-bg"
+                  : "border-transparent bg-surface-subtle"
               }`}
             >
               <button
                 type="button"
                 onClick={() => onSelectRun(run.id)}
-                className="w-full rounded px-2 py-1 text-left text-[11px] hover:bg-[#F3F4F6]"
+                className="w-full rounded px-2 py-1 text-left text-[11px] hover:bg-surface-subtle"
               >
                 <div className="flex items-center justify-between">
                   <span>{run.role}</span>
-                  <span className="text-[10px] text-[#6B7280]">{run.status}</span>
+                  <span className="text-[10px] text-ink-soft">{run.status}</span>
                 </div>
-                <div className="truncate text-[10px] text-[#9CA3AF]">{run.id}</div>
+                <div className="truncate text-[10px] text-ink-soft">{run.id}</div>
               </button>
               <RunCommandButtons run={run} onCommandApplied={onCommandApplied} />
             </li>
@@ -313,7 +313,7 @@ function RunCommandButtons({
   };
 
   return (
-    <div className="border-t border-[#E5E7EB] px-2 py-1">
+    <div className="border-t border-line px-2 py-1">
       <div className="flex flex-wrap gap-1">
         {commands.map((kind) => (
           <button
@@ -321,13 +321,13 @@ function RunCommandButtons({
             type="button"
             disabled={pending !== null}
             onClick={() => void execute(kind)}
-            className="rounded bg-white px-1.5 py-0.5 text-[10px] text-[#374151] ring-1 ring-[#D1D5DB] hover:bg-[#F3F4F6] disabled:opacity-50"
+            className="rounded bg-white px-1.5 py-0.5 text-[10px] text-ink-strong ring-1 ring-line hover:bg-surface-subtle disabled:opacity-50"
           >
             {pending === kind ? "..." : COMMAND_LABEL[kind]}
           </button>
         ))}
       </div>
-      {error ? <p className="mt-1 text-[10px] text-[#DC2626]">{error}</p> : null}
+      {error ? <p className="mt-1 text-[10px] text-danger">{error}</p> : null}
     </div>
   );
 }
@@ -338,7 +338,7 @@ function CausationTree({ runId }: { runId: string | null }) {
   const { run, events, loading, error, refetch } = useAgentEventsByRun(runId);
 
   if (!runId) {
-    return <p className="text-xs text-[#6B7280]">从上方选择一个 agent_run 查看因果链事件流。</p>;
+    return <p className="text-xs text-ink-soft">从上方选择一个 agent_run 查看因果链事件流。</p>;
   }
 
   return (
@@ -349,21 +349,21 @@ function CausationTree({ runId }: { runId: string | null }) {
         </h2>
         <button
           type="button"
-          className="text-xs text-[#3B82F6] hover:underline"
+          className="text-xs text-info hover:underline"
           onClick={refetch}
         >
           刷新
         </button>
       </header>
-      {loading ? <p className="text-xs text-[#6B7280]">加载中…</p> : null}
-      {error ? <p className="text-xs text-[#DC2626]">{error}</p> : null}
+      {loading ? <p className="text-xs text-ink-soft">加载中…</p> : null}
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
       <ol className="space-y-1">
         {events.map((event) => (
           <EventRow key={event.id} event={event} />
         ))}
       </ol>
       {!loading && events.length === 0 ? (
-        <p className="text-xs text-[#6B7280]">暂无事件</p>
+        <p className="text-xs text-ink-soft">暂无事件</p>
       ) : null}
     </div>
   );
@@ -371,15 +371,15 @@ function CausationTree({ runId }: { runId: string | null }) {
 
 function EventRow({ event }: { event: AgentEvent }) {
   return (
-    <li className="rounded border border-[#E5E7EB] bg-white p-2">
+    <li className="rounded border border-line bg-white p-2">
       <div className="flex items-center justify-between text-[11px]">
         <span className="font-medium">
           #{event.seq} · {event.type}
         </span>
-        <span className="text-[10px] text-[#6B7280]">{event.createdAt}</span>
+        <span className="text-[10px] text-ink-soft">{event.createdAt}</span>
       </div>
       {event.payloadRef ? (
-        <p className="mt-1 text-[10px] text-[#9CA3AF]">payloadRef: {event.payloadRef}</p>
+        <p className="mt-1 text-[10px] text-ink-soft">payloadRef: {event.payloadRef}</p>
       ) : null}
     </li>
   );

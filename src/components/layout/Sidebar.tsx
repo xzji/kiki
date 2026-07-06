@@ -13,6 +13,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { ensureConversationWorkspaceApi } from "@/lib/api/conversationWorkspace";
 import { isImeCompositionKeyEvent } from "@/lib/browser/ime";
@@ -81,7 +82,7 @@ export function Sidebar() {
       }
       setDeleteTarget(null);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "删除会话失败");
+      toast.error(error instanceof Error ? error.message : "删除会话失败");
     } finally {
       setDeletePending(false);
     }
@@ -90,7 +91,7 @@ export function Sidebar() {
   if (collapsed) {
     return (
       <aside
-        className="fixed inset-y-0 left-0 z-10 hidden flex-col items-center border-r border-[#D8DDE4] bg-[#F5F6F8] py-4 md:flex"
+        className="fixed inset-y-0 left-0 z-10 hidden flex-col items-center border-r border-line-muted bg-surface py-4 md:flex"
         style={{ width: NAV_SIDEBAR_COLLAPSED_WIDTH }}
       >
         <button
@@ -102,9 +103,9 @@ export function Sidebar() {
           <span className="group-hover:hidden">
             <ProductLogo compact />
           </span>
-          <PanelLeftOpen className="hidden h-4 w-4 text-[#6B7280] group-hover:block" />
+          <PanelLeftOpen className="hidden h-4 w-4 text-ink-soft group-hover:block" />
         </button>
-        <nav className="flex flex-col items-center gap-2 text-[#475467]">
+        <nav className="flex flex-col items-center gap-2 text-ink-strong">
           <IconLink
             href="/"
             active={pathname === "/"}
@@ -133,7 +134,7 @@ export function Sidebar() {
   return (
     <>
       <aside
-        className="fixed inset-y-0 left-0 z-10 hidden flex-col border-r border-[#D8DDE4] bg-[#F5F6F8] px-4 py-5 md:flex"
+        className="fixed inset-y-0 left-0 z-10 hidden flex-col border-r border-line-muted bg-surface px-4 py-5 md:flex"
         style={{ width: NAV_SIDEBAR_EXPANDED_WIDTH }}
       >
         <div className="mb-4 flex items-center justify-between px-3">
@@ -142,12 +143,12 @@ export function Sidebar() {
             type="button"
             aria-label="收起侧边栏"
             onClick={() => setCollapsed(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-white"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-white"
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>
         </div>
-        <nav className="space-y-1 text-sm text-[#475467]">
+        <nav className="space-y-1 text-sm text-ink-strong">
           <NavLink
             href="/"
             active={pathname === "/"}
@@ -163,7 +164,7 @@ export function Sidebar() {
           />
         </nav>
 
-        <div className="mt-6 flex items-center justify-between px-3 text-xs font-medium text-[#6B7280]">
+        <div className="mt-6 flex items-center justify-between px-3 text-xs font-medium text-ink-soft">
           <span className="flex items-center gap-2">
             <MessageCircle className="h-3.5 w-3.5" />
             会话
@@ -172,7 +173,7 @@ export function Sidebar() {
             type="button"
             aria-label="新建会话"
             onClick={onCreateConversation}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-[#6B7280] hover:bg-white hover:text-[#1F2328]"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-ink-soft hover:bg-white hover:text-ink"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -182,7 +183,7 @@ export function Sidebar() {
           {!conversationsHydrated && sortedConversations.length === 0 ? (
             <ConversationListLoading />
           ) : sortedConversations.length === 0 ? (
-            <div className="mt-3 px-[34px] py-2 text-[12px] text-[#9AA0A6]">暂无会话</div>
+            <div className="mt-3 px-[34px] py-2 text-[12px] text-ink-faint">暂无会话</div>
           ) : (
             <ul className="space-y-1">
               {sortedConversations.map((conv) => {
@@ -219,18 +220,18 @@ export function Sidebar() {
 function ConversationListLoading() {
   return (
     <div className="mt-3 space-y-2 px-3" aria-label="会话列表加载中" role="status">
-      <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-[#8A9099]">
+      <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-ink-faint">
         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
         <span>加载会话中...</span>
       </div>
       {[0, 1, 2].map((item) => (
         <div
           key={item}
-          className="h-[50px] animate-pulse rounded-xl border border-[#E5E7EB]/70 bg-white/70"
+          className="h-[50px] animate-pulse rounded-xl border border-line/70 bg-white/70"
         >
           <div className="px-3 py-2">
-            <div className="h-3 w-28 rounded-full bg-[#E2E6EC]" />
-            <div className="mt-2 h-2.5 w-36 rounded-full bg-[#ECEFF3]" />
+            <div className="h-3 w-28 rounded-full bg-line" />
+            <div className="mt-2 h-2.5 w-36 rounded-full bg-surface-subtle" />
           </div>
         </div>
       ))}
@@ -253,9 +254,9 @@ function DeleteConversationDialog({
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 px-4">
-      <div className="w-[420px] max-w-full rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-2xl">
+      <div className="w-[420px] max-w-full rounded-2xl border border-line bg-white p-5 shadow-2xl">
         <div className="text-[16px] font-semibold text-[#111]">确认删除会话？</div>
-        <div className="mt-3 text-[13px] leading-6 text-[#4B5563]">
+        <div className="mt-3 text-[13px] leading-6 text-ink-strong">
           你将删除会话「<span className="font-medium text-[#111]">{conversation.title}</span>」。
           删除后，该会话及其关联的主题规划数据会从持久化存储中移除，且无法恢复。
         </div>
@@ -264,7 +265,7 @@ function DeleteConversationDialog({
             type="button"
             disabled={pending}
             onClick={onCancel}
-            className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#111] hover:bg-[#F8F9FB] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-[13px] text-[#111] hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             取消
           </button>
@@ -272,7 +273,7 @@ function DeleteConversationDialog({
             type="button"
             disabled={pending}
             onClick={onConfirm}
-            className="inline-flex h-9 items-center rounded-lg bg-[#D1242F] px-3 text-[13px] text-white hover:bg-[#B42318] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-9 items-center rounded-lg bg-danger px-3 text-[13px] text-white hover:bg-danger-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pending ? "删除中..." : "确认删除"}
           </button>
@@ -415,33 +416,33 @@ function ConversationListItem({
                   cancelRenaming();
                 }
               }}
-              className="w-full rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-[13px] text-[#1F2328] outline-none ring-0 placeholder:text-[#9AA0A6] focus:border-[#111]"
+              className="w-full rounded-md border border-line-strong bg-white px-2 py-1 text-[13px] text-ink outline-none ring-0 placeholder:text-ink-faint focus:border-[#111]"
               maxLength={80}
             />
           </div>
         ) : (
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[13px] text-[#1F2328]">
+              <span className="truncate text-[13px] text-ink">
                 {conversation.title}
               </span>
               <div className="flex items-center gap-1">
                 {conversation.pinned ? (
-                  <span className="text-[10px] text-[#8C9198]">置顶</span>
+                  <span className="text-[10px] text-ink-faint">置顶</span>
                 ) : null}
                 {unread > 0 ? (
-                  <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[10px] text-white">
+                  <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-badge px-1 text-[10px] text-white">
                     {unread}
                   </span>
                 ) : null}
               </div>
             </div>
             {latest ? (
-              <span className="block truncate text-[11px] text-[#8C9198]">
+              <span className="block truncate text-[11px] text-ink-faint">
                 {latest.content}
               </span>
             ) : (
-              <span className="block truncate text-[11px] text-[#8C9198]">
+              <span className="block truncate text-[11px] text-ink-faint">
                 暂无消息
               </span>
             )}
@@ -453,21 +454,21 @@ function ConversationListItem({
             aria-label="更多"
             onClick={() => setMenuOpen((prev) => !prev)}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-md text-[#8C9198] hover:bg-white hover:text-[#1F2328]",
+              "flex h-6 w-6 items-center justify-center rounded-md text-ink-faint hover:bg-white hover:text-ink",
               menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             )}
           >
             <Ellipsis className="h-4 w-4" />
           </button>
           {menuOpen ? (
-            <div className="absolute right-0 top-7 z-20 w-32 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328] shadow-sm">
+            <div className="absolute right-0 top-7 z-20 w-32 overflow-hidden rounded-lg border border-line bg-white py-1 text-[12px] text-ink shadow-sm">
               <button
                 type="button"
                 onClick={() => {
                   onTogglePinned();
                   setMenuOpen(false);
                 }}
-                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+                className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
               >
                 {conversation.pinned ? "取消置顶" : "置顶"}
               </button>
@@ -481,7 +482,7 @@ function ConversationListItem({
                   }
                   setMenuOpen(false);
                 }}
-                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+                className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
               >
                 {unread > 0 ? "标记为已读" : "标记为未读"}
               </button>
@@ -492,7 +493,7 @@ function ConversationListItem({
                   setIsRenaming(true);
                   setMenuOpen(false);
                 }}
-                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+                className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
               >
                 重命名
               </button>
@@ -502,7 +503,7 @@ function ConversationListItem({
                   await onDelete();
                   setMenuOpen(false);
                 }}
-                className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
+                className="block w-full px-3 py-2 text-left text-danger hover:bg-surface-hover"
               >
                 删除
               </button>
@@ -540,7 +541,7 @@ function NavLink({
         <span className="truncate">{label}</span>
       </span>
       {badge ? (
-        <span className="ml-3 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[10px] text-white">
+        <span className="ml-3 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-badge px-1 text-[10px] text-white">
           {badge}
         </span>
       ) : null}
@@ -573,7 +574,7 @@ function IconLink({
     >
       {icon}
       {badge ? (
-        <span className="absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[9px] text-white">
+        <span className="absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-badge px-1 text-[9px] text-white">
           {badge}
         </span>
       ) : null}
@@ -607,7 +608,7 @@ function IconButton({
     >
       {icon}
       {badge ? (
-        <span className="absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#E5484D] px-1 text-[9px] text-white">
+        <span className="absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-badge px-1 text-[9px] text-white">
           {badge}
         </span>
       ) : null}

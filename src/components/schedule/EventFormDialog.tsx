@@ -116,19 +116,19 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/30 md:items-center" onClick={onClose}>
       <div
-        className="flex h-dvh w-full flex-col overflow-hidden border border-[#E5E7EB] bg-white md:h-auto md:w-[440px] md:max-w-[90vw] md:rounded-xl"
+        className="flex h-dvh w-full flex-col overflow-hidden border border-line bg-white md:h-auto md:w-[440px] md:max-w-[90vw] md:rounded-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-3">
-          <div className="text-sm font-semibold text-[#1F2328]">{initial ? "编辑日程" : "新建日程"}</div>
-          <button onClick={onClose} className="rounded p-1 text-[#6B7280] hover:bg-[#F5F6F8]" aria-label="关闭">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
+          <div className="text-sm font-semibold text-ink">{initial ? "编辑日程" : "新建日程"}</div>
+          <button onClick={onClose} className="rounded p-1 text-ink-soft hover:bg-surface" aria-label="关闭">
             ✕
           </button>
         </div>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm md:px-5">
           <Field label="主题">
             <input
-              className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
+              className="w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-[#111]"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="输入主题"
@@ -136,13 +136,13 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
           </Field>
           <Field label="内容">
             <textarea
-              className="min-h-[72px] w-full resize-none rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
+              className="min-h-[72px] w-full resize-none rounded-lg border border-line px-3 py-2 outline-none focus:border-[#111]"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="补充说明"
             />
           </Field>
-          <label className="flex items-center gap-2 text-xs text-[#475467]">
+          <label className="flex items-center gap-2 text-xs text-ink-strong">
             <input
               type="checkbox"
               checked={isAllDay}
@@ -158,7 +158,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
             <Field label="开始">
               <input
                 type={isAllDay ? "date" : "datetime-local"}
-                className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
+                className="w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-[#111]"
                 value={startValue}
                 onChange={(e) => setStartValue(e.target.value)}
               />
@@ -166,7 +166,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
             <Field label="结束">
               <input
                 type={isAllDay ? "date" : "datetime-local"}
-                className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
+                className="w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-[#111]"
                 value={endValue}
                 onChange={(e) => setEndValue(e.target.value)}
               />
@@ -174,7 +174,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
           </div>
           <Field label="参与人（逗号分隔）">
             <input
-              className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
+              className="w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-[#111]"
               value={attendees}
               onChange={(e) => setAttendees(e.target.value)}
               placeholder="Josh, Sky"
@@ -189,7 +189,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
                   onClick={() => setColor(c)}
                   className={cn(
                     "h-7 w-7 rounded-full border",
-                    color === c ? "border-[#1F2328]" : "border-transparent"
+                    color === c ? "border-ink" : "border-transparent"
                   )}
                   style={{ backgroundColor: EVENT_COLORS[c].bg }}
                   aria-label={c}
@@ -201,19 +201,19 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
           </Field>
           <Field label="地点">
             <input
-              className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 outline-none focus:border-[#111]"
+              className="w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-[#111]"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="线上 / 书房"
             />
           </Field>
-          {error ? <div className="text-xs text-[#E5484D]">{error}</div> : null}
+          {error ? <div className="text-xs text-badge">{error}</div> : null}
         </div>
-          <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-5 md:pb-3">
+          <div className="flex items-center justify-end gap-2 border-t border-line px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-5 md:pb-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-[#E5E7EB] px-3 py-1.5 text-sm text-[#1F2328] hover:bg-[#F5F6F8]"
+            className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink hover:bg-surface"
           >
             取消
           </button>
@@ -232,7 +232,7 @@ export function EventFormDialog({ open, initial, defaultStart, defaultEnd, onClo
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block text-xs text-[#6B7280]">
+    <label className="block text-xs text-ink-soft">
       <span className="mb-1 block">{label}</span>
       {children}
     </label>

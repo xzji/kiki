@@ -29,12 +29,12 @@ export function ScheduleHeader({ viewMode, focusDate, onToday, onPrev, onNext, o
   })();
 
   return (
-    <div className="flex flex-col gap-2 border-b border-[#E5E7EB] px-3 py-3 md:h-14 md:flex-row md:items-center md:justify-between md:px-4 md:py-0">
+    <div className="flex flex-col gap-2 border-b border-line px-3 py-3 md:h-14 md:flex-row md:items-center md:justify-between md:px-4 md:py-0">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onToday}
-          className="rounded-lg border border-[#E5E7EB] bg-[#F5F6F8] px-3 py-1.5 text-sm text-[#1F2328] hover:bg-[#EEF0F3]"
+          className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-subtle"
         >
           今天
         </button>
@@ -42,7 +42,7 @@ export function ScheduleHeader({ viewMode, focusDate, onToday, onPrev, onNext, o
           type="button"
           onClick={onPrev}
           aria-label="上一个"
-          className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
+          className="rounded-md p-1.5 text-ink-soft hover:bg-surface"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -50,14 +50,14 @@ export function ScheduleHeader({ viewMode, focusDate, onToday, onPrev, onNext, o
           type="button"
           onClick={onNext}
           aria-label="下一个"
-          className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
+          className="rounded-md p-1.5 text-ink-soft hover:bg-surface"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
-        <div className="min-w-0 text-sm font-semibold text-[#1F2328] md:ml-2">{title}</div>
+        <div className="min-w-0 text-sm font-semibold text-ink md:ml-2">{title}</div>
       </div>
       <div className="flex items-center justify-between gap-2 md:justify-start">
-        <div className="inline-flex rounded-lg border border-[#E5E7EB] p-0.5 text-xs text-[#475467]">
+        <div className="inline-flex rounded-lg border border-line p-0.5 text-xs text-ink-strong">
           {(["day", "week", "month"] as ScheduleViewMode[]).map((mode) => (
             <button
               key={mode}
@@ -65,7 +65,7 @@ export function ScheduleHeader({ viewMode, focusDate, onToday, onPrev, onNext, o
               onClick={() => onChangeMode(mode)}
               className={cn(
                 "rounded-md px-3 py-1.5 transition",
-                viewMode === mode ? "bg-[#F5F6F8] font-semibold text-[#1F2328]" : "hover:bg-[#F5F6F8]"
+                viewMode === mode ? "bg-surface font-semibold text-ink" : "hover:bg-surface"
               )}
             >
               {mode === "day" ? "日" : mode === "week" ? "周" : "月"}

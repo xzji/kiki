@@ -37,13 +37,13 @@ export default function HomePage() {
         <button
           type="button"
           onClick={openTaskMonitor}
-            className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] font-medium text-[#1F2328] transition hover:border-[#111]"
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-[13px] font-medium text-ink transition hover:border-[#111]"
         >
-          <Activity className="h-4 w-4 text-[#6B7280]" />
+          <Activity className="h-4 w-4 text-ink-soft" />
             <span className="md:hidden">任务</span>
             <span className="hidden md:inline">任务执行情况</span>
           {runningCount > 0 ? (
-            <span className="rounded-full bg-[#E6F4EA] px-2 py-0.5 text-[12px] font-semibold text-[#137333]">
+            <span className="rounded-full bg-success-bg px-2 py-0.5 text-[12px] font-semibold text-success">
               {runningCount}
             </span>
           ) : null}
@@ -56,11 +56,11 @@ export default function HomePage() {
           <button
             type="button"
             onClick={() => setSnoozedExpanded((prev) => !prev)}
-            className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left text-[13px] font-medium text-[#6B7280] transition hover:text-[#111]"
+            className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left text-[13px] font-medium text-ink-soft transition hover:text-[#111]"
           >
             <Clock className="h-4 w-4" />
             <span>稍后处理</span>
-            <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[12px] font-semibold text-[#6B7280]">
+            <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-[12px] font-semibold text-ink-soft">
               {orderedSnoozed.length}
             </span>
             <ChevronDown

@@ -29,14 +29,7 @@ import {
   waitForTaskRunCompletion,
 } from "@/lib/api/taskRuns";
 import { buildTaskQuoteContent } from "@/lib/taskFeedback";
-import {
-  commitGoalDraftToStores,
-  continueGoalWorkflowAfterInfo,
-  hasRecoverableGoalPlanCheckpoint,
-  resumeGoalWorkflowFromCheckpoint,
-  resumeGoalWorkflowFromRecovery,
-  startGoalInfoCollection,
-} from "@/lib/goalWorkflow";
+import { commitGoalDraftToStores } from "@/lib/goalWorkflow";
 import { appendGoalProgressMessage } from "@/lib/goalProgressLog";
 import { openSettings } from "@/lib/settings";
 import { parseSlashCommand } from "@/lib/slashCommands";
@@ -583,18 +576,18 @@ export function ConversationView({ conversationId }: { conversationId: string })
   if (!conversation) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-white">
-        <header className="flex h-11 flex-none items-center border-b border-[#E5E7EB] px-2">
-          <div className="text-[15px] font-semibold text-[#1F2328]">会话不存在</div>
+        <header className="flex h-11 flex-none items-center border-b border-line px-2">
+          <div className="text-[15px] font-semibold text-ink">会话不存在</div>
         </header>
         <div className="flex flex-1 items-center justify-center px-6">
           <div className="max-w-sm text-center">
-            <div className="text-[15px] font-medium text-[#1F2328]">会话不存在或已被删除</div>
-            <div className="mt-2 text-[13px] leading-5 text-[#6B7280]">
+            <div className="text-[15px] font-medium text-ink">会话不存在或已被删除</div>
+            <div className="mt-2 text-[13px] leading-5 text-ink-soft">
               当前链接指向的会话不在本地状态中，可能已经被清理或尚未成功保存。
             </div>
             <Link
               href="/conversations"
-              className="mt-4 inline-flex rounded-lg border border-[#D0D7DE] px-3 py-2 text-[13px] text-[#1F2328] hover:border-[#111]"
+              className="mt-4 inline-flex rounded-lg border border-line-strong px-3 py-2 text-[13px] text-ink hover:border-[#111]"
             >
               返回会话列表
             </Link>
@@ -1012,25 +1005,14 @@ export function ConversationView({ conversationId }: { conversationId: string })
   ) => {
     const parsedCommand = parseSlashCommand(text);
     const canResumePlanning = parsedCommand.kind === "plain" && shouldResumePlanningFromMessage(text);
-    const hasLocalPlanningFailure = conversation.planningRunState?.status === "failed";
-    const hasCheckpointPlanningFailure =
-      canResumePlanning && !hasLocalPlanningFailure
-        ? await hasRecoverableGoalPlanCheckpoint(conversation.id)
-        : false;
-    if (
-      canResumePlanning &&
-      (hasLocalPlanningFailure || hasCheckpointPlanningFailure)
-    ) {
+    const hasSagaPlanningFailure =
+      conversation.planningRunState?.status === "failed" && conversation.planningRunState?.source === "saga";
+    if (canResumePlanning && hasSagaPlanningFailure) {
       const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
       const userId = `msg-user-${Date.now()}`;
       const assistantId = `msg-kiki-${Date.now() + 1}`;
-      const plannedSagaRecoveryRequestId =
-        hasLocalPlanningFailure && conversation.planningRunState?.source === "saga"
-          ? `topic-saga-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-          : undefined;
-      const initialAssistantContent = hasLocalPlanningFailure
-        ? "正在从上次失败点恢复目标规划..."
-        : "正在从已保存断点继续目标规划...";
+      const plannedSagaRecoveryRequestId = `topic-saga-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const initialAssistantContent = "正在从上次失败点恢复目标规划...";
       const controller = new AbortController();
       streamAbortRef.current = controller;
       activeAssistantMessageIdRef.current = assistantId;
@@ -1054,9 +1036,9 @@ export function ConversationView({ conversationId }: { conversationId: string })
         status: "streaming",
         source: "kiki",
         cliProcess: createPlanningCliProcess({
-          runId: plannedSagaRecoveryRequestId ?? `goal-cli-${assistantId}`,
+          runId: plannedSagaRecoveryRequestId,
           startedAt: assistantCreatedAt,
-          title: hasLocalPlanningFailure ? "恢复目标规划" : "从断点继续目标规划",
+          title: "恢复目标规划",
           output: initialAssistantContent,
         }),
       });
@@ -1065,8 +1047,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
 
       let activeSagaRecoveryRequestId: string | undefined;
       try {
-        if (hasLocalPlanningFailure && conversation.planningRunState?.source === "saga") {
-          const recovery = conversation.planningRunState;
+        {
+          const recovery = conversation.planningRunState!;
           const runtimeEnv = activeRuntimeEnv;
           if (!runtimeEnv || runtimeEnv.type !== "local") {
             throw new Error("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
@@ -1159,65 +1141,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
           setActivePlanGoalId(committed.goalId);
           return;
         }
-        const progressHandler = (progress: { message: string }) => {
-          appendPlanningProgress(controller, assistantId, progress);
-        };
-        const result = hasLocalPlanningFailure
-          ? await resumeGoalWorkflowFromRecovery({
-              conversationId: conversation.id,
-              userMessage: text,
-              signal: controller.signal,
-              onProgress: progressHandler,
-            })
-          : await resumeGoalWorkflowFromCheckpoint({
-              conversationId: conversation.id,
-              signal: controller.signal,
-              onProgress: progressHandler,
-            });
-        if (result.kind === "collecting_info") {
-          const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
-          const questionText = latestRound.questions
-            .map((question, index) => `${index + 1}. ${question}`)
-            .join("\n");
-          updateMessage(conversation.id, assistantId, (message) => ({
-            ...message,
-            content: `${result.assistantMessage}\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`,
-            status: "done",
-          }));
-          appendPlanningProcessEvent(controller, assistantId, "status", {
-            title: "等待用户补充",
-            content: "目标规划仍需要补充信息。",
-          });
-          markPlanningProcessDone(controller, assistantId, "completed");
-          setConversationStatus(conversation.id, "idle");
-          return;
-        }
-        setGoalInfoCollection(conversation.id, null);
-        updateMessage(conversation.id, assistantId, (message) => ({
-          id: message.id,
-          kind: "goal_plan_card",
-          role: "kiki",
-          content: goalPlanMessageContent(),
-          createdAt: message.createdAt,
-          unread: message.unread,
-          status: "done",
-          source: "kiki",
-          ...(message.kind === "text" || message.kind === "goal_plan_card" ? { cliProcess: message.cliProcess } : {}),
-          goalRef: {
-            goalId: result.goalId,
-            title: result.goalTitle,
-            summary: result.summary,
-            subGoalCount: result.subGoalCount,
-            taskCount: result.taskCount,
-          },
-        }));
-        appendPlanningProcessEvent(controller, assistantId, "status", {
-          title: "目标规划草案已生成",
-          content: goalPlanMessageContent(),
-        });
-        markPlanningProcessDone(controller, assistantId, "completed");
-        setConversationStatus(conversation.id, "idle");
-        setActivePlanGoalId(result.goalId);
       } catch (error) {
         if (isAbortError(error)) {
           markPlanningProcessDone(controller, assistantId, "aborted", "目标规划已中断");
@@ -1229,142 +1152,16 @@ export function ConversationView({ conversationId }: { conversationId: string })
           }
           return;
         }
-        if (hasLocalPlanningFailure && conversation.planningRunState?.source === "saga") {
-          setPlanningRunState(
-            conversation.id,
-            createSagaPlanningFailureState({
-              topicText: conversation.planningRunState.goalText,
-              sagaRequestId:
-                activeSagaRecoveryRequestId ?? `topic-saga-retry-failed-${Date.now()}`,
-              error,
-              lastUserMessage: text,
-            }),
-          );
-        }
-        updateMessage(conversation.id, assistantId, (message) => ({
-          ...message,
-          content: appendPlanningFailureMessage(message.content, error),
-          status: "error",
-        }));
-        appendPlanningProcessEvent(controller, assistantId, "error", {
-          title: "目标规划生成失败",
-          content: getErrorMessage(error, "目标规划生成失败"),
-        });
-        markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "目标规划生成失败"));
-        setConversationStatus(conversation.id, "error");
-        setStreamError(getErrorMessage(error, "目标规划生成失败"));
-      } finally {
-        if (streamAbortRef.current === controller) {
-          streamAbortRef.current = null;
-          activeAssistantMessageIdRef.current = null;
-          setHasLocalActiveStream(false);
-        }
-      }
-      setQuotedMessage(null);
-      return;
-    }
-
-    if (
-      conversation.goalInfoCollection &&
-      conversation.goalInfoCollection.status === "awaiting_user" &&
-      parsedCommand.kind === "plain"
-    ) {
-      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
-      const userId = `msg-user-${Date.now()}`;
-      const assistantId = `msg-kiki-${Date.now() + 1}`;
-      const initialAssistantContent = "已收到背景信息，正在拆解子目标...";
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
-      activeAssistantMessageIdRef.current = assistantId;
-      setHasLocalActiveStream(true);
-      appendMessage(conversation.id, {
-        id: userId,
-        kind: "text",
-        role: "user",
-        content: text,
-        createdAt: userCreatedAt,
-        source: "user",
-        status: "done",
-        quotedMessage: quoted ?? undefined,
-      });
-      appendMessage(conversation.id, {
-        id: assistantId,
-        kind: "text",
-        role: "kiki",
-        content: initialAssistantContent,
-        createdAt: assistantCreatedAt,
-        status: "streaming",
-        source: "kiki",
-        cliProcess: createPlanningCliProcess({
-          runId: `goal-cli-${assistantId}`,
-          startedAt: assistantCreatedAt,
-          title: "继续目标规划",
-          output: initialAssistantContent,
-        }),
-      });
-      setConversationStatus(conversation.id, "streaming");
-      setStreamError(null);
-
-      try {
-        const result = await continueGoalWorkflowAfterInfo({
-          answer: text,
-          source: "conversation",
-          conversationId: conversation.id,
-          signal: controller.signal,
-          onProgress: (progress) => {
-            appendPlanningProgress(controller, assistantId, progress);
-          },
-        });
-        if (result.kind === "collecting_info") {
-          const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
-          const questionText = latestRound.questions
-            .map((question, index) => `${index + 1}. ${question}`)
-            .join("\n");
-          updateMessage(conversation.id, assistantId, (message) => ({
-            ...message,
-            content: `${result.assistantMessage}\n\n${questionText}\n\n你可以继续在下一条消息里一次性回答这些问题。`,
-            status: "done",
-          }));
-          appendPlanningProcessEvent(controller, assistantId, "status", {
-            title: "等待用户补充",
-            content: "目标规划仍需要补充信息。",
-          });
-          markPlanningProcessDone(controller, assistantId, "completed");
-          setConversationStatus(conversation.id, "idle");
-          return;
-        }
-        setGoalInfoCollection(conversation.id, null);
-        updateMessage(conversation.id, assistantId, (message) => ({
-          id: message.id,
-          kind: "goal_plan_card",
-          role: "kiki",
-          content: goalPlanMessageContent(),
-          createdAt: message.createdAt,
-          unread: message.unread,
-          status: "done",
-          source: "kiki",
-          ...(message.kind === "text" || message.kind === "goal_plan_card" ? { cliProcess: message.cliProcess } : {}),
-          goalRef: {
-            goalId: result.goalId,
-            title: result.goalTitle,
-            summary: result.summary,
-            subGoalCount: result.subGoalCount,
-            taskCount: result.taskCount,
-          },
-        }));
-        appendPlanningProcessEvent(controller, assistantId, "status", {
-          title: "目标规划草案已生成",
-          content: goalPlanMessageContent(),
-        });
-        markPlanningProcessDone(controller, assistantId, "completed");
-        setConversationStatus(conversation.id, "idle");
-        setActivePlanGoalId(result.goalId);
-      } catch (error) {
-        if (isAbortError(error)) {
-          markPlanningProcessDone(controller, assistantId, "aborted", "目标规划已中断");
-          setConversationStatus(conversation.id, "idle");
-          return;
-        }
+        setPlanningRunState(
+          conversation.id,
+          createSagaPlanningFailureState({
+            topicText: conversation.planningRunState?.goalText ?? text,
+            sagaRequestId:
+              activeSagaRecoveryRequestId ?? `topic-saga-retry-failed-${Date.now()}`,
+            error,
+            lastUserMessage: text,
+          }),
+        );
         updateMessage(conversation.id, assistantId, (message) => ({
           ...message,
           content: appendPlanningFailureMessage(message.content, error),
@@ -1389,7 +1186,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
     }
 
     if (parsedCommand.kind === "unknown") {
-      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以使用 /goal 或 /topic 发起规划。`);
+      setStreamError(`暂不支持 ${parsedCommand.commandText} 命令。你可以使用 /topic 发起规划。`);
       return;
     }
 
@@ -1558,97 +1355,6 @@ export function ConversationView({ conversationId }: { conversationId: string })
         markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "5 角色 Saga 规划失败"));
         setConversationStatus(conversation.id, "error");
         setStreamError(getErrorMessage(error, "5 角色 Saga 规划失败"));
-      } finally {
-        if (streamAbortRef.current === controller) {
-          streamAbortRef.current = null;
-          activeAssistantMessageIdRef.current = null;
-          setHasLocalActiveStream(false);
-        }
-      }
-      setQuotedMessage(null);
-      return;
-    }
-
-    if (parsedCommand.kind === "command" && parsedCommand.command === "goal") {
-      const { userCreatedAt, assistantCreatedAt } = createTurnTimestamps();
-      const userId = `msg-user-${Date.now()}`;
-      const assistantId = `msg-kiki-${Date.now() + 1}`;
-      const initialAssistantContent = "正在理解目标和关键约束...";
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
-      activeAssistantMessageIdRef.current = assistantId;
-      setHasLocalActiveStream(true);
-      appendMessage(conversation.id, {
-        id: userId,
-        kind: "text",
-        role: "user",
-        content: text,
-        createdAt: userCreatedAt,
-        source: "user",
-        status: "done",
-        quotedMessage: quoted ?? undefined,
-      });
-      appendMessage(conversation.id, {
-        id: assistantId,
-        kind: "text",
-        role: "kiki",
-        content: initialAssistantContent,
-        createdAt: assistantCreatedAt,
-        status: "streaming",
-        source: "kiki",
-        cliProcess: createPlanningCliProcess({
-          runId: `goal-cli-${assistantId}`,
-          startedAt: assistantCreatedAt,
-          title: "启动目标规划",
-          output: initialAssistantContent,
-        }),
-      });
-      setConversationStatus(conversation.id, "streaming");
-      setStreamError(null);
-
-      try {
-        const result = await startGoalInfoCollection({
-          goalText: parsedCommand.payload,
-          source: "conversation",
-          conversationId: conversation.id,
-          signal: controller.signal,
-          onProgress: (progress) => {
-            appendPlanningProgress(controller, assistantId, progress);
-          },
-        });
-        const latestRound = result.collection.rounds[result.collection.rounds.length - 1];
-        const questionText = latestRound.questions
-          .map((question, index) => `${index + 1}. ${question}`)
-          .join("\n");
-        updateMessage(conversation.id, assistantId, (message) => ({
-          ...message,
-          content: `${result.assistantMessage}\n\n${questionText}\n\n你可以直接在下一条消息里一次性回答这些问题。`,
-          status: "done",
-        }));
-        appendPlanningProcessEvent(controller, assistantId, "status", {
-          title: "等待用户补充",
-          content: "目标规划需要先收集关键背景信息。",
-        });
-        markPlanningProcessDone(controller, assistantId, "completed");
-        setConversationStatus(conversation.id, "idle");
-      } catch (error) {
-        if (isAbortError(error)) {
-          markPlanningProcessDone(controller, assistantId, "aborted", "目标规划已中断");
-          setConversationStatus(conversation.id, "idle");
-          return;
-        }
-        updateMessage(conversation.id, assistantId, (message) => ({
-          ...message,
-          content: appendPlanningFailureMessage(message.content, error),
-          status: "error",
-        }));
-        appendPlanningProcessEvent(controller, assistantId, "error", {
-          title: "目标规划生成失败",
-          content: getErrorMessage(error, "目标规划生成失败"),
-        });
-        markPlanningProcessDone(controller, assistantId, "error", getErrorMessage(error, "目标规划生成失败"));
-        setConversationStatus(conversation.id, "error");
-        setStreamError(getErrorMessage(error, "目标规划生成失败"));
       } finally {
         if (streamAbortRef.current === controller) {
           streamAbortRef.current = null;
@@ -2312,8 +2018,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {/* 顶部栏 */}
-      <header className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4 sm:px-6 lg:px-8">
-        <div className="text-[15px] font-semibold text-[#1F2328]">{conversation.title}</div>
+      <header className="flex h-12 flex-none items-center justify-between border-b border-line px-4 sm:px-6 lg:px-8">
+        <div className="text-[15px] font-semibold text-ink">{conversation.title}</div>
         <div className="flex items-center gap-2">
           {conversation.goalId ? (
             <button
@@ -2323,7 +2029,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 setPlanFocus(null);
                 setPlanOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#D0D7DE] bg-white px-2.5 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-white px-2.5 py-1 text-[12px] text-ink hover:border-[#111]"
             >
               <LayoutList className="h-3.5 w-3.5" />
               目标规划
@@ -2334,19 +2040,19 @@ export function ConversationView({ conversationId }: { conversationId: string })
               type="button"
               aria-label="更多"
               onClick={() => setMoreMenuOpen((open) => !open)}
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-[#D0D7DE] bg-white text-[#6B7280] hover:border-[#111] hover:text-[#111]"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-line-strong bg-white text-ink-soft hover:border-[#111] hover:text-[#111]"
             >
               <Ellipsis className="h-4 w-4" />
             </button>
             {moreMenuOpen ? (
-              <div className="absolute right-0 top-9 z-20 w-40 rounded-xl border border-[#E5E7EB] bg-white p-1 shadow-lg">
+              <div className="absolute right-0 top-9 z-20 w-40 rounded-xl border border-line bg-white p-1 shadow-lg">
                 <button
                   type="button"
                   onClick={() => {
                     setMemoryOpen(true);
                     setMoreMenuOpen(false);
                   }}
-                  className="flex w-full rounded-lg px-3 py-2 text-left text-[12px] text-[#1F2328] hover:bg-[#F5F6F8]"
+                  className="flex w-full rounded-lg px-3 py-2 text-left text-[12px] text-ink hover:bg-surface"
                 >
                   会话记忆
                 </button>
@@ -2364,7 +2070,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pb-[calc(13rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 md:pb-5 lg:px-8">
             {streamErrorUi?.kind === "runtime" ? (
-              <div className="rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+              <div className="rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-[12px] leading-5 text-danger-hover">
                 <div>{streamErrorUi.title}</div>
                 <button
                   type="button"
@@ -2376,7 +2082,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
               </div>
             ) : null}
             {backgroundIssue ? (
-              <div className="rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#92400E]">
+              <div className="rounded-2xl border border-warning-border bg-warning-bg px-4 py-3 text-[12px] leading-5 text-warning-strong">
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
                   <div>
@@ -2391,15 +2097,15 @@ export function ConversationView({ conversationId }: { conversationId: string })
               </div>
             ) : null}
             {messageFeedbackError ? (
-              <div className="text-[12px] text-[#B42318]">{messageFeedbackError}</div>
+              <div className="text-[12px] text-danger-hover">{messageFeedbackError}</div>
             ) : null}
             {messagesLoading && sortedMessages.length === 0 ? (
-              <div className="mt-20 flex items-center justify-center gap-2 text-[13px] text-[#8C9198]">
+              <div className="mt-20 flex items-center justify-center gap-2 text-[13px] text-ink-faint">
                 <LoaderCircle className="h-4 w-4 animate-spin" />
                 <span>加载会话消息中...</span>
               </div>
             ) : messagesLoadError?.conversationId === conversation.id && sortedMessages.length === 0 ? (
-              <div className="mt-20 max-w-md self-center rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-center text-[13px] leading-6 text-[#B42318]">
+              <div className="mt-20 max-w-md self-center rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-center text-[13px] leading-6 text-danger-hover">
                 <div>{messagesLoadError.message}</div>
                 <button
                   type="button"
@@ -2413,8 +2119,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
                 </button>
               </div>
             ) : sortedMessages.length === 0 ? (
-              <div className="mt-20 max-w-md self-center text-center text-[13px] text-[#8C9198]">
-                和 KiKi 聊聊你的目标或想法，输入 <span className="font-mono text-[#1F2328]">/goal</span>{" "}
+              <div className="mt-20 max-w-md self-center text-center text-[13px] text-ink-faint">
+                和 KiKi 聊聊你的目标或想法，输入 <span className="font-mono text-ink">/topic</span>{" "}
                 可以进入目标规划模式。
               </div>
             ) : (
@@ -2424,11 +2130,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
                     {firstUnreadId === msg.id ? (
                       <div
                         ref={firstUnreadMarkerRef}
-                        className="mb-5 flex items-center gap-3 text-[12px] text-[#8C9198]"
+                        className="mb-5 flex items-center gap-3 text-[12px] text-ink-faint"
                       >
-                        <div className="h-px flex-1 bg-[#E5E7EB]" />
+                        <div className="h-px flex-1 bg-line" />
                         <span>以下为新消息</span>
-                        <div className="h-px flex-1 bg-[#E5E7EB]" />
+                        <div className="h-px flex-1 bg-line" />
                       </div>
                     ) : null}
                     <ConversationMessageItem
@@ -2488,7 +2194,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   });
                   markUnreadSeen();
                 }}
-                className="pointer-events-auto rounded-full border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] shadow-sm hover:border-[#111]"
+                className="pointer-events-auto rounded-full border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink shadow-sm hover:border-[#111]"
               >
                 {unreadCount}条新消息
               </button>
@@ -2498,7 +2204,7 @@ export function ConversationView({ conversationId }: { conversationId: string })
       </div>
 
       {/* 底部输入 */}
-      <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 flex-none border-t border-[#E5E7EB] bg-white px-4 pb-3 pt-3 shadow-[0_-6px_18px_rgba(15,23,42,0.06)] sm:px-6 md:static md:border-t-0 md:shadow-none lg:px-8">
+      <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 flex-none border-t border-line bg-white px-4 pb-3 pt-3 shadow-[0_-6px_18px_rgba(15,23,42,0.06)] sm:px-6 md:static md:border-t-0 md:shadow-none lg:px-8">
         <div className="mx-auto max-w-3xl">
           <AssistantComposer
             onSubmit={onSend}
@@ -2534,14 +2240,14 @@ export function ConversationView({ conversationId }: { conversationId: string })
             onClick={() => setMemoryOpen(false)}
             className="fixed inset-0 z-30 bg-black/10"
           />
-          <aside className="fixed inset-y-0 right-0 z-40 flex w-[520px] max-w-[92vw] flex-col border-l border-[#E5E7EB] bg-white">
-            <div className="flex h-12 flex-none items-center justify-between border-b border-[#E5E7EB] px-4">
+          <aside className="fixed inset-y-0 right-0 z-40 flex w-[520px] max-w-[92vw] flex-col border-l border-line bg-white">
+            <div className="flex h-12 flex-none items-center justify-between border-b border-line px-4">
               <div className="text-[14px] font-medium text-[#111]">会话记忆</div>
               <button
                 type="button"
                 aria-label="关闭会话记忆"
                 onClick={() => setMemoryOpen(false)}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
               >
                 <ChevronsRight className="h-4 w-4" />
               </button>
@@ -2566,8 +2272,8 @@ export function ConversationView({ conversationId }: { conversationId: string })
             onClick={() => setTaskInfoMessage(null)}
             className="fixed inset-0 z-30 bg-transparent"
           />
-          <aside className="fixed inset-y-0 right-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-[#E5E7EB] bg-white">
-            <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
+          <aside className="fixed inset-y-0 right-0 z-40 flex w-[60vw] min-w-[640px] flex-col border-l border-line bg-white">
+            <div className="flex h-12 flex-none items-center gap-4 border-b border-line px-4">
               <TopicPlanBreadcrumb
                 goalId={taskInfo.goal.id}
                 goalTitle={taskInfo.goal.title}
@@ -2596,14 +2302,14 @@ export function ConversationView({ conversationId }: { conversationId: string })
                   type="button"
                   aria-label="关闭任务信息"
                   onClick={() => setTaskInfoMessage(null)}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
                 >
                   <ChevronsRight className="h-4 w-4" />
                 </button>
                 <Link
                   href={taskDetailPath(taskInfo.goal.id, taskInfo.task.id)}
                   aria-label="全屏查看任务信息"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
                 >
                   <Maximize2 className="h-4 w-4" />
                 </Link>
@@ -2635,11 +2341,11 @@ export function ConversationView({ conversationId }: { conversationId: string })
 function ConversationInitializing() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <header className="flex h-12 flex-none items-center border-b border-[#E5E7EB] px-4 sm:px-6 lg:px-8">
-        <div className="h-4 w-32 animate-pulse rounded-full bg-[#E5E7EB]" />
+      <header className="flex h-12 flex-none items-center border-b border-line px-4 sm:px-6 lg:px-8">
+        <div className="h-4 w-32 animate-pulse rounded-full bg-line" />
       </header>
       <div className="flex flex-1 items-center justify-center px-6">
-        <div className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8F9FB] px-4 py-3 text-[13px] text-[#6B7280]">
+        <div className="flex items-center gap-2 rounded-2xl border border-line bg-surface-hover px-4 py-3 text-[13px] text-ink-soft">
           <LoaderCircle className="h-4 w-4 animate-spin" />
           <span>正在进入会话...</span>
         </div>

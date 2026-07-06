@@ -85,9 +85,9 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
   const table = workbook?.tables[activeSheet];
 
   return (
-    <div className="mt-4 text-[13px] text-[#374151]">
-      {state === "loading" ? <div className="text-[#8C9198]">正在读取 Excel...</div> : null}
-      {state === "error" ? <div className="text-[#B42318]">{error}</div> : null}
+    <div className="mt-4 text-[13px] text-ink-strong">
+      {state === "loading" ? <div className="text-ink-faint">正在读取 Excel...</div> : null}
+      {state === "error" ? <div className="text-danger-hover">{error}</div> : null}
       {state === "ready" && workbook && table ? (
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -99,20 +99,20 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
                   onClick={() => setActiveSheet(index)}
                   className={cn(
                     "rounded-full px-2.5 py-1 text-[12px]",
-                    activeSheet === index ? "bg-[#F4F8FF] text-[#0D47A1]" : "text-[#8C9198] hover:bg-[#F6F8FA] hover:text-[#1F2328]",
+                    activeSheet === index ? "bg-info-bg text-info-strong" : "text-ink-faint hover:bg-surface-subtle hover:text-ink",
                   )}
                 >
                   {sheet.title || `Sheet${index + 1}`}
                 </button>
               ))}
             </div>
-            <div className="mt-1 text-[11px] text-[#8C9198] md:hidden">表格可左右滑动</div>
+            <div className="mt-1 text-[11px] text-ink-faint md:hidden">表格可左右滑动</div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => void loadWorkbook()}
                 disabled={isDownloading}
-                className="inline-flex items-center gap-1 text-[12px] text-[#6B7280] hover:text-[#1F2328] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1 text-[12px] text-ink-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 重置
@@ -121,19 +121,19 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
                 type="button"
                 onClick={handleDownload}
                 disabled={isDownloading}
-                className="inline-flex items-center gap-1 text-[12px] text-[#1F2328] hover:text-[#0D47A1] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1 text-[12px] text-ink hover:text-info-strong disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Download className="h-3.5 w-3.5" />
                 {isDownloading ? "导出中" : "下载已填写版本"}
               </button>
             </div>
           </div>
-            <div className="mt-3 overflow-x-auto rounded-xl border border-[#E5E7EB] shadow-[inset_-12px_0_12px_-12px_rgba(15,23,42,0.25)]">
+            <div className="mt-3 overflow-x-auto rounded-xl border border-line shadow-[inset_-12px_0_12px_-12px_rgba(15,23,42,0.25)]">
             <table className="min-w-full border-collapse text-left text-[13px]">
-              <thead className="bg-[#F8F9FB] text-[#6B7280]">
+              <thead className="bg-surface-hover text-ink-soft">
                 <tr>
                   {table.headers.map((header, index) => (
-                    <th key={`${index}-${header}`} className="border-b border-[#E5E7EB] px-3 py-2 font-medium">
+                    <th key={`${index}-${header}`} className="border-b border-line px-3 py-2 font-medium">
                       {header}
                     </th>
                   ))}
@@ -141,13 +141,13 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
               </thead>
               <tbody>
                 {table.rows.map((row, rowIndex) => (
-                  <tr key={`row-${rowIndex}`} className={table.highlight?.includes(rowIndex) ? "bg-[#FFF9E8]" : "bg-white"}>
+                  <tr key={`row-${rowIndex}`} className={table.highlight?.includes(rowIndex) ? "bg-warning-bg" : "bg-white"}>
                     {table.headers.map((_, columnIndex) => (
-                      <td key={columnIndex} className="border-b border-[#EEF1F4] p-0 align-top">
+                      <td key={columnIndex} className="border-b border-surface-subtle p-0 align-top">
                         <input
                           value={row[columnIndex] ?? ""}
                           onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
-                          className="h-full min-w-[96px] bg-transparent px-3 py-2 text-[#374151] outline-none hover:bg-[#F8F9FB] focus:bg-[#F4F8FF]"
+                          className="h-full min-w-[96px] bg-transparent px-3 py-2 text-ink-strong outline-none hover:bg-surface-hover focus:bg-info-bg"
                         />
                       </td>
                     ))}
@@ -156,7 +156,7 @@ export function SpreadsheetEditor({ artifact }: SpreadsheetEditorProps) {
               </tbody>
             </table>
           </div>
-          {error ? <div className="mt-2 text-[12px] text-[#B42318]">{error}</div> : null}
+          {error ? <div className="mt-2 text-[12px] text-danger-hover">{error}</div> : null}
         </div>
       ) : null}
     </div>

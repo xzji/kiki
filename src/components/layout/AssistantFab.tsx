@@ -22,7 +22,7 @@ export function AssistantFab() {
       type="button"
       aria-label="打开 KiKi 对话"
       onClick={open}
-        className="fixed bottom-6 right-6 z-30 hidden h-12 w-12 items-center justify-center rounded-full border border-[#222]/30 bg-white text-[#1F2328] transition hover:border-[#111] hover:bg-[#F5F6F8] md:flex"
+        className="fixed bottom-6 right-6 z-30 hidden h-12 w-12 items-center justify-center rounded-full border border-[#222]/30 bg-white text-ink transition hover:border-[#111] hover:bg-surface md:flex"
     >
       <Sparkles className="h-5 w-5" />
     </button>

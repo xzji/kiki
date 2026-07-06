@@ -261,29 +261,29 @@ function ToolActionBadge({ tool }: { tool: NonNullable<ProcessStep["tool"]> }) {
   const actionBody = actionMatch ? actionMatch[2] : "";
 
   return (
-    <div className="w-fit max-w-full rounded-2xl bg-[#EEF0F3] px-2.5 py-2 text-[12px] leading-5 text-[#374151]">
+    <div className="w-fit max-w-full rounded-2xl bg-surface-subtle px-2.5 py-2 text-[12px] leading-5 text-ink-strong">
       <div className="flex max-w-full items-start gap-2">
-        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-mono font-bold text-[#1F2328]">
+        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-mono font-bold text-ink">
           {tool.name}
         </span>
-        <span className="shrink-0 font-semibold text-[#1F2328]">{actionPrefix}</span>
+        <span className="shrink-0 font-semibold text-ink">{actionPrefix}</span>
         {actionBody ? (
-          <span className="min-w-0 whitespace-pre-wrap break-all text-[#1F2328]">{actionBody}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-all text-ink">{actionBody}</span>
         ) : null}
         {tool.display.objectText ? (
-          <span className="min-w-0 whitespace-pre-wrap break-all text-[#4B5563]">{tool.display.objectText}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-all text-ink-strong">{tool.display.objectText}</span>
         ) : null}
       </div>
       {hasPaths ? (
           <details className="group/path mt-1.5 pl-0 md:pl-[54px]">
-          <summary className="cursor-pointer list-none text-[12px] text-[#6B7280] select-none marker:hidden hover:text-[#1F2328] [&::-webkit-details-marker]:hidden">
+          <summary className="cursor-pointer list-none text-[12px] text-ink-soft select-none marker:hidden hover:text-ink [&::-webkit-details-marker]:hidden">
             <span className="group-open/path:hidden">展开路径详情</span>
             <span className="hidden group-open/path:inline">收起路径详情</span>
           </summary>
-          <div className="mt-2 grid gap-1.5 rounded-xl bg-white px-3 py-2 text-[12px] leading-5 text-[#4B5563]">
+          <div className="mt-2 grid gap-1.5 rounded-xl bg-white px-3 py-2 text-[12px] leading-5 text-ink-strong">
             {paths.map((path, index) => (
               <div key={`${path}-${index}`} className="grid min-w-0 grid-cols-[48px_minmax(0,1fr)] gap-2">
-                <span className="text-[#8C9198]">{paths.length > 1 ? `文件 ${index + 1}` : "文件"}</span>
+                <span className="text-ink-faint">{paths.length > 1 ? `文件 ${index + 1}` : "文件"}</span>
                 <span className="min-w-0 break-words">{path}</span>
               </div>
             ))}
@@ -301,37 +301,37 @@ function AgentMessage({ group, verdict }: { group: TimelineGroup; verdict?: Verd
 
   return (
     <article className="group relative grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[42px_minmax(0,1fr)] md:gap-3">
-      <div className="grid h-8 w-8 place-items-center rounded-full border border-[#E5E7EB] bg-white text-[12px] font-bold text-[#64748B] md:h-[42px] md:w-[42px] md:text-[13px]">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-line bg-white text-[12px] font-bold text-ink-strong md:h-[42px] md:w-[42px] md:text-[13px]">
         {getGroupAvatar(group)}
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-bold text-[#1F2328]">{getGroupName(group)}</span>
-          {time ? <span className="text-[12px] text-[#8C9198] opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
+          <span className="text-[13px] font-bold text-ink">{getGroupName(group)}</span>
+          {time ? <span className="text-[12px] text-ink-faint opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
         </div>
         <div className="flex max-w-[820px] flex-col gap-2.5 bg-transparent py-0.5">
-          <details className="group/process text-[13px] text-[#374151]">
-            <summary className="flex cursor-pointer list-none items-center gap-1 text-[12px] text-[#8C9198] select-none marker:hidden [&::-webkit-details-marker]:hidden">
-              <span className="font-normal text-[#6B7280]">过程({processSteps.length})</span>
-              <span className="inline-block h-[7px] w-[7px] -rotate-45 border-r-[1.5px] border-b-[1.5px] border-current text-[#8C9198] opacity-100 transition duration-150 md:opacity-0 md:group-hover:opacity-100 group-open/process:rotate-45" />
+          <details className="group/process text-[13px] text-ink-strong">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-[12px] text-ink-faint select-none marker:hidden [&::-webkit-details-marker]:hidden">
+              <span className="font-normal text-ink-soft">过程({processSteps.length})</span>
+              <span className="inline-block h-[7px] w-[7px] -rotate-45 border-r-[1.5px] border-b-[1.5px] border-current text-ink-faint opacity-100 transition duration-150 md:opacity-0 md:group-hover:opacity-100 group-open/process:rotate-45" />
             </summary>
-            <div className="mt-3 flex flex-col gap-3.5 border-l border-dashed border-[#E5E7EB] pl-3.5">
+            <div className="mt-3 flex flex-col gap-3.5 border-l border-dashed border-line pl-3.5">
               {processSteps.length ? processSteps.map((step, index) => (
                 <div key={step.id} className="flex flex-col gap-1.5">
-                  <div className="text-[11px] font-bold tracking-[0.04em] text-[#8C9198] uppercase">Step {index + 1}</div>
-                  <div className="whitespace-pre-wrap text-[13px] leading-6 text-[#374151]">{step.thought}</div>
+                  <div className="text-[11px] font-bold tracking-[0.04em] text-ink-faint uppercase">Step {index + 1}</div>
+                  <div className="whitespace-pre-wrap text-[13px] leading-6 text-ink-strong">{step.thought}</div>
                   {step.tool ? (
                     <ToolActionBadge tool={step.tool} />
                   ) : null}
                 </div>
               )) : (
-                <div className="text-[13px] leading-6 text-[#8C9198]">暂无可展开的过程。</div>
+                <div className="text-[13px] leading-6 text-ink-faint">暂无可展开的过程。</div>
               )}
             </div>
           </details>
-          <div className={verdict ? "flex items-center gap-2 text-[13px] leading-6 text-[#374151]" : "text-[13px] leading-6 text-[#374151]"}>
+          <div className={verdict ? "flex items-center gap-2 text-[13px] leading-6 text-ink-strong" : "text-[13px] leading-6 text-ink-strong"}>
             {verdict ? (
-              <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none ${verdict.tone === "ok" ? "bg-[#E8F5E9] text-[#25663A]" : "bg-[#FFF3CD] text-[#8A6D3B]"}`}>
+              <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none ${verdict.tone === "ok" ? "bg-success-bg text-success-strong" : "bg-warning-bg text-warning-strong"}`}>
                 {verdict.label}
               </span>
             ) : null}
@@ -346,13 +346,13 @@ function AgentMessage({ group, verdict }: { group: TimelineGroup; verdict?: Verd
 function InteractionMessage({ children, time }: { children: ReactNode; time?: string }) {
   return (
     <article className="group relative grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[42px_minmax(0,1fr)] md:gap-3">
-      <div className="grid h-8 w-8 place-items-center rounded-full border border-[#E5E7EB] bg-white text-[12px] font-bold text-[#64748B] md:h-[42px] md:w-[42px] md:text-[13px]">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-line bg-white text-[12px] font-bold text-ink-strong md:h-[42px] md:w-[42px] md:text-[13px]">
         K
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-bold text-[#1F2328]">KiKi</span>
-          {time ? <span className="text-[12px] text-[#8C9198] opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
+          <span className="text-[13px] font-bold text-ink">KiKi</span>
+          {time ? <span className="text-[12px] text-ink-faint opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
         </div>
         <div className="max-w-[820px] py-0.5">{children}</div>
       </div>
@@ -363,15 +363,15 @@ function InteractionMessage({ children, time }: { children: ReactNode; time?: st
 function UserSubmittedMessage({ text, time }: { text: string; time?: string }) {
   return (
     <article className="group relative grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[42px_minmax(0,1fr)] md:gap-3">
-      <div className="grid h-8 w-8 place-items-center rounded-full border border-[#E5E7EB] bg-white text-[11px] font-bold text-[#64748B] md:h-[42px] md:w-[42px] md:text-[12px]">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-line bg-white text-[11px] font-bold text-ink-strong md:h-[42px] md:w-[42px] md:text-[12px]">
         你
       </div>
       <div className="min-w-0 pt-0.5">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-bold text-[#1F2328]">你</span>
-          {time ? <span className="text-[12px] text-[#8C9198] opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
+          <span className="text-[13px] font-bold text-ink">你</span>
+          {time ? <span className="text-[12px] text-ink-faint opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">{time}</span> : null}
         </div>
-        <p className="max-w-[720px] whitespace-pre-wrap text-[13px] leading-6 text-[#374151]">{text}</p>
+        <p className="max-w-[720px] whitespace-pre-wrap text-[13px] leading-6 text-ink-strong">{text}</p>
       </div>
     </article>
   );
@@ -415,7 +415,7 @@ export function TaskExecutionTimeline({
 
   if (groups.length === 0 && afterGroups.length === 0 && !interactionTurn) {
     return (
-      <div className="border border-dashed border-[#E5E7EB] bg-[#F8F9FB] px-4 py-6 text-sm text-[#8C9198]">
+      <div className="border border-dashed border-line bg-surface-hover px-4 py-6 text-sm text-ink-faint">
         暂无执行链路。
       </div>
     );

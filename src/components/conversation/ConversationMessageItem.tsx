@@ -146,7 +146,7 @@ export function ConversationMessageItem({
         <div className="flex max-w-[66%] items-end gap-2">
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center justify-end gap-2 text-[12px]">
-              <div className="text-[#8C9198] opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="text-ink-faint opacity-0 transition-opacity group-hover:opacity-100">
                 {timeLabel}
               </div>
               <div ref={menuRef} className="relative">
@@ -155,7 +155,7 @@ export function ConversationMessageItem({
                   aria-label="更多"
                   onClick={() => setMenuOpen((prev) => !prev)}
                   className={cn(
-                    "inline-flex h-6 w-6 items-center justify-center rounded-md text-[#9AA0A6] transition-opacity hover:bg-[#F5F6F8] hover:text-[#1F2328]",
+                    "inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition-opacity hover:bg-surface hover:text-ink",
                     "opacity-0 group-hover:opacity-100",
                     menuOpen && "opacity-100",
                   )}
@@ -185,7 +185,7 @@ export function ConversationMessageItem({
               {message.content}
             </div>
           </div>
-          <div className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-[11px] text-[#5F5AA2]">
+          <div className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-brand-soft/25 bg-brand-surface text-[11px] text-brand-soft">
             J
           </div>
         </div>
@@ -235,9 +235,9 @@ export function ConversationMessageItem({
       <KikiAvatar size="sm" />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
-          <div className="text-[13px] font-medium text-[#1F2328]">KiKi</div>
+          <div className="text-[13px] font-medium text-ink">KiKi</div>
           <div ref={menuRef} className="relative flex items-center gap-1.5">
-            <div className="text-[12px] text-[#8C9198] opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="text-[12px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100">
               {timeLabel}
             </div>
             <button
@@ -245,7 +245,7 @@ export function ConversationMessageItem({
               aria-label="更多"
               onClick={() => setMenuOpen((prev) => !prev)}
               className={cn(
-                "inline-flex h-6 w-6 items-center justify-center rounded-md text-[#9AA0A6] transition-opacity hover:bg-[#F5F6F8] hover:text-[#1F2328]",
+                "inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition-opacity hover:bg-surface hover:text-ink",
                 "opacity-0 group-hover:opacity-100",
                 menuOpen && "opacity-100",
               )}
@@ -360,45 +360,45 @@ function GovernanceConfirmationCard({
     isTaskMutationIntent(message.governance.payload.intent) &&
     changeItems.length === 0;
   return (
-    <div className="mt-3 w-full max-w-2xl rounded-2xl border border-[#D0D7DE] bg-[#FBFCFE] p-4">
-      <div className="text-[13px] font-medium text-[#1F2328]">确认任务变更</div>
-      <div className="mt-1 text-[13px] leading-6 text-[#4B5563]">
+    <div className="mt-3 w-full max-w-2xl rounded-2xl border border-line-strong bg-surface-subtle p-4">
+      <div className="text-[13px] font-medium text-ink">确认任务变更</div>
+      <div className="mt-1 text-[13px] leading-6 text-ink-strong">
         {message.governance.summary}
       </div>
       {changeItems.length ? (
-        <div className="mt-3 rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
-          <div className="text-[12px] font-medium text-[#1F2328]">
+        <div className="mt-3 rounded-xl border border-line bg-white px-3 py-2">
+          <div className="text-[12px] font-medium text-ink">
             本次修改内容
           </div>
           <div className="mt-2 space-y-2">
             {changeItems.map((item) => (
               <div
                 key={item.field}
-                className="rounded-lg border border-[#EEF0F3] bg-[#FBFCFE] px-2.5 py-2"
+                className="rounded-lg border border-surface-subtle bg-surface-subtle px-2.5 py-2"
               >
-                <div className="flex items-center gap-2 text-[12px] font-medium text-[#1F2328]">
+                <div className="flex items-center gap-2 text-[12px] font-medium text-ink">
                   <span
                     className={cn(
                       "rounded-md px-1.5 py-0.5 text-[11px]",
-                      item.action === "新增" && "bg-[#DAFBE1] text-[#1A7F37]",
-                      item.action === "删除" && "bg-[#FFEBE9] text-[#B42318]",
-                      item.action === "修改" && "bg-[#FFF8C5] text-[#7D4E00]",
+                      item.action === "新增" && "bg-success-bg text-success",
+                      item.action === "删除" && "bg-danger-bg text-danger-hover",
+                      item.action === "修改" && "bg-warning-bg text-warning-strong",
                     )}
                   >
                     {item.action}
                   </span>
                   <span>{item.field}</span>
                 </div>
-                <div className="mt-1 grid gap-2 text-[12px] leading-5 text-[#6B7280] md:grid-cols-2">
+                <div className="mt-1 grid gap-2 text-[12px] leading-5 text-ink-soft md:grid-cols-2">
                   <div>
-                    <div className="mb-0.5 text-[#8C9198]">修改前</div>
-                    <div className="whitespace-pre-wrap rounded-lg bg-[#F6F8FA] p-2">
+                    <div className="mb-0.5 text-ink-faint">修改前</div>
+                    <div className="whitespace-pre-wrap rounded-lg bg-surface-subtle p-2">
                       {item.before || "空"}
                     </div>
                   </div>
                   <div>
-                    <div className="mb-0.5 text-[#8C9198]">修改后</div>
-                    <div className="whitespace-pre-wrap rounded-lg bg-[#F0FDF4] p-2 text-[#1F2328]">
+                    <div className="mb-0.5 text-ink-faint">修改后</div>
+                    <div className="whitespace-pre-wrap rounded-lg bg-success-bg p-2 text-ink">
                       {item.after || "空"}
                     </div>
                   </div>
@@ -408,20 +408,20 @@ function GovernanceConfirmationCard({
           </div>
         </div>
       ) : isTaskMutationIntent(message.governance.payload.intent) ? (
-        <div className="mt-3 rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] leading-5 text-[#6B7280]">
+        <div className="mt-3 rounded-lg border border-line-strong bg-white px-3 py-2 text-[12px] leading-5 text-ink-soft">
           未检测到实际字段变化，当前任务内容可能已经包含这次要求。
         </div>
       ) : null}
       {taskPreview.fullItems.length ? (
-        <div className="mt-3 rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
-          <div className="text-[12px] font-medium text-[#1F2328]">
+        <div className="mt-3 rounded-xl border border-line bg-white px-3 py-2">
+          <div className="text-[12px] font-medium text-ink">
             修改后的完整任务内容
           </div>
           <div className="mt-2 space-y-2">
             {taskPreview.fullItems.map((item) => (
               <div key={item.label} className="text-[12px] leading-5">
-                <div className="mb-0.5 text-[#8C9198]">{item.label}</div>
-                <div className="whitespace-pre-wrap rounded-lg bg-[#F0FDF4] p-2 text-[#1F2328]">
+                <div className="mb-0.5 text-ink-faint">{item.label}</div>
+                <div className="whitespace-pre-wrap rounded-lg bg-success-bg p-2 text-ink">
                   {item.value}
                 </div>
               </div>
@@ -430,7 +430,7 @@ function GovernanceConfirmationCard({
         </div>
       ) : null}
       {message.governance.error ? (
-        <div className="mt-3 rounded-lg border border-[#FFB4A8] bg-[#FFF4F2] px-3 py-2 text-[12px] text-[#B42318]">
+        <div className="mt-3 rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] text-danger-hover">
           {message.governance.error}
         </div>
       ) : null}
@@ -444,7 +444,7 @@ function GovernanceConfirmationCard({
               className={cn(
                 "rounded-lg px-3 py-1.5 text-[12px] font-medium",
                 noActualMutationChange
-                  ? "cursor-not-allowed bg-[#D0D7DE] text-white"
+                  ? "cursor-not-allowed bg-line-strong text-white"
                   : "bg-[#111] text-white hover:bg-[#333]",
               )}
             >
@@ -453,7 +453,7 @@ function GovernanceConfirmationCard({
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+              className="rounded-lg border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
             >
               取消
             </button>
@@ -462,9 +462,9 @@ function GovernanceConfirmationCard({
           <span
             className={cn(
               "rounded-md px-2 py-1 text-[12px]",
-              applied && "bg-[#DAFBE1] text-[#1A7F37]",
-              cancelled && "bg-[#F6F8FA] text-[#6B7280]",
-              errored && "bg-[#FFEBE9] text-[#B42318]",
+              applied && "bg-success-bg text-success",
+              cancelled && "bg-surface-subtle text-ink-soft",
+              errored && "bg-danger-bg text-danger-hover",
             )}
           >
             {applied ? "已执行" : cancelled ? "已取消" : "执行失败"}
@@ -976,11 +976,11 @@ function SentQuotePreview({
   content: string;
 }) {
   return (
-    <div className="mb-1.5 rounded-xl border border-[#D0D7DE] bg-[#F8F9FB] px-3 py-2 text-left">
-      <div className="text-[11px] font-medium text-[#1F2328]">
+    <div className="mb-1.5 rounded-xl border border-line-strong bg-surface-hover px-3 py-2 text-left">
+      <div className="text-[11px] font-medium text-ink">
         引用 {roleLabel}
       </div>
-      <div className="mt-0.5 line-clamp-2 text-[12px] leading-5 text-[#6B7280]">
+      <div className="mt-0.5 line-clamp-2 text-[12px] leading-5 text-ink-soft">
         {content}
       </div>
     </div>
@@ -1027,10 +1027,10 @@ function SagaProgressCard({ saga }: { saga: SagaInstance | null }) {
   const isTerminal = saga?.status === "completed" || saga?.status === "failed";
 
   return (
-    <div className="mt-3 w-full max-w-xl rounded-2xl border border-[#E5E7EB] bg-[#FBFCFE] px-4 py-3">
+    <div className="mt-3 w-full max-w-xl rounded-2xl border border-line bg-surface-subtle px-4 py-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-[12px] font-medium text-[#1F2328]">拆解进度</div>
-        <div className="text-[12px] text-[#6B7280]">
+        <div className="text-[12px] font-medium text-ink">拆解进度</div>
+        <div className="text-[12px] text-ink-soft">
           {saga ? formatSagaStatus(saga) : "启动中"}
         </div>
       </div>
@@ -1048,23 +1048,23 @@ function SagaProgressCard({ saga }: { saga: SagaInstance | null }) {
                 className={cn(
                   "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium",
                   state === "completed" &&
-                    "border-[#1A7F37] bg-[#DAFBE1] text-[#1A7F37]",
+                    "border-success bg-success-bg text-success",
                   state === "running" &&
-                    "border-[#8250DF] bg-[#F0EDFF] text-[#5B3DBE]",
+                    "border-brand bg-brand-bg text-brand",
                   state === "failed" &&
-                    "border-[#D1242F] bg-[#FFEBE9] text-[#D1242F]",
+                    "border-danger bg-danger-bg text-danger",
                   state === "pending" &&
-                    "border-[#D0D7DE] bg-white text-[#8C9198]",
+                    "border-line-strong bg-white text-ink-faint",
                 )}
               >
                 {state === "completed" ? "✓" : index + 1}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[12px] font-medium text-[#1F2328]">
+                  <span className="text-[12px] font-medium text-ink">
                     {step.title}
                   </span>
-                  <span className="rounded-md bg-white px-1.5 py-0.5 font-mono text-[11px] text-[#6B7280]">
+                  <span className="rounded-md bg-white px-1.5 py-0.5 font-mono text-[11px] text-ink-soft">
                     {step.role}
                   </span>
                   <span
@@ -1073,7 +1073,7 @@ function SagaProgressCard({ saga }: { saga: SagaInstance | null }) {
                     {formatSagaStepState(state)}
                   </span>
                 </div>
-                <div className="mt-0.5 text-[12px] leading-5 text-[#6B7280]">
+                <div className="mt-0.5 text-[12px] leading-5 text-ink-soft">
                   {step.description}
                 </div>
               </div>
@@ -1123,10 +1123,10 @@ function formatSagaStepState(state: ReturnType<typeof resolveSagaStepState>) {
 function sagaStepStateClassName(
   state: ReturnType<typeof resolveSagaStepState>,
 ) {
-  if (state === "completed") return "text-[#1A7F37]";
-  if (state === "running") return "text-[#5B3DBE]";
-  if (state === "failed") return "text-[#D1242F]";
-  return "text-[#8C9198]";
+  if (state === "completed") return "text-success";
+  if (state === "running") return "text-brand";
+  if (state === "failed") return "text-danger";
+  return "text-ink-faint";
 }
 
 function GoalPlanMessageCard({
@@ -1146,32 +1146,32 @@ function GoalPlanMessageCard({
     <button
       type="button"
       onClick={onOpen}
-      className="mt-3 block w-full max-w-xl rounded-2xl border border-[#D0D7DE] bg-white p-4 text-left shadow-sm transition hover:border-[#111] hover:shadow-md"
+      className="mt-3 block w-full max-w-xl rounded-2xl border border-line-strong bg-white p-4 text-left shadow-sm transition hover:border-[#111] hover:shadow-md"
     >
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-[#F0EDFF] text-[#5B3DBE]">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-brand-bg text-brand">
           <LayoutList className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-[#6B7280]">
+          <div className="text-[12px] font-medium text-ink-soft">
             目标规划草案
           </div>
-          <div className="mt-1 text-base font-semibold leading-6 text-[#1F2328]">
+          <div className="mt-1 text-base font-semibold leading-6 text-ink">
             {title}
           </div>
           {summary ? (
-            <div className="mt-2 line-clamp-2 text-[13px] leading-5 text-[#6B7280]">
+            <div className="mt-2 line-clamp-2 text-[13px] leading-5 text-ink-soft">
               {summary}
             </div>
           ) : null}
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-[#6B7280]">
-            <span className="rounded-md bg-[#F5F6F8] px-2 py-1">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-ink-soft">
+            <span className="rounded-md bg-surface px-2 py-1">
               {subGoalCount} 个子目标
             </span>
-            <span className="rounded-md bg-[#F5F6F8] px-2 py-1">
+            <span className="rounded-md bg-surface px-2 py-1">
               {taskCount} 个任务
             </span>
-            <span className="ml-auto font-medium text-[#1F2328]">打开规划</span>
+            <span className="ml-auto font-medium text-ink">打开规划</span>
           </div>
         </div>
       </div>
@@ -1188,7 +1188,7 @@ function LoadingDots() {
       {[0, 1, 2].map((index) => (
         <span
           key={index}
-          className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#9AA0A6]"
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint"
           style={{ animationDelay: `${index * 120}ms` }}
         />
       ))}
@@ -1210,14 +1210,14 @@ function MessageMenu({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328] shadow-sm">
+    <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-lg border border-line bg-white py-1 text-[12px] text-ink shadow-sm">
       <button
         type="button"
         onClick={() => {
           onQuote();
           onClose();
         }}
-        className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+        className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
       >
         引用
       </button>
@@ -1230,9 +1230,9 @@ function MessageMenu({
           onClose();
         }}
         className={cn(
-          "block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]",
+          "block w-full px-3 py-2 text-left hover:bg-surface-hover",
           !canOpenTaskInfo &&
-            "cursor-not-allowed text-[#B0B6BE] hover:bg-white",
+            "cursor-not-allowed text-ink-faint hover:bg-white",
         )}
       >
         查看任务信息
@@ -1243,7 +1243,7 @@ function MessageMenu({
           onDelete();
           onClose();
         }}
-        className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
+        className="block w-full px-3 py-2 text-left text-danger hover:bg-surface-hover"
       >
         删除
       </button>

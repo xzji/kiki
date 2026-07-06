@@ -39,21 +39,21 @@ import { useTaskMonitorStore } from "@/stores/taskMonitorStore";
 import { useTaskDrawerStore } from "@/stores/taskDrawerStore";
 
 const groupBadgeClass: Record<TaskMonitorGroup, string> = {
-  queued: "bg-[#F5F6F8] text-[#6B7280]",
-  running: "bg-[#E6F4EA] text-[#137333]",
-  paused: "bg-[#FFF4CC] text-[#7A5A00]",
-  done: "bg-[#EEF2FF] text-[#4F46E5]",
+  queued: "bg-surface text-ink-soft",
+  running: "bg-success-bg text-success",
+  paused: "bg-warning-bg text-warning-strong",
+  done: "bg-brand-bg text-brand",
 };
 
 const statusDotClass: Record<TaskMonitorGroup, string> = {
-  queued: "bg-[#9CA3AF]",
-  running: "bg-[#1A7F37]",
-  paused: "bg-[#9A6A24]",
-  done: "bg-[#4F46E5]",
+  queued: "bg-ink-soft",
+  running: "bg-success",
+  paused: "bg-warning-strong",
+  done: "bg-brand",
 };
 
 function rowBadgeClass(row: TaskMonitorRow) {
-  if (row.group === "done" && row.result === "fail") return "bg-[#FDECEC] text-[#B42318]";
+  if (row.group === "done" && row.result === "fail") return "bg-danger-bg text-danger-hover";
   return groupBadgeClass[row.group];
 }
 
@@ -264,7 +264,7 @@ export function TaskMonitorDrawer() {
       />
       <aside
         aria-label="任务执行情况"
-        className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[#E5E7EB] bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
+        className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-line bg-white shadow-[-2px_0_0_rgba(0,0,0,0.02)] transition-[right] duration-200 md:w-auto"
         style={{
           width: isMobile ? undefined : panelLayout.monitorWidth,
           right: isMobile ? 0 : panelLayout.monitorRightOffset,
@@ -276,27 +276,27 @@ export function TaskMonitorDrawer() {
             aria-orientation="vertical"
             title="拖拽调整宽度"
             onMouseDown={onDragStart}
-            className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-[#D0D7DE]"
+            className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-line-strong"
           />
         ) : null}
-        <div className="flex h-12 flex-none items-center gap-3 border-b border-[#E5E7EB] px-4">
-          <Activity className="h-4 w-4 text-[#6B7280]" />
-          <h2 className="min-w-0 flex-1 text-[13px] font-semibold text-[#1F2328]">任务执行情况</h2>
+        <div className="flex h-12 flex-none items-center gap-3 border-b border-line px-4">
+          <Activity className="h-4 w-4 text-ink-soft" />
+          <h2 className="min-w-0 flex-1 text-[13px] font-semibold text-ink">任务执行情况</h2>
           <button
             type="button"
             aria-label="收起任务执行情况"
             onClick={closeMonitor}
-            className="rounded-md p-1.5 text-[#6B7280] hover:bg-[#F5F6F8]"
+            className="rounded-md p-1.5 text-ink-soft hover:bg-surface"
           >
             <ChevronsRight className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="border-b border-[#E5E7EB] px-4 py-4">
+        <div className="border-b border-line px-4 py-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-[13px] font-medium text-[#1F2328]">最多同时执行</div>
-              <div className="mt-0.5 text-[12px] text-[#8C9198]">超出上限的任务进入等待队列</div>
+              <div className="text-[13px] font-medium text-ink">最多同时执行</div>
+              <div className="mt-0.5 text-[12px] text-ink-faint">超出上限的任务进入等待队列</div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {dispatchPaused ? (
@@ -304,7 +304,7 @@ export function TaskMonitorDrawer() {
                   type="button"
                   disabled={pendingGlobalAction}
                   onClick={() => void toggleDispatchPause()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#1F2328] bg-[#1F2328] px-3 text-[12px] font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-ink bg-ink px-3 text-[12px] font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <Play className="h-3.5 w-3.5 fill-current" />
                   恢复执行
@@ -314,29 +314,29 @@ export function TaskMonitorDrawer() {
                   type="button"
                   disabled={pendingGlobalAction}
                   onClick={() => void toggleDispatchPause()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#D0D7DE] bg-white px-3 text-[12px] font-medium text-[#1F2328] hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-[12px] font-medium text-ink hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <Pause className="h-3.5 w-3.5" />
                   全部暂停
                 </button>
               )}
-              <div className="inline-flex items-center overflow-hidden rounded-lg border border-[#D0D7DE] bg-white">
+              <div className="inline-flex items-center overflow-hidden rounded-lg border border-line-strong bg-white">
                 <button
                   type="button"
                   disabled={maxConcurrentTasks <= 1 || dispatchPaused}
                   onClick={() => void changeConcurrency(maxConcurrentTasks - 1)}
-                  className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
+                  className="h-8 w-8 text-[16px] text-ink hover:bg-surface disabled:cursor-not-allowed disabled:text-line-strong"
                 >
                   -
                 </button>
-                <span className="min-w-8 border-x border-[#D0D7DE] px-2 text-center text-[13px] font-semibold">
+                <span className="min-w-8 border-x border-line-strong px-2 text-center text-[13px] font-semibold">
                   {maxConcurrentTasks}
                 </span>
                 <button
                   type="button"
                   disabled={maxConcurrentTasks >= 10 || dispatchPaused}
                   onClick={() => void changeConcurrency(maxConcurrentTasks + 1)}
-                  className="h-8 w-8 text-[16px] text-[#1F2328] hover:bg-[#F5F6F8] disabled:cursor-not-allowed disabled:text-[#D0D7DE]"
+                  className="h-8 w-8 text-[16px] text-ink hover:bg-surface disabled:cursor-not-allowed disabled:text-line-strong"
                 >
                   +
                 </button>
@@ -344,37 +344,37 @@ export function TaskMonitorDrawer() {
             </div>
           </div>
           {dispatchPaused ? (
-            <div className="mt-3 rounded-lg border border-[#FFF4CC] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#7A5A00]">
+            <div className="mt-3 rounded-lg border border-warning-bg bg-warning-bg px-3 py-2 text-[12px] text-warning-strong">
               任务调度已全局暂停，执行中与待执行的任务均已停止。
             </div>
           ) : null}
           <div className="mt-3 flex items-center gap-3">
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EEF0F3]">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-subtle">
               <div
-                className={cn("h-full rounded-full", taskRunningCount >= maxConcurrentTasks ? "bg-[#F2C94C]" : "bg-[#1A7F37]")}
+                className={cn("h-full rounded-full", taskRunningCount >= maxConcurrentTasks ? "bg-warning-border" : "bg-success")}
                 style={{ width: `${concurrencyRatio}%` }}
               />
             </div>
-            <span className="shrink-0 text-[12px] text-[#6B7280]">
+            <span className="shrink-0 text-[12px] text-ink-soft">
               {taskRunningCount} / {maxConcurrentTasks} 执行中
             </span>
           </div>
         </div>
 
         {errorMessage ? (
-          <div className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] leading-5 text-[#B42318]">
+          <div className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-5 text-danger-hover">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="min-w-0 flex-1">{errorMessage}</span>
-            <button type="button" onClick={() => setErrorMessage(null)} className="shrink-0 text-[#6B7280]">
+            <button type="button" onClick={() => setErrorMessage(null)} className="shrink-0 text-ink-soft">
               关闭
             </button>
           </div>
         ) : null}
         {noticeMessage ? (
-          <div className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-[#FFF4CC] bg-[#FFFBEB] px-3 py-2 text-[12px] leading-5 text-[#7A5A00]">
+          <div className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-warning-bg bg-warning-bg px-3 py-2 text-[12px] leading-5 text-warning-strong">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="min-w-0 flex-1">{noticeMessage}</span>
-            <button type="button" onClick={() => setNoticeMessage(null)} className="shrink-0 text-[#6B7280]">
+            <button type="button" onClick={() => setNoticeMessage(null)} className="shrink-0 text-ink-soft">
               关闭
             </button>
           </div>
@@ -393,9 +393,9 @@ export function TaskMonitorDrawer() {
                   className="mb-3 flex w-full items-center gap-2 text-left"
                 >
                   <ChevronRight
-                    className={cn("h-4 w-4 text-[#8C9198] transition-transform", !collapsed && "rotate-90")}
+                    className={cn("h-4 w-4 text-ink-faint transition-transform", !collapsed && "rotate-90")}
                   />
-                  <span className="text-[13px] font-semibold text-[#6B7280]">{TASK_MONITOR_GROUP_LABEL[group]}</span>
+                  <span className="text-[13px] font-semibold text-ink-soft">{TASK_MONITOR_GROUP_LABEL[group]}</span>
                   <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-semibold", groupBadgeClass[group])}>
                     {items.length}
                   </span>
@@ -426,7 +426,7 @@ export function TaskMonitorDrawer() {
             );
           })}
           {rows.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-[#D0D7DE] px-4 py-8 text-center text-[13px] text-[#8C9198]">
+            <div className="rounded-xl border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-faint">
               暂无任务执行记录
             </div>
           ) : null}
@@ -482,7 +482,7 @@ function TaskMonitorCard({
       className={cn(
         "rounded-xl border bg-white p-4 transition",
         clickable ? "cursor-pointer hover:border-[#111]" : "cursor-default",
-        active ? "border-[#111]" : "border-[#E5E7EB]",
+        active ? "border-[#111]" : "border-line",
       )}
     >
       <div className="flex items-start gap-3">
@@ -490,8 +490,8 @@ function TaskMonitorCard({
           <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", statusDotClass[row.group])} />
         ) : null}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-semibold text-[#1F2328]">{row.taskTitle}</div>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-[#8C9198]">
+          <div className="truncate text-[15px] font-semibold text-ink">{row.taskTitle}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-faint">
             <span className="truncate">{row.goalTitle}</span>
             <span>·</span>
             <span>{sourceChipLabel(row)}</span>
@@ -501,7 +501,7 @@ function TaskMonitorCard({
             </span>
           </div>
         </div>
-        {isTask ? <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-[#8C9198]" /> : null}
+        {isTask ? <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-ink-faint" /> : null}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -578,10 +578,10 @@ function TaskMonitorCard({
         ) : null}
 
         {!isTask ? (
-          <span className="text-[11px] text-[#8C9198]">系统自动执行</span>
+          <span className="text-[11px] text-ink-faint">系统自动执行</span>
         ) : null}
 
-        <span className="ml-auto text-[11px] text-[#8C9198]">{timeLabel(row, nowMs)}</span>
+        <span className="ml-auto text-[11px] text-ink-faint">{timeLabel(row, nowMs)}</span>
       </div>
     </div>
   );
@@ -618,10 +618,10 @@ function ActionButton({
       className={cn(
         "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-45",
         primary
-          ? "border-[#1F2328] bg-[#1F2328] text-white hover:bg-black"
+          ? "border-ink bg-ink text-white hover:bg-black"
           : danger
-            ? "border-[#FECACA] bg-white text-[#B42318] hover:border-[#B42318]"
-            : "border-[#D0D7DE] bg-white text-[#1F2328] hover:border-[#111]",
+            ? "border-danger-border bg-white text-danger-hover hover:border-danger-hover"
+            : "border-line-strong bg-white text-ink hover:border-[#111]",
       )}
     >
       {icon}

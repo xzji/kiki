@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { DEFAULT_EASTER_EGG_SETTINGS } from "@/lib/goalSystemConfig";
-import { buildDecomposePrompt } from "@/lib/server/goalPlanning";
+import { buildDecomposePrompt } from "@/lib/server/goalPlanning/promptBuilders";
 import { adaptTopicInitSagaToGoalDraft } from "./sagaDraftAdapter";
 import type { TopicInitSagaResult } from "./topicInitSaga";
 

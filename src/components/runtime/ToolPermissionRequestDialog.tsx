@@ -66,16 +66,16 @@ export function ToolPermissionRequestDialog({
   };
 
   const content = (
-    <div className={variant === "modal" ? "w-full max-w-[560px] rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-xl" : "rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] p-4"}>
+    <div className={variant === "modal" ? "w-full max-w-[560px] rounded-2xl border border-line bg-white p-5 shadow-xl" : "rounded-2xl border border-line bg-surface-subtle p-4"}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-[14px] font-semibold text-[#111]">需要授权工具运行</div>
-            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">
+            <div className="mt-1 text-[12px] leading-5 text-ink-soft">
               Claude 请求使用未预授权工具。你可以只允许本次，也可以沉淀为会话或 Runtime 规则。
             </div>
           </div>
           {onClose ? (
-            <button type="button" onClick={onClose} className="text-[18px] leading-none text-[#6B7280]">
+            <button type="button" onClick={onClose} className="text-[18px] leading-none text-ink-soft">
               ×
             </button>
           ) : null}
@@ -83,21 +83,21 @@ export function ToolPermissionRequestDialog({
 
         <div className="mt-4 grid gap-2 text-[12px]">
           <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
-            <span className="text-[#6B7280]">工具</span>
+            <span className="text-ink-soft">工具</span>
             <span className="break-all font-mono text-[#111]">{request.toolName}</span>
           </div>
           <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2">
-            <span className="text-[#6B7280]">规则</span>
+            <span className="text-ink-soft">规则</span>
             <input
               value={rule}
               onChange={(event) => setRule(event.target.value)}
-              className="h-8 rounded-lg border border-[#E5E7EB] px-2 font-mono text-[12px] outline-none focus:border-[#111]"
+              className="h-8 rounded-lg border border-line px-2 font-mono text-[12px] outline-none focus:border-[#111]"
             />
           </label>
         </div>
 
         {resolved ? (
-          <div className="mt-4 rounded-xl border border-[#D1FADF] bg-[#ECFDF3] px-3 py-2 text-[12px] text-[#067647]">
+          <div className="mt-4 rounded-xl border border-success-border bg-success-bg px-3 py-2 text-[12px] text-success">
             已处理该授权请求。
           </div>
         ) : (
@@ -114,7 +114,7 @@ export function ToolPermissionRequestDialog({
             type="button"
             onClick={() => void submit("conversation")}
             disabled={Boolean(pendingScope)}
-            className="h-10 rounded-xl border border-[#E5E7EB] bg-white px-3 text-left text-[13px] text-[#111] disabled:opacity-60"
+            className="h-10 rounded-xl border border-line bg-white px-3 text-left text-[13px] text-[#111] disabled:opacity-60"
           >
             本会话内始终允许
           </button>
@@ -122,7 +122,7 @@ export function ToolPermissionRequestDialog({
             type="button"
             onClick={() => void submit("runtime")}
             disabled={Boolean(pendingScope)}
-            className="h-10 rounded-xl border border-[#E5E7EB] bg-white px-3 text-left text-[13px] text-[#111] disabled:opacity-60"
+            className="h-10 rounded-xl border border-line bg-white px-3 text-left text-[13px] text-[#111] disabled:opacity-60"
           >
             始终允许并写入 Runtime 策略
           </button>
@@ -130,14 +130,14 @@ export function ToolPermissionRequestDialog({
             type="button"
             onClick={() => void submit("deny")}
             disabled={Boolean(pendingScope)}
-            className="h-10 rounded-xl border border-[#FECACA] bg-white px-3 text-left text-[13px] text-[#B42318] disabled:opacity-60"
+            className="h-10 rounded-xl border border-danger-border bg-white px-3 text-left text-[13px] text-danger-hover disabled:opacity-60"
           >
             拒绝
           </button>
         </div>
         )}
 
-        {error ? <div className="mt-3 text-[12px] leading-5 text-[#B42318]">{error}</div> : null}
+        {error ? <div className="mt-3 text-[12px] leading-5 text-danger-hover">{error}</div> : null}
       </div>
   );
 

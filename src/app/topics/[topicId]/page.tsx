@@ -45,9 +45,9 @@ export default function TopicDetailPage({ params }: { params: { topicId: string 
   if (!goal) {
     const isLookingUpRemote = remoteLookup?.key !== topicId || remoteLookup.loading || !remoteLookup?.loaded;
     if (isLookingUpRemote) {
-      return <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">正在加载主题...</div>;
+      return <div className="rounded-xl border border-line bg-surface p-6 text-sm text-ink-soft">正在加载主题...</div>;
     }
-    return <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">未找到该主题。</div>;
+    return <div className="rounded-xl border border-line bg-surface p-6 text-sm text-ink-soft">未找到该主题。</div>;
   }
 
   return <TopicPlanContent goal={goal} />;

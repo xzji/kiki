@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { fetchTaskRunProgress } from "@/lib/api/taskRuns";
 import { fetchRuntimeStateSnapshot } from "@/lib/api/runtime-daemon";
@@ -200,7 +201,7 @@ export function ExecutionResultBody(props: {
   const dependencyViews = getTaskDependencyViews(goal, task);
   const resultBlock = shouldRenderConcreteDeliverable ? (
     <div>
-      <div className="mb-3 text-[13px] font-medium text-[#1F2328]">产出物</div>
+      <div className="mb-3 text-[13px] font-medium text-ink">产出物</div>
       <GenericAgentResultView
         summary={instance.result?.summary}
         finalMessage={instance.result?.finalMessage}
@@ -226,14 +227,14 @@ export function ExecutionResultBody(props: {
       <details className="group/process">
         <summary className="mb-4 flex cursor-pointer list-none items-center justify-between gap-3 marker:hidden select-none [&::-webkit-details-marker]:hidden">
           <div>
-            <div className="text-[15px] font-bold text-[#1F2328]">执行过程</div>
-            <div className="mt-0.5 text-[12px] text-[#8C9198]">
+            <div className="text-[15px] font-bold text-ink">执行过程</div>
+            <div className="mt-0.5 text-[12px] text-ink-faint">
               {agentRunPlan?.mode === "role_collaboration"
                 ? `${agentRunPlan.strategy} · 多 Agent 协同`
                 : "single_agent · KiKi"}
             </div>
           </div>
-          <span className="inline-block h-[8px] w-[8px] -rotate-45 border-r-2 border-b-2 border-[#8C9198] transition group-open/process:rotate-45" />
+          <span className="inline-block h-[8px] w-[8px] -rotate-45 border-r-2 border-b-2 border-ink-faint transition group-open/process:rotate-45" />
         </summary>
         <TaskExecutionTimeline
           steps={applyWaitingReasonToSteps(
@@ -251,16 +252,16 @@ export function ExecutionResultBody(props: {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 md:p-6">
-        <div className="mb-3 text-[13px] font-medium text-[#1F2328]">任务信息</div>
+      <div className="rounded-xl border border-line bg-white p-4 md:p-6">
+        <div className="mb-3 text-[13px] font-medium text-ink">任务信息</div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-[15px] font-semibold text-[#1F2328]">
+            <div className="text-[15px] font-semibold text-ink">
               {buildInstanceCardTitle(task, instance)}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-ink-faint">
               <span>{EXECUTION_KIND_LABEL[currentKind]}</span>
-              <span className="text-[#D0D7DE]">/</span>
+              <span className="text-line-strong">/</span>
               <span>{displayStatus}</span>
             </div>
           </div>
@@ -272,47 +273,47 @@ export function ExecutionResultBody(props: {
                   void runTaskExecutionAction(task.id, instance.status === "paused" ? "resume" : "rerun", {
                     instanceId: instance.id,
                   }).catch((error) => {
-                    window.alert(error instanceof Error ? error.message : "任务执行失败");
+                    toast.error(error instanceof Error ? error.message : "任务执行失败");
                   });
                 }}
-                className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+                className="rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
               >
                 {instance.status === "paused" ? "继续执行本次" : instance.status === "terminated" ? "重新执行" : "重试本次"}
               </button>
             ) : null}
           </div>
         </div>
-        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3 md:px-4">
-          <div className="text-[12px] text-[#8C9198]">预期产出</div>
-          <div className="mt-1 text-[13px] leading-6 text-[#1F2328]">{task.expectedOutcome}</div>
+        <div className="mt-4 rounded-xl border border-line bg-surface-hover px-3 py-3 md:px-4">
+          <div className="text-[12px] text-ink-faint">预期产出</div>
+          <div className="mt-1 text-[13px] leading-6 text-ink">{task.expectedOutcome}</div>
         </div>
         {dependencyViews.length ? (
-          <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3 md:px-4">
-            <div className="text-[12px] text-[#8C9198]">依赖任务</div>
+          <div className="mt-4 rounded-xl border border-line bg-surface-hover px-3 py-3 md:px-4">
+            <div className="text-[12px] text-ink-faint">依赖任务</div>
             <div className="mt-2 space-y-2">
               {dependencyViews.map((dependency) => (
                 <div key={dependency.id} className="space-y-1 text-[13px] leading-6">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-[#1F2328]">{dependency.displayTitle}</span>
-                    <span className="font-mono text-[11px] text-[#8C9198]">
+                    <span className="font-medium text-ink">{dependency.displayTitle}</span>
+                    <span className="font-mono text-[11px] text-ink-faint">
                       {dependency.missing ? `引用 ID：${dependency.taskId}` : `任务 ID：${dependency.taskId}`}
                     </span>
                     <span
                       className={
                         dependency.missing
-                          ? "rounded-md bg-[#FDECEC] px-2 py-0.5 text-[11px] text-[#B42318]"
+                          ? "rounded-md bg-danger-bg px-2 py-0.5 text-[11px] text-danger-hover"
                           : dependency.satisfied
-                            ? "rounded-md bg-[#E8F5E9] px-2 py-0.5 text-[11px] text-[#25663A]"
-                            : "rounded-md bg-[#F5F6F8] px-2 py-0.5 text-[11px] text-[#6B7280]"
+                            ? "rounded-md bg-success-bg px-2 py-0.5 text-[11px] text-success-strong"
+                            : "rounded-md bg-surface px-2 py-0.5 text-[11px] text-ink-soft"
                       }
                     >
                       {dependency.statusLabel}
                     </span>
                   </div>
-                  <div className="text-[12px] leading-5 text-[#6B7280]">
+                  <div className="text-[12px] leading-5 text-ink-soft">
                     需要信息：{dependency.expectedOutcome || "依赖任务本身不存在，无法读取预期产出。"}
                   </div>
-                  <div className={dependency.missing ? "text-[12px] leading-5 text-[#B42318]" : "text-[12px] leading-5 text-[#6B7280]"}>
+                  <div className={dependency.missing ? "text-[12px] leading-5 text-danger-hover" : "text-[12px] leading-5 text-ink-soft"}>
                     当前原因：{dependency.reason}
                   </div>
                 </div>
@@ -320,7 +321,7 @@ export function ExecutionResultBody(props: {
             </div>
           </div>
         ) : null}
-        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FB] px-3 py-3 text-[12px] text-[#6B7280] md:px-4">
+        <div className="mt-4 rounded-xl border border-line bg-surface-hover px-3 py-3 text-[12px] text-ink-soft md:px-4">
           {instance.execution?.lastUpdatedAt ? `最近更新：${new Date(instance.execution.lastUpdatedAt).toLocaleString("zh-CN")}` : "等待调度器同步执行状态"}
         </div>
       </div>

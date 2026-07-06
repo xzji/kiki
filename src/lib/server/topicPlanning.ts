@@ -1,45 +1,16 @@
 /**
- * topicPlanning — Thin wrapper around legacy goalPlanning.ts
+ * topicPlanning — Topic Init Saga entry point.
  *
- * Plan ref: §3.3.2 + §10.9 PR10.
+ * Plan ref: §3.3.2 + §10.9.
  *
- * Goal of this PR (PR10): introduce Topic-named entry point so that downstream
- * call sites can migrate from `goalPlanning` import to `topicPlanning` import
- * without behavior change. The actual Saga-based rewrite happens in PR11.
- *
- * Until PR11 lands:
- *  - `generateTopicPlanWithClaude` ≡ `generateGoalPlanWithClaude`
- *  - `generateTopicClarificationQuestionsWithClaude` ≡ `generateGoalClarificationQuestionsWithClaude`
- *  - `advanceTopicInfoCollectionWithClaude` ≡ `advanceGoalInfoCollectionWithClaude`
- *
- * After PR11, this module will host the new 5-role saga; legacy goalPlanning
- * will be reduced to a re-export shim until removed in a later PR.
- */
-
-export {
-  generateGoalPlanWithClaude as generateTopicPlanWithClaude,
-  generateGoalClarificationQuestionsWithClaude as generateTopicClarificationQuestionsWithClaude,
-  advanceGoalInfoCollectionWithClaude as advanceTopicInfoCollectionWithClaude,
-  getGoalPlanningCheckpointStatus as getTopicPlanningCheckpointStatus,
-  getGoalPlanningCheckpointForResume as getTopicPlanningCheckpointForResume,
-} from "./goalPlanning";
-
-export type {
-  GoalClarificationQuestions as TopicClarificationQuestions,
-  GoalInfoCollectionHistoryItem as TopicInfoCollectionHistoryItem,
-  GoalInfoCollectionTurnDecision as TopicInfoCollectionTurnDecision,
-  GoalPlanningCheckpointStatus as TopicPlanningCheckpointStatus,
-} from "./goalPlanning";
-
-/**
- * PR11 Saga entry point — re-export the default-wired Topic Init Saga runner so
- * that downstream PRs (PR12+, command service swap) can import a single Topic-
- * scoped path instead of reaching into goalPlanning/* internals.
+ * The legacy Goal planning command (`generateGoalPlanWithClaude` and its
+ * checkpoint helpers) has been removed; Topic planning now runs exclusively on
+ * the 5-role Saga. This module re-exports the default-wired Topic Init Saga
+ * runner so downstream call sites import a single Topic-scoped path instead of
+ * reaching into goalPlanning/* internals.
  *
  * `runTopicInitSagaWithDefaults` orchestrates createSagaInstance + 5 default
- * prompts + 5 default LlmInvokes (built on createClaudeJsonInvoke). The legacy
- * `generateTopicPlanWithClaude` thin wrapper above remains the active call site
- * during the migration window — see §11.3 PR11 / §12.1 in the implementation plan.
+ * prompts + 5 default LlmInvokes (built on createClaudeJsonInvoke).
  */
 export {
   runTopicInitSagaWithDefaults,

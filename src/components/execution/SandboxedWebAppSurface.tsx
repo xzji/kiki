@@ -194,22 +194,22 @@ export function SandboxedWebAppSurface({ artifact }: { artifact: ArtifactRef }) 
   }, [artifact.id, postToFrame, scheduleSave]);
 
   return (
-    <section className="rounded-xl border border-[#DDE7FF] bg-[#F8FBFF] p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+    <section className="rounded-xl border border-info-bg bg-info-bg p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[12px] font-medium text-[#0D47A1]">可执行小应用</div>
-          <h3 className="mt-1 text-[15px] font-semibold text-[#1F2328]">{artifact.label}</h3>
-          {artifact.summary ? <p className="mt-1 text-[13px] text-[#6B7280]">{artifact.summary}</p> : null}
+          <div className="text-[12px] font-medium text-info-strong">可执行小应用</div>
+          <h3 className="mt-1 text-[15px] font-semibold text-ink">{artifact.label}</h3>
+          {artifact.summary ? <p className="mt-1 text-[13px] text-ink-soft">{artifact.summary}</p> : null}
         </div>
         <div className="flex items-center gap-2 text-[12px]">
-          <span className={status === "failed" ? "text-[#B42318]" : "text-[#4B5563]"}>{statusText(status, savedAt)}</span>
+          <span className={status === "failed" ? "text-danger-hover" : "text-ink-strong"}>{statusText(status, savedAt)}</span>
           <button
             type="button"
             onClick={() => {
               setReloadKey((value) => value + 1);
               setError(null);
             }}
-            className="inline-flex items-center gap-1 rounded-lg border border-[#D0D7DE] bg-white px-2 py-1 text-[#1F2328] hover:bg-[#F6F8FA]"
+            className="inline-flex items-center gap-1 rounded-lg border border-line-strong bg-white px-2 py-1 text-ink hover:bg-surface-subtle"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             重载
@@ -221,12 +221,12 @@ export function SandboxedWebAppSurface({ artifact }: { artifact: ArtifactRef }) 
         ref={iframeRef}
         sandbox="allow-scripts"
         src={previewUrl}
-        className="w-full rounded-xl border border-[#D0D7DE] bg-white"
+        className="w-full rounded-xl border border-line-strong bg-white"
           style={{ height: isMobile ? `min(${height}px, 60dvh)` : height }}
         title={artifact.label}
         referrerPolicy="strict-origin-when-cross-origin"
       />
-      {error ? <div className="mt-2 rounded-lg bg-[#FEF3F2] px-3 py-2 text-[12px] text-[#B42318]">{error}</div> : null}
+      {error ? <div className="mt-2 rounded-lg bg-danger-bg px-3 py-2 text-[12px] text-danger-hover">{error}</div> : null}
     </section>
   );
 }

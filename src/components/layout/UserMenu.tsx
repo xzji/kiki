@@ -83,19 +83,19 @@ export function UserMenu({ placement = "desktop" }: { placement?: "desktop" | "m
             isMobileNav ? "right-0" : "left-0 md:w-40",
           )}
         >
-          <div className="mb-3 flex items-center gap-3 border-b border-[#EEF1F4] pb-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[#D0D7DE] bg-[#F3EEFF] text-sm font-medium text-[#111]">
+          <div className="mb-3 flex items-center gap-3 border-b border-surface-subtle pb-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong bg-brand-bg text-sm font-medium text-[#111]">
               {initial}
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-[#111]">{displayName}</div>
-              <div className="truncate text-[11px] text-[#6B7280]">{email}</div>
+              <div className="truncate text-[11px] text-ink-soft">{email}</div>
             </div>
           </div>
           <div className="space-y-1">
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-[#374151] hover:bg-[#F5F6F8]"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-ink-strong hover:bg-surface"
               onClick={() => {
                 setOpen(false);
                 setSettingsTab("account");
@@ -107,7 +107,7 @@ export function UserMenu({ placement = "desktop" }: { placement?: "desktop" | "m
             </button>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-[#374151] hover:bg-[#F5F6F8]"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-ink-strong hover:bg-surface"
               onClick={() => void handleLogout()}
             >
               <LogOut className="h-4 w-4" />
@@ -121,14 +121,14 @@ export function UserMenu({ placement = "desktop" }: { placement?: "desktop" | "m
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
           isMobileNav
-            ? "relative flex min-h-11 w-full flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium text-[#475467] active:bg-[#F5F6F8]"
-            : "flex h-7 w-7 items-center justify-center rounded-full border border-[#534f69]/25 bg-[#E9E6FF] text-xs text-[#5F5AA2]",
+            ? "relative flex min-h-11 w-full flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium text-ink-strong active:bg-surface"
+            : "flex h-7 w-7 items-center justify-center rounded-full border border-brand-soft/25 bg-brand-surface text-xs text-brand-soft",
         )}
         aria-label="打开用户菜单"
       >
         {isMobileNav ? (
           <>
-            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#D0D7DE] bg-[#E9E6FF] text-[9px] leading-none text-[#5F5AA2]">
+            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-line-strong bg-brand-surface text-[9px] leading-none text-brand-soft">
               {initial}
             </span>
             <span>我的</span>

@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { TaskAgentPromptDrawer } from "@/components/topic/TaskAgentPromptDrawer";
 import { TaskEditDrawer } from "@/components/topic/TaskEditDrawer";
@@ -324,14 +325,14 @@ export function TaskDetailBody({
 
   return (
     <div>
-      <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-[#1F2328]">{cleanTitle}</h2>
+      <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{cleanTitle}</h2>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+        <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink-faint">
           <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium", taskStatusClassName(taskState))}>
             {pendingTaskDelete ? "删除中" : pendingTaskUpdate ? "保存中" : statusLabel}
           </span>
           <span>{EXECUTION_LABEL[normalizeTaskResultViewKind(task.resultViewKind ?? task.executionKind)]}</span>
-          <span className="text-[#D0D7DE]">/</span>
+          <span className="text-line-strong">/</span>
           <span>{task.triggerRule}</span>
         </div>
         <div className="relative ml-auto flex items-center justify-end gap-1">
@@ -340,10 +341,10 @@ export function TaskDetailBody({
               type="button"
               onClick={() => {
                 void runTaskExecutionAction(task.id, executionAction.action).catch((error) => {
-                  window.alert(error instanceof Error ? error.message : "任务执行失败");
+                  toast.error(error instanceof Error ? error.message : "任务执行失败");
                 });
               }}
-              className="rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
+              className="rounded-md border border-line-strong bg-white px-2 py-1 text-[12px] text-ink hover:border-[#111]"
             >
               {executionAction.label}
             </button>
@@ -351,13 +352,13 @@ export function TaskDetailBody({
           <button
             type="button"
             onClick={() => setMetaOpen((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-md border border-[#D0D7DE] bg-white px-2 py-1 text-[12px] text-[#1F2328] hover:border-[#111]"
+            className="inline-flex items-center gap-1 rounded-md border border-line-strong bg-white px-2 py-1 text-[12px] text-ink hover:border-[#111]"
           >
             详细信息
             {metaOpen ? (
-              <ChevronDown className="h-3.5 w-3.5 text-[#6B7280]" />
+              <ChevronDown className="h-3.5 w-3.5 text-ink-soft" />
             ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-[#6B7280]" />
+              <ChevronRight className="h-3.5 w-3.5 text-ink-soft" />
             )}
           </button>
           {!isPendingChange ? (
@@ -365,20 +366,20 @@ export function TaskDetailBody({
             type="button"
             aria-label="更多任务操作"
             onClick={() => setMenuOpen((prev) => !prev)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#D0D7DE] bg-white text-[#6B7280] hover:border-[#111] hover:text-[#1F2328]"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-line-strong bg-white text-ink-soft hover:border-[#111] hover:text-ink"
           >
             <Ellipsis className="h-4 w-4" />
           </button>
           ) : null}
           {menuOpen ? (
-            <div className="absolute right-0 top-8 z-20 w-28 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 text-[12px] text-[#1F2328]">
+            <div className="absolute right-0 top-8 z-20 w-28 overflow-hidden rounded-lg border border-line bg-white py-1 text-[12px] text-ink">
               <button
                 type="button"
                 onClick={() => {
                   setEditOpen(true);
                   setMenuOpen(false);
                 }}
-                className="block w-full px-3 py-2 text-left hover:bg-[#F8F9FB]"
+                className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
               >
                 编辑
               </button>
@@ -408,10 +409,10 @@ export function TaskDetailBody({
                     })
                     .catch((error) => {
                       removePendingTaskDelete(overlayId);
-                      window.alert(error instanceof Error ? error.message : "任务删除失败");
+                      toast.error(error instanceof Error ? error.message : "任务删除失败");
                     });
                 }}
-                className="block w-full px-3 py-2 text-left text-[#D1242F] hover:bg-[#F8F9FB]"
+                className="block w-full px-3 py-2 text-left text-danger hover:bg-surface-hover"
               >
                 删除
               </button>
@@ -422,7 +423,7 @@ export function TaskDetailBody({
 
       <section>
         {metaOpen ? (
-          <div className="mt-5 border-t border-[#E5E7EB] pt-4">
+          <div className="mt-5 border-t border-line pt-4">
             <div className="grid grid-cols-[88px_1fr] gap-x-4 gap-y-3 text-[13px]">
               <MetaLabel>任务类型</MetaLabel>
               <MetaValue>{TASK_TYPE_LABEL[task.taskType]}</MetaValue>
@@ -448,26 +449,26 @@ export function TaskDetailBody({
                         <div key={dependency.id} className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span>{dependency.displayTitle}</span>
-                            <span className="font-mono text-[11px] text-[#8C9198]">
+                            <span className="font-mono text-[11px] text-ink-faint">
                               {dependency.missing ? `引用 ID：${dependency.taskId}` : `任务 ID：${dependency.taskId}`}
                             </span>
                             <span
                               className={cn(
                                 "rounded-md px-2 py-0.5 text-[11px]",
                                 dependency.missing
-                                  ? "bg-[#FDECEC] text-[#B42318]"
+                                  ? "bg-danger-bg text-danger-hover"
                                   : dependency.satisfied
-                                    ? "bg-[#E8F5E9] text-[#25663A]"
-                                    : "bg-[#F5F6F8] text-[#6B7280]",
+                                    ? "bg-success-bg text-success-strong"
+                                    : "bg-surface text-ink-soft",
                               )}
                             >
                               {dependency.statusLabel}
                             </span>
                           </div>
-                          <div className="text-[12px] leading-5 text-[#6B7280]">
+                          <div className="text-[12px] leading-5 text-ink-soft">
                             需要信息：{dependency.expectedOutcome || "依赖任务本身不存在，无法读取预期产出。"}
                           </div>
-                          <div className={cn("text-[12px] leading-5", dependency.missing ? "text-[#B42318]" : "text-[#6B7280]")}>
+                          <div className={cn("text-[12px] leading-5", dependency.missing ? "text-danger-hover" : "text-ink-soft")}>
                             当前原因：{dependency.reason}
                           </div>
                         </div>
@@ -486,20 +487,20 @@ export function TaskDetailBody({
             </div>
 
             {task.description ? (
-              <div className="mt-4 border-t border-[#E5E7EB] pt-4">
+              <div className="mt-4 border-t border-line pt-4">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-[12px] text-[#8C9198]">任务内容</div>
+                  <div className="text-[12px] text-ink-faint">任务内容</div>
                   {promptContext ? (
                     <button
                       type="button"
                       onClick={() => setPromptDrawerOpen(true)}
-                      className="text-[12px] text-[#3B82F6] hover:underline"
+                      className="text-[12px] text-info hover:underline"
                     >
                       📄 Agent 完整任务内容（md）
                     </button>
                   ) : null}
                 </div>
-                <p className="whitespace-pre-wrap text-[13px] leading-6 text-[#1F2328]">{task.description}</p>
+                <p className="whitespace-pre-wrap text-[13px] leading-6 text-ink">{task.description}</p>
               </div>
             ) : null}
           </div>
@@ -566,9 +567,9 @@ export function TaskDetailBody({
 
 function TaskExecutionEmptyState() {
   return (
-    <div className="rounded-xl border border-dashed border-[#D0D7DE] bg-[#FAFAFB] px-4 py-8 text-center">
-      <div className="text-[14px] font-medium text-[#1F2328]">暂无任务执行记录</div>
-      <div className="mt-1 text-[12px] text-[#8C9198]">任务开始执行后，会在这里展示执行状态和结果。</div>
+    <div className="rounded-xl border border-dashed border-line-strong bg-surface-subtle px-4 py-8 text-center">
+      <div className="text-[14px] font-medium text-ink">暂无任务执行记录</div>
+      <div className="mt-1 text-[12px] text-ink-faint">任务开始执行后，会在这里展示执行状态和结果。</div>
     </div>
   );
 }
@@ -606,13 +607,13 @@ function InstanceSection({
         )}
       >
         <div>
-          <h3 className="text-[14px] font-medium text-[#1F2328]">
+          <h3 className="text-[14px] font-medium text-ink">
             {title}
-            <span className="ml-2 text-[12px] text-[#8C9198]">({instances.length})</span>
+            <span className="ml-2 text-[12px] text-ink-faint">({instances.length})</span>
           </h3>
-          <div className="mt-1 text-[12px] text-[#8C9198]">{description}</div>
+          <div className="mt-1 text-[12px] text-ink-faint">{description}</div>
         </div>
-        <span className="mt-0.5 text-[#8C9198]">
+        <span className="mt-0.5 text-ink-faint">
           {open && hasInstances ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </span>
       </button>
@@ -707,16 +708,16 @@ function InstanceCard({
   }, [hasFinalResult, instance.id]);
 
   return (
-    <div className="overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white">
+    <div className="overflow-hidden rounded-[16px] border border-line bg-white">
       <button
         type="button"
         onClick={showOuterToggle ? onToggle : undefined}
         disabled={!canExpand}
-        className={cn("w-full px-4 py-4 text-left", showOuterToggle && "transition-colors hover:bg-[#FCFCFD]")}
+        className={cn("w-full px-4 py-4 text-left", showOuterToggle && "transition-colors hover:bg-surface-subtle")}
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2 text-[12px] text-[#8C9198]">
+            <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink-faint">
               <span>{instance.dateLabel}</span>
               <span className={cn("rounded-md px-2 py-0.5 text-[11px]", instanceStatusClassName(instance.status))}>
                 {instanceStatusLabel(instance)}
@@ -725,10 +726,10 @@ function InstanceCard({
                 <span>最近更新 {new Date(instance.execution.lastUpdatedAt).toLocaleString("zh-CN")}</span>
               ) : null}
             </div>
-            <p className="mt-2 text-[14px] leading-6 text-[#1F2328]">{instance.intro}</p>
+            <p className="mt-2 text-[14px] leading-6 text-ink">{instance.intro}</p>
           </div>
           {canRetry || showOuterToggle ? (
-            <div className="flex shrink-0 items-center gap-2 text-[12px] text-[#6B7280]">
+            <div className="flex shrink-0 items-center gap-2 text-[12px] text-ink-soft">
               {canRetry ? (
                 <button
                   type="button"
@@ -737,10 +738,10 @@ function InstanceCard({
                     void runTaskExecutionAction(task.id, "rerun", {
                       instanceId: instance.id,
                     }).catch((error) => {
-                      window.alert(error instanceof Error ? error.message : "任务执行失败");
+                      toast.error(error instanceof Error ? error.message : "任务执行失败");
                     });
                   }}
-                  className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+                  className="rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
                 >
                   重试本次
                 </button>
@@ -753,10 +754,10 @@ function InstanceCard({
                     void runTaskExecutionAction(task.id, "pause", {
                       instanceId: instance.id,
                     }).catch((error) => {
-                      window.alert(error instanceof Error ? error.message : "任务停止失败");
+                      toast.error(error instanceof Error ? error.message : "任务停止失败");
                     });
                   }}
-                  className="rounded-md border border-[#FECACA] bg-white px-3 py-1.5 text-[12px] text-[#B42318] hover:border-[#B42318]"
+                  className="rounded-md border border-danger-border bg-white px-3 py-1.5 text-[12px] text-danger-hover hover:border-danger-hover"
                 >
                   暂停
                 </button>
@@ -773,7 +774,7 @@ function InstanceCard({
       </button>
 
       {detailOpen ? (
-        <div className="border-t border-[#E5E7EB] bg-[#FAFAFB] px-4 py-4">
+        <div className="border-t border-line bg-surface-subtle px-4 py-4">
           <div className="space-y-4">
             {instance.status === "paused" ? (
               <div className="flex justify-end">
@@ -783,10 +784,10 @@ function InstanceCard({
                     void runTaskExecutionAction(task.id, "resume", {
                       instanceId: instance.id,
                     }).catch((error) => {
-                      window.alert(error instanceof Error ? error.message : "任务执行失败");
+                      toast.error(error instanceof Error ? error.message : "任务执行失败");
                     });
                   }}
-                  className="rounded-md border border-[#D0D7DE] bg-white px-3 py-1.5 text-[12px] text-[#1F2328] hover:border-[#111]"
+                  className="rounded-md border border-line-strong bg-white px-3 py-1.5 text-[12px] text-ink hover:border-[#111]"
                 >
                   继续执行本次
                 </button>
@@ -866,13 +867,13 @@ function InstanceDetailSection({
         className="flex w-full items-start justify-between gap-3 text-left"
       >
         <span className="min-w-0">
-          <span className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-[#1F2328]">
+          <span className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-ink">
             {title}
-            {meta ? <span className="text-[12px] font-normal text-[#8C9198]">{meta}</span> : null}
+            {meta ? <span className="text-[12px] font-normal text-ink-faint">{meta}</span> : null}
           </span>
-          <span className="mt-0.5 block text-[12px] text-[#8C9198]">{description}</span>
+          <span className="mt-0.5 block text-[12px] text-ink-faint">{description}</span>
         </span>
-        <span className="mt-0.5 shrink-0 text-[#8C9198]">
+        <span className="mt-0.5 shrink-0 text-ink-faint">
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </span>
       </button>
@@ -908,15 +909,15 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
-        <div className="text-[12px] text-[#8C9198]">{failed ? "失败原因" : "结果内容"}</div>
-        <div className={cn("mt-2 whitespace-pre-wrap text-[14px] leading-7", failed ? "text-[#B42318]" : "text-[#1F2328]")}>
+      <div className="rounded-xl border border-line bg-white p-4">
+        <div className="text-[12px] text-ink-faint">{failed ? "失败原因" : "结果内容"}</div>
+        <div className={cn("mt-2 whitespace-pre-wrap text-[14px] leading-7", failed ? "text-danger-hover" : "text-ink")}>
           {resultLine || "该任务暂未产出最终结果。"}
         </div>
         {resultSummary ? (
-          <div className="mt-4 border-t border-[#EEF1F4] pt-4">
-            <div className="text-[12px] text-[#8C9198]">结果摘要</div>
-            <div className="mt-2 whitespace-pre-wrap text-[14px] leading-7 text-[#1F2328]">
+          <div className="mt-4 border-t border-surface-subtle pt-4">
+            <div className="text-[12px] text-ink-faint">结果摘要</div>
+            <div className="mt-2 whitespace-pre-wrap text-[14px] leading-7 text-ink">
               {resultSummary}
             </div>
           </div>
@@ -935,20 +936,20 @@ function InstanceResultPanel({ task, instance }: { task: Task; instance: TaskIns
         />
       ) : null}
       {structuredOutput ? (
-        <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
+        <div className="rounded-xl border border-line bg-white p-4">
           <button
             type="button"
             onClick={() => setStructuredOutputOpen((open) => !open)}
             aria-expanded={structuredOutputOpen}
             className="flex w-full items-center justify-between gap-3 text-left"
           >
-            <span className="text-[12px] text-[#8C9198]">结构化输出</span>
-            <span className="shrink-0 text-[#8C9198]">
+            <span className="text-[12px] text-ink-faint">结构化输出</span>
+            <span className="shrink-0 text-ink-faint">
               {structuredOutputOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </span>
           </button>
           {structuredOutputOpen ? (
-            <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-[#F8F9FB] p-3 text-[12px] leading-6 text-[#374151]">
+            <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-surface-hover p-3 text-[12px] leading-6 text-ink-strong">
               {JSON.stringify(structuredOutput, null, 2)}
             </pre>
           ) : null}
@@ -965,11 +966,11 @@ function PayloadSummaryCard({ lines }: { lines: string[] }) {
   if (lines.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
-      <div className="text-[12px] text-[#8C9198]">更多结果</div>
+    <div className="rounded-xl border border-line bg-white p-4">
+      <div className="text-[12px] text-ink-faint">更多结果</div>
       <div className="mt-2 space-y-2">
         {lines.map((line, index) => (
-          <div key={`payload-line-${index}`} className="rounded-lg bg-[#F8F9FB] px-3 py-2 text-[13px] leading-6 text-[#1F2328]">
+          <div key={`payload-line-${index}`} className="rounded-lg bg-surface-hover px-3 py-2 text-[13px] leading-6 text-ink">
             {line}
           </div>
         ))}
@@ -1010,11 +1011,11 @@ function getInstanceResultLine(task: Task, instance: TaskInstance) {
 }
 
 function MetaLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-[12px] leading-6 text-[#8C9198]">{children}</div>;
+  return <div className="text-[12px] leading-6 text-ink-faint">{children}</div>;
 }
 
 function MetaValue({ children }: { children: React.ReactNode }) {
-  return <div className="text-[13px] leading-6 text-[#1F2328]">{children}</div>;
+  return <div className="text-[13px] leading-6 text-ink">{children}</div>;
 }
 
 function getTaskDisplayState(task: Task) {
@@ -1043,22 +1044,22 @@ function getExecutionAction(task: Task, taskState: ReturnType<typeof getTaskDisp
 }
 
 function taskStatusClassName(state: ReturnType<typeof getTaskDisplayState>) {
-  if (state === "completed") return "bg-[#E5E7EB] text-[#6B7280]";
-  if (state === "awaiting_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
-  if (state === "in_progress") return "bg-[#DDE1E7] text-[#1F2328]";
-  if (state === "error") return "bg-[#FDECEC] text-[#B42318]";
-  if (state === "paused") return "bg-[#E5E7EB] text-[#6B7280]";
-  return "bg-[#F5F6F8] text-[#8C9198]";
+  if (state === "completed") return "bg-line text-ink-soft";
+  if (state === "awaiting_user") return "bg-warning-bg text-warning-strong";
+  if (state === "in_progress") return "bg-line text-ink";
+  if (state === "error") return "bg-danger-bg text-danger-hover";
+  if (state === "paused") return "bg-line text-ink-soft";
+  return "bg-surface text-ink-faint";
 }
 
 function instanceStatusClassName(status: Task["instances"][number]["status"]) {
-  if (status === "completed") return "bg-[#E8F5E9] text-[#25663A]";
-  if (status === "in_progress") return "bg-[#DDE1E7] text-[#1F2328]";
-  if (status === "awaiting_user") return "bg-[#FFF3CD] text-[#8A6D3B]";
-  if (status === "error") return "bg-[#FDECEC] text-[#B42318]";
-  if (status === "paused") return "bg-[#E5E7EB] text-[#6B7280]";
-  if (status === "terminated") return "bg-[#EEF2FF] text-[#4F46E5]";
-  return "bg-[#F5F6F8] text-[#8C9198]";
+  if (status === "completed") return "bg-success-bg text-success-strong";
+  if (status === "in_progress") return "bg-line text-ink";
+  if (status === "awaiting_user") return "bg-warning-bg text-warning-strong";
+  if (status === "error") return "bg-danger-bg text-danger-hover";
+  if (status === "paused") return "bg-line text-ink-soft";
+  if (status === "terminated") return "bg-brand-bg text-brand";
+  return "bg-surface text-ink-faint";
 }
 
 function instanceStatusLabel(instance: Task["instances"][number]) {

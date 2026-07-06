@@ -4,6 +4,7 @@ import { Calendar, CircleDot, ListTodo, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { ChatHistoryView } from "@/components/topic/ChatHistoryView";
 import { DigestTopicView } from "@/components/topic/DigestTopicView";
@@ -99,13 +100,13 @@ export function TopicPlanBreadcrumb({
   );
 
   const goalPlanNode = taskTitle && onGoalPlanClick ? (
-    <button type="button" onClick={onGoalPlanClick} className="font-medium text-[#1F2328] hover:text-[#111]">
+    <button type="button" onClick={onGoalPlanClick} className="font-medium text-ink hover:text-[#111]">
       主题规划
     </button>
   ) : disableLinks ? (
-    <span className="font-medium text-[#1F2328]">主题规划</span>
+    <span className="font-medium text-ink">主题规划</span>
   ) : (
-    <Link href={topicDetailPath(goalId)} className="font-medium text-[#1F2328] hover:text-[#111]">
+    <Link href={topicDetailPath(goalId)} className="font-medium text-ink hover:text-[#111]">
       主题规划
     </Link>
   );
@@ -113,7 +114,7 @@ export function TopicPlanBreadcrumb({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-end gap-1 text-right text-xs text-[#1F2328]",
+        "flex flex-wrap items-center justify-end gap-1 text-right text-xs text-ink",
         className,
       )}
     >
@@ -316,11 +317,11 @@ export function TopicPlanContent({
     if (!normalizedFeedback || revisionSubmitting) return;
     const runtimeEnv = getActiveRuntimeEnv();
     if (!runtimeEnv || runtimeEnv.type !== "local") {
-      window.alert("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
+      toast.warning("当前没有可用的本地 Runtime，请先到设置 -> 运行环境完成连接。");
       return;
     }
     if (!SUPPORTED_RUNTIME_KINDS.includes(runtimeEnv.runtimeKind || "claude")) {
-      window.alert("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI、Pi CLI、Cursor CLI 或 Codex CLI。");
+      toast.warning("当前目标规划暂不支持这个 Runtime。请在运行环境中切换到 Claude CLI、Pi CLI、Cursor CLI 或 Codex CLI。");
       return;
     }
     const overlayId = createOpaqueId("idem");
@@ -356,7 +357,7 @@ export function TopicPlanContent({
       });
       if (result.kind === "awaiting_user") {
         const questions = result.questions.map((question, index) => `${index + 1}. ${question}`).join("\n");
-        window.alert(questions ? `Saga 需要补充信息：\n\n${questions}` : "Saga 需要补充信息后才能继续。");
+        toast.info("Saga 需要补充信息后才能继续。", questions ? { description: questions } : undefined);
         return;
       }
       await replaceGoalDraftInStores({
@@ -369,7 +370,7 @@ export function TopicPlanContent({
     } catch (error) {
       const message = error instanceof Error ? error.message : "规划重新生成失败";
       setRevisionError(message);
-      window.alert(message);
+      toast.error(message);
     } finally {
       removePendingGoalWorkflow(overlayId);
       setRevisionSubmitting(false);
@@ -385,10 +386,10 @@ export function TopicPlanContent({
       <section className="mb-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[24px] font-semibold tracking-[-0.02em] text-[#1F2328] sm:text-[28px]">
+            <h1 className="text-[24px] font-semibold tracking-[-0.02em] text-ink sm:text-[28px]">
               {goal.title}
             </h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-[#6B7280]">
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink-soft">
               <ReviewCyclePopover
                 kind="topic"
                 entityId={goal.id}
@@ -410,19 +411,19 @@ export function TopicPlanContent({
               </span>
             </div>
             {goal.deadline ? (
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-[#6B7280]">
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink-soft">
                 <span className="inline-flex items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5" />
                   截止 {formatDateInput(goal.deadline)}
                 </span>
-                <span className="rounded-md bg-[#E9EEF5] px-2.5 py-1 text-xs font-medium text-[#1F2328]">
+                <span className="rounded-md bg-surface-subtle px-2.5 py-1 text-xs font-medium text-ink">
                   剩余 {summary.daysLeft} 天
                 </span>
               </div>
             ) : null}
           </div>
 
-          <div className="grid min-w-0 grid-cols-2 gap-2 border-t border-[#E5E7EB] pt-5 sm:grid-cols-4 lg:min-w-[360px] lg:gap-3 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+          <div className="grid min-w-0 grid-cols-2 gap-2 border-t border-line pt-5 sm:grid-cols-4 lg:min-w-[360px] lg:gap-3 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
             <SummaryStat label="已结束" value={summary.completedCount} />
             <SummaryStat label="待确认" value={summary.awaitingCount} />
             <SummaryStat label="进行中" value={summary.inProgressCount} />
@@ -430,24 +431,24 @@ export function TopicPlanContent({
           </div>
         </div>
         {displayWorkflow || showWorkflowProgress ? (
-          <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3">
+          <div className="mt-5 rounded-2xl border border-line bg-surface-subtle px-4 py-3">
             {displayWorkflow ? (
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <div className="text-[12px] text-[#6B7280]">主题工作流</div>
-                  <div className="mt-1 text-sm font-medium text-[#1F2328]">
+                  <div className="text-[12px] text-ink-soft">主题工作流</div>
+                  <div className="mt-1 text-sm font-medium text-ink">
                     {phaseLabel(displayWorkflow.phase)}
                   </div>
                   {pendingGoalWorkflow || revisionSubmitting ? (
-                    <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">
+                    <div className="mt-1 text-[12px] leading-5 text-ink-faint">
                       {revisionSubmitting ? "重新生成规划中..." : "保存中..."}
                     </div>
                   ) : null}
                   {displayWorkflow.error ? (
-                    <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{displayWorkflow.error}</div>
+                    <div className="mt-1 text-[12px] leading-5 text-danger-hover">{displayWorkflow.error}</div>
                   ) : null}
                   {revisionError ? (
-                    <div className="mt-1 text-[12px] leading-5 text-[#B42318]">{revisionError}</div>
+                    <div className="mt-1 text-[12px] leading-5 text-danger-hover">{revisionError}</div>
                   ) : null}
                 </div>
                 {canRevisePlan ? (
@@ -463,7 +464,7 @@ export function TopicPlanContent({
                         void runRevisionPlan(feedback);
                       }}
                       disabled={revisionSubmitting}
-                      className="rounded-lg border border-[#D0D7DE] bg-white px-3 py-2 text-[12px] font-medium text-[#1F2328] hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg border border-line-strong bg-white px-3 py-2 text-[12px] font-medium text-ink hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {revisionSubmitting ? "重新生成中..." : isRevisionStuck ? "重新生成规划" : "继续调整"}
                     </button>
@@ -491,7 +492,7 @@ export function TopicPlanContent({
                             removePendingGoalWorkflow(overlayId);
                           }).catch((error) => {
                             removePendingGoalWorkflow(overlayId);
-                            window.alert(error instanceof Error ? error.message : "规划确认失败");
+                            toast.error(error instanceof Error ? error.message : "规划确认失败");
                           });
                         }}
                         disabled={revisionSubmitting}
@@ -505,8 +506,8 @@ export function TopicPlanContent({
               </div>
             ) : (
               <div>
-                <div className="text-[12px] text-[#6B7280]">主题工作流</div>
-                <div className="mt-1 text-sm font-medium text-[#1F2328]">执行进展</div>
+                <div className="text-[12px] text-ink-soft">主题工作流</div>
+                <div className="mt-1 text-sm font-medium text-ink">执行进展</div>
               </div>
             )}
             {showWorkflowProgress ? <WorkflowProgressPanel progress={workflowProgress} /> : null}
@@ -532,7 +533,7 @@ export function TopicPlanContent({
         <button
           type="button"
           onClick={() => setSubGoalDrawerOpen(true)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-[18px] border border-dashed border-[#D4D7DD] bg-transparent px-6 py-5 text-sm text-[#6B7280] hover:border-[#1F2328] hover:text-[#1F2328]"
+          className="flex w-full items-center justify-center gap-1.5 rounded-[18px] border border-dashed border-line bg-transparent px-6 py-5 text-sm text-ink-soft hover:border-ink hover:text-ink"
         >
           <Plus className="h-4 w-4" />
           添加线程
@@ -639,12 +640,12 @@ function SummaryStat({
     <div className="text-center">
       <div
         className={`text-[24px] font-semibold tracking-[-0.03em] ${
-          muted ? "text-[#9AA0A6]" : "text-[#1F2328]"
+          muted ? "text-ink-faint" : "text-ink"
         }`}
       >
         {value}
       </div>
-      <div className="mt-1 text-[11px] tracking-[0.08em] text-[#8C9198]">{label}</div>
+      <div className="mt-1 text-[11px] tracking-[0.08em] text-ink-faint">{label}</div>
     </div>
   );
 }
@@ -819,10 +820,10 @@ function WorkflowProgressPanel({ progress }: { progress: WorkflowProgress }) {
   const hiddenUpcomingCount = Math.max(0, progress.upcomingTasks.length - visibleUpcoming.length);
 
   return (
-    <div className="mt-4 border-t border-[#E5E7EB] pt-4">
+    <div className="mt-4 border-t border-line pt-4">
       {progress.attentionTasks.length > 0 ? (
-        <div className="rounded-xl border border-[#F2C7C3] bg-[#FFF7F6] px-3 py-2">
-          <div className="mb-2 text-[12px] font-medium text-[#B42318]">需关注</div>
+        <div className="rounded-xl border border-danger-bg bg-danger-bg px-3 py-2">
+          <div className="mb-2 text-[12px] font-medium text-danger-hover">需关注</div>
           <div className="space-y-2">
             {progress.attentionTasks.map((item) => (
               <WorkflowTaskLine key={item.taskId} item={item} tone="error" />
@@ -865,16 +866,16 @@ function WorkflowTaskGroup({
 }) {
   return (
     <div>
-      <div className="mb-2 text-[12px] font-medium text-[#6B7280]">{title}</div>
+      <div className="mb-2 text-[12px] font-medium text-ink-soft">{title}</div>
       {items.length > 0 ? (
         <div className="space-y-2">
           {items.map((item) => (
             <WorkflowTaskLine key={item.taskId} item={item} tone={tone} />
           ))}
-          {footer ? <div className="text-[12px] leading-5 text-[#8C9198]">{footer}</div> : null}
+          {footer ? <div className="text-[12px] leading-5 text-ink-faint">{footer}</div> : null}
         </div>
       ) : (
-        <div className="rounded-xl border border-dashed border-[#D4D7DD] px-3 py-3 text-[12px] text-[#8C9198]">
+        <div className="rounded-xl border border-dashed border-line px-3 py-3 text-[12px] text-ink-faint">
           {emptyText}
         </div>
       )}
@@ -895,34 +896,34 @@ function WorkflowTaskLine({
         <span
           className={cn(
             "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-            tone === "error" ? "bg-[#B42318]" : tone === "active" ? "bg-[#1F2328]" : "bg-[#D0D7DE]",
+            tone === "error" ? "bg-danger-hover" : tone === "active" ? "bg-ink" : "bg-line-strong",
           )}
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-[13px] font-medium text-[#1F2328]">{item.title}</span>
+            <span className="truncate text-[13px] font-medium text-ink">{item.title}</span>
             <span
               className={cn(
                 "rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                 tone === "error"
-                  ? "bg-[#FDECEC] text-[#B42318]"
+                  ? "bg-danger-bg text-danger-hover"
                   : tone === "active"
-                    ? "bg-[#DDE1E7] text-[#1F2328]"
-                    : "bg-[#F5F6F8] text-[#8C9198]",
+                    ? "bg-line text-ink"
+                    : "bg-surface text-ink-faint",
               )}
             >
               {item.statusLabel}
             </span>
             {tone === "pending" && item.scheduledStartLabel ? (
-              <span className="text-[11px] font-medium text-[#6B7280]">{item.scheduledStartLabel}</span>
+              <span className="text-[11px] font-medium text-ink-soft">{item.scheduledStartLabel}</span>
             ) : null}
             {item.blockedByUpstream ? (
-              <span className="rounded-md bg-[#FFF3CD] px-1.5 py-0.5 text-[11px] font-medium text-[#8A6D3B]">
+              <span className="rounded-md bg-warning-bg px-1.5 py-0.5 text-[11px] font-medium text-warning-strong">
                 等待上游
               </span>
             ) : null}
           </div>
-          <div className="mt-1 text-[12px] leading-5 text-[#8C9198]">
+          <div className="mt-1 text-[12px] leading-5 text-ink-faint">
             {item.threadTitle}
             {item.phaseText ? ` · ${item.phaseText}` : ""}
           </div>

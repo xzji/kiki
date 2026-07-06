@@ -1,25 +1,22 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-import { getGoalPlanningCheckpointStatus } from "@/lib/server/goalPlanning";
 import { withAuth } from "@/lib/server/http/withAuth";
+import { withDeprecatedApiHeaders } from "@/lib/server/http/deprecation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function GETHandler(request: NextRequest) {
-  const conversationId = request.nextUrl.searchParams.get("conversationId")?.trim();
-  if (!conversationId) {
-    return NextResponse.json({ available: false, reason: "conversationId 不能为空" }, { status: 400 });
-  }
-
-  const checkpoint = getGoalPlanningCheckpointStatus(conversationId);
-  if (!checkpoint.available) {
-    return NextResponse.json({
-      available: false,
-      checkpoint: checkpoint.discarded ? checkpoint : undefined,
-    });
-  }
-  return NextResponse.json({ available: true, checkpoint });
+// Tombstone: the legacy Goal planning checkpoint has been removed. Planning now
+// runs exclusively on the Topic Init Saga (`/api/topics/plan`), which manages
+// its own saga-instance resume.
+async function GoneHandler() {
+  return withDeprecatedApiHeaders(
+    NextResponse.json(
+      { available: false, reason: "Goal 规划命令已下线，请使用 /topic（POST /api/topics/plan）。" },
+      { status: 410 },
+    ),
+    "/api/topics/plan",
+  );
 }
 
-export const GET = withAuth(GETHandler);
+export const GET = withAuth(GoneHandler);

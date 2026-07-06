@@ -5,6 +5,57 @@
 :root {
   --background: #f5f6f8;
   --foreground: #1f2328;
+
+  /* Text */
+  --color-text-primary: #1f2328;
+  --color-text-secondary: #6b7280;
+  --color-text-tertiary: #8c9198;
+  --color-text-strong: #1f2933;
+
+  /* Border */
+  --color-border-default: #e5e7eb;
+  --color-border-strong: #d0d7de;
+  --color-border-muted: #d8dde4;
+
+  /* Surface */
+  --color-surface-base: #f5f6f8;
+  --color-surface-hover: #f8f9fb;
+  --color-surface-subtle: #fafafb;
+
+  /* Brand */
+  --color-brand: #5b3dbe;
+  --color-brand-soft: #5f5aa2;
+  --color-brand-surface: #e9e6ff;
+  --color-brand-bg: #f3eeff;
+  --color-brand-border: #d6ccff;
+
+  /* Danger */
+  --color-danger: #d1242f;
+  --color-danger-hover: #b42318;
+  --color-danger-strong: #991b1b;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+
+  /* Success */
+  --color-success: #067647;
+  --color-success-strong: #166534;
+  --color-success-bg: #ecfdf3;
+  --color-success-border: #d1fadf;
+
+  /* Warning */
+  --color-warning: #f59e0b;
+  --color-warning-strong: #92400e;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+
+  /* Info */
+  --color-info: #3b82f6;
+  --color-info-strong: #175cd3;
+  --color-info-bg: #eef4ff;
+  --color-info-border: #93c5fd;
+
+  /* Badge */
+  --color-badge: #e5484d;
 }
 
 html,
@@ -31,9 +82,9 @@ body {
 }
 
 .input {
-  @apply w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111];
+  @apply w-full rounded-lg border border-line px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111];
 }
 
 .textarea {
-  @apply min-h-24 w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111];
+  @apply min-h-24 w-full rounded-lg border border-line px-3 py-2 text-sm text-[#111] outline-none transition focus:border-[#111];
 }

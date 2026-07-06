@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import {
   createScheduleEventCommand,
@@ -80,7 +81,7 @@ export function SchedulePage() {
     };
     void submit().catch((error) => {
       console.error("日程事件保存失败", error);
-      window.alert(error instanceof Error ? error.message : "日程事件保存失败");
+      toast.error(error instanceof Error ? error.message : "日程事件保存失败");
     });
   };
 
@@ -92,7 +93,7 @@ export function SchedulePage() {
     };
     void remove().catch((error) => {
       console.error("日程事件删除失败", error);
-      window.alert(error instanceof Error ? error.message : "日程事件删除失败");
+      toast.error(error instanceof Error ? error.message : "日程事件删除失败");
     });
   };
 

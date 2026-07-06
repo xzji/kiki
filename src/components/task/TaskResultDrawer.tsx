@@ -50,9 +50,9 @@ export function TaskResultDrawer({
         onClick={onClose}
         className="fixed inset-0 z-30 bg-transparent"
       />
-        <aside className="fixed inset-y-0 right-0 z-40 flex w-full min-w-0 flex-col border-l border-[#E5E7EB] bg-white md:w-[60vw] md:min-w-[640px]">
-        <div className="flex h-12 flex-none items-center gap-4 border-b border-[#E5E7EB] px-4">
-          <div className="min-w-0 flex-1 text-[13px] font-medium text-[#1F2328]">
+        <aside className="fixed inset-y-0 right-0 z-40 flex w-full min-w-0 flex-col border-l border-line bg-white md:w-[60vw] md:min-w-[640px]">
+        <div className="flex h-12 flex-none items-center gap-4 border-b border-line px-4">
+          <div className="min-w-0 flex-1 text-[13px] font-medium text-ink">
             {buildInstanceCardTitle(task, instance)}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -60,14 +60,14 @@ export function TaskResultDrawer({
               type="button"
               aria-label="关闭任务结果"
               onClick={onClose}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
             >
               <ChevronsRight className="h-4 w-4" />
             </button>
             <Link
               href={fullscreenHref}
               aria-label="全屏查看任务结果"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8]"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-soft hover:bg-surface"
             >
               <Maximize2 className="h-4 w-4" />
             </Link>

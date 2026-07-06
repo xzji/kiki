@@ -79,13 +79,13 @@ export default function TaskDetailPage({
     const isLookingUpRemote = remoteLookup?.key !== routeKey || remoteLookup.loading || !remoteLookup?.loaded;
     if (isLookingUpRemote) {
       return (
-        <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">
+        <div className="rounded-xl border border-line bg-surface p-6 text-sm text-ink-soft">
           正在加载任务...
         </div>
       );
     }
     return (
-      <div className="rounded-xl border border-[#E5E7EB] bg-[#F5F6F8] p-6 text-sm text-[#6B7280]">
+      <div className="rounded-xl border border-line bg-surface p-6 text-sm text-ink-soft">
         未找到任务。
       </div>
     );
@@ -111,7 +111,7 @@ export default function TaskDetailPage({
           type="button"
           aria-label="收起为右侧边栏"
           onClick={() => router.push(topicTaskDrawerReturnPath(goal.id, task.id, searchParams?.instanceId))}
-            className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] md:flex"
+            className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-surface md:flex"
         >
           <Minimize2 className="h-4 w-4" />
         </button>

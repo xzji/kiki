@@ -26,7 +26,7 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-[#D8DDE4] bg-white/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-line-muted bg-white/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
       aria-label="移动端主导航"
     >
       <div className="grid grid-cols-4 gap-1">
@@ -74,13 +74,13 @@ function MobileNavLink({
       href={href}
       className={cn(
         "relative flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium",
-        active ? "bg-[#F5F6F8] text-[#1F2328]" : "text-[#475467] active:bg-[#F5F6F8]",
+        active ? "bg-surface text-ink" : "text-ink-strong active:bg-surface",
       )}
     >
       {icon}
       <span>{label}</span>
       {badge > 0 ? (
-        <span className="absolute right-4 top-1 rounded-full bg-[#E5484D] px-1.5 text-[10px] font-semibold leading-4 text-white">
+        <span className="absolute right-4 top-1 rounded-full bg-badge px-1.5 text-[10px] font-semibold leading-4 text-white">
           {badge > 99 ? "99+" : badge}
         </span>
       ) : null}

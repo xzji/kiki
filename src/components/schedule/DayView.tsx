@@ -44,16 +44,16 @@ export function DayView({ focusDate, today, events, onClickEvent, onCreateAt }: 
 
   return (
     <div className="flex flex-col">
-      <div className="flex border-b border-[#E5E7EB]">
+      <div className="flex border-b border-line">
         <div
           style={{ width: TIME_GUTTER_WIDTH }}
-          className="flex flex-none items-center justify-start border-r border-[#E5E7EB] px-4 py-3 text-[11px] text-[#6B7280]"
+          className="flex flex-none items-center justify-start border-r border-line px-4 py-3 text-[11px] text-ink-soft"
         >
           GMT+8
         </div>
-        <div className="flex flex-1 items-center justify-center gap-2 py-3 text-sm font-semibold text-[#1F2328]">
+        <div className="flex flex-1 items-center justify-center gap-2 py-3 text-sm font-semibold text-ink">
           <span>{`周${"日一二三四五六".charAt(focusDate.getDay())}`}</span>
-          <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[11px] font-semibold ${isToday ? "bg-[#E5484D] text-white" : "bg-[#F5F6F8] text-[#1F2328]"}`}>
+          <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[11px] font-semibold ${isToday ? "bg-badge text-white" : "bg-surface text-ink"}`}>
             {focusDate.getDate()}
           </span>
         </div>
@@ -65,11 +65,11 @@ export function DayView({ focusDate, today, events, onClickEvent, onCreateAt }: 
       />
       <div ref={scrollRef} className="relative overflow-y-auto" style={{ maxHeight: GRID_MAX_HEIGHT }}>
         <div className="flex">
-          <div className="flex-none border-r border-[#E5E7EB]" style={{ width: TIME_GUTTER_WIDTH }}>
+          <div className="flex-none border-r border-line" style={{ width: TIME_GUTTER_WIDTH }}>
             {HOURS.map((hour) => (
               <div
                 key={hour}
-                className="flex items-start justify-end border-b border-[#E5E7EB] pr-2 pt-1 text-[11px] text-[#6B7280]"
+                className="flex items-start justify-end border-b border-line pr-2 pt-1 text-[11px] text-ink-soft"
                 style={{ height: HOUR_HEIGHT }}
               >
                 {formatHourLabel(hour)}
@@ -90,9 +90,9 @@ export function DayView({ focusDate, today, events, onClickEvent, onCreateAt }: 
             }}
           >
             {HOURS.map((hour) => (
-              <div key={hour} className="relative border-b border-[#E5E7EB]" style={{ height: HOUR_HEIGHT }}>
+              <div key={hour} className="relative border-b border-line" style={{ height: HOUR_HEIGHT }}>
                 <div
-                  className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-[#EFF1F4]"
+                  className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-surface-subtle"
                   style={{ top: HOUR_HEIGHT / 2 }}
                 />
               </div>

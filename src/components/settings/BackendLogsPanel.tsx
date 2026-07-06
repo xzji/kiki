@@ -131,12 +131,12 @@ export function BackendLogsPanel() {
   };
 
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-5">
+    <div className="rounded-2xl border border-line bg-white px-5 py-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-[15px] font-medium text-[#111]">后端运行日志</div>
-          <div className="mt-1 text-[13px] text-[#6B7280]">
-            用于排查 /goal 规划和任务执行是否正常推进，可看到当前正在跑的阶段和最近日志。
+          <div className="mt-1 text-[13px] text-ink-soft">
+            用于排查 /topic 规划和任务执行是否正常推进，可看到当前正在跑的阶段和最近日志。
           </div>
         </div>
         <div className="relative shrink-0">
@@ -145,8 +145,8 @@ export function BackendLogsPanel() {
               className={cn(
                 "absolute -top-11 right-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] shadow-sm",
                 refreshFeedback.tone === "success"
-                  ? "border border-[#BBF7D0] bg-[#F0FDF4] text-[#166534]"
-                  : "border border-[#FECACA] bg-[#FEF2F2] text-[#B42318]",
+                  ? "border border-success-border bg-success-bg text-success-strong"
+                  : "border border-danger-border bg-danger-bg text-danger-hover",
               )}
             >
               {refreshFeedback.message}
@@ -155,7 +155,7 @@ export function BackendLogsPanel() {
           <button
             type="button"
             onClick={() => void handleManualRefresh()}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#D0D7DE] px-3 py-2 text-[12px] font-medium text-[#374151] hover:border-[#111] hover:text-[#111]"
+            className="inline-flex items-center gap-2 rounded-lg border border-line-strong px-3 py-2 text-[12px] font-medium text-ink-strong hover:border-[#111] hover:text-[#111]"
           >
             <RefreshCcw className={cn("h-3.5 w-3.5", logsLoading && "animate-spin")} />
             刷新
@@ -163,18 +163,18 @@ export function BackendLogsPanel() {
         </div>
       </div>
 
-      <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#FAFAFB] p-3">
+      <div className="mt-4 rounded-xl border border-line bg-surface-subtle p-3">
         <div className="text-[12px] font-medium text-[#111]">运行中请求</div>
-        {logsError ? <div className="mt-2 text-[12px] text-[#C2410C]">{logsError}</div> : null}
+        {logsError ? <div className="mt-2 text-[12px] text-warning-strong">{logsError}</div> : null}
         {activeRequests.length === 0 ? (
-          <div className="mt-2 text-[12px] text-[#6B7280]">当前没有正在执行的请求</div>
+          <div className="mt-2 text-[12px] text-ink-soft">当前没有正在执行的请求</div>
         ) : (
           <div className="mt-2 space-y-2">
             {activeRequests.map((item) => (
-              <div key={item.requestId} className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
+              <div key={item.requestId} className="rounded-lg border border-line bg-white px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[11px] text-[#374151]">{item.requestId}</span>
-                  <span className="rounded-full bg-[#EEF4FF] px-2 py-0.5 text-[11px] text-[#175CD3]">
+                  <span className="font-mono text-[11px] text-ink-strong">{item.requestId}</span>
+                  <span className="rounded-full bg-info-bg px-2 py-0.5 text-[11px] text-info-strong">
                     {item.phase}
                   </span>
                 </div>
@@ -187,30 +187,30 @@ export function BackendLogsPanel() {
 
       <div
         ref={scrollerRef}
-        className="mt-4 max-h-64 overflow-y-auto rounded-xl border border-[#E5E7EB] bg-[#0F172A] px-3 py-2 font-mono text-[11px] text-[#E2E8F0]"
+        className="mt-4 max-h-64 overflow-y-auto rounded-xl border border-line bg-ink-strong px-3 py-2 font-mono text-[11px] text-line"
       >
         {orderedLogs.length === 0 ? (
-          <div className="text-[#94A3B8]">暂无日志</div>
+          <div className="text-ink-soft">暂无日志</div>
         ) : (
           <div className="space-y-1.5">
             {orderedLogs.map((entry) => (
               <div key={entry.id} className="leading-5">
-                <span className="text-[#94A3B8]">{formatRealWorldTime(entry.timestamp)}</span>{" "}
+                <span className="text-ink-soft">{formatRealWorldTime(entry.timestamp)}</span>{" "}
                 <span
                   className={cn(
                     entry.level === "error"
-                      ? "text-[#FCA5A5]"
+                      ? "text-danger-border"
                       : entry.level === "warn"
-                        ? "text-[#FCD34D]"
-                        : "text-[#93C5FD]",
+                        ? "text-warning-border"
+                        : "text-info-border",
                   )}
                 >
                   [{entry.level}]
                 </span>{" "}
-                <span className="text-[#A7F3D0]">{entry.scope}</span>{" "}
-                {entry.phase ? <span className="text-[#C4B5FD]">[{entry.phase}] </span> : null}
+                <span className="text-success-border">{entry.scope}</span>{" "}
+                {entry.phase ? <span className="text-brand-border">[{entry.phase}] </span> : null}
                 <span>{entry.message}</span>
-                {entry.details ? <span className="text-[#94A3B8]"> | {entry.details}</span> : null}
+                {entry.details ? <span className="text-ink-soft"> | {entry.details}</span> : null}
               </div>
             ))}
           </div>
@@ -232,14 +232,14 @@ export function BackendLogsDialog({
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
-        className="relative w-[880px] max-w-[92vw] rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-2xl"
+        className="relative w-[880px] max-w-[92vw] rounded-2xl border border-line bg-white p-5 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           aria-label="关闭后端日志"
           onClick={onClose}
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F6F8] hover:text-[#111]"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-md text-ink-soft hover:bg-surface hover:text-[#111]"
         >
           <X className="h-4 w-4" />
         </button>

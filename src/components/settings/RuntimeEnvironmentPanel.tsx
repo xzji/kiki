@@ -38,6 +38,7 @@ import type {
 } from "@/types/runtime";
 
 import { ConnectMachineDialog } from "./ConnectMachineDialog";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LocalRuntimeWizard } from "./LocalRuntimeWizard";
 import { RuntimeStatusBadge } from "./RuntimeStatusBadge";
 
@@ -144,6 +145,7 @@ function isFreshCheckingStatus(environment: RuntimeEnvironment) {
 }
 
 export function RuntimeEnvironmentPanel() {
+  const confirm = useConfirm();
   const environments = useRuntimeEnvStore((state) => state.environments);
   const setEnvironmentHealth = useRuntimeEnvStore((state) => state.setEnvironmentHealth);
   const setActiveEnvironment = useRuntimeEnvStore((state) => state.setActiveEnvironment);
@@ -264,7 +266,11 @@ export function RuntimeEnvironmentPanel() {
   }, [handleRuntimeCommandError]);
 
   const handleRemoveEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
-    const ok = window.confirm(`删除本地环境「${environment.name}」？`);
+    const ok = await confirm({
+      title: `删除本地环境「${environment.name}」？`,
+      confirmLabel: "删除",
+      variant: "danger",
+    });
     if (!ok) return;
     setDaemonActionError(null);
     try {
@@ -272,7 +278,7 @@ export function RuntimeEnvironmentPanel() {
     } catch (error) {
       handleRuntimeCommandError(error, "Runtime 环境删除失败");
     }
-  }, [handleRuntimeCommandError]);
+  }, [confirm, handleRuntimeCommandError]);
 
   const handleActivateEnvironment = useCallback(async (environment: RuntimeEnvironment) => {
     setDaemonActionError(null);
@@ -389,10 +395,14 @@ export function RuntimeEnvironmentPanel() {
 
   const handleDeleteMachine = useCallback(async (machine: MachineRecord) => {
     const title = machine.name || "本机电脑";
-    const message = machine.online
-      ? `移除在线电脑「${title}」？\n\n这会立即断开该 daemon；如果之后还要使用，需要重新运行连接命令。`
-      : `移除本机电脑「${title}」？`;
-    const ok = window.confirm(message);
+    const ok = await confirm({
+      title: machine.online ? `移除在线电脑「${title}」？` : `移除本机电脑「${title}」？`,
+      description: machine.online
+        ? "这会立即断开该 daemon；如果之后还要使用，需要重新运行连接命令。"
+        : undefined,
+      confirmLabel: "移除",
+      variant: "danger",
+    });
     if (!ok) return;
     try {
       await deleteMachine(machine.id);
@@ -400,7 +410,7 @@ export function RuntimeEnvironmentPanel() {
     } catch (error) {
       console.error("删除本机电脑失败", error);
     }
-  }, [loadMachines]);
+  }, [confirm, loadMachines]);
 
   useEffect(() => {
     daemonSwitchPendingRef.current = daemonSwitchPending;
@@ -584,11 +594,11 @@ export function RuntimeEnvironmentPanel() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4">
+      <section className="rounded-2xl border border-line bg-white px-5 py-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="text-[15px] font-medium text-[#111]">连接 Runtime</div>
-            <div className="mt-1 text-[13px] text-[#6B7280]">
+            <div className="mt-1 text-[13px] text-ink-soft">
               连接本机电脑作为执行节点，或添加本地 CLI 环境供会话使用。
             </div>
           </div>
@@ -604,7 +614,7 @@ export function RuntimeEnvironmentPanel() {
             <button
               type="button"
               onClick={() => setWizardOpen(true)}
-              className="inline-flex h-9 min-w-[128px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#111] hover:bg-[#F8F9FB]"
+              className="inline-flex h-9 min-w-[128px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line bg-white px-3 text-[13px] text-[#111] hover:bg-surface-hover"
             >
               <Plus className="h-4 w-4" />
               添加本地环境
@@ -617,7 +627,7 @@ export function RuntimeEnvironmentPanel() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[15px] font-medium text-[#111]">已连接电脑</div>
-            <div className="mt-1 text-[13px] text-[#6B7280]">
+            <div className="mt-1 text-[13px] text-ink-soft">
               云端任务会下发到在线的本机电脑，由你本机的 CLI 执行。
             </div>
           </div>
@@ -625,7 +635,7 @@ export function RuntimeEnvironmentPanel() {
             type="button"
             onClick={() => void loadMachines()}
             disabled={machinesLoading}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#475467] hover:bg-[#F8F9FB] disabled:opacity-70"
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-[12px] text-ink-strong hover:bg-surface-hover disabled:opacity-70"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", machinesLoading && "animate-spin")} />
             刷新
@@ -633,8 +643,8 @@ export function RuntimeEnvironmentPanel() {
         </div>
         <div className="grid gap-3">
           {connectedMachines.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#E5E7EB] bg-[#FAFAFB] px-5 py-6 text-center">
-              <div className="text-[13px] text-[#6B7280]">还没有连接的本机电脑</div>
+            <div className="rounded-2xl border border-dashed border-line bg-surface-subtle px-5 py-6 text-center">
+              <div className="text-[13px] text-ink-soft">还没有连接的本机电脑</div>
               <button
                 type="button"
                 onClick={() => setConnectDialogOpen(true)}
@@ -650,19 +660,19 @@ export function RuntimeEnvironmentPanel() {
                 key={machine.id}
                 className={cn(
                   "rounded-2xl border bg-white px-5 py-4",
-                  machine.online ? "border-[#111]" : "border-[#E5E7EB]",
+                  machine.online ? "border-[#111]" : "border-line",
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-[#F8F9FB] text-[#1F2328]">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-surface-hover text-ink">
                       <Monitor className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
                       <div className="truncate text-[14px] font-medium text-[#111]">
                         {machine.name || "本机电脑"}
                       </div>
-                      <div className="mt-0.5 text-[12px] text-[#6B7280]">
+                      <div className="mt-0.5 text-[12px] text-ink-soft">
                         {formatMachineFingerprint(machine.fingerprint)} · {formatLocalDateTime(machine.lastSeenAt ?? undefined)}
                       </div>
                     </div>
@@ -672,8 +682,8 @@ export function RuntimeEnvironmentPanel() {
                       className={cn(
                         "rounded-full border px-2 py-1 text-[11px]",
                         machine.online
-                          ? "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]"
-                          : "border-[#E5E7EB] bg-[#FAFAFB] text-[#6B7280]",
+                          ? "border-success-border bg-success-bg text-success"
+                          : "border-line bg-surface-subtle text-ink-soft",
                       )}
                     >
                       {machine.online ? "在线" : "离线"}
@@ -683,7 +693,7 @@ export function RuntimeEnvironmentPanel() {
                       aria-label="移除本机电脑"
                       title={machine.online ? "移除并断开此在线电脑" : "移除本机电脑"}
                       onClick={() => void handleDeleteMachine(machine)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#B42318] hover:bg-[#FEF2F2]"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-danger-hover hover:bg-danger-bg"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -718,7 +728,7 @@ export function RuntimeEnvironmentPanel() {
       <section className="space-y-4">
         <div>
           <div className="text-[15px] font-medium text-[#111]">已连接环境</div>
-          <div className="mt-1 text-[13px] text-[#6B7280]">
+          <div className="mt-1 text-[13px] text-ink-soft">
             当前环境用于会话执行；如果需要关闭浏览器后继续运行，再为当前本地环境开启 `24h 运行`。
           </div>
         </div>
@@ -728,20 +738,20 @@ export function RuntimeEnvironmentPanel() {
             key={environment.id}
             className={cn(
               "rounded-2xl border bg-white px-5 py-4",
-              environment.isDefault ? "border-[#111]" : "border-[#E5E7EB]",
+              environment.isDefault ? "border-[#111]" : "border-line",
             )}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-[#F8F9FB] text-[#1F2328]">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-surface-hover text-ink">
                     <Laptop className="h-4 w-4" />
                   </span>
                   <div className="min-w-0">
                     <div className="truncate text-[14px] font-medium text-[#111]">
                       {environment.name}
                     </div>
-                    <div className="mt-0.5 text-[12px] text-[#6B7280]">
+                    <div className="mt-0.5 text-[12px] text-ink-soft">
                       {runtimeKindLabels[environment.runtimeKind || "claude"]}
                     </div>
                   </div>
@@ -758,7 +768,7 @@ export function RuntimeEnvironmentPanel() {
                   <button
                     type="button"
                     onClick={() => void refreshEnvironment(environment)}
-                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#475467] hover:bg-[#F8F9FB]"
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-[12px] text-ink-strong hover:bg-surface-hover"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     重新检测
@@ -771,7 +781,7 @@ export function RuntimeEnvironmentPanel() {
                     onClick={() => {
                       void handleRemoveEnvironment(environment);
                     }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#B42318] hover:bg-[#FEF2F2]"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-danger-hover hover:bg-danger-bg"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -780,7 +790,7 @@ export function RuntimeEnvironmentPanel() {
                   <button
                     type="button"
                     onClick={() => void handleActivateEnvironment(environment)}
-                    className="inline-flex h-8 items-center rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#1F2328] hover:bg-[#F8F9FB]"
+                    className="inline-flex h-8 items-center rounded-lg border border-line bg-white px-2.5 text-[12px] text-ink hover:bg-surface-hover"
                   >
                     设为当前环境
                   </button>
@@ -796,9 +806,9 @@ export function RuntimeEnvironmentPanel() {
               <InfoField label="CLI 路径" value={environment.cliPath} />
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-surface-subtle px-4 py-3">
               <div>
-                <div className="text-[12px] text-[#6B7280]">执行权限模式</div>
+                <div className="text-[12px] text-ink-soft">执行权限模式</div>
                 <div className="mt-1 text-[13px] text-[#111]">
                   {permissionLabels[environment.permissionMode]}
                 </div>
@@ -821,7 +831,7 @@ export function RuntimeEnvironmentPanel() {
                           disabled && "cursor-not-allowed opacity-45",
                           mode === environment.permissionMode
                             ? "border-[#111] bg-white text-[#111]"
-                            : "border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#111]",
+                            : "border-line bg-white text-ink-soft hover:text-[#111]",
                         )}
                       >
                         {permissionLabels[mode]}
@@ -833,7 +843,7 @@ export function RuntimeEnvironmentPanel() {
             </div>
 
             {environment.runtimeKind === "codex" && environment.permissionMode === "confirm" ? (
-              <div className="mt-3 rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#92400E]">
+              <div className="mt-3 rounded-2xl border border-warning-border bg-warning-bg px-4 py-3 text-[12px] leading-5 text-warning-strong">
                 Codex exec 首版不支持 KiKi 手动确认。请切换为“只读聊天”或“项目内可执行”；后端会把历史 confirm 配置按只读处理。
               </div>
             ) : null}
@@ -851,7 +861,7 @@ export function RuntimeEnvironmentPanel() {
 
             {environment.type === "local" ? (
               environment.isDefault ? (
-                <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-4">
+                <div className="mt-3 rounded-2xl border border-line bg-surface-subtle px-4 py-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -860,8 +870,8 @@ export function RuntimeEnvironmentPanel() {
                           className={cn(
                             "rounded-full border px-2 py-1 text-[11px]",
                             daemonStatusBadge.tone === "error"
-                              ? "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]"
-                              : "border-[#E5E7EB] bg-white text-[#111]",
+                              ? "border-danger-border bg-danger-bg text-danger-hover"
+                              : "border-line bg-white text-[#111]",
                           )}
                         >
                           {daemonStatusBadge.loading ? (
@@ -879,14 +889,14 @@ export function RuntimeEnvironmentPanel() {
                             "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-70",
                             daemonRefreshPending
                               ? "border-[#111] bg-[#111] text-white"
-                              : "border-[#E5E7EB] bg-white text-[#475467] hover:border-[#D0D5DD] hover:bg-[#F8F9FB]",
+                              : "border-line bg-white text-ink-strong hover:border-line hover:bg-surface-hover",
                           )}
                         >
                           <RefreshCw className={cn("h-3.5 w-3.5", daemonRefreshPending && "animate-spin")} />
                           刷新状态
                         </button>
                       </div>
-                      <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">{daemonDescription}</div>
+                      <div className="mt-1 text-[12px] leading-5 text-ink-soft">{daemonDescription}</div>
                     </div>
                     <button
                       type="button"
@@ -903,7 +913,7 @@ export function RuntimeEnvironmentPanel() {
                       }}
                       className={cn(
                         "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors",
-                        effectiveDaemonEnabled ? "bg-[#111]" : "bg-[#D0D5DD]",
+                        effectiveDaemonEnabled ? "bg-[#111]" : "bg-line",
                         daemonSwitchPending && "cursor-not-allowed opacity-70",
                       )}
                     >
@@ -953,30 +963,30 @@ export function RuntimeEnvironmentPanel() {
                   ) : null}
 
                   {daemonActionMessage ? (
-                    <div className="mt-3 rounded-2xl border border-[#BBF7D0] bg-[#F0FDF4] px-4 py-3 text-[12px] leading-5 text-[#166534]">
+                    <div className="mt-3 rounded-2xl border border-success-border bg-success-bg px-4 py-3 text-[12px] leading-5 text-success-strong">
                       {daemonActionMessage}
                     </div>
                   ) : null}
                   {daemonStatus?.message ? (
-                    <div className="mt-3 rounded-2xl border border-[#FEDF89] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-5 text-[#B54708]">
+                    <div className="mt-3 rounded-2xl border border-warning-border bg-warning-bg px-4 py-3 text-[12px] leading-5 text-warning-strong">
                       {daemonStatus.message}
                     </div>
                   ) : null}
                   {daemonActionError ? (
-                    <div className="mt-3 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+                    <div className="mt-3 rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-[12px] leading-5 text-danger-hover">
                       {daemonActionError}
                     </div>
                   ) : null}
                 </div>
               ) : (
-                <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3 text-[12px] leading-5 text-[#6B7280]">
+                <div className="mt-3 rounded-2xl border border-line bg-surface-subtle px-4 py-3 text-[12px] leading-5 text-ink-soft">
                   将这个本地环境设为当前环境后，才可以为它配置 `24h 运行`。
                 </div>
               )
             ) : null}
 
             {environment.health && "reason" in environment.health ? (
-              <div className="mt-3 text-[12px] leading-5 text-[#B42318]">
+              <div className="mt-3 text-[12px] leading-5 text-danger-hover">
                 {environment.health.reason}
               </div>
             ) : null}
@@ -1030,19 +1040,19 @@ function formatKikiSkillsInstallMessage(result: KikiSkillsInstallPayload) {
 const kikiSkillStatusLabels: Record<KikiSkillInstallStatus, { label: string; className: string }> = {
   installed: {
     label: "已安装",
-    className: "border-[#D1FADF] bg-[#ECFDF3] text-[#067647]",
+    className: "border-success-border bg-success-bg text-success",
   },
   outdated: {
     label: "需更新",
-    className: "border-[#FEDF89] bg-[#FFFAEB] text-[#B54708]",
+    className: "border-warning-border bg-warning-bg text-warning-strong",
   },
   not_installed: {
     label: "未安装",
-    className: "border-[#E5E7EB] bg-white text-[#6B7280]",
+    className: "border-line bg-white text-ink-soft",
   },
   blocked: {
     label: "冲突",
-    className: "border-[#FECACA] bg-[#FEF2F2] text-[#B42318]",
+    className: "border-danger-border bg-danger-bg text-danger-hover",
   },
 };
 
@@ -1073,11 +1083,11 @@ function KikiDefaultSkillsSection({
   const targetRoot = status?.targetRoot || "~/.claude/skills";
 
   return (
-    <section className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4">
+    <section className="rounded-2xl border border-line bg-white px-5 py-4">
       <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <div className="text-[15px] font-medium text-[#111]">KiKi 默认 Skills</div>
-          <div className="mt-1 max-w-[760px] text-[13px] leading-6 text-[#6B7280]">
+          <div className="mt-1 max-w-[760px] text-[13px] leading-6 text-ink-soft">
             安装后会写入本机 Claude CLI skills 目录；KiKi 只管理 `kiki-*` 副本，不覆盖你的自定义 skills。
             安装 skill 不等于启用 Skill 工具，若要允许 Claude CLI 调用 skill，请在当前 Runtime 的工具权限策略中开启「子代理」能力。
           </div>
@@ -1087,7 +1097,7 @@ function KikiDefaultSkillsSection({
             type="button"
             onClick={onRefresh}
             disabled={loading || installing}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[12px] text-[#475467] hover:bg-[#F8F9FB] disabled:cursor-not-allowed disabled:opacity-70"
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-[12px] text-ink-strong hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-70"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
             刷新状态
@@ -1119,22 +1129,22 @@ function KikiDefaultSkillsSection({
             return (
               <div
                 key={skill.sourceSkillId}
-                className="grid gap-2 rounded-xl border border-[#E5E7EB] bg-[#FAFAFB] px-3 py-2 md:grid-cols-[minmax(0,1fr)_auto]"
+                className="grid gap-2 rounded-xl border border-line bg-surface-subtle px-3 py-2 md:grid-cols-[minmax(0,1fr)_auto]"
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-[12px] text-[#111]">{skill.targetName}</span>
-                    <span className="text-[11px] text-[#6B7280]">v{skill.version}</span>
+                    <span className="text-[11px] text-ink-soft">v{skill.version}</span>
                     <span className={cn("rounded-full border px-2 py-1 text-[11px]", statusLabel.className)}>
                       {statusLabel.label}
                     </span>
                   </div>
-                  <div className="mt-1 break-all text-[11px] leading-5 text-[#6B7280]">{skill.targetPath}</div>
+                  <div className="mt-1 break-all text-[11px] leading-5 text-ink-soft">{skill.targetPath}</div>
                   {skill.reason ? (
-                    <div className="mt-1 text-[11px] leading-5 text-[#B42318]">{skill.reason}</div>
+                    <div className="mt-1 text-[11px] leading-5 text-danger-hover">{skill.reason}</div>
                   ) : null}
                 </div>
-                <div className="self-center font-mono text-[10px] text-[#98A2B3]">{skill.contentHash.slice(0, 19)}...</div>
+                <div className="self-center font-mono text-[10px] text-ink-faint">{skill.contentHash.slice(0, 19)}...</div>
               </div>
             );
           })}
@@ -1142,18 +1152,18 @@ function KikiDefaultSkillsSection({
       ) : null}
 
       {message ? (
-        <div className="mt-3 rounded-2xl border border-[#BBF7D0] bg-[#F0FDF4] px-4 py-3 text-[12px] leading-5 text-[#166534]">
+        <div className="mt-3 rounded-2xl border border-success-border bg-success-bg px-4 py-3 text-[12px] leading-5 text-success-strong">
           {message}
         </div>
       ) : null}
       {error ? (
-        <div className="mt-3 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[12px] leading-5 text-[#B42318]">
+        <div className="mt-3 rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-[12px] leading-5 text-danger-hover">
           <div>{error}</div>
           {error.includes("本机电脑") || error.includes("daemon") ? (
             <button
               type="button"
               onClick={onConnectMachine}
-              className="mt-2 inline-flex h-8 items-center gap-1 rounded-lg border border-[#B42318] bg-white px-2.5 text-[12px] text-[#B42318] hover:bg-[#FEF2F2]"
+              className="mt-2 inline-flex h-8 items-center gap-1 rounded-lg border border-danger-hover bg-white px-2.5 text-[12px] text-danger-hover hover:bg-danger-bg"
             >
               <Monitor className="h-3.5 w-3.5" />
               连接本机电脑
@@ -1223,23 +1233,23 @@ function ToolPolicySection({
 
   if (environment.runtimeKind === "codex") {
     return (
-      <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
+      <div className="mt-3 rounded-2xl border border-line bg-surface-subtle px-4 py-3">
         <div className="text-[12px] font-medium text-[#111]">Codex sandbox 权限</div>
-        <div className="mt-1 max-w-[620px] text-[12px] leading-5 text-[#6B7280]">
+        <div className="mt-1 max-w-[620px] text-[12px] leading-5 text-ink-soft">
           Codex exec 首版不支持 Claude 式工具白名单，也不接 KiKi 手动确认弹窗；权限由 Codex sandbox 和执行权限模式控制。
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <div className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
+          <div className="rounded-xl border border-line bg-white px-3 py-2">
             <div className="text-[12px] font-medium text-[#111]">只读聊天</div>
-            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">使用 read-only sandbox，可读项目，不写文件。</div>
+            <div className="mt-1 text-[12px] leading-5 text-ink-soft">使用 read-only sandbox，可读项目，不写文件。</div>
           </div>
-          <div className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
+          <div className="rounded-xl border border-line bg-white px-3 py-2">
             <div className="text-[12px] font-medium text-[#111]">项目内可执行</div>
-            <div className="mt-1 text-[12px] leading-5 text-[#6B7280]">使用 workspace-write sandbox，只允许在项目范围内执行和写入。</div>
+            <div className="mt-1 text-[12px] leading-5 text-ink-soft">使用 workspace-write sandbox，只允许在项目范围内执行和写入。</div>
           </div>
-          <div className="rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
-            <div className="text-[12px] font-medium text-[#92400E]">手动确认不可用</div>
-            <div className="mt-1 text-[12px] leading-5 text-[#92400E]">弹窗确认将在后续 app-server 阶段接入。</div>
+          <div className="rounded-xl border border-warning-border bg-warning-bg px-3 py-2">
+            <div className="text-[12px] font-medium text-warning-strong">手动确认不可用</div>
+            <div className="mt-1 text-[12px] leading-5 text-warning-strong">弹窗确认将在后续 app-server 阶段接入。</div>
           </div>
         </div>
       </div>
@@ -1247,11 +1257,11 @@ function ToolPolicySection({
   }
 
   return (
-    <div className="mt-3 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFB] px-4 py-3">
+    <div className="mt-3 rounded-2xl border border-line bg-surface-subtle px-4 py-3">
       <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <div className="text-[12px] font-medium text-[#111]">工具权限策略</div>
-          <div className="mt-1 max-w-[620px] text-[12px] leading-5 text-[#6B7280]">
+          <div className="mt-1 max-w-[620px] text-[12px] leading-5 text-ink-soft">
             控制这个 Runtime 允许哪些工具能力。全部会话、目标模式、任务执行都会先遵循这里的设置。写入文件和终端命令还会受到「执行权限模式」约束；例如只读聊天下即使勾选，也不会真正生效。
           </div>
         </div>
@@ -1265,7 +1275,7 @@ function ToolPolicySection({
                 "rounded-full border px-3 py-1.5 text-[12px] transition",
                 mode === filePolicy.mode
                   ? "border-[#111] bg-white text-[#111]"
-                  : "border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#111]",
+                  : "border-line bg-white text-ink-soft hover:text-[#111]",
               )}
             >
               {filePolicyModeLabels[mode]}
@@ -1286,13 +1296,13 @@ function ToolPolicySection({
                 onClick={() => onCapabilityChange(option.key, !checked)}
                 className={cn(
                   "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition",
-                  checked ? "border-[#111] bg-white" : "border-[#E5E7EB] bg-white hover:border-[#D0D5DD]",
+                  checked ? "border-[#111] bg-white" : "border-line bg-white hover:border-line",
                 )}
               >
                 <span
                   className={cn(
                     "mt-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border text-[12px] leading-none",
-                    checked ? "border-[#111] bg-[#111] text-white" : "border-[#D0D5DD] text-transparent",
+                    checked ? "border-[#111] bg-[#111] text-white" : "border-line text-transparent",
                   )}
                 >
                   ✓
@@ -1300,21 +1310,21 @@ function ToolPolicySection({
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-[12px] font-medium text-[#111]">{option.label}</span>
-                    <span className="text-[11px] leading-5 text-[#6B7280]">{option.description}</span>
+                    <span className="text-[11px] leading-5 text-ink-soft">{option.description}</span>
                     {option.tools.map((tool) => (
                       <span
                         key={tool}
-                        className="inline-flex h-5 items-center rounded-full border border-[#E5E7EB] px-2 font-mono text-[10px] text-[#6B7280]"
+                        className="inline-flex h-5 items-center rounded-full border border-line px-2 font-mono text-[10px] text-ink-soft"
                       >
                         {tool}
                       </span>
                     ))}
                   </span>
                   {constraint ? (
-                    <span className="mt-1 block text-[10px] leading-4 text-[#B42318]">{constraint}</span>
+                    <span className="mt-1 block text-[10px] leading-4 text-danger-hover">{constraint}</span>
                   ) : null}
                   {(option.key === "fileWrite" || option.key === "shell") && !checked ? (
-                    <span className="mt-1 block text-[10px] leading-4 text-[#B54708]">
+                    <span className="mt-1 block text-[10px] leading-4 text-warning-strong">
                       关闭后无法在会话中发送文件/附件
                     </span>
                   ) : null}
@@ -1324,11 +1334,11 @@ function ToolPolicySection({
           })}
         </div>
       ) : null}
-      <div className="mt-4 border-t border-[#E5E7EB] pt-3">
+      <div className="mt-4 border-t border-line pt-3">
           <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-between">
           <div>
             <div className="text-[12px] font-medium text-[#111]">额外允许的工具</div>
-            <div className="mt-1 text-[11px] leading-5 text-[#6B7280]">
+            <div className="mt-1 text-[11px] leading-5 text-ink-soft">
               运行时授权后沉淀的工具规则会显示在这里，可删除或修改。
             </div>
           </div>
@@ -1340,12 +1350,12 @@ function ToolPolicySection({
                 if (event.key === "Enter") addAllowedRule();
               }}
               placeholder="例如 Workflow 或 mcp__server__*"
-              className="h-8 min-w-0 flex-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 font-mono text-[12px] text-[#111] outline-none focus:border-[#111]"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-line bg-white px-2.5 font-mono text-[12px] text-[#111] outline-none focus:border-[#111]"
             />
             <button
               type="button"
               onClick={addAllowedRule}
-              className="h-8 rounded-lg border border-[#111] bg-white px-3 text-[12px] text-[#111] hover:bg-[#F8F9FB]"
+              className="h-8 rounded-lg border border-[#111] bg-white px-3 text-[12px] text-[#111] hover:bg-surface-hover"
             >
               添加
             </button>
@@ -1356,20 +1366,20 @@ function ToolPolicySection({
             {allowedToolRules.map((rule) => (
               <div
                 key={rule.id}
-                className="flex items-center gap-2 rounded-xl border border-[#E5E7EB] bg-white px-3 py-2"
+                className="flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2"
               >
                 <span className="min-w-0 flex-1 break-all font-mono text-[12px] text-[#111]">{rule.pattern}</span>
                 <button
                   type="button"
                   onClick={() => editAllowedRule(rule)}
-                  className="rounded-lg border border-[#E5E7EB] px-2 py-1 text-[11px] text-[#475467] hover:bg-[#F8F9FB]"
+                  className="rounded-lg border border-line px-2 py-1 text-[11px] text-ink-strong hover:bg-surface-hover"
                 >
                   编辑
                 </button>
                 <button
                   type="button"
                   onClick={() => removeAllowedRule(rule)}
-                  className="rounded-lg border border-[#FECACA] px-2 py-1 text-[11px] text-[#B42318] hover:bg-[#FEF2F2]"
+                  className="rounded-lg border border-danger-border px-2 py-1 text-[11px] text-danger-hover hover:bg-danger-bg"
                 >
                   删除
                 </button>
@@ -1377,7 +1387,7 @@ function ToolPolicySection({
             ))}
           </div>
         ) : (
-          <div className="mt-2 text-[11px] text-[#9CA3AF]">暂无额外允许工具。</div>
+          <div className="mt-2 text-[11px] text-ink-soft">暂无额外允许工具。</div>
         )}
       </div>
     </div>
@@ -1394,10 +1404,10 @@ function InfoField({
   loading?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
-      <div className="text-[12px] text-[#6B7280]">{label}</div>
+    <div className="rounded-2xl border border-line bg-white px-4 py-3">
+      <div className="text-[12px] text-ink-soft">{label}</div>
       {loading ? (
-        <div className="mt-2 flex items-center gap-2 text-[13px] text-[#6B7280]">
+        <div className="mt-2 flex items-center gap-2 text-[13px] text-ink-soft">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>加载中...</span>
         </div>
@@ -1428,12 +1438,12 @@ function EnableDaemonConfirmDialog({
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
-        className="w-[520px] max-w-[92vw] rounded-2xl border border-[#E5E7EB] bg-white"
+        className="w-[520px] max-w-[92vw] rounded-2xl border border-line bg-white"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-[#E5E7EB] px-5 py-4">
+        <div className="border-b border-line px-5 py-4">
           <div className="text-[15px] font-medium text-[#111]">开启 24h 运行</div>
-          <div className="mt-1 text-[13px] leading-6 text-[#6B7280]">
+          <div className="mt-1 text-[13px] leading-6 text-ink-soft">
             {remote ? (
               <>
                 即将通过已连接的本机 daemon 为 <span className="font-medium text-[#111]">{environmentName}</span>{" "}
@@ -1447,7 +1457,7 @@ function EnableDaemonConfirmDialog({
             )}
           </div>
         </div>
-        <div className="space-y-2 px-5 py-4 text-[13px] leading-6 text-[#475467]">
+        <div className="space-y-2 px-5 py-4 text-[13px] leading-6 text-ink-strong">
           {remote ? (
             <>
               <div>1. macOS 会写入 `~/Library/LaunchAgents/com.kiki.daemon.plist`</div>
@@ -1462,12 +1472,12 @@ function EnableDaemonConfirmDialog({
             </>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[#E5E7EB] px-5 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-4">
           <button
             type="button"
             onClick={onClose}
             disabled={pending}
-            className="inline-flex h-9 items-center rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] text-[#111] hover:bg-[#F8F9FB]"
+            className="inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-[13px] text-[#111] hover:bg-surface-hover"
           >
             取消
           </button>

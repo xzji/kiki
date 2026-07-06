@@ -12,5 +12,5 @@
 export {
   buildDecomposePrompt,
   buildDecompositionNormalizationPrompt,
-} from "@/lib/server/goalPlanning";
+} from "@/lib/server/goalPlanning/promptBuilders";
 export { buildTaskDraftPrompt } from "@/lib/server/goalPlanning/taskDraftPrompt";

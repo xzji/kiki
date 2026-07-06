@@ -22,12 +22,12 @@ export function ExternalEmbedSurface({ artifact }: { artifact: ArtifactRef }) {
   if (!embedUrl) return null;
 
   return (
-    <section className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+    <section className="rounded-xl border border-line bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[12px] font-medium text-[#8C9198]">外部嵌入</div>
-          <h3 className="mt-1 text-[15px] font-semibold text-[#1F2328]">{artifact.label}</h3>
-          <p className="mt-1 text-[13px] text-[#6B7280]">
+          <div className="text-[12px] font-medium text-ink-faint">外部嵌入</div>
+          <h3 className="mt-1 text-[15px] font-semibold text-ink">{artifact.label}</h3>
+          <p className="mt-1 text-[13px] text-ink-soft">
             内容由 {host} 提供。若该网站禁止嵌入，可在新窗口打开。
           </p>
         </div>
@@ -35,7 +35,7 @@ export function ExternalEmbedSurface({ artifact }: { artifact: ArtifactRef }) {
           href={artifact.url || embedUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 rounded-lg border border-[#D0D7DE] bg-white px-2.5 py-1.5 text-[12px] font-medium text-[#1F2328] hover:bg-[#F6F8FA]"
+          className="inline-flex items-center gap-1 rounded-lg border border-line-strong bg-white px-2.5 py-1.5 text-[12px] font-medium text-ink hover:bg-surface-subtle"
         >
           <ExternalLink className="h-3.5 w-3.5" />
           新窗口打开
@@ -48,20 +48,20 @@ export function ExternalEmbedSurface({ artifact }: { artifact: ArtifactRef }) {
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen={artifact.allowFullScreen !== false}
           referrerPolicy="strict-origin-when-cross-origin"
-            className="h-[60dvh] max-h-[420px] w-full rounded-xl border border-[#D0D7DE] bg-black md:h-[420px]"
+            className="h-[60dvh] max-h-[420px] w-full rounded-xl border border-line-strong bg-black md:h-[420px]"
           title={artifact.label}
         />
       ) : (
         <button
           type="button"
           onClick={() => setLoaded(true)}
-          className="flex h-[220px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#D0D7DE] bg-[#F6F8FA] text-center hover:bg-[#EEF6FF]"
+          className="flex h-[220px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-line-strong bg-surface-subtle text-center hover:bg-info-bg"
         >
-          <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#0D47A1] shadow-sm">
+          <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-white text-info-strong shadow-sm">
             <Play className="h-5 w-5 fill-current" />
           </span>
-          <span className="text-[14px] font-semibold text-[#1F2328]">加载外部内容</span>
-          <span className="mt-1 text-[12px] text-[#6B7280]">点击后会从 {host} 加载 iframe 内容</span>
+          <span className="text-[14px] font-semibold text-ink">加载外部内容</span>
+          <span className="mt-1 text-[12px] text-ink-soft">点击后会从 {host} 加载 iframe 内容</span>
         </button>
       )}
     </section>

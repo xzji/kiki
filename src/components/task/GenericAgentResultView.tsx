@@ -118,8 +118,8 @@ export function GenericAgentResultView({
     return (
       <article className="min-w-0">
         <header className="mb-6">
-          <div className="text-[12px] font-medium text-[#8C9198]">{deliverableLabel(presentationTaskResult)}</div>
-          <h2 className="mt-1 text-[18px] font-semibold leading-8 text-[#1F2328]">{presentationTaskResult.title}</h2>
+          <div className="text-[12px] font-medium text-ink-faint">{deliverableLabel(presentationTaskResult)}</div>
+          <h2 className="mt-1 text-[18px] font-semibold leading-8 text-ink">{presentationTaskResult.title}</h2>
         </header>
         <div className="space-y-6">
           {interactive}

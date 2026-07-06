@@ -252,34 +252,34 @@ function EventDetails({ event }: { event: CliProcessEvent }) {
   return (
     <div className="ml-3.5 space-y-2 pb-2 pr-2">
       {isSubProcess && event.agentId ? (
-        <div className="text-[11px] text-[#8C9198]">agentId: {event.agentId}</div>
+        <div className="text-[11px] text-ink-faint">agentId: {event.agentId}</div>
       ) : null}
       {isSubagent && info ? (
-        <div className="space-y-1.5 text-[12px] leading-5 text-[#374151]">
+        <div className="space-y-1.5 text-[12px] leading-5 text-ink-strong">
           {info.agentType ? (
             <div>
-              <span className="text-[#8C9198]">子代理类型：</span>
+              <span className="text-ink-faint">子代理类型：</span>
               {info.agentType}
             </div>
           ) : null}
           <div>
-            <span className="text-[#8C9198]">描述：</span>
+            <span className="text-ink-faint">描述：</span>
             {info.description}
           </div>
           {info.prompt ? (
-            <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#F6F8FA] px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
+            <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-subtle px-2.5 py-2 font-mono text-[11px] leading-5 text-ink-strong">
               {info.prompt}
             </pre>
           ) : null}
         </div>
       ) : null}
       {event.content ? (
-        <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#F6F8FA] px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
+        <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-subtle px-2.5 py-2 font-mono text-[11px] leading-5 text-ink-strong">
           {event.content}
         </pre>
       ) : null}
       {event.input !== undefined ? (
-        <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#F6F8FA] px-2.5 py-2 font-mono text-[11px] leading-5 text-[#374151]">
+        <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-subtle px-2.5 py-2 font-mono text-[11px] leading-5 text-ink-strong">
           {JSON.stringify(event.input, null, 2)}
         </pre>
       ) : null}
@@ -293,29 +293,29 @@ function TimelineEventCard({ event }: { event: TimelineEvent }) {
   const isThinking = event.type === "thinking" || (event.type === "subagent_event" && event.eventKind === "thinking");
   const badge = eventBadge(event);
   return (
-    <details className={cn("group/timeline pl-3", !isThinking && "border-l border-[#E5E7EB]")}>
+    <details className={cn("group/timeline pl-3", !isThinking && "border-l border-line")}>
       <summary
         className={cn(
           "flex cursor-pointer list-none items-start gap-2 marker:hidden select-none [&::-webkit-details-marker]:hidden",
-          isThinking ? "py-1 text-[#6B7280]" : "py-1.5",
+          isThinking ? "py-1 text-ink-soft" : "py-1.5",
         )}
       >
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className={cn("truncate text-[12px]", isThinking ? "font-medium text-[#6B7280]" : "font-semibold text-[#1F2328]")}>
+            <span className={cn("truncate text-[12px]", isThinking ? "font-medium text-ink-soft" : "font-semibold text-ink")}>
               {eventTitle(event)}
             </span>
             {badge ? (
-              <span className="shrink-0 rounded bg-[#FFEBE9] px-1.5 py-0.5 text-[10px] font-medium text-[#B42318]">
+              <span className="shrink-0 rounded bg-danger-bg px-1.5 py-0.5 text-[10px] font-medium text-danger-hover">
                 {badge}
               </span>
             ) : null}
-            <span className="shrink-0 text-[10px] text-[#8C9198]">{formatTime(event.createdAt)}</span>
+            <span className="shrink-0 text-[10px] text-ink-faint">{formatTime(event.createdAt)}</span>
           </span>
-          {summary && !isThinking && !hasDetails ? <span className="mt-1 block truncate text-[12px] text-[#4B5563]">{summary}</span> : null}
+          {summary && !isThinking && !hasDetails ? <span className="mt-1 block truncate text-[12px] text-ink-strong">{summary}</span> : null}
         </span>
         {hasDetails ? (
-          <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-[#8C9198] transition group-open/timeline:rotate-90" />
+          <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-ink-faint transition group-open/timeline:rotate-90" />
         ) : null}
       </summary>
       {hasDetails ? <EventDetails event={event} /> : null}
@@ -345,15 +345,15 @@ function SubagentLogPanel({ panel }: { panel: SubagentPanelModel }) {
   return (
     <div className="pl-3">
       <div className="flex min-w-0 items-center gap-2 py-1">
-        <span className="min-w-0 truncate text-[12px] font-semibold text-[#1F2328]">{panel.title}</span>
-        {panel.agentType ? <span className="shrink-0 text-[10px] text-[#8C9198]">{panel.agentType}</span> : null}
-        <span className="shrink-0 text-[10px] text-[#8C9198]">{statusText(panel.status)}</span>
-        <span className="shrink-0 text-[10px] text-[#8C9198]">{formatTime(panel.startedAt)}</span>
+        <span className="min-w-0 truncate text-[12px] font-semibold text-ink">{panel.title}</span>
+        {panel.agentType ? <span className="shrink-0 text-[10px] text-ink-faint">{panel.agentType}</span> : null}
+        <span className="shrink-0 text-[10px] text-ink-faint">{statusText(panel.status)}</span>
+        <span className="shrink-0 text-[10px] text-ink-faint">{formatTime(panel.startedAt)}</span>
       </div>
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="max-h-[220px] overflow-y-auto border-l border-[#E5E7EB] pr-1"
+        className="max-h-[220px] overflow-y-auto border-l border-line pr-1"
       >
         {panel.events.length ? (
           <div className="space-y-0.5">
@@ -364,7 +364,7 @@ function SubagentLogPanel({ panel }: { panel: SubagentPanelModel }) {
         ) : panel.anchor ? (
           <EventDetails event={panel.anchor} />
         ) : (
-          <div className="py-1.5 pl-3 text-[12px] text-[#8C9198]">等待子代理事件。</div>
+          <div className="py-1.5 pl-3 text-[12px] text-ink-faint">等待子代理事件。</div>
         )}
       </div>
     </div>
@@ -378,16 +378,16 @@ function SubagentGroupCard({ node }: { node: Extract<TimelineNode, { kind: "suba
   const summary = runningCount ? `${runningCount} 个运行中` : "子代理过程";
 
   return (
-    <details className="group/timeline border-l border-[#E5E7EB] pl-3">
+    <details className="group/timeline border-l border-line pl-3">
       <summary className="flex cursor-pointer list-none items-start gap-2 py-1.5 marker:hidden select-none [&::-webkit-details-marker]:hidden">
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[12px] font-semibold text-[#1F2328]">{title}</span>
-            <span className="shrink-0 text-[10px] text-[#8C9198]">{formatTime(node.anchor.createdAt)}</span>
+            <span className="truncate text-[12px] font-semibold text-ink">{title}</span>
+            <span className="shrink-0 text-[10px] text-ink-faint">{formatTime(node.anchor.createdAt)}</span>
           </span>
-          <span className="mt-1 block truncate text-[12px] text-[#4B5563]">{summary}</span>
+          <span className="mt-1 block truncate text-[12px] text-ink-strong">{summary}</span>
         </span>
-        <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-[#8C9198] transition group-open/timeline:rotate-90" />
+        <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-ink-faint transition group-open/timeline:rotate-90" />
       </summary>
       <div className="ml-3.5 space-y-3 pb-2 pr-2">
         {node.children.map((panel) => (
@@ -411,11 +411,11 @@ export function InlineCliProcessTimeline({ process }: { process: ConversationCli
   const subagentCount = countSubagents(events);
   return (
     <details className="group/process mb-3 max-w-3xl text-[12px]">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-[#6B7280] marker:hidden select-none [&::-webkit-details-marker]:hidden">
-        <span className="font-medium text-[#374151]">执行过程</span>
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-ink-soft marker:hidden select-none [&::-webkit-details-marker]:hidden">
+        <span className="font-medium text-ink-strong">执行过程</span>
         <span>{events.length} 条事件</span>
         {subagentCount ? <span>{subagentCount} 个子代理</span> : null}
-        <ChevronRight className="h-3.5 w-3.5 text-[#8C9198] transition group-open/process:rotate-90" />
+        <ChevronRight className="h-3.5 w-3.5 text-ink-faint transition group-open/process:rotate-90" />
       </summary>
       <div className="mt-2 space-y-1">
         {nodes.map((node) =>
