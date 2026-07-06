@@ -290,8 +290,15 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
     for (const subGoal of goal.subGoals) {
       for (const task of subGoal.tasks) {
         for (const instance of task.instances) {
-          const ageMs = nowMs - new Date(instance.createdAt).getTime();
-          if (instance.status === "in_progress" && ageMs >= DEFAULT_EASTER_EGG_SETTINGS.taskDefaultTimeoutMs) {
+          // 超时判定必须以「当前执行片段」为基准，而非实例创建时间：一个存在很久、
+          // 反复暂停/续跑的实例，其 createdAt 早已超过超时阈值，若以此计龄会导致刚进入
+          // in_progress 就被立即判超时并暂停，形成「续跑→秒超时→再续跑」的死循环。
+          // execution.activeSince 仅在 in_progress 时有值，表示本次执行片段的开始时间。
+          const createdAtMs = new Date(instance.createdAt).getTime();
+          const runStartedAt =
+            instance.execution?.activeSince ?? instance.execution?.startedAt ?? instance.createdAt;
+          const runAgeMs = nowMs - new Date(runStartedAt).getTime();
+          if (instance.status === "in_progress" && runAgeMs >= DEFAULT_EASTER_EGG_SETTINGS.taskDefaultTimeoutMs) {
             const job = getRuntimeJobByTaskInstanceId(instance.id);
             if (job) {
               updateGoalRuntimeJobExecution(job.id, {
@@ -317,7 +324,7 @@ export function runGoalWatchdogWorker(goals: Goal[]) {
               },
             });
           }
-          if (instance.status === "awaiting_user" && ageMs >= DEFAULT_EASTER_EGG_SETTINGS.taskHeartbeatTimeoutMs) {
+          if (instance.status === "awaiting_user" && nowMs - createdAtMs >= DEFAULT_EASTER_EGG_SETTINGS.taskHeartbeatTimeoutMs) {
             const ensured = ensureTaskNotificationStateFromInstance({
               goalId: goal.id,
               taskId: task.id,
