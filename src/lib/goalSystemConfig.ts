@@ -32,7 +32,7 @@ export const DEFAULT_EASTER_EGG_SETTINGS: EasterEggSettings = {
   maxInfoCollectionRounds: 3,
   minInfoCollectionRounds: 1,
   schedulerCycleIntervalMs: 60000,
-  taskDefaultTimeoutMs: 600000,
+  taskDefaultTimeoutMs: 1800000,
   taskHeartbeatTimeoutMs: 120000,
   llmLogMode: "standard",
   logBufferMaxSize: 200,

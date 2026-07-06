@@ -15,6 +15,7 @@
 - 抽离 6 个被 Topic Saga 复用的共享 prompt builder 到新模块 `src/lib/server/goalPlanning/promptBuilders.ts`（Interviewer / Planner / Presenter 角色锚点与规划回归 spec 改为引用该模块），使其不再依赖已下线的 legacy 编排。
 - 侧边栏助手（`assistantStore`）的规划入口从 `/goal` 迁移到 `/topic` Saga，并完整移植多轮澄清（`awaiting_user`）续答：以累积问答 history 作为上下文重放，避免多轮后早期答案丢失。
 - 会话视图（`ConversationView`）删除 `command === "goal"` 分支、信息收集续答分支与 goal checkpoint/recovery 恢复子路径，保留基于 `planningRunState.source === "saga"` 的 Saga 失败恢复路径。
+- 任务默认超时阈值 `taskDefaultTimeoutMs` 从 10 分钟（600000）上调至 30 分钟（1800000，配置允许上限）：单段连续执行时间较长的任务不再频繁被看门狗（`runGoalWatchdogWorker`）中途判超时暂停。
 - 引入统一设计 token 体系与组件视觉重构：`globals.css` 定义文本/边框/表面/品牌/语义色等 CSS 变量，`tailwind.config.ts` 接入 token；新增 `ConfirmDialog` 全局确认弹窗（基于 `@radix-ui/react-alert-dialog`）并接入 `sonner` toast、`@radix-ui/react-popover`，多组件改用 token 与统一交互控件。
 
 ### Fixed
